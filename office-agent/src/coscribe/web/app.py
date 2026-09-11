@@ -72,6 +72,7 @@ from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel
 
+from .. import __version__
 from ..cli import _dotenv_path, _load_settings_or_none
 from ..config import Settings
 from ..coordinator import build_coordinator_agent
@@ -2422,6 +2423,23 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    # Not used by anything at runtime -- exists so the packaged desktop
+    # shell's installer can execute this binary once, immediately after
+    # extraction, purely to make it exit instantly instead of actually
+    # starting a server (which would bind a port and run forever). Real,
+    # live-reported problem this addresses: Windows Defender's real-time
+    # scan of a large, unsigned, freshly-extracted exe on its very first
+    # execution can take long enough to look like the app hung -- the
+    # splash page's own 180s failure UI would fire, sidecar log
+    # completely empty the whole time, every single fresh install/update
+    # ("每次新包第一次运行都是要启动很久"). Triggering that same one-time
+    # scan-and-cache cost during the install step (where a moment's delay
+    # is already expected and shown as installer progress) instead of at
+    # the user's first real launch fixes the *experience*, not the
+    # underlying OS/AV cost -- see
+    # office-agent-desktop-electron/build/installer.nsh, which is what
+    # actually calls this.
+    parser.add_argument("--version", action="version", version=f"coscribe {__version__}")
     args = parser.parse_args()
 
     _exit_when_orphaned()

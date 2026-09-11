@@ -56,7 +56,8 @@
       "artifactName": "${productName}-Setup-${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh"
     },
     "mac": {
       "icon": "icons/icon.icns",
