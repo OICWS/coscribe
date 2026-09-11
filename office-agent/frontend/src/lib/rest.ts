@@ -19,6 +19,7 @@ import type {
   ScheduledTaskDeleteResult,
   ScheduledTaskResult,
   ScriptEnvInstallResult,
+  ScriptEnvInterpreterInfo,
   ScriptEnvPackage,
   SkillsResponse,
   ToolsResponse,
@@ -138,6 +139,11 @@ export const installScriptEnvPackage = (packageName: string) =>
   postJson<ScriptEnvInstallResult>("/api/script-env/packages", { package: packageName });
 export const removeScriptEnvPackage = (packageName: string) =>
   del<ScriptEnvInstallResult>(`/api/script-env/packages/${encodeURIComponent(packageName)}`);
+
+export const getScriptEnvInterpreter = () => getJson<ScriptEnvInterpreterInfo>("/api/script-env/interpreter");
+// `path: ""` clears the override server-side, reverting to auto-detection.
+export const setScriptEnvInterpreter = (path: string) =>
+  postJson<ScriptEnvInstallResult>("/api/script-env/interpreter", { path });
 
 // Mirrors the script-env functions above exactly -- backed by
 // run_node_script's node-env directory instead (see tools/node_env.py).

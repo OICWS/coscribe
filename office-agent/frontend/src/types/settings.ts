@@ -179,6 +179,16 @@ export interface ScriptEnvInstallResult {
   error: string | null;
 }
 
+export interface ScriptEnvInterpreterInfo {
+  /** The user's manually-chosen interpreter path, or null if they haven't
+   * set one -- auto-detection (`auto_detected`) is what's actually used. */
+  configured: string | null;
+  /** What auto-detection alone would try, in order (sys.executable first,
+   * then py/python3/python found on PATH) -- shown so the UI can tell
+   * "found automatically" apart from "your manual choice". */
+  auto_detected: string[];
+}
+
 // ---------------------------------------------------------------------
 // Workflows tab
 // ---------------------------------------------------------------------

@@ -107,7 +107,14 @@ from ..tools.node_env import install_package as install_node_package
 from ..tools.node_env import list_packages as list_node_packages
 from ..tools.node_env import uninstall_package as uninstall_node_package
 from ..tools.scheduled_tasks import ScheduledTriggerStore, compute_next_run_at, create_trigger
-from ..tools.script_env import install_package, list_packages, uninstall_package
+from ..tools.script_env import (
+    fallbacks_for_platform,
+    get_interpreter_override,
+    install_package,
+    list_packages,
+    set_interpreter_override,
+    uninstall_package,
+)
 from ..tools.tasks import TaskToolkit
 from ..tools.workflows import WorkflowRunStore, WorkflowStore, reconcile_interrupted_runs
 from .background_events import BackgroundEvent, BackgroundEventBus
@@ -862,6 +869,10 @@ class ProviderUpdate(BaseModel):
 
 class ScriptEnvPackageInstall(BaseModel):
     package: str
+
+
+class ScriptEnvInterpreterUpdate(BaseModel):
+    path: str  # blank clears the override, reverting to auto-detection
 
 
 def _read_mcp_servers_raw(path: Path) -> dict[str, Any]:
@@ -2047,6 +2058,25 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     @app.delete("/api/script-env/packages/{name}")
     async def remove_script_env_package(name: str) -> dict[str, object]:
         return uninstall_package(settings.state_dir, name)
+
+    @app.get("/api/script-env/interpreter")
+    async def get_script_env_interpreter() -> dict[str, object]:
+        """What ensure_script_env would try, in order, right now -- the
+        Environment tab's manual override (if any) is already reflected
+        first in `candidates` since the override changes what
+        auto-detection itself returns; `auto_detected` is the plain
+        fallback list on its own, shown alongside so the UI can tell the
+        two apart (e.g. "currently using your manual choice" vs. "found
+        automatically")."""
+        override = get_interpreter_override(settings.state_dir)
+        return {
+            "configured": override,
+            "auto_detected": [sys.executable, *fallbacks_for_platform()],
+        }
+
+    @app.post("/api/script-env/interpreter")
+    async def set_script_env_interpreter(payload: ScriptEnvInterpreterUpdate) -> dict[str, object]:
+        return set_interpreter_override(settings.state_dir, payload.path.strip() or None)
 
     # Mirrors the script-env endpoints above exactly, backed by
     # tools/node_env.py's npm-based node-env directory instead -- see that

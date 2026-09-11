@@ -7,6 +7,7 @@ import {
   removeScriptEnvPackage,
 } from "../../lib/rest";
 import { PackageListSection } from "./PackageListSection";
+import { PythonInterpreterSection } from "./PythonInterpreterSection";
 
 interface EnvironmentTabProps {
   active: boolean;
@@ -15,6 +16,7 @@ interface EnvironmentTabProps {
 export function EnvironmentTab({ active }: EnvironmentTabProps) {
   return (
     <div className="flex flex-col gap-6">
+      <PythonInterpreterSection active={active} />
       <PackageListSection
         title="Python packages"
         description="When the assistant writes and runs a Python script for you (for a task too big or too specific for its built-in tools), it can only use libraries installed here. Add anything the assistant might need -- you'll still be asked to approve each script before it runs."

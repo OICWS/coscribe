@@ -1,5 +1,6 @@
 import shutil
 import socket
+import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -8,8 +9,10 @@ import pytest
 
 from coscribe.tools.script_env import (
     ensure_script_env,
+    get_interpreter_override,
     install_package,
     list_packages,
+    set_interpreter_override,
     uninstall_package,
     venv_python,
 )
@@ -156,3 +159,81 @@ def test_install_package_times_out_gracefully(real_state_dir: Path) -> None:
 
     assert result["success"] is False
     assert "timed out" in str(result["error"])
+
+
+def test_get_interpreter_override_returns_none_when_unset(tmp_path: Path) -> None:
+    assert get_interpreter_override(tmp_path) is None
+
+
+def test_set_interpreter_override_persists_a_valid_interpreter(tmp_path: Path) -> None:
+    result = set_interpreter_override(tmp_path, sys.executable)
+
+    assert result == {"success": True, "error": None}
+    assert get_interpreter_override(tmp_path) == sys.executable
+
+
+def test_set_interpreter_override_rejects_a_path_that_isnt_python(tmp_path: Path) -> None:
+    """Regression guard for the real machine this was designed around: a
+    user pointing the override at the WindowsApps python.exe "app
+    execution alias" stub (or any other non-functional path) should get a
+    specific, actionable error back -- not a silently-persisted setting
+    that then breaks the next script run the same way auto-detection did."""
+    not_python = tmp_path / "not-python"
+    not_python.write_text("#!/bin/sh\nexit 1\n")
+    not_python.chmod(0o755)
+
+    result = set_interpreter_override(tmp_path, str(not_python))
+
+    assert result["success"] is False
+    assert result["error"]
+    assert get_interpreter_override(tmp_path) is None
+
+
+def test_set_interpreter_override_rejects_a_nonexistent_path(tmp_path: Path) -> None:
+    result = set_interpreter_override(tmp_path, str(tmp_path / "does-not-exist"))
+
+    assert result["success"] is False
+    assert get_interpreter_override(tmp_path) is None
+
+
+def test_clearing_interpreter_override_with_empty_string(tmp_path: Path) -> None:
+    set_interpreter_override(tmp_path, sys.executable)
+    assert get_interpreter_override(tmp_path) == sys.executable
+
+    result = set_interpreter_override(tmp_path, None)
+
+    assert result == {"success": True, "error": None}
+    assert get_interpreter_override(tmp_path) is None
+
+
+def test_setting_a_new_override_deletes_an_existing_script_env_so_it_rebuilds(
+    tmp_path: Path,
+) -> None:
+    """The whole point of manually picking an interpreter is to actually
+    use it -- if a (possibly broken, or just unwanted) venv already exists
+    from a previous auto-detected interpreter, it must not silently keep
+    being served by ensure_script_env's own is_file() short-circuit."""
+    venv_dir = tmp_path / "script-env"
+    venv_python(venv_dir).parent.mkdir(parents=True)
+    venv_python(venv_dir).write_text("stand-in for an existing venv")
+    assert venv_python(venv_dir).is_file()
+
+    set_interpreter_override(tmp_path, sys.executable)
+
+    assert not venv_python(venv_dir).is_file()
+
+
+@pytestmark_network
+def test_ensure_script_env_prefers_a_configured_override_over_sys_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user-configured override must outrank even a working
+    sys.executable -- once someone has explicitly picked an interpreter
+    (e.g. because auto-detection found the wrong one on their machine),
+    auto-detection's own guesses shouldn't override that choice."""
+    set_interpreter_override(tmp_path, sys.executable)
+    monkeypatch.setattr("coscribe.tools.script_env.sys.executable", "/bin/false")
+
+    venv_dir = ensure_script_env(tmp_path)
+
+    assert venv_python(venv_dir).is_file()

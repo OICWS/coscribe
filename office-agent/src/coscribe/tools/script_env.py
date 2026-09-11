@@ -43,8 +43,68 @@ _SETUP_TIMEOUT = 300.0
 # Environment settings tab.
 _BASELINE_PACKAGES = ("openpyxl", "python-docx", "python-pptx", "pandas", "pdfplumber")
 
+# A plain text file (not JSON -- one value, no reason for the ceremony)
+# holding the user's manually-chosen interpreter path, when they've set
+# one. Lives under state_dir alongside the venv itself, not the app's
+# top-level .env (unlike e.g. COSCRIBE_BACKGROUND_ON_CLOSE) -- script_env.py
+# already treats state_dir as its own self-contained world (see
+# ensure_script_env's venv_dir), and this setting has nothing to do with
+# the desktop shell the way that one does.
+_INTERPRETER_OVERRIDE_FILE = "script_env_interpreter.txt"
 
-def _venv_create_candidates() -> list[str]:
+
+def get_interpreter_override(state_dir: Path) -> str | None:
+    """The user's manually-chosen interpreter path from the Environment
+    settings tab, or None if they haven't set one (the normal case --
+    auto-detection in _venv_create_candidates handles most machines)."""
+    path = state_dir / _INTERPRETER_OVERRIDE_FILE
+    if not path.is_file():
+        return None
+    value = path.read_text(encoding="utf-8").strip()
+    return value or None
+
+
+def set_interpreter_override(state_dir: Path, python_path: str | None) -> dict[str, object]:
+    """Persist (or, if `python_path` is falsy, clear) the user's manually-
+    chosen interpreter. Exists because auto-detection has a real ceiling on
+    Windows this project hit on real hardware: a GUI app's inherited PATH
+    can be stale relative to what a freshly-installed Python actually
+    registered (Explorer's own environment block doesn't refresh until
+    logoff/logon), and the WindowsApps python.exe/python3.exe "app
+    execution alias" stubs resolve via shutil.which without being real
+    interpreters -- no amount of smarter auto-detection closes either gap.
+    VS Code's Python extension hits the identical wall and solves it the
+    same way: auto-detect as the default, plus an always-available manual
+    "enter interpreter path" escape hatch.
+
+    Validates by actually running `--version` -- same philosophy as
+    install_package below (never raise, return the real, specific failure
+    the settings panel can show verbatim) rather than trusting a path that
+    merely exists on disk. On success, also deletes any existing script-env
+    venv so the next ensure_script_env call rebuilds it with the newly
+    chosen interpreter instead of silently keeping whatever was there
+    before -- the whole point of picking one explicitly is to actually use
+    it, not just to influence some future from-scratch install."""
+    override_path = state_dir / _INTERPRETER_OVERRIDE_FILE
+    if not python_path:
+        override_path.unlink(missing_ok=True)
+        return {"success": True, "error": None}
+    try:
+        result = subprocess.run(
+            [python_path, "--version"], capture_output=True, text=True, timeout=10.0
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"success": False, "error": f"Could not run {python_path!r}: {exc}"}
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout).strip() or f"exited with code {result.returncode}"
+        return {"success": False, "error": error}
+    state_dir.mkdir(parents=True, exist_ok=True)
+    override_path.write_text(python_path, encoding="utf-8")
+    shutil.rmtree(state_dir / "script-env", ignore_errors=True)
+    return {"success": True, "error": None}
+
+
+def _venv_create_candidates(state_dir: Path) -> list[str]:
     """Interpreters to try, in order, for bootstrapping the script-env
     venv. sys.executable first -- correct and sufficient in a normal dev
     install, where it's the real interpreter coscribe itself runs on. The
@@ -70,10 +130,31 @@ def _venv_create_candidates() -> list[str]:
     PATH (via C:\\Windows) even when the "Add python.exe to PATH"
     checkbox was left unchecked -- not every real end user's default
     choice -- so it's a genuinely more reliable find on Windows, not just
-    a synonym for "python"."""
+    a synonym for "python".
+
+    A user-configured override (get_interpreter_override, set from the
+    Environment settings tab) always goes first, ahead of even
+    sys.executable -- once someone has explicitly picked an interpreter,
+    auto-detection's guesses shouldn't outrank it, and this is also the
+    escape hatch for machines where every auto-detected candidate is
+    wrong (a stale-PATH GUI process, or a WindowsApps python.exe/
+    python3.exe "app execution alias" stub that shutil.which finds but
+    that isn't a real interpreter)."""
+    auto_detected = [sys.executable, *fallbacks_for_platform()]
+    override = get_interpreter_override(state_dir)
+    if override:
+        return [override, *[c for c in auto_detected if c != override]]
+    return auto_detected
+
+
+def fallbacks_for_platform() -> list[str]:
+    """The auto-detected candidates below sys.executable, exposed on its
+    own for the Environment tab's "detected" list in the interpreter API --
+    kept separate from the override so the API can show what auto-
+    detection alone would find, regardless of what's currently
+    configured."""
     fallback_names = ["py", "python3", "python"] if sys.platform == "win32" else ["python3", "python"]
-    fallbacks = [found for found in (shutil.which(name) for name in fallback_names) if found]
-    return [sys.executable, *fallbacks]
+    return [found for found in (shutil.which(name) for name in fallback_names) if found]
 
 
 def venv_python(venv_dir: Path) -> Path:
@@ -105,7 +186,7 @@ def ensure_script_env(state_dir: Path) -> Path:
     if venv_python(venv_dir).is_file():
         return venv_dir
     venv_dir.parent.mkdir(parents=True, exist_ok=True)
-    candidates = _venv_create_candidates()
+    candidates = _venv_create_candidates(state_dir)
     result = subprocess.run(
         [candidates[0], "-m", "venv", str(venv_dir)],
         capture_output=True,

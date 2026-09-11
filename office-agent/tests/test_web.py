@@ -3288,6 +3288,53 @@ def test_post_script_env_package_rejects_blank_name(
     assert response.json()["success"] is False
 
 
+def test_get_script_env_interpreter_starts_unconfigured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/script-env/interpreter")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is None
+    assert sys.executable in body["auto_detected"]
+
+
+def test_set_script_env_interpreter_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post("/api/script-env/interpreter", json={"path": sys.executable})
+        assert response.status_code == 200
+        assert response.json() == {"success": True, "error": None}
+
+        info = client.get("/api/script-env/interpreter").json()
+        assert info["configured"] == sys.executable
+
+        cleared = client.post("/api/script-env/interpreter", json={"path": ""})
+        assert cleared.json() == {"success": True, "error": None}
+
+        info_after_clear = client.get("/api/script-env/interpreter").json()
+        assert info_after_clear["configured"] is None
+
+
+def test_set_script_env_interpreter_rejects_a_bad_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post(
+            "/api/script-env/interpreter", json={"path": str(tmp_path / "not-a-real-interpreter")}
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["error"]
+
+
 def _node_npm_available_and_reachable() -> bool:
     """Mirrors _network_reachable above, plus node/npm actually being
     installed -- unlike Python (coscribe's own runtime, always present),
