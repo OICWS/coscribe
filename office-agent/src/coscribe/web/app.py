@@ -117,6 +117,11 @@ from .session import ChatSessionLG
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # office docs/PDFs, not video files
 _PREVIEW_NAME_RE = re.compile(r"[0-9a-f]{32}\.png")  # tools/_thumbnail.py's uuid4().hex naming
+# How long lifespan() blocks app startup on connect_mcp_tools_lg before
+# letting a still-connecting server finish in the background instead --
+# see lifespan's own comment. Same default Claude Code itself settled on
+# (MCP_CONNECT_TIMEOUT_MS) for the identical problem.
+MCP_STARTUP_TIMEOUT_SECONDS = 5.0
 
 
 def _unique_upload_path(scope: WorkspaceScope, filename: str) -> Path:
@@ -960,11 +965,15 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     sessions: dict[str, ChatSessionLG] = {}
     # Set once the lifespan context is entered -- plain mutable holders
     # rather than module/globals, since create_app_lg() may be called more
-    # than once (e.g. once per test). extra_tools_holder starts empty and
-    # is only ever populated before the app starts serving requests (see
-    # lifespan below), same ordering guarantee checkpointer_holder already
-    # relies on -- _get_session is only reachable from ws_endpoint, which
+    # than once (e.g. once per test). checkpointer_holder is always
+    # populated before the app starts serving requests (see lifespan
+    # below) -- _get_session is only reachable from ws_endpoint, which
     # can't run until the lifespan's own yield has happened.
+    #
+    # extra_tools_holder does NOT have that same guarantee, deliberately:
+    # see lifespan's own MCP-connect comment for why a session opened
+    # very early may briefly see fewer tools than a slow-to-connect MCP
+    # server will eventually provide.
     checkpointer_holder: dict[str, Any] = {}
     extra_tools_holder: dict[str, list[Any]] = {"tools": []}
     # Fan-out for background-completion events (see background_events.py's
@@ -1221,10 +1230,56 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
             checkpointer_holder["checkpointer"] = checkpointer
+            mcp_connect_task: asyncio.Task[Any] | None = None
             if settings.mcp_config_path is not None:
-                tools, connections = await connect_mcp_tools_lg(settings.mcp_config_path)
-                extra_tools_holder["tools"] = tools
-                mcp_connections.update(connections)
+                # Real, user-reported bug: this used to be a plain
+                # `await connect_mcp_tools_lg(...)`, so the app didn't
+                # start serving *anything* -- not even the splash/setup
+                # page -- until every configured MCP server finished
+                # connecting. A slow-to-start one (Playwright launching a
+                # real browser process is the worst case) meant a real,
+                # repeatable multi-minute wait on every single cold
+                # start, unrelated to which desktop shell was used.
+                # Mirrors Claude Code's own real fix for the identical
+                # problem (MCP_CONNECT_TIMEOUT_MS, default 5s): wait up
+                # to MCP_STARTUP_TIMEOUT_SECONDS, then stop blocking
+                # startup on it -- asyncio.shield() keeps the connect
+                # task itself running rather than cancelling it just
+                # because this wait_for gave up on it.
+                connect_task: asyncio.Task[Any] = asyncio.create_task(
+                    connect_mcp_tools_lg(settings.mcp_config_path)
+                )
+                mcp_connect_task = connect_task
+                try:
+                    tools, connections = await asyncio.wait_for(
+                        asyncio.shield(connect_task), timeout=MCP_STARTUP_TIMEOUT_SECONDS
+                    )
+                    extra_tools_holder["tools"] = tools
+                    mcp_connections.update(connections)
+                    mcp_connect_task = None
+                except TimeoutError:
+                    # Still connecting -- let the app start serving
+                    # requests now (a session opened in this window
+                    # simply starts with fewer tools, same as any
+                    # mid-conversation connector add/remove already
+                    # behaves) and splice the result in once it's ready,
+                    # reusing the exact mechanism a live connector-add
+                    # already uses to reach already-open sessions.
+                    async def _finish_mcp_connect_in_background(
+                        task: asyncio.Task[Any],
+                    ) -> None:
+                        try:
+                            tools, connections = await task
+                        except Exception:
+                            logging.getLogger(__name__).exception(
+                                "connect_mcp_tools_lg: background connect failed"
+                            )
+                            return
+                        extra_tools_holder["tools"] = extra_tools_holder["tools"] + tools
+                        mcp_connections.update(connections)
+                        await _refresh_all_sessions_extra_tools()
+
+                    asyncio.create_task(_finish_mcp_connect_in_background(connect_task))
             wake_poll_task = asyncio.create_task(_wake_poll_loop())
             yield
             wake_poll_task.cancel()
@@ -1232,6 +1287,12 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 await wake_poll_task
             except asyncio.CancelledError:
                 pass
+            if mcp_connect_task is not None and not mcp_connect_task.done():
+                mcp_connect_task.cancel()
+                try:
+                    await mcp_connect_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             # Each connection now owns a real, persistent subprocess (see
             # runtime_lg/mcp.py's module docstring) -- close them all here
             # rather than letting them leak past this process's own

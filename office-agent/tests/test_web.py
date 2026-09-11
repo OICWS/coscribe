@@ -2755,6 +2755,86 @@ def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(
         }
 
 
+def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for a real, user-reported bug: lifespan() used to
+    `await connect_mcp_tools_lg(...)` directly, so the whole app -- not
+    just one connector's own tools -- didn't start serving *anything*
+    until every configured MCP server finished connecting. A slow one (a
+    real Playwright launch is the worst case) meant a repeatable
+    multi-minute wait on every single cold start, every time, regardless
+    of which desktop shell was used. Fixed by bounding that wait
+    (MCP_STARTUP_TIMEOUT_SECONDS) and letting a still-connecting server
+    finish in the background instead, splicing its tools in once ready --
+    the exact mechanism a live mid-conversation connector-add already
+    uses (see test_post_mcp_server_splices_tools_into_both_new_and_
+    already_open_sessions right below). Proves both halves: a session
+    opened before the slow connect finishes works immediately with no
+    wait (timed, not just "eventually passed"), and that same session
+    picks up the tool once the background connect completes, with no
+    reconnect needed."""
+    from coscribe.runtime.types import tool_metadata
+
+    def _fake_tool_fn(x: str = "") -> str:
+        """A fake MCP tool for this test."""
+        return f"fetched:{x}"
+
+    _fake_tool_fn.__name__ = "fetch__fetch_url"
+    tool_metadata(_fake_tool_fn, risk_category="READ", category="mcp:fetch")
+
+    class _FakeConnection:
+        async def close(self) -> None:
+            pass
+
+    async def _slow_connect_mcp_tools_lg(config_path: Path) -> tuple[list[Any], dict[str, Any]]:
+        await asyncio.sleep(2.0)
+        return [_fake_tool_fn], {"fetch": _FakeConnection()}
+
+    monkeypatch.setattr("coscribe.web.app.MCP_STARTUP_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr("coscribe.web.app.connect_mcp_tools_lg", _slow_connect_mcp_tools_lg)
+
+    config_path = tmp_path / "mcp.json"
+    config_path.write_text(
+        json.dumps({"mcpServers": {"fetch": {"command": "uvx", "args": ["mcp-server-fetch"]}}}),
+        encoding="utf-8",
+    )
+    call = _tool_call("call_1", "fetch__fetch_url", {"x": "hi"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model, mcp_config_path=config_path) as client:
+        # Opening the *first* session must not block on the still-
+        # connecting "fetch" server -- a pre-fix lifespan() would have
+        # hung inside `with _client_lg(...)`'s own context-manager entry
+        # above (TestClient runs the ASGI lifespan synchronously) for the
+        # full 2s fake-connect duration before this line was ever reached
+        # at all. Timed, not just "it eventually passed" -- comfortably
+        # under the 2s the fake connect takes (with real margin above
+        # this harness's own baseline per-session overhead -- opening a
+        # brand-new thread's WebSocket genuinely compiles a fresh
+        # LangGraph graph, not instant even with no MCP involved at all)
+        # proves startup itself wasn't the thing waiting on it.
+        started = time.monotonic()
+        with client.websocket_connect("/ws/t_startup_bg") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+        assert time.monotonic() - started < 1.0
+
+        # Give the background connect (2s) time to actually finish.
+        time.sleep(2.5)
+
+        with client.websocket_connect("/ws/t_startup_bg") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "fetch hi"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    tool_result = next(m for m in messages if m["type"] == "tool_result")
+    assert tool_result["tool_name"] == "fetch__fetch_url"
+    assert tool_result["result"] == "fetched:hi"
+
+
 def test_post_mcp_server_splices_tools_into_both_new_and_already_open_sessions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
