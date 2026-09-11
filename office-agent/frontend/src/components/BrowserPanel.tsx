@@ -3,6 +3,19 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { CloseIcon } from "./icons";
 import { browserPanelClose, browserPanelOpen, browserPanelReposition, isTauri, type PanelRect } from "../lib/tauri";
+import {
+  browserPanelBack as electronBrowserPanelBack,
+  browserPanelClose as electronBrowserPanelClose,
+  browserPanelForward as electronBrowserPanelForward,
+  browserPanelNavigate as electronBrowserPanelNavigate,
+  browserPanelOpen as electronBrowserPanelOpen,
+  browserPanelReload as electronBrowserPanelReload,
+  browserPanelReposition as electronBrowserPanelReposition,
+  isElectron,
+  onBrowserPanelLoadError,
+  onBrowserPanelNavigated,
+  type BrowserPanelRect,
+} from "../lib/electron";
 
 /** Same shape as Composer.tsx's own PendingImage on purpose -- lets
  * App.tsx hand a captured element straight to Composer's existing
@@ -192,6 +205,16 @@ export function BrowserPanel({
   // guessing blind again.
   const [nativeDebug, setNativeDebug] = useState<string | null>(null);
 
+  // Electron migration Phase 2 -- see the effect below and electron.ts's
+  // own module docs. electronMode is stable for the life of this
+  // component, same reasoning tauriMode already documents.
+  const electronMode = isElectron();
+  const [electronUrl, setElectronUrl] = useState("");
+  const [electronAddressValue, setElectronAddressValue] = useState("");
+  const [electronCanGoBack, setElectronCanGoBack] = useState(false);
+  const [electronCanGoForward, setElectronCanGoForward] = useState(false);
+  const [electronLoadError, setElectronLoadError] = useState<string | null>(null);
+
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
@@ -207,15 +230,17 @@ export function BrowserPanel({
   };
 
   useEffect(() => {
-    // Stage 1 of the native-window plan (see the effect below) doesn't
-    // wire the panel window to any backend yet -- no screencast, no CDP
-    // attach, nothing this WS connection would drive. Guarding here
-    // rather than not registering the effect at all keeps this file's
-    // Hooks call order identical between the Tauri and non-Tauri paths
-    // (isTauri() never changes within one mount, so this is safe either
-    // way, but matching React's own "same hooks every render" rule by
-    // convention rather than relying on that is cheap insurance).
-    if (tauriMode) return;
+    // Stage 1 of the Tauri native-window plan (see the effect below)
+    // doesn't wire the panel window to any backend yet -- no screencast,
+    // no CDP attach, nothing this WS connection would drive. Electron
+    // mode has its own real navigation IPC (the effect further below) and
+    // never needs this WS/CDP path at all. Guarding here rather than not
+    // registering the effect at all keeps this file's Hooks call order
+    // identical across all three paths (isTauri()/isElectron() never
+    // change within one mount, so this is safe either way, but matching
+    // React's own "same hooks every render" rule by convention rather
+    // than relying on that is cheap insurance).
+    if (tauriMode || electronMode) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/browser`);
     wsRef.current = ws;
@@ -269,11 +294,11 @@ export function BrowserPanel({
       ws.close();
       wsRef.current = null;
     };
-    // tauriMode is derived from isTauri(), a static environment check
-    // that cannot change for the life of this component -- included so
-    // this satisfies exhaustive-deps without actually causing any
-    // re-subscription in practice.
-  }, [tauriMode]);
+    // tauriMode/electronMode are derived from isTauri()/isElectron(),
+    // static environment checks that cannot change for the life of this
+    // component -- included so this satisfies exhaustive-deps without
+    // actually causing any re-subscription in practice.
+  }, [tauriMode, electronMode]);
 
   // Browser panel native-window plan, Stage 1 (Tauri desktop only --
   // see ROADMAP.md "Browser panel: native second-window architecture").
@@ -363,6 +388,83 @@ export function BrowserPanel({
     };
     // See the WS effect above's own comment on including tauriMode here.
   }, [tauriMode]);
+
+  // Browser panel, Electron migration Phase 2 -- real embedding, unlike
+  // the Tauri effect above (still Stage 1, a placeholder with nothing
+  // wired to a backend). A `WebContentsView` is a true child of the main
+  // window, not a synced sibling top-level window like Tauri's own
+  // approach -- `setBounds()` takes coordinates relative to the parent
+  // window's own content area, so computeRect here is just
+  // getBoundingClientRect() with no devicePixelRatio/innerPosition() math
+  // at all (contrast with the Tauri effect's own computeRect above), and
+  // the main window *moving* needs no reposition call (the child's
+  // position relative to its own parent doesn't change when the parent
+  // moves). Two independent things can still change where this panel's
+  // own container sits *within* the window, so both are watched: a plain
+  // `window.resize` listener (the window's overall width changing moves
+  // this panel's left edge even when the panel's own on-screen size
+  // doesn't change at all, since it's docked to the right edge of a flex
+  // row -- a ResizeObserver on containerRef alone would miss exactly this
+  // case, since ResizeObserver only fires on the observed element's own
+  // size changing) and the same ResizeObserver on containerRef the non-
+  // electron canvas path below already uses for its own purposes (the
+  // resize-handle drag, or the nav rail collapsing, both change the
+  // container's own size directly).
+  useEffect(() => {
+    if (!electronMode) return;
+    let cancelled = false;
+    let resizeObserver: ResizeObserver | undefined;
+
+    const computeRect = (): BrowserPanelRect | null => {
+      const container = containerRef.current;
+      if (!container) return null;
+      const rect = container.getBoundingClientRect();
+      return {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      };
+    };
+
+    const reposition = () => {
+      const rect = computeRect();
+      if (!rect || cancelled) return;
+      void electronBrowserPanelReposition(rect);
+    };
+
+    (async () => {
+      const rect = computeRect();
+      if (!rect || cancelled) return;
+      await electronBrowserPanelOpen(rect);
+      if (cancelled) return;
+      window.addEventListener("resize", reposition);
+      if (containerRef.current) {
+        resizeObserver = new ResizeObserver(reposition);
+        resizeObserver.observe(containerRef.current);
+      }
+    })();
+
+    onBrowserPanelNavigated((payload) => {
+      setElectronUrl(payload.url);
+      setElectronAddressValue(payload.url);
+      setElectronCanGoBack(payload.canGoBack);
+      setElectronCanGoForward(payload.canGoForward);
+      setElectronLoadError(null);
+    });
+    onBrowserPanelLoadError((errorDescription) => {
+      setElectronLoadError(errorDescription);
+    });
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", reposition);
+      resizeObserver?.disconnect();
+      void electronBrowserPanelClose();
+    };
+    // See the WS effect above's own comment on including tauriMode/
+    // electronMode here.
+  }, [electronMode]);
 
   // Tracks this panel's own on-screen display size -- purely a local
   // rendering concern now (the canvas's own CSS box + backing pixel
@@ -711,6 +813,88 @@ export function BrowserPanel({
             </div>
           )}
         </div>
+      ) : electronMode ? (
+        // Electron migration Phase 2: a real, natively-embedded
+        // WebContentsView paints directly on top of this empty div (see
+        // the effect above) -- no canvas, no IME bridge, no synthetic
+        // input relay, all of that machinery the non-desktop path below
+        // needs simply doesn't apply to a true native child view. No
+        // "Select an element" button yet -- that's Phase 3, not
+        // implemented here; showing a button that doesn't do anything
+        // would be worse than not showing one at all.
+        <>
+          <div className="flex items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-2">
+            <button
+              type="button"
+              title="Back"
+              disabled={!electronCanGoBack}
+              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--card-bg)] disabled:opacity-40"
+              onClick={() => void electronBrowserPanelBack()}
+            >
+              ‹
+            </button>
+            <button
+              type="button"
+              title="Forward"
+              disabled={!electronCanGoForward}
+              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--card-bg)] disabled:opacity-40"
+              onClick={() => void electronBrowserPanelForward()}
+            >
+              ›
+            </button>
+            <input
+              className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-xs outline-none focus:border-[var(--accent)]"
+              placeholder="Enter a URL..."
+              value={electronAddressValue}
+              onChange={(e) => setElectronAddressValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && electronAddressValue.trim()) {
+                  void electronBrowserPanelNavigate(electronAddressValue.trim());
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--card-bg)]"
+              onClick={() => electronAddressValue.trim() && void electronBrowserPanelNavigate(electronAddressValue.trim())}
+            >
+              Go
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--card-bg)]"
+              onClick={() => void electronBrowserPanelReload()}
+            >
+              ⟳
+            </button>
+          </div>
+
+          {electronLoadError && (
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-red-500/10 px-2.5 py-1.5 text-xs text-red-500">
+              <span>{electronLoadError}</span>
+              <button type="button" className="shrink-0 hover:opacity-70" onClick={() => setElectronLoadError(null)}>
+                <CloseIcon className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
+          <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden bg-black/5">
+            {/* Same caveat the Tauri placeholder above already documents:
+             * the real WebContentsView is a separately-composited native
+             * surface painting directly on top of this div once
+             * positioned, so this text is only actually visible for the
+             * brief moment before that happens (an empty view still
+             * shows its own blank white background, covering this). Kept
+             * anyway, same reasoning -- worth seeing during that instant
+             * (or if opening somehow never lands) rather than a silent
+             * empty rectangle either way. */}
+            {!electronUrl && !electronLoadError && (
+              <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-[var(--muted)]">
+                Enter a URL above to get started
+              </div>
+            )}
+          </div>
+        </>
       ) : (
         <>
           <div className="flex items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-2">

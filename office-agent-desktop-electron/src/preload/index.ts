@@ -33,6 +33,31 @@ import { contextBridge, ipcRenderer } from "electron";
 // a shared import, see this file's own header comment above.
 const PICK_FOLDER_CHANNEL = "dialog:pick-folder";
 
+// Keep these in sync with browserPanel.ts's own exported channel/event
+// constants -- same "cannot be a shared import" constraint.
+const BROWSER_PANEL_OPEN_CHANNEL = "browser-panel:open";
+const BROWSER_PANEL_REPOSITION_CHANNEL = "browser-panel:reposition";
+const BROWSER_PANEL_CLOSE_CHANNEL = "browser-panel:close";
+const BROWSER_PANEL_NAVIGATE_CHANNEL = "browser-panel:navigate";
+const BROWSER_PANEL_BACK_CHANNEL = "browser-panel:back";
+const BROWSER_PANEL_FORWARD_CHANNEL = "browser-panel:forward";
+const BROWSER_PANEL_RELOAD_CHANNEL = "browser-panel:reload";
+const BROWSER_PANEL_NAVIGATED_EVENT = "browser-panel:navigated";
+const BROWSER_PANEL_LOAD_ERROR_EVENT = "browser-panel:load-error";
+
+interface BrowserPanelRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface BrowserPanelNavigatedPayload {
+  url: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
 contextBridge.exposeInMainWorld("coscribeDesktop", {
   /** Fires once, only on a real startup failure (sidecar process
    * exited, or a 180s timeout) -- mirrors the splash page's own
@@ -46,5 +71,43 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
    * the user cancelled. */
   pickFolder(): Promise<string | null> {
     return ipcRenderer.invoke(PICK_FOLDER_CHANNEL);
+  },
+
+  /** Browser panel, Electron migration Phase 2 -- see browserPanel.ts's
+   * own module docs. Opens/repositions/closes the native WebContentsView
+   * and drives its navigation; onNavigated/onLoadError mirror the plain-
+   * browser-tab path's own WS "frame"/"error" messages closely enough
+   * that BrowserPanel.tsx's electron branch can reuse the same UI states
+   * (address bar, back/forward-enabled, error banner). */
+  browserPanelOpen(rect: BrowserPanelRect): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_OPEN_CHANNEL, rect);
+  },
+  browserPanelReposition(rect: BrowserPanelRect): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_REPOSITION_CHANNEL, rect);
+  },
+  browserPanelClose(): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_CLOSE_CHANNEL);
+  },
+  browserPanelNavigate(url: string): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_NAVIGATE_CHANNEL, url);
+  },
+  browserPanelBack(): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_BACK_CHANNEL);
+  },
+  browserPanelForward(): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_FORWARD_CHANNEL);
+  },
+  browserPanelReload(): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_RELOAD_CHANNEL);
+  },
+  onBrowserPanelNavigated(callback: (payload: BrowserPanelNavigatedPayload) => void): void {
+    ipcRenderer.on(BROWSER_PANEL_NAVIGATED_EVENT, (_event, payload: BrowserPanelNavigatedPayload) =>
+      callback(payload),
+    );
+  },
+  onBrowserPanelLoadError(callback: (errorDescription: string) => void): void {
+    ipcRenderer.on(BROWSER_PANEL_LOAD_ERROR_EVENT, (_event, errorDescription: string) =>
+      callback(errorDescription),
+    );
   },
 });

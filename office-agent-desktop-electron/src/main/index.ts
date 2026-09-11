@@ -12,6 +12,7 @@ import { watchBackgroundEvents } from "./backgroundEvents";
 import { createMainWindow, showMainWindow, preloadPath, iconsDirFromApp, markQuitting } from "./mainWindow";
 import { createTray } from "./tray";
 import { registerDialogHandlers } from "./dialog";
+import { registerBrowserPanelHandlers, destroyBrowserPanel } from "./browserPanel";
 
 // MUST run before anything else touches the window: a second launch
 // fires the 'second-instance' handler below in the ALREADY-running
@@ -34,6 +35,7 @@ if (!gotLock) {
 
     const win = createMainWindow(port, preloadPath());
     registerDialogHandlers(win);
+    registerBrowserPanelHandlers(win);
     createTray(iconsDirFromApp(), showMainWindow, () => {
       markQuitting();
       app.quit();
@@ -42,6 +44,10 @@ if (!gotLock) {
 
   app.on("before-quit", () => {
     killSidecar();
+    // Explicit teardown, not assumed to happen automatically as part of
+    // the window closing -- see destroyBrowserPanel's own comment for
+    // why this migration exists to specifically not trust that.
+    destroyBrowserPanel();
   });
 
   // macOS-only by convention (Cmd+Q / dock quit) -- left in place rather
