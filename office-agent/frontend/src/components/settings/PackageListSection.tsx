@@ -41,10 +41,19 @@ export function PackageListSection({
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
 
   const refresh = () => {
-    getPackages().then((res) => {
-      setPackages(res);
-      setLoaded(true);
-    });
+    getPackages()
+      .then((res) => {
+        setPackages(res);
+        setLoaded(true);
+      })
+      .catch((err) => {
+        // Same silent-failure shape as install()/remove() before their
+        // catch was added: a failed GET (e.g. the venv itself failing to
+        // create) used to leave the list stuck looking like it was still
+        // loading forever, with the real error never surfacing.
+        setLoaded(true);
+        setStatus({ text: err instanceof Error ? err.message : "Could not load packages.", error: true });
+      });
   };
 
   useEffect(() => {
@@ -66,6 +75,17 @@ export function PackageListSection({
       setStatus({ text: `Added ${name}.`, error: false });
       setQuery("");
       refresh();
+    } catch (err) {
+      // installPackage/removePackage only return {success:false} for an
+      // *expected* pip failure (bad name, no network); an unexpected one
+      // -- the venv itself failing to create, the server erroring, a
+      // dropped connection -- surfaces as a thrown Error from rest.ts's
+      // checkOk() instead. Without this catch that exception used to
+      // become a silent unhandled rejection: the spinner would stop and
+      // nothing else would happen, with the real error message never
+      // reaching the user (see the script-env 500 report this was
+      // debugged from).
+      setStatus({ text: err instanceof Error ? err.message : `Could not add ${name}.`, error: true });
     } finally {
       setInstalling(false);
     }
@@ -81,6 +101,8 @@ export function PackageListSection({
         return;
       }
       refresh();
+    } catch (err) {
+      setStatus({ text: err instanceof Error ? err.message : `Could not remove ${name}.`, error: true });
     } finally {
       setRemoving(null);
     }
