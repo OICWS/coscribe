@@ -1,0 +1,10 @@
+id: minimal-light
+name: Minimal Light
+description: >-
+  A spacious, editorial-style 4-slide deck: white background, one thin
+  accent-color rule under each title, generous margins, no solid color
+  blocks -- a quieter, more understated look than Modern Block. Slide
+  order: (1) title, (2) content, (3) content, (4) closing.
+accent: "0F6B5C"
+slide_count: 4
+slide_roles: [title, content, content, closing]

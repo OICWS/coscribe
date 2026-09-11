@@ -1,0 +1,2634 @@
+"""ChatSessionLG: the web equivalent of cli.py's chat() loop body, built
+on runtime_lg instead of runtime/ (see runtime_lg/README.md, Phase 3).
+
+Mirrors web/session.py's ChatSession public shape (handle_user_message,
+resolve_approval, send_state) closely enough that app.py's WS handler is
+nearly identical to app.py's -- but the internals are native async
+(agent.astream/aget_state) instead of the queue.Queue/asyncio.to_thread
+bridging ChatSession needs only because Runner.run_sync is synchronous.
+
+/plan, /accept-edits, /compact, /clear, /stop, model switching, and Hooks
+are supported here (see runtime_lg/README.md's "Plan mode, accept-edits,
+compact, and Hooks under runtime_lg" section for the design of the first
+four; /stop and switch_model follow the same "port the contract, adapt the
+mechanism to a compiled graph" approach -- /stop is cooperative, checked at
+_stream_turn/_decide_action_request's own yield points, mirroring
+runtime/runner.py's threading.Event-based stop_event; switch_model rebuilds
+self.lg_agent against the same checkpointer/thread_id rather than mutating
+a model string in place, since create_agent() bakes the model into a fixed
+compiled graph at construction time). Threshold-triggered *automatic*
+compaction (Settings.auto_compact_threshold) and a turn cap
+(Settings.max_turns) *are* both wired in too -- see _build_lg_agent below,
+which passes both through to build_langgraph_agent as
+SummarizationMiddleware/ModelCallLimitMiddleware. Still narrower than
+ChatSession in one documented way: Hooks configured on a top-level
+session don't propagate into spawn_agent's/review_work's own nested
+sub-agent graphs -- a sub-agent's own tool calls run without PreToolUse/
+PostToolUse checks. Workflows *are* supported too
+(/startworkflow/endworkflow/saveworkflow/runworkflow -- see
+_handle_start_workflow and friends below, and runtime_lg/README.md's
+"Workflows" section for the design), with one narrower spot of its own:
+there's no model-callable run_workflow tool, only the slash command/picker
+-- see _RUN_WORKFLOW_NOTE. spawn_agent/review_work delegation *is* wired in
+(see
+runtime_lg/README.md's "spawn_agent's nested-interrupt bridge" section --
+live-verified against Gemini before being added here, including that a
+nested approval bridges up through _resolve_pending_approvals below with
+zero changes needed, since the bridged interrupt's payload shape matches
+HumanInTheLoopMiddleware's own exactly).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import logging
+import shutil
+import tempfile
+import time
+import uuid
+from asyncio import Future, get_running_loop
+from collections import defaultdict
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
+
+from fastapi import WebSocket
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langchain_core.messages.ai import UsageMetadata
+from langchain_core.tools import BaseTool
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langgraph.types import Command
+
+from ..cli import INIT_PROMPT
+from ..config import Settings
+from ..coordinator import build_coordinator_agent
+from ..runtime import (
+    COMPACT_INSTRUCTIONS,
+    LLMClient,
+    empty_hooks_config,
+    get_tool_metadata,
+    run_hook,
+    tool_metadata,
+)
+from ..runtime_lg import (
+    SkillSaveProposal,
+    build_langgraph_agent,
+    build_review_work_tool,
+    build_spawn_agent_tool,
+    propose_skill_save_lg,
+    propose_workflow_save_lg,
+    record_agent_workflow_lg,
+    record_chain_workflow_lg,
+    recorded_tool_call_steps_lg,
+    resolve_chat_model,
+    run_chain_lg,
+    serialize_history_for_ws_lg,
+    tool_name,
+    write_skill_lg,
+)
+from ..runtime_lg import extract_text as _extract_text
+from ..runtime_lg import render_transcript_lg as _render_transcript_lg
+from ..runtime_lg import tool_result_value as _tool_result_value
+from ..runtime_lg.audit import AuditLog, record_decision
+from ..runtime_lg.exec_policy import EXEC_POLICY_TOOL_NAMES, load_exec_policy
+from ..runtime_lg.messages import (
+    ACCEPT_EDITS_MODE_NOTE,
+    NORMAL_MODE_NOTE,
+    PLAN_MODE_NOTE,
+    current_date_note,
+)
+from ..tools import (
+    QUESTION_TOOL_NAMES,
+    load_builtin_skills,
+    load_skills,
+    slugify_skill_name,
+)
+from ..tools._thumbnail import render_single_page_preview
+from ..tools._workspace import WorkspaceScope
+from ..tools.documents import DocumentToolkit
+from ..tools.presentations import PresentationToolkit
+from ..tools.spreadsheets import SpreadsheetToolkit
+from ..tools.workflows import (
+    Workflow,
+    WorkflowRun,
+    WorkflowRunStore,
+    WorkflowSaveProposal,
+    WorkflowStepStatus,
+    WorkflowStore,
+)
+
+logger = logging.getLogger(__name__)
+
+# Same value as web/session.py's identical constant -- how many rounds of
+# clarifying question/answer bare /saveworkflow will go through before
+# giving up and telling the user to use /startworkflow instead.
+MAX_SAVE_CLARIFICATION_ROUNDS = 3
+
+# _build_document_edit_preview's dispatch table: which toolkit class
+# owns an approval-gated edit tool, keyed by the target file's extension
+# -- all three toolkits share the same (root, *, state_dir=,
+# extra_readable=, extra_writable=) constructor shape (see that method's
+# own docstring), which is what makes a single dict lookup enough instead
+# of three near-duplicate preview-building methods.
+_PREVIEWABLE_TOOLKITS_BY_EXTENSION: dict[str, type[Any]] = {
+    ".pptx": PresentationToolkit,
+    ".potx": PresentationToolkit,
+    ".docx": DocumentToolkit,
+    ".dotx": DocumentToolkit,
+    ".xlsx": SpreadsheetToolkit,
+    ".xlsm": SpreadsheetToolkit,
+    ".xltx": SpreadsheetToolkit,
+}
+
+
+def _format_reply(text: str) -> str:
+    if not text.strip():
+        return "[no reply -- the model ended its turn without responding; try rephrasing]"
+    return text
+
+
+def _now_iso_lg() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _can_resolve_approvals(websocket: Any) -> bool:
+    """True for a real client connection able to actually answer an
+    approval_required prompt; False for a silent/background stand-in
+    (runtime_lg/selfwake.py's _SilentSocket, driving an unattended
+    sleep/wake or Scheduled Task turn) where nobody is present to ever
+    resolve one. Checked via a duck-typed attribute, not isinstance --
+    this module can't import runtime_lg back without a circular import
+    (see runtime_lg/selfwake.py's own docstring). A real fastapi
+    WebSocket has no such attribute, so it defaults True, unchanged.
+
+    Calling _resolve_pending_approvals anyway when this is False would
+    create a real asyncio.Future and await it, resolved only by a genuine
+    incoming WS message that a silent caller will never send -- verified
+    live, this hangs the calling coroutine forever, which for a poll-loop
+    caller (poll_due_wakes/poll_due_scheduled_tasks) wedges the *entire*
+    background poller on the very first unattended run that happens to
+    touch a gated tool. Skipping the call instead leaves the interrupt
+    durably paused in the checkpointer, exactly what
+    resume_after_reconnect already expects to find and resolve once a
+    real client opens that thread."""
+    return getattr(websocket, "can_resolve_approvals", True)
+
+
+# coordinator.py's shared INSTRUCTIONS (used verbatim by both runtimes) tells
+# the model to call run_workflow(name) to actually run a saved workflow --
+# accurate for ChatSession, but runtime_lg has no model-callable run_workflow
+# tool (see this module's own docstring for the deliberate scope cut): a
+# workflow run here only ever happens via the /runworkflow slash command or
+# the shared frontend's own picker, both of which bypass the model entirely.
+# Appended to this session's own instructions (not coordinator.py's shared
+# constant, which both runtimes still need to read the same way) so the
+# model doesn't try to call a tool that was never bound to this graph.
+_RUN_WORKFLOW_NOTE = (
+    "Note: in this app, a saved workflow is only ever run via the "
+    "/runworkflow <name> command or the workflow picker in the UI -- there "
+    "is no run_workflow tool here. If the user asks you to run a saved "
+    "workflow, tell them to type /runworkflow <name> (or use the picker); "
+    "do not attempt to call a tool named run_workflow."
+)
+
+
+class ChatSessionLG:
+    def __init__(
+        self,
+        *,
+        thread_id: str,
+        settings: Settings,
+        context_window_client: LLMClient,
+        custom_providers: dict[str, dict[str, str]],
+        extra_tools: list[Any],
+        checkpointer: Any,
+        hooks_config: dict[str, list[str]] | None = None,
+        enabled_skill_names: set[str] | None = None,
+        workspace_root: Path | None = None,
+        workspace_explicit: bool = False,
+    ) -> None:
+        self.thread_id = thread_id
+        self.settings = settings
+        # None (the old default, still used by anything that hasn't been
+        # taught about per-thread workspaces) falls back to the global
+        # settings.workspace_root -- see coordinator.py's identical
+        # fallback in build_coordinator_agent.
+        self.workspace_root: Path = workspace_root or settings.workspace_root
+        # True iff app.py's _resolve_workspace found a real per-thread
+        # choice (sidecar file), not the settings.workspace_root fallback
+        # -- select_workspace's "already set" guard needs this sentinel,
+        # not a path comparison, since a user can legitimately choose the
+        # same directory as the default (see _resolve_workspace's
+        # docstring).
+        self._workspace_explicit = workspace_explicit
+        self._context_window_client = context_window_client
+        self._context_window: int | None = None
+        self._pending_approvals: dict[str, Future[bool]] = {}
+        self._pending_questions: dict[str, Future[str]] = {}
+        self.hooks_config: dict[str, list[str]] = hooks_config or empty_hooks_config()
+        self.plan_mode = False
+        self.accept_edits = False
+        # Reset at the top of every handle_user_message call -- see
+        # _stream_turn's docstring for why this exists (recovering a tool
+        # call's arguments for the PostToolUse hook payload, which the
+        # ToolMessage carrying its result doesn't itself include).
+        self._pending_tool_args: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        # Cooperative /stop flag -- see request_stop's docstring. Reset at
+        # the start of every handle_user_message call, same as
+        # runtime/runner.py's threading.Event-based stop_event is cleared
+        # at the start of every turn there.
+        self._stop_requested = False
+        # Most recent model-response segment's real usage_metadata (see
+        # _stream_turn's _capture_segment_usage) -- not reset per-turn like
+        # _pending_tool_args/_stop_requested above, since it's read once
+        # after the whole turn (including any approval-resume continuation)
+        # finishes, not checked mid-turn. None until the first real segment
+        # completes, or if the active model never populates usage_metadata.
+        self._last_usage_metadata: UsageMetadata | None = None
+        # web/session.py's ws_endpoint dispatches each incoming
+        # "user_message" via asyncio.create_task without awaiting it, so it
+        # can go straight back to receiving the next one -- otherwise a
+        # turn blocked on approval would freeze the whole socket, including
+        # approval_response messages for that same turn (app.py's
+        # ws_endpoint does the identical thing). Without this lock, a
+        # second message sent while the first is still running would start
+        # a fully concurrent second handle_user_message call against the
+        # same self.lg_agent/self.config -- each mutating the same shared
+        # instance state (_pending_tool_args, _stop_requested) and issuing
+        # concurrent astream()/aget_state() calls against the identical
+        # checkpointed thread, racing and interleaving their output. Same
+        # lock ChatSession already has for the exact same reason; this
+        # runtime just never had it ported over until a concurrency review
+        # caught the gap. resolve_approval/request_stop are deliberately
+        # NOT gated by this lock, same as ChatSession's identical methods
+        # -- they have to be able to reach whichever turn is *currently*
+        # in flight, not queue behind it.
+        self._turn_lock = asyncio.Lock()
+        # The task currently holding _turn_lock (handle_user_message or
+        # resume_after_reconnect), if any -- see abandon_orphaned_turn's
+        # docstring for why this exists: a turn lock alone would let an
+        # orphaned task (one whose websocket died mid-approval-wait, so
+        # nothing can ever resolve its pending Future) block every future
+        # turn on this thread_id forever, including a genuine reconnect's
+        # own attempt to redeliver that same pending approval.
+        self._current_turn_task: asyncio.Task[None] | None = None
+        # None = not recording; otherwise the tool-call-step count captured
+        # at the moment /startworkflow was typed (see _handle_start_workflow/
+        # _handle_end_workflow below) -- only steps recorded from this index
+        # onward are ever saved by /endworkflow. Mirrors ChatSession's
+        # identical field.
+        self.workflow_recording_start: int | None = None
+        # None = no bare /saveworkflow curation in progress; otherwise
+        # awaiting the user's answer to a clarifying question or
+        # confirmation of a proposed save -- see _run_save_curation/
+        # _present_save_proposal below. Mirrors ChatSession's identical
+        # field.
+        self.pending_save_proposal: dict[str, Any] | None = None
+        # Same shape and purpose as pending_save_proposal above, but for
+        # /saveskill -- deliberately a separate field rather than one
+        # shared "pending save" slot with a type tag: keeping them apart
+        # means _handle_pending_save_proposal/_handle_pending_skill_save_
+        # proposal each only ever have to reason about their own
+        # proposal shape. See runtime_lg/skill_authoring.py's module
+        # docstring for why /saveskill is a parallel mechanism, not a
+        # third branch bolted onto /saveworkflow's own state machine.
+        self.pending_save_skill_proposal: dict[str, Any] | None = None
+        # Shared across every "agent" mode workflow run this session ever
+        # makes (one InMemorySaver, not one per run) -- same reasoning as
+        # runtime_lg/subagents.py's spawn_agent child_checkpointer: a fresh
+        # thread_id per run (see _run_workflow_agent_mode) means runs never
+        # collide against each other on this one shared checkpointer, and a
+        # workflow run's own progress doesn't need to survive a reconnect
+        # the way the main conversation does, so there's no reason to use
+        # the session's real, persistent self._checkpointer for this.
+        self._workflow_run_checkpointer = InMemorySaver()
+
+        self.enabled_skill_names: set[str] = set(enabled_skill_names or ())
+        agent = build_coordinator_agent(
+            settings,
+            thread_id,
+            skill_names=self.enabled_skill_names,
+            workspace_root=self.workspace_root,
+        )
+        # Unrestricted by enabled_skill_names deliberately -- a /<slug>
+        # slash command is an explicit, one-off user request to follow
+        # that skill for this message, distinct from the passive "is it
+        # listed in instructions" toggle set_enabled_skills controls
+        # below. Keyed by SkillInfo.slug (a single command-safe token,
+        # e.g. "skill-creator"), not skill.name -- every current built-in
+        # skill's display name has a space in it ("Skill Creator", "Word
+        # Documents", ...), which a bare `.lower()` on the name can never
+        # match against the single word _handle_user_message_locked below
+        # actually parses out of "/<word> <rest>". Real, previously-
+        # shipped-but-untested bug: the frontend's own autocomplete
+        # (Composer.tsx's selectAutocomplete) inserted the literal display
+        # name including its space, so selecting a multi-word skill from
+        # the dropdown produced text this lookup could never match --
+        # confirmed by reading through both sides together, not by a
+        # live report. Distinct from web/app.py's *other*, separately-
+        # scoped `skills_by_name` (the enable/disable toggle, correctly
+        # keyed by display name -- that one was never broken).
+        self.skills_by_slug = {
+            skill.slug: skill
+            for skill in load_builtin_skills() + load_skills(settings.skills_dir)
+        }
+
+        # Kept for switch_model, which needs to rebuild both the tool list
+        # (spawn_agent/review_work are bound to a specific model) and the
+        # compiled graph itself against a *new* model, reusing everything
+        # else about this session unchanged (same checkpointer/thread_id,
+        # same base tools, same instructions).
+        #
+        # Excludes list_recorded_steps -- build_coordinator_agent's shared
+        # tools/workflows.py's build_workflow_tools() call already put one
+        # in agent.tools, but it's backed by FileStateStore, a storage
+        # shape this runtime's checkpointer-backed threads don't have (it
+        # would silently return [] for every runtime_lg thread, forever --
+        # a real, previously-unnoticed gap, since list_workflows/
+        # get_workflow/delete_workflow from that same call are storage-only
+        # and already work correctly here). _build_lg_tools below adds a
+        # replacement backed by the real checkpointed message history.
+        self._checkpointer = checkpointer
+        self._custom_providers = custom_providers
+        self._base_tools: list[Callable[..., Any] | BaseTool] = [
+            t for t in agent.tools if tool_name(t) != "list_recorded_steps"
+        ]
+        # Kept separate from self._base_tools (not just concatenated once
+        # here) because refresh_extra_tools below can replace this list
+        # wholesale, independently, whenever an MCP connector connects/
+        # disconnects live -- self._base_tools never needs rebuilding for
+        # that. Combined back in by _build_lg_tools below (same treatment
+        # spawn_agent/review_work/list_recorded_steps already get).
+        self._extra_tools: list[Callable[..., Any] | BaseTool] = list(extra_tools)
+        self._instructions = (
+            f"{agent.instructions}\n\n{_RUN_WORKFLOW_NOTE}"
+            if agent.instructions
+            else _RUN_WORKFLOW_NOTE
+        )
+        self._model_string = settings.default_model
+
+        self.model = resolve_chat_model(self._model_string, custom_providers)
+        lg_tools = self._build_lg_tools(self.model)
+        # The *original* requires_approval set, computed independently of
+        # what actually ends up in HumanInTheLoopMiddleware's interrupt_on
+        # (which _build_lg_agent below may widen to include every tool, if
+        # PreToolUse hooks are configured) -- plan mode needs to tell
+        # "genuinely risky, blocked outright" apart from "only gated so a
+        # hook gets a look," and this is the one place that distinction is
+        # still visible. See _resolve_pending_approvals. Tool *names* don't
+        # change across a model switch (same base tools, same spawn_agent/
+        # review_work names every time), so this set is computed once here
+        # and never needs recomputing anywhere else.
+        self._approval_required_names = {
+            tool_name(t)
+            for t in lg_tools
+            if get_tool_metadata(cast(Any, t)).requires_approval
+        }
+        # The exact tool objects currently bound to self.lg_agent's compiled
+        # graph, kept for _run_workflow_chain_mode's own direct-invocation
+        # tool registry (see run_chain_lg's docstring for why chain-mode
+        # replay invokes tools directly rather than through the graph).
+        # Reassigned alongside self.lg_agent everywhere it's rebuilt
+        # (switch_model) so a workflow run started after always sees the
+        # currently-active tool set, not a stale one captured only at
+        # __init__ time.
+        self._lg_tools = lg_tools
+        self.lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
+        self.config = {"configurable": {"thread_id": thread_id}}
+
+    def _build_lg_tools(self, model: Any) -> list[Callable[..., Any] | BaseTool]:
+        # self._base_tools ("domain" tools) combined with self._extra_tools
+        # (MCP connector tools -- see __init__'s comment on why these are
+        # kept separate) *before* appending spawn_agent itself below -- a
+        # sub-agent's own
+        # selectable tool_names never includes spawn_agent, matching
+        # tools/subagents.py's _DISALLOWED_SUBAGENT_TOOLS reasoning, and
+        # does include MCP tools, same as the old runtime's cli.py (which
+        # extends agent.tools with MCP tools before build_subagent_tools'
+        # own available_tools=agent.tools call).
+        combined_tools = [*self._base_tools, *self._extra_tools]
+        spawn_agent_tool = build_spawn_agent_tool(model, combined_tools)
+        # The reviewer only ever gets read-only "documents" tools (read_docx/
+        # read_pdf/search_pdf/read_xlsx/read_pptx today) -- independent
+        # verification of a generated file's real content, never a way for
+        # it to change anything itself. requires_approval is False for all
+        # five, which is exactly why build_review_work_tool's own docstring
+        # can promise its sub-agent never pauses on HumanInTheLoopMiddleware.
+        reviewer_tools = [
+            t
+            for t in combined_tools
+            if (metadata := get_tool_metadata(cast("Callable[..., Any]", t))).category
+            == "documents"
+            and not metadata.requires_approval
+        ]
+        review_work_tool = build_review_work_tool(model, reviewer_tools, self.settings.state_dir)
+        # Added here (not self._base_tools) same reason spawn_agent/
+        # review_work are -- see __init__'s comment on why list_recorded_
+        # steps was stripped out of self._base_tools in the first place.
+        list_recorded_steps_tool = self._build_list_recorded_steps_tool()
+        return [*combined_tools, spawn_agent_tool, review_work_tool, list_recorded_steps_tool]
+
+    def _build_list_recorded_steps_tool(self) -> Callable[..., Any]:
+        """runtime_lg-aware replacement for tools/workflows.py's
+        build_workflow_tools()'s list_recorded_steps, which reads
+        FileStateStore -- always empty for this runtime's checkpointer-
+        backed threads (see __init__'s comment). Async (unlike the old
+        one): self.lg_agent's real checkpointer in production is an
+        AsyncSqliteSaver, which only supports the async aget_state -- a
+        sync get_state call against it would raise. Closes over self, not
+        a captured thread_id/state_dir, so it always reads whichever
+        checkpointed thread self.lg_agent/self.config currently point at,
+        even after switch_model rebuilds them."""
+
+        async def list_recorded_steps() -> list[dict[str, Any]]:
+            """List every tool call already recorded in this thread, in
+            order, each tagged with its index. Useful for explaining to the
+            user what's already happened in this thread, or for suggesting
+            they run /startworkflow before repeating a sequence of steps
+            worth saving.
+            """
+            state = await self.lg_agent.aget_state(self.config)
+            messages = list(state.values.get("messages", [])) if state.values else []
+            return [
+                {"index": index, "tool_name": name, "arguments": args}
+                for index, (name, args, _result) in enumerate(recorded_tool_call_steps_lg(messages))
+            ]
+
+        return tool_metadata(list_recorded_steps, risk_category="READ", category="workflows")
+
+    def _build_lg_agent(
+        self, model: Any, model_string: str, lg_tools: list[Callable[..., Any] | BaseTool]
+    ) -> Any:
+        # When PreToolUse hooks are configured, route *every* tool call
+        # through the same interrupt point -- not just the ones that
+        # already require human approval -- so a hook gets the chance to
+        # veto a low-risk tool too. Mirrors runtime/policies.py's
+        # HookToolPolicy, which wraps every tool call regardless of risk
+        # level, not just RequireApprovalPolicy's gated subset.
+        extra_interrupt_names = (
+            [tool_name(t) for t in lg_tools] if self.hooks_config["PreToolUse"] else []
+        )
+        # `model_string` is taken as its own parameter rather than read from
+        # self._model_string -- switch_model (below) calls this *before*
+        # updating self._model_string (so a failed switch can revert
+        # cleanly without ever having mutated it), so reading the field
+        # here would silently compute auto_compact_tokens for the *old*
+        # model on every switch. get_context_window is best-effort and
+        # never raises (see LLMClient.get_context_window's own docstring),
+        # so no try/except is needed around it here.
+        auto_compact_tokens = max(
+            1,
+            int(
+                self._context_window_client.get_context_window(model_string)
+                * self.settings.auto_compact_threshold
+            ),
+        )
+        return build_langgraph_agent(
+            model,
+            lg_tools,
+            self._instructions,
+            checkpointer=self._checkpointer,
+            extra_interrupt_tool_names=extra_interrupt_names,
+            question_tool_names=QUESTION_TOOL_NAMES,
+            max_turns=self.settings.max_turns,
+            auto_compact_tokens=auto_compact_tokens,
+        )
+
+    def resolve_approval(self, request_id: str, approved: bool) -> None:
+        future = self._pending_approvals.get(request_id)
+        if future is not None and not future.done():
+            future.set_result(approved)
+
+    def resolve_question(self, request_id: str, answer: str) -> None:
+        future = self._pending_questions.get(request_id)
+        if future is not None and not future.done():
+            future.set_result(answer)
+
+    def request_stop(self) -> None:
+        """Called directly from ws_endpoint on a "stop" message, not
+        awaited -- it has to reach whichever turn is *currently* running,
+        same reasoning as resolve_approval. Mostly cooperative: sets a flag
+        that _stream_turn/_decide_action_request check at their own natural
+        yield points, mirroring runtime/runner.py's threading.Event-based
+        stop_event (same cooperative-cancellation shape; this runtime's
+        turn loop is a single async coroutine rather than a worker thread,
+        so a plain flag serves the same purpose a thread-safe Event does
+        there). Also immediately denies any tool call currently blocked on
+        approval, so a stop can't get stuck waiting behind an approval
+        prompt no one is going to answer -- the stop-flag checks elsewhere
+        run between chunks/decisions, which a pending approval wait would
+        otherwise never reach. A pending ask_user_question gets the same
+        treatment, resolved with a placeholder answer rather than a bool --
+        it's a "respond" decision, not approve/reject (see
+        _decide_action_request's own docstring).
+
+        Real, user-reported gap in the purely-cooperative design: none of
+        the above helps when the turn isn't blocked on an approval/
+        question at all, but stuck deep inside a single provider SDK call
+        -- e.g. langchain_google_genai's own internal retry/backoff loop on
+        a quota error, which can run for the better part of a minute
+        without ever yielding a chunk for _stream_turn's stop-flag check to
+        run against (see runtime_lg/providers.py's own comment on that same
+        bug). Every other agent tool's Stop button reaches for the same
+        fix in this situation -- bind directly to cancelling the actual
+        in-flight call (AbortController in a JS fetch-based client,
+        asyncio.Task.cancel() here) -- so this does too, but *only* when
+        there's nothing pending to resolve instead: a pending approval/
+        question means the turn is legitimately paused at a LangGraph
+        interrupt() waiting on user input, and unblocking it via the
+        futures above lets it unwind through its own normal
+        Command(resume=...) path, preserving the checkpointer's state
+        correctly. Hard-cancelling *that* case instead would skip straight
+        past the resume path -- see abandon_orphaned_turn's own docstring,
+        which reasons through exactly this for the WebSocket-disconnect
+        case and deliberately avoids it there too."""
+        self._stop_requested = True
+        has_pending_interrupt = False
+        for future in list(self._pending_approvals.values()):
+            if not future.done():
+                future.set_result(False)
+                has_pending_interrupt = True
+        for question_future in list(self._pending_questions.values()):
+            if not question_future.done():
+                question_future.set_result("(Stopped by user before answering.)")
+                has_pending_interrupt = True
+        if (
+            not has_pending_interrupt
+            and self._current_turn_task is not None
+            and not self._current_turn_task.done()
+        ):
+            self._current_turn_task.cancel()
+
+    def abandon_orphaned_turn(self) -> None:
+        """Called from app.py's WebSocketDisconnect handler, not
+        request_stop -- a real, previously-unhandled deadlock a concurrency
+        review caught: _turn_lock (see __init__) means any turn still
+        blocked on an approval when its websocket dies would otherwise hang
+        onto that lock forever, since nothing can ever resolve a pending
+        Future once the socket that would carry its approval_response is
+        gone -- silently blocking every future turn on this thread_id too,
+        including a genuine reconnect's own resume_after_reconnect trying
+        to redeliver that exact same pending approval to a fresh
+        connection.
+
+        Deliberately does NOT call request_stop(): that denies the pending
+        approval (a real decision, resumed against the checkpointer via
+        Command(resume=...)) and would consume the very interrupt a
+        reconnect is supposed to redeliver *untouched* -- see
+        runtime_lg/README.md's reconnect/restart verdict, the whole reason
+        a persistent checkpointer was chosen over InMemorySaver in the
+        first place. Hard-cancels whichever task currently holds
+        _turn_lock instead: cancellation unwinds that task without ever
+        reaching a Command(resume=...) call, so the checkpointer's real
+        pending state is left exactly as it was. The lock still gets
+        released correctly either way, since `async with` releases on
+        cancellation the same as on any other exception."""
+        if self._current_turn_task is not None and not self._current_turn_task.done():
+            self._current_turn_task.cancel()
+
+    async def switch_model(self, model: str, websocket: WebSocket) -> None:
+        """Change this thread's active model immediately, mid-session, no
+        restart, no reconnect -- mirrors ChatSession.switch_model's public
+        contract exactly, but the mechanism is necessarily different:
+        Runner re-reads agent.model fresh every turn, so the old runtime
+        just mutates a string in place. create_agent() bakes the model into
+        a *compiled graph* once, so this rebuilds that graph instead
+        (self.lg_agent), reusing everything else about the session
+        unchanged -- same checkpointer, same thread_id/config, same base
+        tools, same instructions. Rebinding a new compiled graph object to
+        the *same* checkpointer/thread_id is safe even if a turn is
+        mid-approval when this is called: HumanInTheLoopMiddleware's
+        interrupt_on set is derived purely from tool *names*/hooks
+        configuration, both unchanged by a model switch, and LangGraph
+        resumes from checkpointed state, not from the compiled graph
+        object's own identity.
+
+        Only a basic "provider:model" shape check happens here; a
+        genuinely bad choice (unknown provider prefix, or a provider whose
+        SDK validates eagerly) is caught by resolve_chat_model/
+        get_context_window below, both of which can raise -- reverted on
+        that failure rather than leaving the thread pinned to a model that
+        can never actually be used."""
+        if ":" not in model:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": f'model must be a "provider:model" string, got {model!r}',
+                }
+            )
+            return
+        previous_model = self.model
+        previous_lg_agent = self.lg_agent
+        previous_model_string = self._model_string
+        previous_lg_tools = self._lg_tools
+        self._context_window = None
+        try:
+            new_model = resolve_chat_model(model, self._custom_providers)
+            lg_tools = self._build_lg_tools(new_model)
+            new_lg_agent = self._build_lg_agent(new_model, model, lg_tools)
+            self.model = new_model
+            self.lg_agent = new_lg_agent
+            self._model_string = model
+            self._lg_tools = lg_tools
+            await self.send_state(websocket)
+        except Exception as exc:  # noqa: BLE001 -- a bad/misconfigured provider must not corrupt session state
+            self.model = previous_model
+            self.lg_agent = previous_lg_agent
+            self._model_string = previous_model_string
+            self._lg_tools = previous_lg_tools
+            self._context_window = None
+            await websocket.send_json(
+                {"type": "error", "message": f"Could not switch to {model!r}: {exc}"}
+            )
+
+    async def refresh_extra_tools(self, extra_tools: list[Any]) -> None:
+        """Rebuild self.lg_agent so this *already-open* thread picks up an
+        MCP connector added/removed/version-bumped after this session was
+        first created -- real, live-reported bug: __init__ takes a one-time
+        snapshot of extra_tools_holder["tools"] (list(extra_tools), see its
+        own comment), so before this method existed, connecting a new
+        connector only ever affected the *next new* thread_id;
+        already-open conversations kept whatever MCP tools existed at
+        session-creation time until the process restarted. app.py calls
+        this on every currently-open ChatSessionLG right after
+        add_mcp_server/remove_mcp_server/bump_mcp_server_version succeeds,
+        mirroring switch_model's "rebuild the compiled graph in place, same
+        checkpointer/thread_id" shape.
+
+        No websocket parameter, unlike switch_model: this
+        runs from a REST endpoint handler, not in response to a message
+        from *this* thread's own client, so there is nothing to reply to
+        and no previous-state revert to report -- a failure here (e.g. a
+        newly-added MCP tool with a schema create_agent rejects) is logged
+        and this session's tools are simply left as they were, same
+        "don't corrupt a working session" posture as switch_model's own
+        except-and-revert branch, just without a websocket to notify.
+        Guarded by _turn_lock so this can't race a concurrent
+        handle_user_message call on the same session's self.lg_agent/
+        self.config, same reasoning as resume_after_reconnect above."""
+        async with self._turn_lock:
+            self._extra_tools = list(extra_tools)
+            try:
+                lg_tools = self._build_lg_tools(self.model)
+                new_lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
+            except Exception:  # noqa: BLE001 -- a bad connector must not corrupt this session
+                logger.exception(
+                    "refresh_extra_tools: failed to rebuild lg_agent for thread %r, "
+                    "keeping its previous tool set",
+                    self.thread_id,
+                )
+                return
+            self._lg_tools = lg_tools
+            self.lg_agent = new_lg_agent
+            self._approval_required_names = {
+                tool_name(t)
+                for t in lg_tools
+                if get_tool_metadata(cast(Any, t)).requires_approval
+            }
+
+    async def select_workspace(self, path: str, websocket: WebSocket) -> bool:
+        """The WS-message counterpart to passing ?workspace= at connect
+        time (see app.py's ws_endpoint/_resolve_workspace) -- lets the
+        new-session workspace picker fire *after* the socket is already
+        open (the picker only shows once the first "state" event confirms
+        this is a genuinely fresh thread, by which point _get_session
+        already built this session against the fallback
+        settings.workspace_root).
+
+        Rebuilds self._base_tools/self.lg_agent from scratch via
+        build_coordinator_agent with the new root, same revert-on-failure
+        shape as set_enabled_skills below (a bad path -- e.g. one that
+        can't be created -- must not corrupt an otherwise-working
+        session).
+
+        Returns whether the switch actually took effect -- unlike
+        set_enabled_skills (whose caller in app.py's ws_endpoint always
+        persists the sidecar unconditionally), a rejected workspace
+        change must NOT have its (different, unapplied) path written to
+        the sidecar --
+        that would desync the sidecar from this session's actual
+        in-memory workspace_root, and a later reconnect reading the
+        sidecar fresh would try to rebuild against the bad/rejected path
+        with no revert-on-failure safety net at that point (a startup
+        crash, not a soft in-turn error). The caller only writes the
+        sidecar when this returns True."""
+        if self._workspace_explicit:
+            await websocket.send_json(
+                {"type": "error", "message": "This thread already has a workspace set."}
+            )
+            return False
+        previous_workspace_root = self.workspace_root
+        previous_instructions = self._instructions
+        previous_base_tools = self._base_tools
+        previous_lg_agent = self.lg_agent
+        previous_approval_required_names = self._approval_required_names
+        previous_lg_tools = self._lg_tools
+        self._context_window = None
+        try:
+            # Unlike set_enabled_skills, build_coordinator_agent itself is
+            # inside this try -- a folder a WorkspaceScope can't mkdir into
+            # (permission denied, invalid path syntax) is a real, easily
+            # user-triggered failure mode for a folder-picker-driven path
+            # in a way a skill lookup rarely is, and it must be caught
+            # here rather than crashing the WS message loop.
+            self.workspace_root = Path(path)
+            agent = build_coordinator_agent(
+                self.settings,
+                self.thread_id,
+                skill_names=self.enabled_skill_names,
+                workspace_root=self.workspace_root,
+            )
+            new_instructions = (
+                f"{agent.instructions}\n\n{_RUN_WORKFLOW_NOTE}"
+                if agent.instructions
+                else _RUN_WORKFLOW_NOTE
+            )
+            self._instructions = new_instructions
+            self._base_tools = [
+                t for t in agent.tools if tool_name(t) != "list_recorded_steps"
+            ]
+            lg_tools = self._build_lg_tools(self.model)
+            new_approval_required_names = {
+                tool_name(t)
+                for t in lg_tools
+                if get_tool_metadata(cast(Any, t)).requires_approval
+            }
+            new_lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
+        except Exception as exc:  # noqa: BLE001 -- a bad workspace path must not corrupt session state
+            self.workspace_root = previous_workspace_root
+            self._instructions = previous_instructions
+            self._base_tools = previous_base_tools
+            self.lg_agent = previous_lg_agent
+            self._approval_required_names = previous_approval_required_names
+            self._lg_tools = previous_lg_tools
+            self._context_window = None
+            await websocket.send_json(
+                {"type": "error", "message": f"Could not switch to workspace {path!r}: {exc}"}
+            )
+            return False
+        self.lg_agent = new_lg_agent
+        self._approval_required_names = new_approval_required_names
+        self._lg_tools = lg_tools
+        self._workspace_explicit = True
+        await self.send_state(websocket)
+        return True
+
+    async def set_enabled_skills(self, skill_names: set[str], websocket: WebSocket) -> None:
+        """Toggle this thread's active built-in/local skills, live,
+        mid-session -- deliberately with NO "once only" guard: the user
+        asked for selectable-anytime toggling, like Claude Code's own
+        skills. Every call fully replaces the enabled set and rebuilds
+        self._instructions/self._base_tools from scratch via
+        build_coordinator_agent, rather than accumulating skill text onto
+        whatever was there from a previous toggle -- so turning a skill
+        back off actually removes its listing, not just stops adding
+        more.
+
+        Same revert-on-failure shape as switch_model: a bad rebuild must
+        not corrupt an otherwise-working session."""
+        previous_instructions = self._instructions
+        previous_base_tools = self._base_tools
+        previous_lg_agent = self.lg_agent
+        previous_approval_required_names = self._approval_required_names
+        previous_lg_tools = self._lg_tools
+        previous_enabled_skill_names = self.enabled_skill_names
+        self.enabled_skill_names = set(skill_names)
+        agent = build_coordinator_agent(
+            self.settings, self.thread_id, skill_names=self.enabled_skill_names
+        )
+        self._instructions = (
+            f"{agent.instructions}\n\n{_RUN_WORKFLOW_NOTE}"
+            if agent.instructions
+            else _RUN_WORKFLOW_NOTE
+        )
+        self._base_tools = [t for t in agent.tools if tool_name(t) != "list_recorded_steps"]
+        self._context_window = None
+        try:
+            lg_tools = self._build_lg_tools(self.model)
+            new_approval_required_names = {
+                tool_name(t)
+                for t in lg_tools
+                if get_tool_metadata(cast(Any, t)).requires_approval
+            }
+            new_lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
+        except Exception as exc:  # noqa: BLE001 -- a bad rebuild must not corrupt session state
+            self._instructions = previous_instructions
+            self._base_tools = previous_base_tools
+            self.lg_agent = previous_lg_agent
+            self._approval_required_names = previous_approval_required_names
+            self._lg_tools = previous_lg_tools
+            self.enabled_skill_names = previous_enabled_skill_names
+            self._context_window = None
+            await websocket.send_json(
+                {"type": "error", "message": f"Could not update skills: {exc}"}
+            )
+            return
+        self.lg_agent = new_lg_agent
+        self._approval_required_names = new_approval_required_names
+        self._lg_tools = lg_tools
+        # Also re-scans disk for skills_by_slug (the /<slug> force-load
+        # lookup, unrestricted by enabled_skill_names -- see its own
+        # comment in __init__) -- cheap, and keeps it correctly in sync
+        # with whatever's actually on disk rather than a stale __init__-
+        # time snapshot. Exists mainly for /saveskill's own confirm
+        # handler below, which calls this method specifically so a
+        # freshly-saved skill is usable via /<slug> in this same session
+        # immediately, without waiting for a reconnect.
+        self.skills_by_slug = {
+            skill.slug: skill
+            for skill in load_builtin_skills() + load_skills(self.settings.skills_dir)
+        }
+        await self.send_state(websocket)
+
+    async def send_state(self, websocket: WebSocket) -> None:
+        if self._context_window is None:
+            self._context_window = await asyncio.to_thread(
+                self._context_window_client.get_context_window, self._model_string
+            )
+        await websocket.send_json(
+            {
+                "type": "state",
+                "plan_mode": self.plan_mode,
+                "accept_edits": self.accept_edits,
+                "model": self._model_string,
+                "context_window": self._context_window,
+                "enabled_skills": sorted(self.enabled_skill_names),
+                "workspace_root": str(self.workspace_root),
+                "workspace_explicit": self._workspace_explicit,
+            }
+        )
+
+    async def send_history(self, websocket: WebSocket) -> None:
+        """One-shot replay of this thread's checkpointed messages, sent
+        once right after send_state on every fresh WS connection (see
+        app.py's ws_endpoint) -- fixes a real, live-reported bug: the
+        chat log was otherwise only ever built up from live events during
+        the *current* connection, so switching to (or reconnecting to) an
+        existing thread showed a blank pane even though the model still
+        remembered the whole conversation. See serialize_history_for_ws_lg
+        for the entry shape and what's deliberately not perfectly handled
+        (a /compact'd thread's synthetic summary message).
+
+        A brand-new thread has no checkpointed messages yet, so this is a
+        harmless no-op "history" event with an empty list -- no special
+        casing needed for the new-thread path."""
+        state = await self.lg_agent.aget_state(self.config)
+        messages = list(state.values.get("messages", [])) if state.values else []
+        await websocket.send_json(
+            {"type": "history", "entries": serialize_history_for_ws_lg(messages)}
+        )
+
+    async def _stream_turn(
+        self,
+        turn_input: Any,
+        websocket: WebSocket,
+        *,
+        agent: Any = None,
+        config: dict[str, Any] | None = None,
+    ) -> str:
+        """Runs one astream() call, forwarding the model's own narration as
+        "agent_delta" events and each tool's return value as "tool_result",
+        same wire shape as ChatSession's _on_delta/_post_tool_use. Returns
+        only the *last* model response's own narration text -- not every
+        response of this call concatenated -- reset (text_parts.clear())
+        at each ToolMessage boundary, the same point _capture_segment_usage
+        already resets `segment` at. A single astream() call can cover more
+        than one model response when it includes an *ungated* tool call
+        (the loop just keeps going past the ToolMessage); without the reset,
+        this method's return value would glue the pre-tool narration onto
+        the post-tool one with no separator, even though the pre-tool text
+        already streamed live as its own "agent_delta" bubble.
+
+        The gated case has the identical join done differently: this method's
+        own astream() loop ends *without* a ToolMessage the moment the model
+        proposes a call that needs approval (the interrupt fires first), so
+        its return value here is already just the pre-tool narration, single-
+        segment; the risk there is a *caller* joining this call's return
+        value with a later _resolve_pending_approvals one -- see that
+        method's own docstring for the matching half of this fix.
+
+        Also recovers each tool call's arguments for the PostToolUse hook
+        payload below -- a ToolMessage only carries a tool's result, not the
+        arguments it was called with, so this accumulates the preceding
+        AIMessageChunk stream (stream_mode=["messages"] yields incremental
+        deltas, merged here via AIMessageChunk's own __add__) into a full
+        AIMessage and reads its .tool_calls. Flushed into
+        self._pending_tool_args in two places: right before a ToolMessage
+        that arrived in the *same* call (the common, non-gated-tool case),
+        and again unconditionally once the astream loop ends (the
+        approval-gated case -- the AIMessage proposing a gated call is
+        always fully streamed *before* the interrupt fires, since
+        interrupt() runs in after_model once the AIMessage already exists,
+        but the interrupt then ends this call's astream loop with no
+        ToolMessage ever arriving in it; the flush at the end is what
+        carries those args over to the *next* _stream_turn call --
+        _resolve_pending_approvals's post-resume one -- where the
+        ToolMessage for that call actually shows up). registered_ids
+        prevents the shared end-of-loop flush from double-registering a
+        call already flushed by the inline branch above it.
+
+        Checks self._stop_requested after every chunk (see request_stop's
+        docstring) -- cooperative, so it can't interrupt a single model
+        call already in flight (same limitation the old runtime's
+        stop_event has for any non-token-streaming provider), but it stops
+        consuming *further* chunks/turns promptly. Explicitly closes the
+        astream() generator on the way out (in a finally, whether the loop
+        ended naturally or via a stop-triggered break) rather than just
+        letting it fall out of scope -- an abandoned, ungarbage-collected
+        async generator keeps running in the background instead of
+        propagating GeneratorExit into LangGraph's own execution.
+
+        `agent`/`config` default to self.lg_agent/self.config (every
+        ordinary turn) but can be overridden to drive a *different*
+        compiled graph/thread instead -- see _run_workflow_agent_mode,
+        which points these at a temporary, workflow-scoped graph/config
+        rather than mutating self.lg_agent/self.config themselves. Note
+        this means a workflow's nested sub-agent turn briefly overwrites
+        self._last_usage_metadata (below) with its own usage rather than
+        the outer thread's -- accepted, not fixed: same "nice-to-have
+        indicator, never worth extra machinery" reasoning
+        get_context_window's own docstring already applies elsewhere.
+
+        Also tracks `self._last_usage_metadata`: a *separate* accumulator
+        (`segment`, distinct from `accumulated` above) that resets at each
+        ToolMessage boundary, so it only ever sums the chunks of the single
+        most recent model response -- not the whole multi-response turn,
+        which would double-count (each individual response's own
+        usage_metadata.total_tokens already reflects the *cumulative*
+        context size at that point, since Gemini/Anthropic/OpenAI all
+        report "tokens in the whole prompt this call sent" as input_tokens,
+        not just what's new since the last call). Verified live against
+        real Gemini through this exact astream(stream_mode=["messages"])
+        path, including a real tool call in between two model responses --
+        confirmed each individual response's accumulated usage_metadata is
+        correct (not the all-zero result an earlier, older
+        langchain-google-genai version returned, see runtime_lg/README.md's
+        "usage bar" section for the fix and how the earlier finding was
+        superseded by an upstream fix in that package). Left as None (no
+        WS event sent) if a response never populates usage_metadata at all
+        -- some providers/configurations still don't; see that same
+        section for langchain-openai's stream_usage caveat.
+
+        _capture_segment_usage also sends a live "usage" WS event itself,
+        at every boundary it runs at (each ToolMessage, plus once more at
+        this method's own return) -- not only from the two post-turn sends
+        the callers below already do once _stream_turn returns. Drives the
+        composer's live running-token counter (ContextRing gets the same
+        event) across a long, multi-tool-call turn instead of only
+        updating once the whole turn is over."""
+        agent = agent if agent is not None else self.lg_agent
+        config = config if config is not None else self.config
+        text_parts: list[str] = []
+        accumulated: AIMessageChunk | None = None
+        segment: AIMessageChunk | None = None
+        registered_ids: set[str] = set()
+
+        def _flush_accumulated() -> None:
+            nonlocal accumulated
+            if accumulated is None:
+                return
+            for call in accumulated.tool_calls:
+                call_id = call["id"]
+                if call_id is not None and call_id not in registered_ids:
+                    self._pending_tool_args[call["name"]].append(call["args"])
+                    registered_ids.add(call_id)
+
+        async def _capture_segment_usage() -> None:
+            nonlocal segment
+            if segment is not None and segment.usage_metadata:
+                self._last_usage_metadata = segment.usage_metadata
+                # Live, not just at turn-end: a multi-step turn (tool call,
+                # then another model response) previously only told the
+                # frontend the token count once the *whole* turn finished
+                # (see the callers' own "usage" sends after _stream_turn
+                # returns) -- nothing to drive a live-updating counter with
+                # while a long turn is still running. Each individual
+                # response's usage_metadata.total_tokens is already the
+                # cumulative context size at that point (see this method's
+                # own docstring), so sending it here, at every boundary this
+                # function already runs at, is a correct running total, not
+                # an approximation.
+                await websocket.send_json(
+                    {"type": "usage", "total_tokens": segment.usage_metadata["total_tokens"]}
+                )
+            segment = None
+
+        stream = agent.astream(turn_input, config=config, stream_mode=["messages"])
+        try:
+            async for _mode, chunk in stream:
+                message, _metadata = chunk
+                if isinstance(message, AIMessageChunk):
+                    text = _extract_text(message.content)
+                    if text:
+                        text_parts.append(text)
+                        await websocket.send_json({"type": "agent_delta", "text": text})
+                    accumulated = message if accumulated is None else accumulated + message
+                    segment = message if segment is None else segment + message
+                elif isinstance(message, ToolMessage):
+                    _flush_accumulated()
+                    await _capture_segment_usage()
+                    # A tool call (gated or not) ends the model's current
+                    # response -- discard whatever narration text_parts
+                    # accumulated for it, same boundary _capture_segment_usage
+                    # already resets `segment` at. That narration already
+                    # streamed live as its own "agent_delta" bubble; without
+                    # this reset, this call's eventual return value would glue
+                    # it onto whatever the model says *after* the tool result
+                    # comes back, with no separator -- a real bug found live
+                    # (see this method's own docstring).
+                    text_parts.clear()
+                    name = message.name or ""
+                    result_value = _tool_result_value(message.content)
+                    args = (
+                        self._pending_tool_args[name].pop(0)
+                        if self._pending_tool_args[name]
+                        else {}
+                    )
+                    await self._run_post_tool_use_hooks(name, args, result_value)
+                    # ask_user_question's own "question"/"answered" card (sent by
+                    # _decide_question_request as question_required, resolved locally
+                    # on answer -- see reducer.ts's "question_required"/
+                    # "local_question_answered" cases) already fully represents this
+                    # call; sending the normal tool_result here too would additionally
+                    # fall into the reducer's tool_result fallback branch (no matching
+                    # pending "tool" item exists, since question tools never got a
+                    # "tool_call" one) and add a second, redundant "Asked: ..." row
+                    # underneath the card for the same interaction.
+                    if name not in QUESTION_TOOL_NAMES:
+                        # `args` (recovered above, same value the hook just got)
+                        # rides along so a live turn's collapsed row can show the
+                        # real filename/query -- without this the frontend only
+                        # ever learns the actual arguments for a *gated* tool
+                        # (via approval_required) or a *replayed* one (via
+                        # history's own checkpointed entry.arguments); an
+                        # ungated tool completing in a live turn had no event
+                        # carrying arguments at all until now, so its row always
+                        # fell back to generic phrasing ("Read a file" instead
+                        # of "Read notes.txt").
+                        await websocket.send_json(
+                            {
+                                "type": "tool_result",
+                                "tool_name": name,
+                                "arguments": args,
+                                "result": result_value,
+                            }
+                        )
+                elif isinstance(message, AIMessage):
+                    # Real, live-caught gap: a middleware-injected terminal
+                    # message (e.g. ModelCallLimitMiddleware's
+                    # exit_behavior="end" AIMessage, added directly via a
+                    # before_model hook's return dict rather than an actual
+                    # model call) never goes through _generate/_stream, so
+                    # stream_mode=["messages"] emits it as one complete
+                    # AIMessage instead of the usual AIMessageChunk deltas
+                    # -- the `isinstance(message, AIMessageChunk)` branch
+                    # above never matches it (AIMessageChunk is a subclass
+                    # of AIMessage, not the reverse), so without this branch
+                    # its content was silently dropped and the turn ended
+                    # with an empty "[no reply -- ...]" instead of telling
+                    # the user *why* it stopped. Confirmed live: printing
+                    # the raw astream(stream_mode=["messages"]) output for a
+                    # max_turns-capped run shows this exact message arriving
+                    # as a plain AIMessage, not a chunk.
+                    text = _extract_text(message.content)
+                    if text:
+                        text_parts.append(text)
+                        await websocket.send_json({"type": "agent_delta", "text": text})
+                if self._stop_requested:
+                    break
+        finally:
+            await stream.aclose()
+        _flush_accumulated()
+        await _capture_segment_usage()
+        return "".join(text_parts)
+
+    async def _run_pre_tool_use_hooks(self, name: str, args: dict[str, Any]) -> str | None:
+        """Returns a denial reason if any configured PreToolUse hook vetoes
+        this call, None if all pass (or none are configured). run_hook is a
+        blocking subprocess call, bridged off the event loop the same way
+        every other blocking call in this module is."""
+        if not self.hooks_config["PreToolUse"]:
+            return None
+        payload = {
+            "event": "PreToolUse",
+            "tool_name": name,
+            "arguments": args,
+            "agent_name": "coordinator",
+        }
+        for command in self.hooks_config["PreToolUse"]:
+            result = await asyncio.to_thread(run_hook, command, payload)
+            if not result.allowed:
+                return result.reason
+        return None
+
+    async def _run_post_tool_use_hooks(self, name: str, args: dict[str, Any], result: Any) -> None:
+        if not self.hooks_config["PostToolUse"]:
+            return
+        payload = {
+            "event": "PostToolUse",
+            "tool_name": name,
+            "arguments": args,
+            "agent_name": "coordinator",
+            "result": result,
+        }
+        for command in self.hooks_config["PostToolUse"]:
+            outcome = await asyncio.to_thread(run_hook, command, payload)
+            if not outcome.allowed:
+                logger.warning("PostToolUse hook failed: %s", outcome.reason)
+
+    async def _run_observational_hooks(self, event: str, payload: dict[str, Any]) -> None:
+        """Shared implementation for every hook event added in ROADMAP.md's
+        Phase 7 item 3 (SessionEnd/UserPromptSubmit/PreCompact/PostCompact/
+        Interrupt) -- none of them can veto the action they're reporting
+        on, only PreToolUse can (see its own method above), so this is
+        just "run every configured command, log a warning if one fails,"
+        the same shape _run_post_tool_use_hooks already had before this
+        got pulled out as a reusable helper (that one isn't routed through
+        this, on purpose -- no reason to touch an already-working,
+        already-tested code path for a pure refactor)."""
+        for command in self.hooks_config.get(event, []):
+            outcome = await asyncio.to_thread(run_hook, command, payload)
+            if not outcome.allowed:
+                logger.warning("%s hook failed: %s", event, outcome.reason)
+
+    async def run_interrupt_hooks(self) -> None:
+        """Called from app.py's ws_endpoint alongside request_stop() --
+        not underscore-prefixed, unlike this class's other hook methods,
+        since (like request_stop/abandon_orphaned_turn) it's meant to be
+        called from outside this class."""
+        await self._run_observational_hooks(
+            "Interrupt", {"event": "Interrupt", "thread_id": self.thread_id}
+        )
+
+    async def run_session_end_hooks(self) -> None:
+        """Called from app.py's ws_endpoint on WebSocketDisconnect, every
+        time a connection for this thread_id drops -- not just the
+        orphaned-turn case abandon_orphaned_turn exists for."""
+        await self._run_observational_hooks(
+            "SessionEnd", {"event": "SessionEnd", "thread_id": self.thread_id}
+        )
+
+    async def _build_document_edit_preview(
+        self, tool_name_: str, args: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        """Best-effort before/after preview for an approval-gated
+        document edit (pptx/docx/xlsx) -- dry-runs the *exact* same tool
+        call, with the *exact* same args, against a throwaway copy of the
+        target file, so the approval card can show what the edit will
+        actually produce instead of the raw JSON arguments dump it fell
+        back to before (`{"shape_index": 3, "fill_color": "38BDF8"}`
+        tells a user little about what's about to change; a picture
+        does). Reusing the real edit method this way -- not a second,
+        hand-written "what would this look like" implementation -- means
+        the preview can never drift out of sync with what actually
+        happens on approval.
+
+        Deliberately generic, not a hardcoded per-tool dispatch table:
+        `_PREVIEWABLE_TOOLKITS_BY_EXTENSION` below maps a file extension
+        to its toolkit class (PresentationToolkit/DocumentToolkit/
+        SpreadsheetToolkit -- all three share the same `(root, *,
+        state_dir=, extra_readable=, extra_writable=)` constructor
+        shape, which is what makes this dispatch table-driven instead of
+        three near-duplicate copies of this method); applies to *any*
+        tool name that happens to be a method on that class (private
+        helpers are all `_`-prefixed, so this can't accidentally match
+        one) whose `path` argument names an existing file with a
+        recognized extension -- covers every current and future edit
+        tool across all three formats with zero maintenance here, and
+        naturally excludes a pure-create tool like `fill_pptx_template`
+        (no existing file to diff against) without needing a denylist --
+        `write_pptx`/`write_docx`/`write_xlsx` *do* get previewed when
+        they're actually overwriting something that already exists,
+        which is exactly the case worth previewing.
+
+        Never raises and never touches the real file -- any failure
+        (soffice/pdftoppm missing, a bad dry-run, a locked file, an
+        unrecognized extension) just means one or both preview images
+        come back None, and the approval flow proceeds exactly as it did
+        before this existed.
+        """
+        path_arg = args.get("path")
+        if not isinstance(path_arg, str):
+            return None, None
+        toolkit_cls = _PREVIEWABLE_TOOLKITS_BY_EXTENSION.get(Path(path_arg.lower()).suffix)
+        if toolkit_cls is None:
+            return None, None
+        if tool_name_.startswith("_") or not hasattr(toolkit_cls, tool_name_):
+            return None, None
+        try:
+            real_scope = WorkspaceScope(
+                self.workspace_root,
+                extra_readable=self.settings.extra_readable_dirs,
+                extra_writable=self.settings.extra_writable_dirs,
+            )
+            real_path = real_scope.resolve(path_arg)
+        except (PermissionError, OSError):
+            return None, None
+        if not real_path.is_file():
+            return None, None
+
+        state_dir = Path(self.settings.state_dir)
+        # "slide" is pptx's own page-selector arg name -- docx/xlsx tool
+        # calls never carry one, so they fall through to page 1, the
+        # same default an argument-less pptx edit (e.g.
+        # edit_pptx_theme_colors, which is deck-wide) already gets.
+        slide = args.get("slide")
+        page = slide if isinstance(slide, int) and slide > 0 else 1
+
+        before_name, _ = await asyncio.to_thread(
+            render_single_page_preview, real_path, state_dir, page
+        )
+
+        after_name: str | None = None
+        tmp_dir = tempfile.mkdtemp(prefix="coscribe_preview_edit_")
+        try:
+            preview_path = Path(tmp_dir) / real_path.name
+            shutil.copyfile(real_path, preview_path)
+            preview_toolkit = toolkit_cls(tmp_dir)
+            method = getattr(preview_toolkit, tool_name_)
+            dry_run_args = {**args, "path": preview_path.name}
+            try:
+                await asyncio.to_thread(lambda: method(**dry_run_args))
+            except Exception:
+                logger.debug(
+                    "approval preview: dry run of %s failed, showing 'before' only",
+                    tool_name_,
+                    exc_info=True,
+                )
+                return before_name, None
+            after_name, _ = await asyncio.to_thread(
+                render_single_page_preview, preview_path, state_dir, page
+            )
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        return before_name, after_name
+
+    async def _decide_action_request(self, request: dict[str, Any], websocket: WebSocket) -> Any:
+        """Decide one pending action request, in precedence order: a
+        configured PreToolUse hook can veto it outright (same precedence as
+        runtime/policies.py's HookToolPolicy, which always runs before the
+        policy it wraps); otherwise, a request for a tool in
+        self._approval_required_names is genuinely gated. For
+        run_python_script/run_node_script specifically (EXEC_POLICY_TOOL_NAMES),
+        a configured exec policy (runtime_lg/exec_policy.py, ROADMAP.md
+        Phase 7) can pre-decide the call: "forbidden" rejects outright,
+        checked even before plan mode (same tier as a hook veto -- a
+        categorical, human-authored "never do this" always wins); "allow"
+        skips straight to approval, but only *after* plan mode's own check,
+        so plan mode's read-only guarantee stays absolute regardless of any
+        exec-policy rule. Otherwise ("prompt", or no policy configured --
+        today's behavior, unconfigured) falls through unchanged: plan mode
+        denies it outright (mirroring PlanModePolicy), accept-edits
+        approves it without asking (mirroring AllowAllToolPolicy), and
+        otherwise the user is actually asked (sending one approval_required
+        WS message per request -- design gap noted in the Phase 3 plan: the
+        middleware batches all of a task's requests into one interrupt, but
+        the existing WS contract expects one message per gated call). A
+        request for a tool *not* in that set only reached here because
+        PreToolUse hooks are configured (see __init__'s
+        extra_interrupt_tool_names) and already passed the hook check
+        above, so it's auto-approved -- plan mode does not block it, since
+        it was never risky enough to require approval in the first place.
+
+        A name in QUESTION_TOOL_NAMES (ask_user_question) is a different
+        shape of interrupt entirely -- see runtime_lg/agent.py's own
+        `question_tool_names` docstring: its graph-level interrupt_on
+        config only allows a "respond" decision, never "approve"/"reject",
+        so every early-exit below that would normally deny a call routes
+        through `_denied` instead of a bare `{"type": "reject", ...}` for
+        this one tool -- `_denied` returns a "respond" decision carrying
+        the same message as its content, which HumanInTheLoopMiddleware
+        substitutes directly as the tool's own result (the model sees the
+        denial reason as if it were the "answer"). Never audit-logged --
+        it's READ risk, not an action that needed anyone's sign-off, same
+        as any other ungated tool call.
+
+        A stop already requested (see request_stop) short-circuits straight
+        to reject, before ever prompting -- request_stop already denies any
+        *existing* pending approval future directly, but this covers a
+        request that's only decided *after* the stop flag was set (e.g. the
+        next task in _resolve_pending_approvals's per-task loop).
+
+        Audit logging (ROADMAP.md's Phase 4 "Audit logging" item, via
+        runtime_lg/audit.py): every branch below that decides a genuinely
+        risky action -- a hook veto (even for a tool outside
+        self._approval_required_names, since a hook denying something is
+        inherently security-relevant regardless of that tool's own base
+        risk tier), an exec-policy rule forbidding or auto-allowing a
+        script call, plan mode blocking a gated call, accept-edits
+        auto-approving one with nobody actually looking, or a real human
+        approving/denying one live -- gets a durable record, whether this
+        turn was attended or a selfwake/scheduled-task run nobody was
+        watching. The one branch deliberately *not* logged is the
+        stop-requested short-circuit right below: that's always a live
+        human's own explicit action with an obvious "why", not the
+        was-anyone-watching gap this feature exists to close."""
+        name = request["name"]
+        is_question = name in QUESTION_TOOL_NAMES
+
+        def _denied(message: str) -> dict[str, Any]:
+            if is_question:
+                return {"type": "respond", "message": message}
+            return {"type": "reject", "message": message}
+
+        if self._stop_requested:
+            return _denied("Stopped by user.")
+        args = request["args"]
+        audit_log = AuditLog(self.settings.state_dir)
+        hook_reason = await self._run_pre_tool_use_hooks(name, args)
+        if hook_reason is not None:
+            record_decision(
+                audit_log,
+                thread_id=self.thread_id,
+                tool_name=name,
+                arguments=args,
+                decision="reject",
+                reason="hook_veto",
+                detail=hook_reason,
+            )
+            return _denied(hook_reason)
+        if is_question:
+            return await self._decide_question_request(args, websocket)
+        if name not in self._approval_required_names:
+            return {"type": "approve"}
+        exec_policy_decision, exec_policy_detail = "prompt", None
+        if name in EXEC_POLICY_TOOL_NAMES:
+            exec_policy = load_exec_policy(self.settings.exec_policy_path)
+            exec_policy_decision, exec_policy_detail = exec_policy.decide(args.get("script", ""))
+        if exec_policy_decision == "forbidden":
+            message = exec_policy_detail or "Forbidden by exec policy."
+            record_decision(
+                audit_log,
+                thread_id=self.thread_id,
+                tool_name=name,
+                arguments=args,
+                decision="reject",
+                reason="exec_policy",
+                detail=message,
+            )
+            return {"type": "reject", "message": message}
+        if self.plan_mode:
+            message = (
+                "Plan mode is active (read-only). Note this step with "
+                "task_create instead; the user needs to turn plan mode "
+                "off before it can run."
+            )
+            record_decision(
+                audit_log,
+                thread_id=self.thread_id,
+                tool_name=name,
+                arguments=args,
+                decision="reject",
+                reason="plan_mode",
+                detail=message,
+            )
+            return {"type": "reject", "message": message}
+        if exec_policy_decision == "allow":
+            record_decision(
+                audit_log,
+                thread_id=self.thread_id,
+                tool_name=name,
+                arguments=args,
+                decision="approve",
+                reason="exec_policy",
+                detail=exec_policy_detail,
+            )
+            return {"type": "approve"}
+        if self.accept_edits:
+            record_decision(
+                audit_log,
+                thread_id=self.thread_id,
+                tool_name=name,
+                arguments=args,
+                decision="approve",
+                reason="accept_edits",
+            )
+            return {"type": "approve"}
+
+        request_id = uuid.uuid4().hex
+        future: Future[bool] = get_running_loop().create_future()
+        self._pending_approvals[request_id] = future
+        # Only worth building for a socket that can actually show it to
+        # someone -- for an unattended selfwake/Scheduled Task turn (see
+        # _can_resolve_approvals's own docstring), this would just spend a
+        # real soffice conversion + dry-run edit on a prompt nobody is
+        # ever going to see resolved live.
+        before_preview, after_preview = (
+            await self._build_document_edit_preview(name, args)
+            if _can_resolve_approvals(websocket)
+            else (None, None)
+        )
+        await websocket.send_json(
+            {
+                "type": "approval_required",
+                "id": request_id,
+                "tool_name": name,
+                "arguments": args,
+                "before_preview": before_preview,
+                "after_preview": after_preview,
+            }
+        )
+        try:
+            approved = await future
+        finally:
+            self._pending_approvals.pop(request_id, None)
+        record_decision(
+            audit_log,
+            thread_id=self.thread_id,
+            tool_name=name,
+            arguments=args,
+            decision="approve" if approved else "reject",
+            reason="human",
+        )
+        return {"type": "approve" if approved else "reject"}
+
+    async def _decide_question_request(
+        self, args: dict[str, Any], websocket: WebSocket
+    ) -> dict[str, Any]:
+        """The ask_user_question flow: send question_required, wait for a
+        real person's answer, and return it as a "respond" decision --
+        HumanInTheLoopMiddleware substitutes this message directly as the
+        tool's own result, the tool's Python body never actually running
+        (see tools/interaction.py's own docstring). Same pending-Future/
+        request-id shape as the approval flow just above, kept as a
+        separate dict (self._pending_questions) rather than reusing
+        self._pending_approvals since the value type is different (a
+        free-text answer, not a bool) and request_stop/reconnect need to
+        treat the two independently."""
+        request_id = uuid.uuid4().hex
+        future: Future[str] = get_running_loop().create_future()
+        self._pending_questions[request_id] = future
+        options = [line for line in args.get("options", "").split("\n") if line.strip()]
+        await websocket.send_json(
+            {
+                "type": "question_required",
+                "id": request_id,
+                "question": args.get("question", ""),
+                "header": args.get("header", ""),
+                "options": options,
+                "multi_select": bool(args.get("multi_select", False)),
+            }
+        )
+        try:
+            answer = await future
+        finally:
+            self._pending_questions.pop(request_id, None)
+        return {"type": "respond", "message": answer}
+
+    async def _resolve_pending_approvals(
+        self,
+        websocket: WebSocket,
+        *,
+        agent: Any = None,
+        config: dict[str, Any] | None = None,
+    ) -> str | None:
+        """While the graph is paused, decide every pending action request
+        and resume -- looping in case a resumed turn immediately hits
+        another approval-gated call.
+
+        Returns the *last* resumed `_stream_turn` call's own text, not a
+        concatenation of every round -- each round already streamed its own
+        narration live as its own "agent_delta" bubble (see reducer.ts's
+        agent_delta/agent_message cases), so re-joining them here would
+        duplicate that text in the final "agent_message" a caller sends
+        with this return value: a real bug found live (DeepSeek/GLM, both
+        of which narrate before a gated tool call, unlike this app's usual
+        Gemini/Anthropic testing) -- "I'll create notes.txt...Done! I
+        created **notes.txt**..." glued with no separator, because the
+        pre-tool narration and the post-tool narration were joined as if
+        they were one continuous reply. Returns None specifically (not
+        "") when the loop never runs at all (nothing was pending) -- a
+        caller needs to tell "nothing to resolve, keep whatever text you
+        already had" apart from "resolved, and the model said nothing
+        further," which an empty string can't distinguish on its own.
+
+        `agent`/`config` default to self.lg_agent/self.config, same as
+        _stream_turn (and threaded through to it below) -- see that
+        method's docstring.
+
+        More than one *task* can be pending at once -- concretely, two
+        concurrent spawn_agent calls proposed in the same AIMessage, each
+        independently bridging its own child's approval via interrupt()
+        (see runtime_lg/subagents.py). LangGraph gives each task's
+        interrupt its own id and, once more than one is pending
+        simultaneously, *requires* resuming each individually via
+        `Command(resume={interrupt_id: value, ...})` -- a single shared
+        resume value (this method's own approach before this was found and
+        fixed) raises `RuntimeError: When there are multiple pending
+        interrupts, you must specify the interrupt id when resuming` the
+        moment a second task is pending at the same time as the first.
+        Live-verified against real Gemini: two concurrent spawn_agent
+        calls, one approved and one rejected, resolved correctly and
+        independently, with no cross-contamination between them -- see
+        runtime_lg/README.md.
+
+        Multiple pending tasks are decided *sequentially* here (one
+        `_decide_action_request` await fully completes before the next
+        task's own interrupt is even inspected) -- so a caller/client must
+        answer the first approval_required before the second one is sent,
+        not expect both up front. A test (or a future UI) that tries to
+        `receive` two approval_required messages back-to-back before
+        answering either one will deadlock against this method, not
+        against LangGraph -- see test_concurrent_spawn_agent_approvals_
+        resolve_independently's request/respond/request/respond shape."""
+        agent = agent if agent is not None else self.lg_agent
+        config = config if config is not None else self.config
+        latest_text: str | None = None
+        state = await agent.aget_state(config)
+        while state.next:
+            resume_map: dict[str, Any] = {}
+            for task in state.tasks:
+                for interrupt in task.interrupts:
+                    action_requests = interrupt.value.get("action_requests", [])
+                    decisions = [
+                        await self._decide_action_request(request, websocket)
+                        for request in action_requests
+                    ]
+                    resume_map[interrupt.id] = {"decisions": decisions}
+
+            latest_text = await self._stream_turn(
+                Command(resume=resume_map), websocket, agent=agent, config=config
+            )
+            state = await agent.aget_state(config)
+        return latest_text
+
+    async def resume_after_reconnect(self, websocket: WebSocket) -> None:
+        """If this session's graph is still paused on an approval from
+        before a dropped connection or a process restart, redeliver it now
+        instead of leaving the browser with nothing to resolve -- the
+        checkpointer already durably persisted the pending state (that's
+        the whole point of a persistent checkpointer over InMemorySaver, see
+        runtime_lg/README.md's reconnect/restart verdict); this just
+        re-runs the same delivery path a fresh turn's approval already
+        uses. A no-op when nothing is pending.
+
+        Guarded by _turn_lock, same reasoning as handle_user_message -- this
+        runs as a backgrounded task right after connect (see ws_endpoint),
+        so without the lock it could run fully concurrently with a
+        user_message the client sends immediately after connecting, racing
+        on the same self.lg_agent/self.config the way two concurrent
+        handle_user_message calls would."""
+        async with self._turn_lock:
+            self._current_turn_task = asyncio.current_task()
+            state = await self.lg_agent.aget_state(self.config)
+            if not state.next:
+                return
+            # state.next already confirmed truthy above, so
+            # _resolve_pending_approvals's own while loop is guaranteed to
+            # run at least once -- its None return (nothing was pending)
+            # can't actually happen here; `or ""` only satisfies the type
+            # checker, not a real runtime fallback.
+            text = await self._resolve_pending_approvals(websocket) or ""
+            await websocket.send_json({"type": "agent_message", "text": _format_reply(text)})
+            if self._last_usage_metadata is not None:
+                await websocket.send_json(
+                    {"type": "usage", "total_tokens": self._last_usage_metadata["total_tokens"]}
+                )
+            await websocket.send_json({"type": "tasks_changed"})
+
+    async def _handle_compact(self, websocket: WebSocket) -> None:
+        """Summarize this thread's checkpointed message history down to one
+        note, freeing up context -- the runtime_lg counterpart to
+        ChatSession's /compact. Reuses runtime/compaction.py's own
+        COMPACT_INSTRUCTIONS (not a duplicate prompt) but can't reuse
+        run_compaction/compact_state themselves: those work on RunState's
+        plain dict messages, not LangGraph's checkpointed BaseMessage list,
+        and collapse via FileStateStore.save_state rather than
+        aupdate_state's RemoveMessage(id=REMOVE_ALL_MESSAGES) sentinel
+        (verified live against real Gemini before wiring this in -- see
+        runtime_lg/README.md).
+
+        No system message to re-add after clearing: verified empirically
+        that create_agent never stores one in checkpointed state at all
+        (system_prompt is injected fresh at call time), unlike the old
+        runtime's RunState.messages, which always keeps one at index 0.
+
+        The pending-approval check below predates _turn_lock and is mostly
+        unreachable through ordinary concurrent messaging now that the lock
+        serializes every turn -- see _handle_clear's docstring for the one
+        remaining window it still guards (a fresh process restart racing
+        resume_after_reconnect for the lock)."""
+        state = await self.lg_agent.aget_state(self.config)
+        messages = list(state.values.get("messages", [])) if state.values else []
+        if len(messages) < 4:
+            await websocket.send_json(
+                {"type": "error", "message": "Nothing much to compact yet."}
+            )
+            return
+        if state.next:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": "Resolve the pending approval before compacting.",
+                }
+            )
+            return
+
+        await self._run_observational_hooks(
+            "PreCompact",
+            {"event": "PreCompact", "thread_id": self.thread_id, "agent_name": "coordinator"},
+        )
+        start = time.perf_counter()
+        summary_message = await self.model.ainvoke(
+            [
+                SystemMessage(content=COMPACT_INSTRUCTIONS),
+                HumanMessage(content=_render_transcript_lg(messages)),
+            ]
+        )
+        summary = _extract_text(summary_message.content) or "(no summary)"
+        note = f"[Earlier conversation compacted to save context.]\n\n{summary}"
+        await self.lg_agent.aupdate_state(
+            self.config,
+            {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), HumanMessage(content=note)]},
+        )
+        after_state = await self.lg_agent.aget_state(self.config)
+        after = len(after_state.values.get("messages", [])) if after_state.values else 0
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        await self._run_observational_hooks(
+            "PostCompact",
+            {
+                "event": "PostCompact",
+                "thread_id": self.thread_id,
+                "agent_name": "coordinator",
+                "before": len(messages),
+                "after": after,
+                "elapsed_ms": elapsed_ms,
+            },
+        )
+        await websocket.send_json(
+            {
+                "type": "compacted",
+                "before": len(messages),
+                "after": after,
+                "elapsed_ms": elapsed_ms,
+            }
+        )
+
+    async def _handle_clear(self, websocket: WebSocket) -> None:
+        """Wipe this thread's conversation history and start fresh -- unlike
+        /compact (collapses down to a summary note), this discards it
+        outright. Doesn't touch plan_mode/accept_edits (session-level UI
+        toggles, not conversation content) -- matches ChatSession's
+        _handle_clear. Cancels an in-progress /startworkflow recording, if
+        any -- its step-index bookkeeping refers to state about to be
+        wiped, so it can't meaningfully continue (same as ChatSession's
+        identical cancelled_recording handling).
+        Same pending-approval guard as _handle_compact -- see that
+        docstring for why an aupdate_state call shouldn't race a paused
+        interrupt task. With _turn_lock now serializing every turn (see
+        __init__), this specific check is unreachable through ordinary
+        concurrent messaging -- a /clear sent while another turn is
+        pending on approval queues behind _turn_lock instead of racing it,
+        so by the time this method actually runs, that turn has already
+        been resolved one way or another (see test_clear_queues_behind_a_
+        pending_turn_instead_of_racing_it). Kept anyway as a defensive
+        backstop for the one window that still isn't covered by the lock:
+        a fresh process restart, where the checkpointer still shows a
+        genuinely pending interrupt from before the restart but this new
+        ChatSessionLG's own _turn_lock is unheld, so a /clear racing
+        resume_after_reconnect for the lock could in principle win it
+        first."""
+        was_recording = self.workflow_recording_start is not None
+        self.workflow_recording_start = None
+        state = await self.lg_agent.aget_state(self.config)
+        if state.next:
+            await websocket.send_json(
+                {"type": "error", "message": "Resolve the pending approval before clearing."}
+            )
+            return
+        await self.lg_agent.aupdate_state(
+            self.config, {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
+        )
+        await websocket.send_json({"type": "cleared", "cancelled_recording": was_recording})
+
+    async def _current_messages(self) -> list[Any]:
+        """This thread's checkpointed message history right now -- the
+        runtime_lg counterpart to reading state.messages off a
+        FileStateStore-persisted RunState, used everywhere the workflow
+        commands below need "what's been said/called so far" (start-
+        marker step counts, save-curation prompts, chain-mode capture)."""
+        state = await self.lg_agent.aget_state(self.config)
+        return list(state.values.get("messages", [])) if state.values else []
+
+    async def handle_edit_message(
+        self,
+        index: int,
+        text: str,
+        websocket: WebSocket,
+        images: list[str] | None = None,
+    ) -> None:
+        # Same _turn_lock serialization as handle_user_message -- an edit
+        # is a new turn like any other, just one that first rewrites
+        # history before running it.
+        async with self._turn_lock:
+            self._current_turn_task = asyncio.current_task()
+            await self._handle_edit_message_locked(index, text, websocket, images=images)
+
+    async def _handle_edit_message_locked(
+        self,
+        index: int,
+        text: str,
+        websocket: WebSocket,
+        images: list[str] | None = None,
+    ) -> None:
+        """Edit an earlier user turn and regenerate the conversation from
+        there. `index` is 0-based, counting only HumanMessages -- the exact
+        count the frontend's own `history` hydration already produces
+        (every checkpointed HumanMessage maps 1:1 to one "user"-kind
+        LogItem there), so no new id-plumbing between frontend and backend
+        is needed to keep the two sides pointing at the same message.
+
+        Truncates the checkpointed state back to (and including) the
+        target HumanMessage via RemoveMessage/aupdate_state -- the same
+        mechanism _handle_compact/_handle_clear already use, and safe to
+        reuse here for the same reason: add_messages assigns every
+        checkpointed message a real id on the way in (verified against
+        langgraph.graph.message.add_messages's own source), so
+        RemoveMessage(id=m.id) always targets a real, existing id. Once
+        truncated, the edited text is re-run through the exact same turn
+        path _handle_user_message_locked already uses for a freshly typed
+        message -- an edit is not a special kind of turn, just one that
+        starts from a rewound history."""
+        state = await self.lg_agent.aget_state(self.config)
+        messages = list(state.values.get("messages", [])) if state.values else []
+        if state.next:
+            await websocket.send_json(
+                {"type": "error", "message": "Resolve the pending approval before editing."}
+            )
+            return
+
+        human_positions = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+        if index < 0 or index >= len(human_positions):
+            await websocket.send_json(
+                {"type": "error", "message": f"No such message to edit (index {index})."}
+            )
+            return
+
+        to_remove = messages[human_positions[index] :]
+        if to_remove:
+            await self.lg_agent.aupdate_state(
+                self.config, {"messages": [RemoveMessage(id=m.id) for m in to_remove]}
+            )
+
+        await self._handle_user_message_locked(text, websocket, images=images)
+
+    async def _handle_start_workflow(self, websocket: WebSocket) -> None:
+        """Mark the current tool-call-step count as the start of a chain-
+        workflow recording -- /endworkflow later captures only steps from
+        this index onward, never the thread's earlier history. Mirrors
+        ChatSession's identical handler."""
+        discarded_previous = self.workflow_recording_start is not None
+        messages = await self._current_messages()
+        self.workflow_recording_start = len(recorded_tool_call_steps_lg(messages))
+        await websocket.send_json(
+            {"type": "recording_started", "discarded_previous": discarded_previous}
+        )
+
+    async def _handle_end_workflow(self, rest: str, websocket: WebSocket) -> None:
+        if self.workflow_recording_start is None:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": "No recording in progress -- use /startworkflow first.",
+                }
+            )
+            return
+        name, _, summary = rest.partition(" ")
+        name = name.strip()
+        if not name:
+            await websocket.send_json(
+                {"type": "error", "message": "Usage: /endworkflow <name> [summary]"}
+            )
+            return
+        start_index = self.workflow_recording_start
+        self.workflow_recording_start = None
+        messages = await self._current_messages()
+        try:
+            saved = await record_chain_workflow_lg(
+                name,
+                summary.strip(),
+                messages=messages,
+                state_dir=self.settings.state_dir,
+                thread_id=self.thread_id,
+                start_index=start_index,
+                model=self.model,
+            )
+        except ValueError as exc:
+            await websocket.send_json({"type": "error", "message": str(exc)})
+            return
+        await websocket.send_json(
+            {
+                "type": "workflow_saved",
+                "name": saved["name"],
+                "mode": "chain",
+                "step_count": len(saved["steps"]),
+            }
+        )
+
+    async def _run_save_curation(
+        self, wf_name: str, clarification_history: list[tuple[str, str]]
+    ) -> WorkflowSaveProposal:
+        """One round of the curator call bare /saveworkflow runs -- see
+        propose_workflow_save_lg's docstring. Async model.ainvoke call, no
+        need to bridge off the event loop the way ChatSession's identical
+        method does for its synchronous Runner.run_sync."""
+        messages = await self._current_messages()
+        return await propose_workflow_save_lg(
+            wf_name,
+            messages=messages,
+            model=self.model,
+            clarification_history=clarification_history,
+        )
+
+    async def _present_save_proposal(
+        self,
+        wf_name: str,
+        proposal: WorkflowSaveProposal,
+        clarification_history: list[tuple[str, str]],
+        rounds: int,
+        websocket: WebSocket,
+    ) -> dict[str, Any]:
+        """Sends the curator's question/preview as a plain chat bubble
+        ("agent_message") rather than a new WS event type -- same
+        reasoning as ChatSession's identical method."""
+        if proposal.decision == "clarify":
+            await websocket.send_json({"type": "agent_message", "text": proposal.question})
+            return {
+                "wf_name": wf_name,
+                "stage": "clarify",
+                "question": proposal.question,
+                "clarification_history": clarification_history,
+                "rounds": rounds,
+            }
+        if proposal.mode == "chain" and proposal.start_index is not None:
+            messages = await self._current_messages()
+            preview_steps = recorded_tool_call_steps_lg(messages)[proposal.start_index :]
+            preview = "\n".join(
+                f"  {index}. {name}({args})"
+                for index, (name, args, _result) in enumerate(preview_steps)
+            )
+            text = (
+                f"Proposed workflow {wf_name!r} (chain, {len(preview_steps)} step(s)) -- "
+                f"{proposal.summary or 'no description'}:\n{preview}\n"
+                'Save this? Reply "yes" to save, anything else to discard.'
+            )
+        else:
+            text = (
+                f"Proposed workflow {wf_name!r} (agent):\n{proposal.summary}\n"
+                'Save this? Reply "yes" to save, anything else to discard.'
+            )
+        await websocket.send_json({"type": "agent_message", "text": text})
+        return {
+            "wf_name": wf_name,
+            "stage": "confirm",
+            "proposal": proposal,
+            "clarification_history": clarification_history,
+        }
+
+    async def _handle_save_workflow(self, name: str, websocket: WebSocket) -> None:
+        """Kicks off the curator flow (see propose_workflow_save_lg's
+        docstring) instead of unconditionally summarizing the whole thread
+        -- the actual save happens later, once _handle_user_message_locked's
+        pending_save_proposal interception gets a confirmation."""
+        name = name.strip()
+        if not name:
+            await websocket.send_json(
+                {"type": "error", "message": "Usage: /saveworkflow <name>"}
+            )
+            return
+        messages = await self._current_messages()
+        if not messages:
+            await websocket.send_json({"type": "error", "message": "Nothing to save yet."})
+            return
+        proposal = await self._run_save_curation(name, [])
+        self.pending_save_proposal = await self._present_save_proposal(
+            name, proposal, [], 1, websocket
+        )
+
+    async def _handle_pending_save_proposal(self, text: str, websocket: WebSocket) -> None:
+        """While pending_save_proposal is set, every incoming message
+        answers it (clarification or yes/no confirm) instead of being
+        treated as a normal chat turn or slash command -- mirrors
+        ChatSession's identical method."""
+        proposal_state = self.pending_save_proposal
+        assert proposal_state is not None
+        if proposal_state["stage"] == "clarify":
+            answer = text.strip()
+            if not answer:
+                await websocket.send_json(
+                    {
+                        "type": "agent_message",
+                        "text": "(please answer, or say 'cancel' to abandon this save)",
+                    }
+                )
+                return
+            if answer.lower() == "cancel":
+                self.pending_save_proposal = None
+                await websocket.send_json({"type": "agent_message", "text": "Cancelled."})
+                return
+            wf_name = proposal_state["wf_name"]
+            history = [
+                *proposal_state["clarification_history"],
+                (proposal_state["question"], answer),
+            ]
+            rounds = proposal_state["rounds"]
+            if rounds >= MAX_SAVE_CLARIFICATION_ROUNDS:
+                self.pending_save_proposal = None
+                await websocket.send_json(
+                    {
+                        "type": "agent_message",
+                        "text": (
+                            "Still unclear after a few tries -- use /startworkflow to record "
+                            "precisely instead."
+                        ),
+                    }
+                )
+                return
+            proposal = await self._run_save_curation(wf_name, history)
+            self.pending_save_proposal = await self._present_save_proposal(
+                wf_name, proposal, history, rounds + 1, websocket
+            )
+            return
+
+        # stage == "confirm"
+        answer = text.strip().lower()
+        wf_name = proposal_state["wf_name"]
+        proposal = proposal_state["proposal"]
+        self.pending_save_proposal = None
+        if answer not in {"y", "yes"}:
+            await websocket.send_json(
+                {
+                    "type": "agent_message",
+                    "text": (
+                        "Discarded -- refine your request and try /saveworkflow again, "
+                        "or use /startworkflow for precise control."
+                    ),
+                }
+            )
+            return
+        try:
+            if proposal.mode == "chain" and proposal.start_index is not None:
+                messages = await self._current_messages()
+                saved = await record_chain_workflow_lg(
+                    wf_name,
+                    proposal.summary or "",
+                    messages=messages,
+                    state_dir=self.settings.state_dir,
+                    thread_id=self.thread_id,
+                    start_index=proposal.start_index,
+                    model=self.model,
+                )
+                await websocket.send_json(
+                    {
+                        "type": "workflow_saved",
+                        "name": saved["name"],
+                        "mode": "chain",
+                        "step_count": len(saved["steps"]),
+                    }
+                )
+            else:
+                saved = record_agent_workflow_lg(
+                    wf_name,
+                    proposal.summary or "",
+                    thread_id=self.thread_id,
+                    state_dir=self.settings.state_dir,
+                )
+                await websocket.send_json(
+                    {"type": "workflow_saved", "name": saved["name"], "mode": "agent"}
+                )
+        except ValueError as exc:
+            await websocket.send_json({"type": "error", "message": str(exc)})
+
+    async def _handle_save_skill(self, name: str, websocket: WebSocket) -> None:
+        """/saveskill's own entry point -- mirrors _handle_save_workflow's
+        shape exactly (validate the name, require a non-empty
+        conversation, run one curator round, present it) but calls
+        propose_skill_save_lg instead of propose_workflow_save_lg. See
+        runtime_lg/skill_authoring.py's module docstring for why this
+        stays a fully separate flow rather than a third mode threaded
+        into /saveworkflow's own state machine."""
+        name = name.strip()
+        if not name:
+            await websocket.send_json({"type": "error", "message": "Usage: /saveskill <name>"})
+            return
+        messages = await self._current_messages()
+        if not messages:
+            await websocket.send_json({"type": "error", "message": "Nothing to save yet."})
+            return
+        proposal = await propose_skill_save_lg(
+            name, messages=messages, model=self.model, clarification_history=[]
+        )
+        self.pending_save_skill_proposal = await self._present_skill_save_proposal(
+            name, proposal, [], 1, websocket
+        )
+
+    async def _present_skill_save_proposal(
+        self,
+        name: str,
+        proposal: SkillSaveProposal,
+        clarification_history: list[tuple[str, str]],
+        rounds: int,
+        websocket: WebSocket,
+    ) -> dict[str, Any]:
+        """Same "plain chat bubble, not a new WS event type" reasoning as
+        _present_save_proposal -- the description/body preview is shown
+        in full (not truncated) for the same reason a script's full text
+        is shown before a run_python_script approval: this is exactly
+        the kind of content worth reading before confirming a write, not
+        something to skim a summary of."""
+        if proposal.decision == "clarify":
+            await websocket.send_json({"type": "agent_message", "text": proposal.question})
+            return {
+                "name": name,
+                "stage": "clarify",
+                "question": proposal.question,
+                "clarification_history": clarification_history,
+                "rounds": rounds,
+            }
+        slug = slugify_skill_name(name)
+        overwrite_note = ""
+        if (self.settings.skills_dir / slug / "SKILL.md").is_file():
+            overwrite_note = " (this will overwrite the existing skill at this slug)"
+        text = (
+            f'Proposed skill "{name}" (/{slug}){overwrite_note}:\n'
+            f"{proposal.description}\n\n"
+            f"{proposal.body}\n\n"
+            'Save this? Reply "yes" to save, anything else to discard.'
+        )
+        await websocket.send_json({"type": "agent_message", "text": text})
+        return {
+            "name": name,
+            "stage": "confirm",
+            "proposal": proposal,
+            "clarification_history": clarification_history,
+        }
+
+    async def _handle_pending_skill_save_proposal(self, text: str, websocket: WebSocket) -> None:
+        """Same clarify-or-confirm interception _handle_pending_save_proposal
+        gives /saveworkflow, for /saveskill's own pending_save_skill_
+        proposal instead."""
+        proposal_state = self.pending_save_skill_proposal
+        assert proposal_state is not None
+        if proposal_state["stage"] == "clarify":
+            answer = text.strip()
+            if not answer:
+                await websocket.send_json(
+                    {
+                        "type": "agent_message",
+                        "text": "(please answer, or say 'cancel' to abandon this save)",
+                    }
+                )
+                return
+            if answer.lower() == "cancel":
+                self.pending_save_skill_proposal = None
+                await websocket.send_json({"type": "agent_message", "text": "Cancelled."})
+                return
+            name = proposal_state["name"]
+            history = [
+                *proposal_state["clarification_history"],
+                (proposal_state["question"], answer),
+            ]
+            rounds = proposal_state["rounds"]
+            if rounds >= MAX_SAVE_CLARIFICATION_ROUNDS:
+                self.pending_save_skill_proposal = None
+                await websocket.send_json(
+                    {
+                        "type": "agent_message",
+                        "text": "Still unclear after a few tries -- try /saveskill again "
+                        "with a more specific name, or once the conversation has a "
+                        "clearer single task in it.",
+                    }
+                )
+                return
+            messages = await self._current_messages()
+            proposal = await propose_skill_save_lg(
+                name, messages=messages, model=self.model, clarification_history=history
+            )
+            self.pending_save_skill_proposal = await self._present_skill_save_proposal(
+                name, proposal, history, rounds + 1, websocket
+            )
+            return
+
+        # stage == "confirm"
+        answer = text.strip().lower()
+        name = proposal_state["name"]
+        proposal = proposal_state["proposal"]
+        self.pending_save_skill_proposal = None
+        if answer not in {"y", "yes"}:
+            await websocket.send_json(
+                {
+                    "type": "agent_message",
+                    "text": "Discarded -- refine your request and try /saveskill again.",
+                }
+            )
+            return
+        slug = slugify_skill_name(name)
+        # A slug colliding with a *built-in* skill would silently shadow
+        # it for every future /<slug> lookup (skills_by_slug below keeps
+        # whichever of load_builtin_skills()/load_skills() loads last for
+        # a repeated key) -- refused outright rather than allowed to
+        # overwrite-in-spirit a file this session doesn't even own.
+        # Colliding with an existing *user* skill is fine (see
+        # write_skill_lg's own docstring) -- that's this command's own
+        # "update" path, same as Skill Creator's own guidance.
+        if slug in {s.slug for s in load_builtin_skills()}:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": f"/{slug} is already a built-in skill -- choose a "
+                    "different name for /saveskill.",
+                }
+            )
+            return
+        saved = write_skill_lg(
+            name,
+            proposal.description or "",
+            proposal.body or "",
+            skills_dir=self.settings.skills_dir,
+        )
+        await websocket.send_json(
+            {"type": "skill_saved", "name": saved["name"], "slug": saved["slug"]}
+        )
+        # Refreshes self.lg_agent/instructions/tools AND self.skills_by_slug
+        # from disk (set_enabled_skills' own rebuild already reloads both
+        # load_builtin_skills()+load_skills(settings.skills_dir) fresh) --
+        # without this, the just-saved skill wouldn't actually be usable
+        # (either passively or via /<slug>) until this session reconnects,
+        # which would make "yes" feel like it silently did nothing.
+        await self.set_enabled_skills(self.enabled_skill_names | {saved["name"]}, websocket)
+
+    async def _invoke_tool_lg(self, tool: Any, arguments: dict[str, Any]) -> Any:
+        """Call a tool object directly, outside of any compiled graph --
+        used only by chain-mode workflow replay (run_chain_lg's
+        invoke_tool callback). Handles all three tool shapes this runtime
+        ever hands around (see tool_name's own docstring): a LangChain
+        BaseTool (spawn_agent/review_work, or an MCP tool) has its own
+        async ainvoke; a plain async function is awaited directly; a plain
+        sync function is offloaded via asyncio.to_thread so a slow/
+        blocking tool (e.g. a filesystem or subprocess call) doesn't stall
+        the event loop the way a live turn's own tool-node execution
+        already avoids doing."""
+        if isinstance(tool, BaseTool):
+            return await tool.ainvoke(arguments)
+        if inspect.iscoroutinefunction(tool):
+            return await tool(**arguments)
+        return await asyncio.to_thread(tool, **arguments)
+
+    async def _save_and_notify_workflow_run(self, run: WorkflowRun, websocket: WebSocket) -> None:
+        run_store = WorkflowRunStore(self.settings.state_dir)
+        run_store.save(run)
+        await websocket.send_json({"type": "workflow_run_progress", "run": run.to_dict()})
+
+    async def _run_workflow_chain_mode(
+        self, workflow: Workflow, run: WorkflowRun, websocket: WebSocket, *, start_step: int = 0
+    ) -> dict[str, Any]:
+        """Drives run_chain_lg with this session's own approval/hook/
+        invocation machinery -- see runtime_lg/workflows.py's module
+        docstring for why no nested-interrupt bridging is needed here
+        (this never runs inside a graph's own tool node).
+
+        A recorded ask_user_question step is a real, if narrow, exception
+        to that "no nested-interrupt bridging" claim: `decide` below
+        already routes through `_decide_action_request`, the exact method
+        a live turn's own _resolve_pending_approvals uses -- so a question
+        step genuinely re-asks (the recorded question/options, replayed
+        like any other step's fixed arguments) and durably waits for a
+        real person's live answer, the same `question_required`/
+        `question_response` round-trip a normal turn gets, not some
+        stale answer from when the workflow was first recorded (nothing
+        about WorkflowStep stores that anyway). The one thing `decide`
+        alone can't do is hand that answer to `invoke` below -- the two
+        are separate calls in run_chain_lg's own loop, and a "respond"
+        decision is never `approved=True` on its own terms the way
+        `approve` is -- so `pending_question_answer` bridges the two
+        closures' shared scope, mirroring how a live turn's `"respond"`
+        decision substitutes the human's message as the tool's own result
+        without the tool's real body ever running (see
+        tools/interaction.py's docstring)."""
+        tools_by_name = {tool_name(t): t for t in self._lg_tools}
+        pending_question_answer: str | None = None
+
+        async def decide(name: str, args: dict[str, Any]) -> tuple[bool, str | None]:
+            nonlocal pending_question_answer
+            outcome = await self._decide_action_request({"name": name, "args": args}, websocket)
+            if outcome["type"] == "respond":
+                pending_question_answer = outcome["message"]
+                return True, None
+            return outcome["type"] == "approve", outcome.get("message")
+
+        async def invoke(tool: Any, args: dict[str, Any]) -> Any:
+            nonlocal pending_question_answer
+            name = tool_name(tool)
+            if name in QUESTION_TOOL_NAMES:
+                # The tool's own Python body never runs -- same contract a
+                # live turn's "respond" decision gets, see decide() above.
+                result = pending_question_answer
+                pending_question_answer = None
+            else:
+                result = await self._invoke_tool_lg(tool, args)
+            await self._run_post_tool_use_hooks(name, args, result)
+            # Suppressed for question tools, same reason as _stream_turn's
+            # own ToolMessage branch: the question_required/answered card
+            # already fully represents this call, so a normal tool_result
+            # event here would just add a redundant "Asked: ..." row.
+            if name not in QUESTION_TOOL_NAMES:
+                await websocket.send_json(
+                    {"type": "tool_result", "tool_name": name, "arguments": args, "result": result}
+                )
+            return result
+
+        async def on_step(index: int, tool_name_: str, status: str, detail: str | None) -> None:
+            run.steps[index] = WorkflowStepStatus(
+                index=index, tool_name=tool_name_, status=status, detail=detail
+            )
+            await self._save_and_notify_workflow_run(run, websocket)
+
+        return await run_chain_lg(
+            workflow,
+            tools_by_name=tools_by_name,
+            decide=decide,
+            invoke_tool=invoke,
+            start_step=start_step,
+            on_step=on_step,
+            stop_requested=lambda: self._stop_requested,
+        )
+
+    async def _run_workflow_agent_mode(
+        self, workflow: Workflow, run: WorkflowRun, websocket: WebSocket
+    ) -> dict[str, Any]:
+        """Same underlying mechanism as a normal top-level turn: a fresh
+        compiled graph (workflow.summary as its instructions, same call
+        shape as runtime_lg/subagents.py's spawn_agent sub_agent) driven by
+        this session's own _stream_turn/_resolve_pending_approvals -- so a
+        gated tool call inside an agent-mode run surfaces as an ordinary
+        approval_required message, same as any other turn's. Unlike
+        ChatSession's _run_agent_mode, doesn't track granular per-tool-call
+        WorkflowStepStatus progress (run.steps stays empty throughout,
+        only run.status/error change) -- a deliberate simplification: chain
+        mode (the deterministic, pre-declared-step-list case where progress
+        is genuinely meaningful) gets full tracking, and agent mode's own
+        progress is inherently fuzzier anyway (the old runtime tracks it,
+        but only by re-purposing its post_tool_use hook, which here would
+        mean threading a second, workflow-specific callback through
+        _stream_turn -- more machinery than this pass's scope justifies for
+        a "recent runs" panel detail, not a functional gap)."""
+        list_recorded_steps_name = "list_recorded_steps"
+        tools = [t for t in self._lg_tools if tool_name(t) != list_recorded_steps_name]
+        extra_interrupt_names = (
+            [tool_name(t) for t in tools] if self.hooks_config["PreToolUse"] else []
+        )
+        sub_agent = build_langgraph_agent(
+            self.model,
+            tools,
+            workflow.summary,
+            checkpointer=self._workflow_run_checkpointer,
+            extra_interrupt_tool_names=extra_interrupt_names,
+        )
+        run_config = {"configurable": {"thread_id": f"workflow-run-{run.run_id}"}}
+        turn_input = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        f"Time to run the recurring workflow '{workflow.name}'. Use the "
+                        "summary above as your context/instructions and carry out this run now."
+                    ),
+                }
+            ]
+        }
+        # summary_text ends up as just the last model response's own text --
+        # see _resolve_pending_approvals's docstring for why joining every
+        # response of the run together was a real bug.
+        summary_text = await self._stream_turn(
+            turn_input, websocket, agent=sub_agent, config=run_config
+        )
+        if _can_resolve_approvals(websocket):
+            resolved_text = await self._resolve_pending_approvals(
+                websocket, agent=sub_agent, config=run_config
+            )
+            if resolved_text is not None:
+                summary_text = resolved_text
+        else:
+            # See _can_resolve_approvals's docstring: resolving here would
+            # hang forever awaiting a real approval that a silent caller
+            # (an unattended Scheduled Task run) can never send. The
+            # interrupt is left durably paused in the checkpointer instead
+            # -- report it as a failed run rather than silently claiming
+            # "completed" when the intended action never actually ran.
+            state = await sub_agent.aget_state(run_config)
+            if state.next:
+                return {
+                    "status": "failed",
+                    "summary": summary_text,
+                    "error": (
+                        "Paused on a tool call that needs approval, with "
+                        "nobody able to answer it -- open this run's thread "
+                        "in the web UI to resolve it."
+                    ),
+                }
+        status = "stopped" if self._stop_requested else "completed"
+        return {"status": status, "summary": summary_text}
+
+    async def _run_workflow_lg(
+        self, name: str, websocket: WebSocket, *, resume_from_step: int = 0
+    ) -> dict[str, Any]:
+        store = WorkflowStore(self.settings.state_dir)
+        workflow = store.load(name)
+        if workflow is None:
+            raise KeyError(f"No workflow named {name!r}")
+        if resume_from_step != 0 and workflow.mode != "chain":
+            raise ValueError("resume_from_step is only meaningful for chain-mode workflows")
+
+        run = WorkflowRun(
+            run_id=uuid.uuid4().hex,
+            workflow_name=name,
+            mode=workflow.mode,
+            status="running",
+            started_at=_now_iso_lg(),
+            steps=[
+                WorkflowStepStatus(
+                    index=index,
+                    tool_name=step.tool_name,
+                    status="pending" if index >= resume_from_step else "done",
+                )
+                for index, step in enumerate(workflow.steps)
+            ]
+            if workflow.mode == "chain"
+            else [],
+        )
+        await self._save_and_notify_workflow_run(run, websocket)
+
+        try:
+            if workflow.mode == "chain":
+                result = await self._run_workflow_chain_mode(
+                    workflow, run, websocket, start_step=resume_from_step
+                )
+            else:
+                result = await self._run_workflow_agent_mode(workflow, run, websocket)
+        except Exception as exc:  # noqa: BLE001 -- a WorkflowRun left at status="running" with
+            # nothing left to ever finalize it is a real bug class (see tools/workflows.py's
+            # reconcile_interrupted_runs docstring) -- converting to "failed" here guarantees
+            # the finalization block below always runs.
+            result = {"status": "failed", "error": f"raised: {exc}"}
+
+        run.status = result["status"]
+        run.finished_at = _now_iso_lg()
+        run.error = result.get("error")
+        await self._save_and_notify_workflow_run(run, websocket)
+
+        workflow.last_run_at = run.finished_at
+        workflow.last_run_status = result["status"]
+        store.save(workflow)
+        return result
+
+    async def run_saved_workflow(self, name: str, websocket: Any) -> dict[str, Any]:
+        """Public entry point for running a saved workflow non-interactively
+        -- unlike _handle_run_workflow (the /runworkflow slash-command
+        handler, which also sends UI-specific workflow_run_started/
+        tasks_changed WS messages), this is the bare _run_workflow_lg
+        result with nothing UI-specific layered on, for a caller with no
+        real WebSocket to send those to. Added for
+        runtime_lg/scheduled_tasks.py's poll_due_scheduled_tasks, which
+        drives this the same way runtime_lg/selfwake.py's poll_due_wakes
+        already drives handle_user_message -- a _SilentSocket in place of
+        a real connection."""
+        return await self._run_workflow_lg(name, websocket)
+
+    async def _handle_run_workflow(self, name: str, websocket: WebSocket) -> None:
+        """Run a saved workflow directly, bypassing the model entirely --
+        the /runworkflow-driven counterpart to how /startworkflow.../
+        endworkflow and /saveworkflow bypass it for *creation*. Also
+        invoked by the shared frontend's New Workflow picker, which sends
+        this same slash command over the wire. Deliberately not a model-
+        callable tool -- see this module's own docstring for the scope cut
+        this implies (no natural-language "run FBL5N" triggering yet)."""
+        name = name.strip()
+        if not name:
+            await websocket.send_json(
+                {"type": "error", "message": "Usage: /runworkflow <name>"}
+            )
+            return
+        # Fresh start for /stop, same as a normal turn.
+        self._stop_requested = False
+        await websocket.send_json({"type": "workflow_run_started", "name": name})
+        try:
+            await self._run_workflow_lg(name, websocket)
+        except Exception as exc:  # noqa: BLE001 -- surface any provider/tool error to the client,
+            # same as a normal turn's error handling (unknown name/bad resume_from_step raise
+            # KeyError/ValueError; a provider/network failure inside agent mode's own run could
+            # raise anything else)
+            await websocket.send_json({"type": "error", "message": str(exc)})
+            return
+        # A run's steps can include task_create/task_update calls, same as
+        # a normal turn -- refresh the Task panel the same way a normal
+        # turn's own end-of-turn tasks_changed does.
+        await websocket.send_json({"type": "tasks_changed"})
+
+    async def handle_user_message(
+        self,
+        text: str,
+        websocket: WebSocket,
+        images: list[str] | None = None,
+    ) -> None:
+        # See _turn_lock's docstring in __init__: this serializes turns so a
+        # message sent while one is still running waits its turn instead of
+        # racing it.
+        async with self._turn_lock:
+            self._current_turn_task = asyncio.current_task()
+            await self._handle_user_message_locked(text, websocket, images=images)
+
+    async def _handle_user_message_locked(
+        self,
+        text: str,
+        websocket: WebSocket,
+        images: list[str] | None = None,
+    ) -> None:
+        await self._run_observational_hooks(
+            "UserPromptSubmit",
+            {"event": "UserPromptSubmit", "thread_id": self.thread_id, "text": text},
+        )
+        stripped_lower = text.strip().lower()
+
+        if self.pending_save_proposal is not None:
+            await self._handle_pending_save_proposal(text, websocket)
+            return
+
+        if self.pending_save_skill_proposal is not None:
+            await self._handle_pending_skill_save_proposal(text, websocket)
+            return
+
+        if stripped_lower == "/plan":
+            self.plan_mode = not self.plan_mode
+            await self.send_state(websocket)
+            return
+
+        if stripped_lower == "/accept-edits":
+            self.accept_edits = not self.accept_edits
+            await self.send_state(websocket)
+            return
+
+        if stripped_lower == "/compact":
+            await self._handle_compact(websocket)
+            return
+
+        if stripped_lower == "/clear":
+            await self._handle_clear(websocket)
+            return
+
+        if stripped_lower == "/startworkflow":
+            await self._handle_start_workflow(websocket)
+            return
+
+        command, _, rest = text.strip().partition(" ")
+        command_lower = command.lower()
+
+        if command_lower == "/endworkflow":
+            await self._handle_end_workflow(rest.strip(), websocket)
+            return
+
+        if command_lower == "/saveworkflow":
+            await self._handle_save_workflow(rest.strip(), websocket)
+            return
+
+        if command_lower == "/saveskill":
+            await self._handle_save_skill(rest.strip(), websocket)
+            return
+
+        if command_lower == "/runworkflow":
+            await self._handle_run_workflow(rest.strip(), websocket)
+            return
+
+        user_input = text
+        if stripped_lower.startswith("/"):
+            name = command[1:].lower()
+            if name == "init":
+                user_input = INIT_PROMPT
+            elif name in self.skills_by_slug:
+                skill = self.skills_by_slug[name]
+                fallback = (
+                    "(no additional request given -- follow the skill and "
+                    "proceed, or ask what is needed.)"
+                )
+                user_input = (
+                    f"[Skill '{skill.name}' invoked directly via /{name} -- "
+                    f"follow its instructions below for this request.]\n\n"
+                    f"{skill.body}\n\n---\nUser request: {rest.strip() or fallback}"
+                )
+            else:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Unknown command: {command}. Type a skill name or /init.",
+                    }
+                )
+                return
+
+        if self.plan_mode:
+            mode_note = PLAN_MODE_NOTE
+        elif self.accept_edits:
+            mode_note = ACCEPT_EDITS_MODE_NOTE
+        else:
+            mode_note = NORMAL_MODE_NOTE
+        # current_date_note() lives here, not in the system prompt --
+        # see its own docstring in runtime_lg/messages.py for why that
+        # matters for caching across every provider, not just Anthropic.
+        model_input = current_date_note() + mode_note + user_input
+
+        content: str | list[dict[str, Any]] = model_input
+        if images:
+            content = [{"type": "text", "text": model_input}]
+            content.extend({"type": "image_url", "image_url": {"url": url}} for url in images)
+        turn_input = {"messages": [{"role": "user", "content": content}]}
+
+        # Reset for this turn -- see _stream_turn's docstring. A stale
+        # entry from a previous turn popping for the wrong call is the only
+        # real risk of *not* resetting; there's no other state to preserve
+        # across turns here.
+        self._pending_tool_args = defaultdict(list)
+        # Fresh start for /stop each turn, same as runtime/runner.py's
+        # stop_event.clear() -- a stop requested during a previous turn (or
+        # left over from one that already finished) must not immediately
+        # halt this new one.
+        self._stop_requested = False
+
+        try:
+            # reply_text ends up as just the *last* model response's own
+            # text, not every response of this turn concatenated -- see
+            # _resolve_pending_approvals's docstring for why joining them
+            # was a real bug (duplicated, glued-together narration on any
+            # model that talks before a gated tool call). Overwritten
+            # below only if approvals actually resolved something; None
+            # means nothing was pending, so the initial call's own text
+            # already *is* the whole (single-segment) reply.
+            reply_text = await self._stream_turn(turn_input, websocket)
+            if _can_resolve_approvals(websocket):
+                resolved_text = await self._resolve_pending_approvals(websocket)
+                if resolved_text is not None:
+                    reply_text = resolved_text
+        except asyncio.CancelledError:
+            # request_stop() hard-cancels this task (see its own
+            # docstring) whenever there's no pending approval/question to
+            # resolve instead -- exactly the case where _stream_turn is
+            # stuck inside a raw provider call with no chunk ever yielded
+            # for its cooperative stop-flag check to run against. No
+            # partial reply_text exists at this point (the cancellation
+            # interrupts _stream_turn before it can return one), so this
+            # sends just the marker -- same "agent_message" type and
+            # "[stopped]" convention the cooperative-stop path below
+            # already uses, so the frontend needs no changes to render it.
+            try:
+                await websocket.send_json({"type": "agent_message", "text": "[stopped]"})
+            except Exception:  # noqa: BLE001 -- the client is already gone
+                pass
+            return
+        except Exception as exc:  # noqa: BLE001 -- surface any provider/tool error to the client
+            try:
+                await websocket.send_json({"type": "error", "message": str(exc)})
+            except Exception:  # noqa: BLE001 -- the client is already gone
+                # Live-hit: a client that drops mid-turn (network blip, tab
+                # closed) makes _stream_turn's own websocket.send_json raise
+                # WebSocketDisconnect, landing here -- but the socket is
+                # already closed by then, so THIS send fails too (Starlette
+                # raises RuntimeError('Cannot call "send" once a close
+                # message has been sent.') once it's recorded the close).
+                # Left uncaught, that second exception propagated out of
+                # handle_user_message, which ws_endpoint fires via
+                # asyncio.create_task with nothing ever awaiting/checking
+                # its result -- so it surfaced only as an alarming
+                # "asyncio: Task exception was never retrieved" log, not a
+                # real problem: the turn lock still releases correctly
+                # either way (handle_user_message's `async with
+                # self._turn_lock` runs its __aexit__ on any exception),
+                # and there's no one left to deliver an error message to.
+                pass
+            return
+
+        if self._stop_requested:
+            # Mirrors ChatSession's _format_agent_reply for status ==
+            # "stopped" -- same "[stopped]" note, appended rather than
+            # replacing whatever text streamed through before the stop.
+            reply_text = f"{reply_text}\n\n[stopped]" if reply_text.strip() else "[stopped]"
+            await websocket.send_json({"type": "agent_message", "text": reply_text})
+        else:
+            await websocket.send_json(
+                {"type": "agent_message", "text": _format_reply(reply_text)}
+            )
+        # self._last_usage_metadata is set by _stream_turn (see its
+        # docstring) -- None if the model never populated usage_metadata at
+        # all, in which case the event is omitted entirely rather than
+        # showing a fabricated number.
+        if self._last_usage_metadata is not None:
+            await websocket.send_json(
+                {"type": "usage", "total_tokens": self._last_usage_metadata["total_tokens"]}
+            )
+        await websocket.send_json({"type": "tasks_changed"})

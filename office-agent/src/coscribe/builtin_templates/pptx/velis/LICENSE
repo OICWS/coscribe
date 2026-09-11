@@ -1,0 +1,16 @@
+Velis (lrk-slides-velis.potx)
+by Laurens R. Krol (https://lrkrol.com)
+Source: https://github.com/lrkrol/powerpoint
+
+Licensed under CC0 1.0 Universal (Public Domain Dedication):
+https://creativecommons.org/publicdomain/zero/1.0/
+
+This coscribe-bundled template.pptx is derived from the original
+lrk-slides-velis.potx: converted from PowerPoint-template (.potx) to
+PowerPoint (.pptx) content type, reduced to 4 slides (title, content,
+content, closing) built from the original's own "Presentation Title" and
+"Title and Content" layouts, with each slide's unused secondary
+placeholder (a logo slot on the title layout, a caption line on the
+content layout) removed so coscribe's fill_pptx_template tooling has
+exactly one title and one body placeholder per slide. No other visual
+design elements were changed.

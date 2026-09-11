@@ -1,0 +1,73 @@
+{
+  "name": "coscribe-desktop-electron",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Electron shell for coscribe-web -- spawns the existing server as a supervised local sidecar and opens a window pointed at it. Replaces office-agent-desktop (Tauri) once it clears its own real-hardware checkpoints -- see office-agent/ROADMAP.md's Browser panel native-window migration plan for why.",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dist:portable": "npm run build && electron-builder --win dir",
+    "dist:nsis": "npm run build && electron-builder --win nsis",
+    "icon": "echo 'icons/ is copied from src-tauri/icons/ -- regenerate both from the same source, see office-agent-desktop/README.md'"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "typescript": "~6.0.2"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  },
+  "build": {
+    "appId": "com.coscribe.desktop.electron",
+    "productName": "coscribe",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "src/splash/**/*",
+      "icons/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/sidecar",
+        "to": "sidecar",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "icons/icon.ico",
+      "target": [
+        {
+          "target": "dir"
+        },
+        {
+          "target": "nsis"
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "icon": "icons/icon.icns",
+      "target": [
+        "dmg"
+      ],
+      "minimumSystemVersion": "12.0"
+    },
+    "electronLanguages": [
+      "en-US"
+    ],
+    "compression": "maximum"
+  }
+}

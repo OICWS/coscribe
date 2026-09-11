@@ -1,0 +1,75 @@
+name: coscribe CI
+
+"on":
+  push:
+    branches: ["**"]
+    paths:
+      - "office-agent/**"
+      - ".github/workflows/office-agent-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "office-agent/**"
+      - ".github/workflows/office-agent-ci.yml"
+
+defaults:
+  run:
+    working-directory: office-agent
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: office-agent/pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: office-agent/frontend/package-lock.json
+
+      # web/static/ is a gitignored build artifact (see frontend/README.md
+      # and web/app.py's own module docstring) -- create_app_lg() mounts
+      # it with check_dir=True, so any test that constructs the FastAPI
+      # app (most of tests/test_web.py) fails at app-construction time
+      # with a bare checkout that never built it. Real, live-reported gap:
+      # this step was missing from CI since the frontend cutover itself,
+      # silently failing every run after -- caught only by finally
+      # checking the Actions tab directly instead of trusting local runs
+      # (which always had a hand-built static/ dir already sitting there).
+      - name: Build frontend
+        working-directory: office-agent/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install coscribe
+        run: pip install -e ".[dev,web]"
+
+      # See pyproject.toml's dependencies comment: aisuite 0.1.14 pins
+      # httpx<0.28.0, which conflicts with google-genai>=1.5.0's own
+      # httpx>=0.28.1 requirement, so the two can't be resolved together in
+      # one `pip install` -- google-genai has to be upgraded as its own
+      # separate step afterward. Without this, pip resolves google-genai to
+      # the old <1.5.0 pin, whose Part type doesn't have thought_signature
+      # yet, and test_gemini_provider.py's real-SDK validation test fails.
+      # Upper-bounded at <2.14.0 -- 2.14.0 removed Part.thought_signature
+      # again (an upstream regression, confirmed by diffing its model_fields
+      # against 2.13.0's), which breaks the exact same test the other way.
+      - name: Upgrade google-genai (needed for Part.thought_signature)
+        run: pip install -U "google-genai>=2.13.0,<2.14.0"
+
+      - name: pytest
+        run: pytest -q
+
+      - name: ruff
+        run: ruff check src tests
+
+      - name: mypy
+        run: mypy src

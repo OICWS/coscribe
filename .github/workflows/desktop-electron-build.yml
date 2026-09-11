@@ -1,0 +1,98 @@
+name: desktop build electron (Windows)
+
+# Manual-only, mirrors desktop-build.yml's own reasoning: a heavy job,
+# not run on every push. This is the Electron shell replacing
+# office-agent-desktop (Tauri) -- see office-agent/ROADMAP.md's Browser
+# panel native-window migration plan for why, and
+# office-agent-desktop-electron/README.md for what this shell is.
+#
+# No code-signing secrets are configured -- same as the Tauri workflow,
+# the resulting installer/portable exe is unsigned and will trigger
+# Windows SmartScreen's usual warning. Expected, not a bug.
+"on":
+  workflow_dispatch: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: office-agent/pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: office-agent/frontend/package-lock.json
+
+      - name: Build frontend (coscribe-web's static assets)
+        working-directory: office-agent/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Set up office-agent's venv
+        working-directory: office-agent
+        run: |
+          python -m venv .venv
+          .venv/Scripts/python -m pip install --upgrade pip
+          .venv/Scripts/python -m pip install -e ".[dev,web]"
+          # See pyproject.toml's dependencies comment: aisuite 0.1.14 pins
+          # httpx<0.28.0, which conflicts with google-genai>=1.5.0's own
+          # httpx>=0.28.1 requirement, so this has to be a separate step
+          # (same two-step install desktop-build.yml/office-agent-ci.yml
+          # already document).
+          .venv/Scripts/python -m pip install -U "google-genai>=2.13.0,<2.14.0"
+          .venv/Scripts/python -m pip install pyinstaller
+
+      - name: Stage the PyInstaller sidecar
+        working-directory: office-agent-desktop-electron
+        run: bash scripts/stage-sidecar.sh
+
+      - name: npm ci (Electron + electron-builder)
+        working-directory: office-agent-desktop-electron
+        run: npm ci
+
+      # `--win dir` (not electron-builder's own "portable" target) --
+      # real-hardware finding: "portable" is actually an NSIS self-
+      # extracting exe, which unpacks its whole payload (Electron's
+      # runtime + the sidecar, ~300MB) to a temp directory on *every*
+      # launch, taking minutes. `dir` produces the plain unpacked
+      # win-unpacked/ folder instead -- exactly Tauri's own "portable"
+      # model (an exe + resources folder, zipped, no extraction step,
+      # instant launch every time).
+      - name: Build unpacked portable folder
+        working-directory: office-agent-desktop-electron
+        run: npm run dist:portable
+
+      - name: Build NSIS installer
+        working-directory: office-agent-desktop-electron
+        run: npm run dist:nsis
+
+      # retention-days: 3 -- see desktop-build.yml's own comment on this:
+      # these are throwaway real-hardware test builds (this one's ~300MB+
+      # per run, even bigger than the Tauri shell's), and the 90-day
+      # default let accumulated runs blow through the account's 500MB
+      # free Actions-storage quota.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coscribe-desktop-electron-windows-portable
+          path: office-agent-desktop-electron/release/win-unpacked/**
+          if-no-files-found: error
+          retention-days: 3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coscribe-desktop-electron-windows-installer
+          path: office-agent-desktop-electron/release/*Setup*.exe
+          if-no-files-found: error
+          retention-days: 3

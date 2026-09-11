@@ -1,0 +1,10 @@
+id: modern-block
+name: Modern Block
+description: >-
+  A 4-slide title / two content / closing-CTA deck built entirely from solid
+  color blocks and left-aligned typography -- no photography or decorative
+  accent lines. Slide order: (1) title, (2) content, (3) content,
+  (4) closing call-to-action.
+accent: "1E2761"
+slide_count: 4
+slide_roles: [title, content, content, closing]

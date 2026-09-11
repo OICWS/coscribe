@@ -1,0 +1,11 @@
+id: velis
+name: Velis
+description: >-
+  A real third-party design (CC0-licensed, by Laurens R. Krol -- see this
+  directory's LICENSE file), not one of coscribe's own python-pptx-built
+  templates: a deep teal/sage/magenta palette inspired by traditional
+  stage curtains, on the design's own A4-landscape proportions rather
+  than 16:9. 4 slides: (1) title, (2) content, (3) content, (4) closing.
+accent: "005C69"
+slide_count: 4
+slide_roles: [title, content, content, closing]

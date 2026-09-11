@@ -1,0 +1,475 @@
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  groupHasPendingApproval,
+  groupToolRuns,
+  summarizeGroupParts,
+  summarizeItemParts,
+  type SummaryParts,
+  type ToolRunGroup,
+} from "../lib/transcriptGrouping";
+import type { LogItem } from "../state/reducer";
+import { CopyButton } from "./CopyButton";
+import { EmptyState } from "./EmptyState";
+import { ChevronDownIcon, PencilIcon } from "./icons";
+import { QuestionCard } from "./QuestionCard";
+
+/** react-markdown + remark/rehype + katex is the single biggest dependency
+ * added to this app (roughly triples the production bundle) -- code-split
+ * it into its own chunk so a session that never renders a markdown-heavy
+ * reply doesn't pay for it on first load. The Suspense fallback is the
+ * plain, unparsed text (what the agent bubble looked like before this
+ * feature existed), so the one-time chunk fetch shows real text, not a
+ * spinner or blank bubble. */
+const Markdown = lazy(() => import("./Markdown").then((m) => ({ default: m.Markdown })));
+
+/** write_docx/write_xlsx/write_pptx's tool result carries a `preview_path`
+ * (a bare filename under GET /api/previews/) when LibreOffice rendered a
+ * thumbnail -- other tools' results never have this shape. */
+function previewPathOf(result: unknown): string | null {
+  if (!result || typeof result !== "object" || !("preview_path" in result)) return null;
+  const value = (result as Record<string, unknown>).preview_path;
+  return typeof value === "string" ? value : null;
+}
+
+type ToolOrApprovalItem = Extract<LogItem, { kind: "tool" | "approval" }>;
+
+interface ChatLogProps {
+  items: LogItem[];
+  onApprove: (id: string, approved: boolean) => void;
+  onAnswerQuestion: (id: string, answer: string) => void;
+  /** Undefined while a turn is in flight -- editing mid-turn would race
+   * the very history the edit is about to truncate, so the affordance is
+   * hidden entirely rather than left clickable-but-erroring. */
+  onEditMessage?: (turnIndex: number, text: string) => void;
+  /** Runs a suggested prompt from EmptyState, shown in place of the
+   * (otherwise empty) message list on a brand-new thread. */
+  onSuggestion: (prompt: string) => void;
+}
+
+export function ChatLog({ items, onApprove, onAnswerQuestion, onEditMessage, onSuggestion }: ChatLogProps) {
+  const endRef = useRef<HTMLDivElement>(null);
+  const entries = groupToolRuns(items);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [items]);
+
+  if (items.length === 0) {
+    return (
+      <div data-testid="chat-log" className="flex-1 overflow-y-auto">
+        <EmptyState onSuggestion={onSuggestion} />
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="chat-log" className="flex-1 overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-4 py-4">
+        {entries.map((entry) =>
+          entry.kind === "tool_run" ? (
+            <ToolRunGroupView key={entry.id} group={entry} onApprove={onApprove} />
+          ) : entry.kind === "tool" || entry.kind === "approval" ? (
+            <ToolCallRow key={entry.id} item={entry} onApprove={onApprove} />
+          ) : entry.kind === "question" ? (
+            <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
+          ) : (
+            <LogItemView key={entry.id} item={entry} onEditMessage={onEditMessage} />
+          ),
+        )}
+        <div ref={endRef} />
+      </div>
+    </div>
+  );
+}
+
+/** Renders a SummaryParts as "verb ⟨object chip⟩" -- the object (a
+ * filename, query, task name, ...) gets its own light monospaced chip so
+ * it visually pops out of the plain-text verb, the same "emphasized
+ * keyword" treatment Claude Code's own transcript rows use for a path or
+ * identifier inside an action description. */
+function SummaryLabel({ parts }: { parts: SummaryParts }) {
+  return (
+    <>
+      {parts.verb}
+      {parts.object && (
+        <>
+          {parts.glue ?? " "}
+          <code className="rounded bg-[var(--panel-bg)] px-1 py-0.5 font-mono text-[0.85em]">{parts.object}</code>
+        </>
+      )}
+    </>
+  );
+}
+
+/** A run containing an unresolved approval always renders its items
+ * directly, unwrapped -- an approval-required action must never be hidden
+ * behind a disclosure the user has to think to open. Once resolved (or
+ * for a pure-tool-only run), collapses to one summary line by default;
+ * `group.id` is stable across that transition (derived from the run's
+ * first item id), so this component isn't remounted when a pending
+ * approval resolves -- `manuallyOpen`'s own state survives it. */
+function ToolRunGroupView({
+  group,
+  onApprove,
+}: {
+  group: ToolRunGroup;
+  onApprove: (id: string, approved: boolean) => void;
+}) {
+  const [manuallyOpen, setManuallyOpen] = useState(false);
+  const hasPendingApproval = groupHasPendingApproval(group);
+
+  if (hasPendingApproval) {
+    return (
+      <div className="flex flex-col gap-1.5 self-start">
+        {group.items.map((item) => (
+          <ToolCallRow key={item.id} item={item} onApprove={onApprove} />
+        ))}
+      </div>
+    );
+  }
+
+  const open = manuallyOpen;
+  const header = summarizeGroupParts(group.items);
+  return (
+    <div className="self-start max-w-[85%] text-sm">
+      <button
+        type="button"
+        className="flex items-center gap-1.5 text-left text-[var(--muted)] hover:text-[var(--fg)]"
+        onClick={() => setManuallyOpen((v) => !v)}
+      >
+        <ChevronDownIcon className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`} />
+        <span className="truncate">
+          {header.shown.map((parts, index) => (
+            <span key={index}>
+              {index > 0 && ", "}
+              <SummaryLabel parts={parts} />
+            </span>
+          ))}
+          {header.more > 0 && `, and ${header.more} more`}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1.5 flex flex-col gap-1">
+          {group.items.map((item) => (
+            <ToolCallRow key={item.id} item={item} onApprove={onApprove} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One collapsible row per tool/approval item -- collapsed to a single
+ * summary line (plus a preview thumbnail, if the result has one -- shown
+ * regardless of collapsed state, since the visual result is usually the
+ * point of looking at these). A still-pending approval starts expanded
+ * (Approve/Deny buttons visible with no click needed); everything else
+ * starts collapsed. Expanded content is the exact same markup this
+ * rendered inline before grouping existed -- relocated, not rewritten.
+ * Styled as its own light rounded card (bg-card-bg, hover-panel-bg) --
+ * the plain "text row" look these used before made a run of several tool
+ * calls read as an undifferentiated wall of gray text; a distinct card
+ * per step is what makes "expand to see what happened" a real disclosure
+ * instead of just more inline text. */
+function ToolCallRow({
+  item,
+  onApprove,
+}: {
+  item: ToolOrApprovalItem;
+  onApprove: (id: string, approved: boolean) => void;
+}) {
+  const [open, setOpen] = useState(() => item.kind === "approval" && item.status === "pending");
+  // An approval item carries a result too, once its (approved) call
+  // actually executes -- see reducer.ts's tool_result case, which merges
+  // onto the same item rather than pushing a second "tool" one. Same
+  // previewPathOf check either way, so a completed write_pptx/write_docx/
+  // write_xlsx call gets its thumbnail here exactly like an ungated one.
+  const previewPath = previewPathOf(item.result);
+  const isPendingApproval = item.kind === "approval" && item.status === "pending";
+
+  return (
+    <div
+      className={
+        isPendingApproval
+          ? "self-start max-w-[85%] rounded-xl border border-[var(--accent)] bg-[var(--card-bg)] px-3.5 py-2.5 text-sm"
+          : "self-start max-w-[85%] rounded-xl border border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm hover:bg-[var(--panel-bg)]"
+      }
+    >
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 text-left text-[var(--fg)]"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronDownIcon className={`h-3.5 w-3.5 shrink-0 text-[var(--muted)] transition-transform ${open ? "" : "-rotate-90"}`} />
+        <span className="truncate">
+          <SummaryLabel parts={summarizeItemParts(item)} />
+        </span>
+      </button>
+      {previewPath && (
+        <img
+          src={`/api/previews/${encodeURIComponent(previewPath)}`}
+          alt={`${item.toolName} preview`}
+          className="mt-1 block max-h-32 rounded-lg border border-[var(--border)]"
+        />
+      )}
+      {open && (
+        <div className="mt-1.5">
+          {item.kind === "tool" ? (
+            item.result !== undefined && (
+              <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-all">
+                {typeof item.result === "string" ? item.result : JSON.stringify(item.result, null, 2)}
+              </pre>
+            )
+          ) : (
+            <ApprovalDetail item={item} onApprove={onApprove} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A pptx edit's before/after slide render, side by side -- what
+ * web/session.py's _build_pptx_edit_preview sends alongside a raw
+ * arguments dump, so approving `{"shape_index": 3, "fill_color":
+ * "38BDF8"}` doesn't require reading JSON to picture the result. Either
+ * side can be missing on its own (the dry run failed, or there was
+ * nothing to diff against) -- rendered as a muted placeholder rather than
+ * collapsing the layout, so "before" and "after" always line up. */
+function ApprovalPreview({
+  beforePreview,
+  afterPreview,
+}: {
+  beforePreview?: string | null;
+  afterPreview?: string | null;
+}) {
+  return (
+    <div className="mb-1.5 grid grid-cols-2 gap-2">
+      {(
+        [
+          ["Before", beforePreview],
+          ["After", afterPreview],
+        ] as const
+      ).map(([label, name]) => (
+        <div key={label} className="flex flex-col gap-1">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">{label}</div>
+          {name ? (
+            <img
+              src={`/api/previews/${encodeURIComponent(name)}`}
+              alt={`${label} the edit`}
+              className="block w-full rounded-lg border border-[var(--border)]"
+            />
+          ) : (
+            <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[10px] text-[var(--muted)]">
+              no preview
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** run_python_script/run_node_script/run_background_script are the tools
+ * with no sandbox around them -- the script text IS the entire safety
+ * review, so they get their own larger, clearly-labeled code block
+ * instead of being buried, JSON-escaped, inside a generic arguments dump
+ * the way every other tool's args are. run_background_script's arguments
+ * carry the same script/description shape as the other two (see
+ * tools/background_tasks.py), so it reuses this exact rendering. */
+function ApprovalDetail({
+  item,
+  onApprove,
+}: {
+  item: Extract<LogItem, { kind: "approval" }>;
+  onApprove: (id: string, approved: boolean) => void;
+}) {
+  const isScript =
+    item.toolName === "run_python_script" ||
+    item.toolName === "run_node_script" ||
+    item.toolName === "run_background_script";
+  const scriptArgs = item.arguments;
+  const hasPreview = Boolean(item.beforePreview || item.afterPreview);
+  return (
+    <>
+      {hasPreview && <ApprovalPreview beforePreview={item.beforePreview} afterPreview={item.afterPreview} />}
+      {isScript ? (
+        <div className="flex flex-col gap-1.5">
+          {typeof scriptArgs.description === "string" && scriptArgs.description && (
+            <div className="text-xs text-[var(--muted)]">{scriptArgs.description}</div>
+          )}
+          <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-all rounded-md bg-black/20 p-2 font-mono text-xs leading-relaxed">
+            {typeof scriptArgs.script === "string" ? scriptArgs.script : JSON.stringify(scriptArgs.script)}
+          </pre>
+          <div className="text-xs text-[var(--muted)]">
+            This script runs with no sandbox -- it can read/write any file this app can, and reach the network.
+            Review it before approving.
+          </div>
+        </div>
+      ) : (
+        <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-xs text-[var(--muted)]">{JSON.stringify(item.arguments, null, 2)}</pre>
+      )}
+      {item.status === "pending" ? (
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            className="rounded-md bg-[var(--accent)] px-3 py-1 text-sm text-[var(--accent-fg)]"
+            onClick={() => onApprove(item.id, true)}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-[var(--border)] px-3 py-1 text-sm"
+            onClick={() => onApprove(item.id, false)}
+          >
+            Deny
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="mt-1 text-xs text-[var(--muted)]">{item.status === "approved" ? "Approved" : "Denied"}</div>
+          {item.result !== undefined && (
+            <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-all text-xs text-[var(--muted)]">
+              {typeof item.result === "string" ? item.result : JSON.stringify(item.result, null, 2)}
+            </pre>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+/** A user bubble with a hover-revealed edit affordance -- clicking it
+ * swaps the bubble for an inline textarea; submitting truncates the
+ * conversation at this turn and regenerates from the edited text (see
+ * EditMessageOut's docstring in wire.ts and _handle_edit_message_locked
+ * in web/session.py for what happens server-side). Its own useState (not
+ * lifted into ChatState) mirrors ToolCallRow/ToolRunGroupView's existing
+ * pattern of local, ephemeral UI state that doesn't need to survive a
+ * remount or be visible to any other component. */
+function UserMessageView({
+  item,
+  onEditMessage,
+}: {
+  item: Extract<LogItem, { kind: "user" }>;
+  onEditMessage?: (turnIndex: number, text: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.text);
+
+  const cancel = () => {
+    setDraft(item.text);
+    setEditing(false);
+  };
+
+  const submit = () => {
+    if (!draft.trim() || !onEditMessage) return;
+    onEditMessage(item.turnIndex, draft);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="ml-auto flex max-w-[75%] flex-col items-end gap-1.5">
+        <textarea
+          autoFocus
+          className="w-full resize-none rounded-2xl rounded-br-[4px] border border-[var(--accent)] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] outline-none"
+          rows={Math.min(10, draft.split("\n").length)}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              cancel();
+            } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs hover:bg-[var(--card-bg)]"
+            onClick={cancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="rounded-md bg-[var(--accent)] px-2.5 py-1 text-xs text-[var(--accent-fg)] disabled:opacity-40"
+            onClick={submit}
+            disabled={!draft.trim()}
+          >
+            Save &amp; submit
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group/msg ml-auto flex max-w-[75%] items-center gap-1">
+      {onEditMessage && (
+        <button
+          type="button"
+          title="Edit message"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--muted)] opacity-0 transition-opacity hover:bg-[var(--card-bg)] hover:text-[var(--fg)] group-hover/msg:opacity-100"
+          onClick={() => setEditing(true)}
+        >
+          <PencilIcon className="h-3.5 w-3.5" />
+        </button>
+      )}
+      <div className="rounded-2xl rounded-br-[4px] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] whitespace-pre-wrap">
+        {item.text}
+      </div>
+    </div>
+  );
+}
+
+function LogItemView({
+  item,
+  onEditMessage,
+}: {
+  item: Extract<LogItem, { kind: "user" | "agent" | "system" }>;
+  onEditMessage?: (turnIndex: number, text: string) => void;
+}) {
+  if (item.kind === "user") {
+    return <UserMessageView item={item} onEditMessage={onEditMessage} />;
+  }
+
+  if (item.kind === "agent") {
+    const text = item.streaming ? `${item.text} ▍` : item.text;
+    return (
+      <div className="group/msg max-w-[85%]">
+        {/* A plain border-l, not a filled bubble like the user's own
+         * message -- the agent's reply is by far the longest, most
+         * frequent content on screen, so a full tinted background would
+         * be the loudest thing on the page for the item that least needs
+         * to shout. Still a real anchor though (unlike the old fully
+         * transparent --agent-bubble with zero visual container): it no
+         * longer reads as a continuation of the muted tool-call summary
+         * line directly above it. */}
+        <div className="rounded-2xl bg-[var(--agent-bubble)] border-l-2 border-[var(--border)] py-1 pl-4 pr-2 text-[var(--agent-bubble-fg)]">
+          <Suspense fallback={<div className="whitespace-pre-wrap">{text}</div>}>
+            <Markdown text={text} />
+          </Suspense>
+        </div>
+        {!item.streaming && (
+          <CopyButton
+            getText={() => item.text}
+            title="Copy message"
+            className="mt-1 flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted)] opacity-0 transition-opacity hover:bg-[var(--card-bg)] hover:text-[var(--fg)] group-hover/msg:opacity-100"
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="self-start text-xs text-[var(--muted)]">
+      {item.text}
+      <span className="ml-0.5">&rsaquo;</span>
+    </div>
+  );
+}

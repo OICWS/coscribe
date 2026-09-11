@@ -1,0 +1,3 @@
+This is a small fixture file used by attachment.spec.ts to exercise the
+real POST /api/upload round trip -- not test data for any tool to read
+meaningfully, just something small and text/plain.

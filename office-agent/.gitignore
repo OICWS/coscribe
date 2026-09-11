@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+.venv/
+# Separate venv for runtime_lg/scripts/verify_*.py -- can't coexist with
+# the project's own .venv today, see runtime_lg/README.md's environment note.
+.venv-lg/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.env
+.coscribe/
+# Pre-rename state_dir name -- shouldn't reappear, but this sandbox's disk
+# has intermittently reverted to a pre-rename snapshot mid-session more
+# than once, regenerating it under the old name.
+.office-agent/
+/workspace/
+/skills/
+/MEMORY.md
+/mcp.json
+/providers.json
+
+# React frontend build output (see frontend/ -- `npm run build` there
+# generates this directory; the old hand-written vanilla-JS files it
+# replaced are gone from git history's tip but still browsable in the
+# pre-cutover commits).
+/src/coscribe/web/static/

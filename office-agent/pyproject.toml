@@ -1,0 +1,234 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coscribe"
+version = "0.1.0"
+description = "Local, user-friendly agentic system for office work, built on aisuite."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "aisuite[openai,mcp]>=0.1.14",
+    # Deliberately NOT installed via aisuite's own "anthropic" extra, which
+    # hard-pins anthropic>=0.30.1,<0.31.0 (a 2024-era release, predating
+    # prompt caching's cache_control field existing in the SDK's types at
+    # all -- verified empirically: TextBlockParam/ToolParam on 0.30.1 have
+    # no cache_control field, confirmed absent from the installed package's
+    # source). aisuite's own anthropic_provider.py only ever does
+    # `anthropic.Anthropic(**config)` and `.messages.create(...)` -- both
+    # stable across this range -- so declaring our own newer floor here
+    # instead and dropping aisuite's extra is safe: verified by installing
+    # 0.68.2 in this project's venv and running the full test suite clean.
+    # See coscribe/providers/anthropic_provider.py for what this
+    # actually enables.
+    "anthropic>=0.68.0,<1.0.0",
+    # google-genai's Part.thought_signature (needed for multi-turn function calling
+    # with current "thinking" Gemini models, see gemini_provider.py) only exists
+    # from 2.13.0 on, but every google-genai>=1.5.0 requires httpx>=0.28.1, which
+    # conflicts with aisuite 0.1.14's own httpx<0.28.0 pin -- pip's resolver treats
+    # that as unsatisfiable in a single `pip install -e ".[dev]"` (both are
+    # top-level requirements resolved together, so this can't be worked around
+    # from this file alone; only running `pip install -U google-genai` as its
+    # own separate command afterward lets pip upgrade it without re-resolving
+    # aisuite). The upper bound below is just to stop pip from backtracking
+    # through every >=1.5.0 release's metadata before landing on 1.4.x -- it
+    # doesn't change that the follow-up step is still required for real
+    # tool-calling with thinking-capable Gemini models:
+    # `pip install -U "google-genai>=2.13.0,<2.14.0"` by hand. Verified
+    # compatible in practice: aisuite's httpx usage (ollama/lmstudio/together/
+    # xai/fireworks providers, mcp/client.py) is plain post()/AsyncClient()
+    # calls unaffected by the 0.27->0.28 change, and none of those aisuite
+    # providers are used here. Upper-bounded below 2.14.0 -- that release
+    # removed Part.thought_signature again (confirmed by diffing its
+    # model_fields against 2.13.0's own), an upstream regression, not an
+    # intentional API change on our end.
+    "google-genai>=1.0.0,<1.5.0",
+    # Explicit pin, not just relying on pydantic-settings'/mcp's/langchain's
+    # own transitive floors -- real, live-reported bug: with no upper bound
+    # anywhere in this dependency tree, `pip install` on a real Windows
+    # machine resolved pydantic to 2.14.0a1, an ALPHA/pre-release build (not
+    # a typo -- confirmed via that machine's own `pip show pydantic`). None
+    # of mcp==1.29.0's own requirements force this (checked its PyPI wheel
+    # metadata directly: `pydantic<3.0.0,>=2.11.0`, comfortably satisfied by
+    # any stable 2.11-2.13 release) -- pip fell back to a pre-release only
+    # because some other combination of loose constraints across this
+    # dependency graph left no stable candidate. Symptom: every MCP
+    # connector fails with `PydanticUserError: ClientRequest is not fully
+    # defined` from mcp's own session.initialize() -- a real incompatibility
+    # in that alpha build's RootModel handling, not anything in coscribe's
+    # own code. Upper-bounded below 2.14.0 to keep pip inside the stable
+    # 2.x line already verified working throughout this project (2.13.4 in
+    # this sandbox); raise this once 2.14 actually ships a stable release
+    # and is verified compatible, not just because the alpha exists.
+    "pydantic>=2.5.0,<2.14.0",
+    "pydantic-settings>=2.5.0",
+    "python-dotenv>=1.0.0",
+    # runtime/secrets.py: OS-keychain-backed secret storage, optional at
+    # runtime (any keyring.errors.KeyringError falls back to plaintext) --
+    # a thin, small, pure-Python meta-package; heavier OS-specific
+    # backends (Linux's secretstorage, Windows' pywin32) are keyring's own
+    # conditional deps, already handled by its installer per platform.
+    "keyring>=25.0.0",
+    "pyyaml>=6.0",
+    "typer>=0.12.0",
+    "python-docx>=1.1.0",
+    "reportlab>=4.0.0",
+    # read_docx/read_pdf reuse the same well-established libraries
+    # microsoft/markitdown itself builds on for docx/pdf -> markdown
+    # conversion, without markitdown's own mandatory magika dependency
+    # (which drags in onnxruntime + numpy, 100+MB, just for file-type
+    # sniffing we don't need -- we already know the format per tool).
+    "mammoth>=1.7.0",
+    "markdownify>=0.13.0",
+    "pdfplumber>=0.11.0",
+    "openpyxl>=3.1.0",
+    # Not actively maintained upstream (no release since Aug 2024) -- unlike
+    # the libraries above, this isn't a "mature and audited" pick, just the
+    # standard, complete-enough option for this use case. See
+    # ARCHITECTURE.md's 范围边界 section.
+    "python-pptx>=1.0.0",
+    # coscribe's real engine (runtime_lg/, cli.py, web/session.py,
+    # web/app.py) -- LangChain/LangGraph-based, replacing the
+    # hand-vendored runtime/providers/gemini_provider.py adapter that
+    # shipped three real bugs in a row (see runtime_lg/README.md's own
+    # Context section). Used to be a separate, optional langgraph_spike
+    # extra, kept out of base dependencies specifically because aisuite's
+    # own "anthropic" extra hard-pinned anthropic<0.31.0, disjoint from
+    # every langchain-anthropic release's anthropic>=0.64.0 floor. That
+    # conflict no longer applies: this project already stopped using
+    # aisuite's anthropic extra in favor of a direct anthropic>=0.68.0
+    # pin above (see that entry's own comment) for an unrelated reason
+    # (prompt-caching support) well before this migration -- verified
+    # empirically that installing everything below together in one fresh
+    # venv now resolves cleanly with no conflict, so there's no reason
+    # left to keep this split. `coscribe` (cli.py) now depends on
+    # these directly, the same as any other built-in capability.
+    "langchain>=1.0.0",
+    "langgraph>=1.0.0",
+    # >=1.0.0, not the old 0.3.0 floor -- runtime_lg/agent.py now imports
+    # AnthropicPromptCachingMiddleware from langchain_anthropic.middleware,
+    # part of the newer "agent middleware" architecture that shipped
+    # alongside langchain-anthropic's own 1.x line (the same rewrite that
+    # introduced create_agent's middleware= param, already required via
+    # langchain>=1.0.0 above) -- a 0.3.x install predates that module
+    # existing at all.
+    "langchain-anthropic>=1.0.0",
+    "langchain-google-genai>=2.0.0",
+    "langchain-openai>=0.2.0",
+    # coscribe's persistent checkpointer (cli.py) -- lets --thread
+    # survive a process restart. Also used by web/session.py's async
+    # twin, AsyncSqliteSaver, from the same package.
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    # runtime_lg's own MCP connector (runtime_lg/mcp.py), in place of
+    # tools/mcp.py's aisuite-based one -- aisuite's MCPToolWrapper collapses
+    # each tool's real JSON Schema into a lossy generic Python signature,
+    # confirmed live to make a real model guess a wrong field name and loop
+    # on the resulting error (see runtime_lg/README.md's "MCP tools under
+    # runtime_lg" section). langchain-mcp-adapters builds each tool's
+    # args_schema directly from the MCP server's real inputSchema instead.
+    "langchain-mcp-adapters>=0.3.0",
+    # web_search tool (tools/websearch.py) -- free, no API key, matching
+    # this project's local-first stance (unlike Tavily and most other
+    # agent-oriented search APIs, which require a paid key). Pulls in a
+    # newer httpx (>=0.28.1) than aisuite's own <0.28.0 pin -- verified
+    # compatible in practice the same way google-genai's identical httpx
+    # conflict above already was (aisuite's own httpx usage is unaffected
+    # by the 0.27->0.28 change); confirmed by installing both together
+    # and running the full test suite clean.
+    "ddgs>=9.0.0",
+    # download_image (tools/images.py) uses httpx directly to stream a
+    # remote image's bytes -- already present transitively (forced to
+    # >=0.28.1 by ddgs/google-genai, per the comments above), declaring it
+    # directly here just makes that explicit now that this codebase has
+    # its own real usage, not just a transitive one. Pillow validates the
+    # downloaded bytes actually decode as an image (a Content-Type header
+    # alone isn't trustworthy) and reads real pixel dimensions for
+    # set_pptx_background_image's cover-crop math -- no image-processing
+    # library existed in this codebase before this.
+    "httpx>=0.27.0",
+    "Pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
+    "types-PyYAML>=6.0",
+    "types-reportlab>=4.0.0",
+    "types-openpyxl>=3.1.0",
+]
+web = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    # Required for FastAPI's UploadFile (POST /api/upload) -- already pulled
+    # in transitively via aisuite's mcp extra, but declared explicitly since
+    # we now depend on it directly.
+    "python-multipart>=0.0.9",
+    # web/browser_panel.py's hand-rolled Chrome DevTools Protocol client
+    # (the Browser panel's live view -- see that module's own docstring for
+    # why raw CDP over a plain WebSocket, not the full `playwright` package:
+    # avoids a heavy new PyInstaller-packaging surface for a feature that
+    # only needs a thin slice of it). Already pulled in transitively via
+    # uvicorn[standard]'s own optional speedups, but declared explicitly
+    # since we now depend on it directly, same reasoning python-multipart
+    # above already has.
+    "websockets>=13.0",
+]
+
+[project.scripts]
+coscribe = "coscribe.cli:main"
+# Needs the `web` extra installed too (FastAPI/uvicorn) -- LangChain/
+# LangGraph are now base dependencies, no separate extra needed for those.
+coscribe-web = "coscribe.web.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coscribe"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Vendored, unmodified-from-upstream code (see the header comment in each file):
+# left alone so a future diff against aisuite's source stays meaningful.
+extend-exclude = ["src/coscribe/providers/gemini_provider.py", "src/coscribe/providers/_vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+exclude = [
+    "src/coscribe/providers/gemini_provider.py",
+    "src/coscribe/providers/_vendor",
+]
+
+[[tool.mypy.overrides]]
+module = "aisuite.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "mammoth.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "lxml.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# cairosvg is a dev-only tool for scripts/build_pptx_icons.py (a one-off
+# asset-generation script, not part of the shipped runtime tool surface)
+# -- deliberately not a [project] dependency, see that script's docstring.
+module = "cairosvg.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "real_libreoffice: exercises actual headless LibreOffice conversion (soffice) -- opts out of conftest.py's default fast-mode monkeypatch of the QA/recalc steps; still skips cleanly via the test file's own _libreoffice_actually_works()-style check when soffice isn't usable in this environment",
+]

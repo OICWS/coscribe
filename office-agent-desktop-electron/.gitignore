@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+# Staged by scripts/stage-sidecar.sh from office-agent's own PyInstaller
+# build -- regenerated per-platform before each build, never committed
+# (it's a ~150MB platform-specific binary tree). Mirrors office-agent-
+# desktop/.gitignore's identical rule for src-tauri/binaries/.
+resources/sidecar/

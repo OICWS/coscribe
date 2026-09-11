@@ -1,0 +1,11 @@
+id: bold-statement
+name: Bold Statement
+description: >-
+  A high-contrast, keynote-style 4-slide deck: full-bleed dark title and
+  closing slides, white content slides with a colored accent spine down
+  the left edge. Punchier than Modern Block or Minimal Light -- for a
+  short, declarative exec-summary deck. Slide order: (1) title,
+  (2) content, (3) content, (4) closing.
+accent: "C2410C"
+slide_count: 4
+slide_roles: [title, content, content, closing]

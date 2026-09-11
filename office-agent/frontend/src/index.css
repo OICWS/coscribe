@@ -1,0 +1,166 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Self-hosted via @fontsource (OFL-licensed, actual woff2 files bundled
+   into this build's own output -- Vite resolves these @imports and
+   copies the referenced font files the same way it already does for
+   katex/dist/katex.min.css's own fonts, see Markdown.tsx), not a Google
+   Fonts CDN link -- this app is local-first/offline-capable by design
+   (see ARCHITECTURE.md), and a CDN font would silently fall back to
+   system fonts the moment there's no network, which is the one thing a
+   self-hosted font never does. IBM Plex Sans/Mono over the previous bare
+   system-ui stack -- has real character (distinctive, slightly
+   technical) without being the "Inter everywhere" default every AI
+   tool's UI already uses, and Plex Mono gives the existing font-mono
+   chips/code blocks a face that's actually paired with the body text
+   instead of whatever monospace the OS happens to ship.
+   400-italic/500/600/700 cover markdown's own italic, bold, and heading
+   weights; Mono only needs 400, nothing here ever bolds/italicizes it. */
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/400-italic.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+
+@theme {
+  /* Retargets Tailwind's own font-sans/font-mono utility classes (and
+     @tailwindcss/typography's prose defaults, which read font-mono for
+     inline code) at the fonts above -- this project has no
+     tailwind.config.js, Tailwind v4's own CSS-first @theme is the only
+     place these tokens can be overridden. body's own `font:` shorthand
+     below is separate, plain CSS (not a Tailwind utility), so it needs
+     the same font-family repeated by hand. */
+  --font-sans: "IBM Plex Sans", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Modernist red-accent palette, from the "Nav rail, Create/Run split, and a
+   mono-red token set" design pass -- see ARCHITECTURE.md's 范围边界 section
+   (the "前端 'Nav rail, Create/Run split' 重设计" bullet) for how this
+   replaced the earlier orange-accent Phase A palette. --border
+   is a computed color-mix, not a fixed hex, so it always reads correctly
+   against --fg without a separate dark-mode override; --danger reuses the
+   accent ramp rather than introducing a second hue (there is no separate
+   "success" color -- see components using a check icon on neutral text
+   instead). --agent-bubble/--shadow aren't part of that token set (chat-
+   bubble-specific, predates it); --shadow is unchanged. --user-bubble
+   used to just be neutral --card-bg (indistinguishable from the page
+   background, --bg is only ~3% lighter) -- now --accent-soft, an
+   existing token from the same palette that had no component actually
+   using it until now, giving the user's own messages real contrast
+   against both the page and the agent's reply without introducing a new
+   color. */
+:root {
+  color-scheme: light dark;
+  --bg: #f3f2f2;
+  --panel-bg: #eae9e9;
+  --fg: #201e1d;
+  --muted: #7d7979;
+  --border: color-mix(in srgb, var(--fg) 40%, transparent);
+  --accent: #ec3013;
+  --accent-hover: #dd2b0f;
+  --accent-soft: #fff2ef;
+  --accent-fg: #f3f2f2;
+  --danger: #dd2b0f;
+  --danger-fg: #7c1405;
+  --card-bg: #f8f4f4;
+  --user-bubble: var(--accent-soft);
+  --user-bubble-fg: var(--fg);
+  --agent-bubble: transparent;
+  --agent-bubble-fg: #1f1f1f;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --code-bg: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #2d2b2b;
+    --panel-bg: #444141;
+    --fg: #f8f4f4;
+    --muted: #9b9797;
+    --border: color-mix(in srgb, var(--fg) 18%, transparent);
+    --accent: #ff563c;
+    --accent-hover: #ff9783;
+    --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+    --accent-fg: #2d2b2b;
+    --danger: #ff9783;
+    --danger-fg: #ffc4b8;
+    --card-bg: #444141;
+    --user-bubble: var(--accent-soft);
+    --user-bubble-fg: var(--fg);
+    --agent-bubble: transparent;
+    --agent-bubble-fg: #ece9e6;
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    --code-bg: color-mix(in srgb, var(--fg) 12%, transparent);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font:
+    15px/1.5 "IBM Plex Sans",
+    system-ui,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}
+
+/* Maps @tailwindcss/typography's own CSS variables onto this app's
+   existing tokens (which already flip for prefers-color-scheme via the
+   @media block above) instead of the plugin's default gray palette or
+   Tailwind's dark: variant -- keeps rendered markdown visually part of
+   this app, not a generic "prose" block dropped in. Sized down a step
+   (headings/spacing) from the plugin's own defaults, which assume a
+   full article layout, not a ~700px chat bubble. */
+.md-prose {
+  --tw-prose-body: var(--agent-bubble-fg);
+  --tw-prose-headings: var(--agent-bubble-fg);
+  --tw-prose-bold: var(--agent-bubble-fg);
+  --tw-prose-links: var(--accent);
+  --tw-prose-bullets: var(--muted);
+  --tw-prose-counters: var(--muted);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--agent-bubble-fg);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted);
+  --tw-prose-code: var(--agent-bubble-fg);
+  --tw-prose-pre-code: var(--agent-bubble-fg);
+  --tw-prose-pre-bg: var(--code-bg);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+.md-prose > :first-child {
+  margin-top: 0;
+}
+.md-prose > :last-child {
+  margin-bottom: 0;
+}
+.md-prose code {
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+  font-weight: 400;
+}
+.md-prose pre code {
+  background: none;
+  padding: 0;
+}
+.md-prose pre {
+  border: 1px solid var(--border);
+}
+.md-prose a {
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
