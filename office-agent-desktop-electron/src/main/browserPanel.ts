@@ -92,6 +92,20 @@ function ensurePanelView(): WebContentsView {
     if (!isMainFrame || errorCode === -3) return;
     attachedWindow?.webContents.send(BROWSER_PANEL_LOAD_ERROR_EVENT, errorDescription);
   });
+  // Real-hardware-reported: clicking a target="_blank" link (or anything
+  // calling window.open()) on a real site (e.g. a Google search result)
+  // spawned a whole separate native OS window showing that page --
+  // Electron's own default behavior for any webContents that doesn't
+  // override this, and exactly the wrong UX for a *single embedded*
+  // panel (no browser chrome, no tabs -- one view). Denying the popup
+  // and navigating this same view instead keeps every link the user
+  // clicks inside the panel, matching how the old screencast
+  // implementation behaved (it had no concept of "new window" at all,
+  // being driven by raw CDP navigate/click commands).
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    void view.webContents.loadURL(url);
+    return { action: "deny" };
+  });
   panelView = view;
   return view;
 }
