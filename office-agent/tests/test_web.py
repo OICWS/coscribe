@@ -3370,10 +3370,13 @@ def test_script_env_package_install_does_not_block_the_event_loop(
         route = next(
             r
             for r in client.app.routes
-            if getattr(r, "path", None) == "/api/script-env/packages" and "POST" in (r.methods or set())
+            if getattr(r, "path", None) == "/api/script-env/packages"
+            and "POST" in (r.methods or set())
         )
         start = time.monotonic()
-        slow_future = client.portal.start_task_soon(route.endpoint, ScriptEnvPackageInstall(package="six"))
+        slow_future = client.portal.start_task_soon(
+            route.endpoint, ScriptEnvPackageInstall(package="six")
+        )
         time.sleep(0.05)  # let the slow call actually start before racing it
         fast_response = client.get("/api/tools")
         fast_elapsed = time.monotonic() - start

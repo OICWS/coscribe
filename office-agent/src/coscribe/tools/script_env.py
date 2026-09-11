@@ -153,7 +153,9 @@ def fallbacks_for_platform() -> list[str]:
     kept separate from the override so the API can show what auto-
     detection alone would find, regardless of what's currently
     configured."""
-    fallback_names = ["py", "python3", "python"] if sys.platform == "win32" else ["python3", "python"]
+    fallback_names = (
+        ["py", "python3", "python"] if sys.platform == "win32" else ["python3", "python"]
+    )
     return [found for found in (shutil.which(name) for name in fallback_names) if found]
 
 
