@@ -1,14 +1,15 @@
 /**
- * Browser panel, Electron migration Phase 2 -- a real, natively-embedded
- * `WebContentsView` child of the main window, replacing the screencast/
- * CDP-relay implementation (`office-agent/src/coscribe/web/browser_panel.py`
- * + `/ws/browser`) that the plain-browser-tab and Tauri paths still use.
- * See office-agent/ROADMAP.md's "Browser panel native-window migration
- * plan" for the full design; this file is Phase 2's entire scope: real
- * embedding + navigation, no CDP, no screencast, no synthetic input relay
- * -- a `WebContentsView` is a real, natively-interactive surface, so
- * mouse/keyboard/IME all just work with zero code here. Element-picking
- * (Phase 3) is not implemented yet.
+ * Browser panel, Electron migration Phases 2-3 -- a real, natively-
+ * embedded `WebContentsView` child of the main window, replacing the
+ * screencast/CDP-relay implementation
+ * (`office-agent/src/coscribe/web/browser_panel.py` + `/ws/browser`)
+ * that the plain-browser-tab and Tauri paths still use. See
+ * office-agent/ROADMAP.md's "Browser panel native-window migration
+ * plan" for the full design. Phase 2: real embedding + navigation, no
+ * CDP, no screencast, no synthetic input relay -- a `WebContentsView` is
+ * a real, natively-interactive surface, so mouse/keyboard/IME all just
+ * work with zero code here. Phase 3: element-picking, see the section
+ * below.
  *
  * One singleton view for the life of the app, not recreated per open/
  * close -- `closeBrowserPanel` only detaches it from the window
@@ -17,9 +18,20 @@
  * exactly like a real browser tab would (this was an explicit real-
  * hardware checkpoint: "closed, reopened, and left open across at least
  * one full close cycle").
+ *
+ * Element-picking (Phase 3): the actual hover-highlight/click-capture
+ * logic lives in browserPanelContent.ts (the panel's own preload,
+ * re-injected on every navigation like a content script) since only
+ * that context can draw *inside* the live page's own DOM -- see that
+ * file's own module docs for why. This file's role is the plumbing
+ * either side of that: forwarding pick-mode on/off down to the content
+ * script, and turning a picked element's rect into a real screenshot
+ * (`capturePage`, no CDP/DPI math needed -- see this project's own
+ * migration plan for why that whole problem class doesn't exist here)
+ * once the content script reports one.
  */
 
-import { WebContentsView, ipcMain, type BrowserWindow } from "electron";
+import { WebContentsView, ipcMain, type BrowserWindow, type Rectangle } from "electron";
 import { join } from "node:path";
 
 // preload/index.ts duplicates each of these exact strings rather than
@@ -33,10 +45,20 @@ export const BROWSER_PANEL_NAVIGATE_CHANNEL = "browser-panel:navigate";
 export const BROWSER_PANEL_BACK_CHANNEL = "browser-panel:back";
 export const BROWSER_PANEL_FORWARD_CHANNEL = "browser-panel:forward";
 export const BROWSER_PANEL_RELOAD_CHANNEL = "browser-panel:reload";
+export const BROWSER_PANEL_SET_PICK_MODE_CHANNEL = "browser-panel:set-pick-mode";
 // Main -> renderer events (webContents.send / ipcRenderer.on), not
 // ipcMain.handle -- same shape as mainWindow.ts's own "sidecar-status".
 export const BROWSER_PANEL_NAVIGATED_EVENT = "browser-panel:navigated";
 export const BROWSER_PANEL_LOAD_ERROR_EVENT = "browser-panel:load-error";
+export const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
+
+// Content-script-facing channels (this file <-> browserPanelContent.ts,
+// the panel's *own* preload -- not the main window's). Duplicated as
+// plain literals in that file too, same "sandboxed preload can't import
+// a local file" constraint dialog.ts's own comment explains -- keep both
+// copies in sync if these ever change.
+const CONTENT_SET_PICK_MODE_CHANNEL = "browser-panel-content:set-pick-mode";
+const CONTENT_PICKED_CHANNEL = "browser-panel-content:picked";
 
 export interface PanelRect {
   x: number;
@@ -45,8 +67,19 @@ export interface PanelRect {
   height: number;
 }
 
+interface PickedElementInfo {
+  tag: string;
+  text: string;
+  rect: Rectangle;
+}
+
 let panelView: WebContentsView | undefined;
 let attachedWindow: BrowserWindow | undefined;
+// Mirrors what was last told to the content script -- re-sent on every
+// navigation (did-navigate handler below), since browserPanelContent.ts
+// re-executes fresh on each new page load and would otherwise forget
+// pick mode was on the moment the user navigates while picking.
+let pickModeActive = false;
 
 function browserPanelContentPreloadPath(): string {
   return join(__dirname, "..", "preload", "browserPanelContent.js");
@@ -78,6 +111,9 @@ function ensurePanelView(): WebContentsView {
   });
   view.webContents.on("did-navigate", (_event, url) => {
     sendStatus(url);
+    // The content script this just reloaded has forgotten pick mode was
+    // on -- see pickModeActive's own comment above.
+    if (pickModeActive) view.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, true);
   });
   view.webContents.on("did-navigate-in-page", (_event, url) => {
     sendStatus(url);
@@ -106,8 +142,36 @@ function ensurePanelView(): WebContentsView {
     void view.webContents.loadURL(url);
     return { action: "deny" };
   });
+  ipcMain.on(CONTENT_PICKED_CHANNEL, (event, info: PickedElementInfo) => {
+    if (event.sender !== view.webContents) return;
+    void handlePicked(view, info);
+  });
   panelView = view;
   return view;
+}
+
+/** capturePage's rect is in the same CSS-pixel/DIP space
+ * getBoundingClientRect() already returns, and the returned NativeImage
+ * is already DPI-correct -- no Emulation.setDeviceMetricsOverride /
+ * captureBeyondViewport dance to get right here at all, unlike
+ * browser_panel.py's own pick_element (see that function's own docstring
+ * for the CDP-side DPI/viewport gotchas this sidesteps entirely: there's
+ * no separate "emulated viewport" concept for a real native view in the
+ * first place). */
+async function handlePicked(view: WebContentsView, info: PickedElementInfo): Promise<void> {
+  if (!attachedWindow || attachedWindow.isDestroyed()) return;
+  const rect: Rectangle = {
+    x: Math.round(info.rect.x),
+    y: Math.round(info.rect.y),
+    width: Math.round(info.rect.width),
+    height: Math.round(info.rect.height),
+  };
+  const image = await view.webContents.capturePage(rect);
+  attachedWindow.webContents.send(BROWSER_PANEL_PICKED_EVENT, {
+    screenshot: image.toJPEG(90).toString("base64"),
+    text: info.text,
+    tag: info.tag,
+  });
 }
 
 function sendStatus(url: string): void {
@@ -144,6 +208,13 @@ function closeBrowserPanel(): void {
   if (panelView && attachedWindow && !attachedWindow.isDestroyed()) {
     attachedWindow.contentView.removeChildView(panelView);
   }
+  // BrowserPanel.tsx unmounts entirely on close (App.tsx only renders it
+  // while its own open flag is true), so its own pickMode React state
+  // always starts fresh (false) on the next open -- reset here too, or a
+  // panel closed mid-pick would silently keep highlighting on reopen
+  // with a "Select" button that no longer looks active.
+  pickModeActive = false;
+  panelView?.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, false);
 }
 
 /** Explicit teardown for app quit -- mirrors sidecar.ts's own
@@ -184,5 +255,9 @@ export function registerBrowserPanelHandlers(win: BrowserWindow): void {
   });
   ipcMain.handle(BROWSER_PANEL_RELOAD_CHANNEL, () => {
     panelView?.webContents.reload();
+  });
+  ipcMain.handle(BROWSER_PANEL_SET_PICK_MODE_CHANNEL, (_event, enabled: boolean) => {
+    pickModeActive = enabled;
+    panelView?.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, enabled);
   });
 }

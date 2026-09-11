@@ -72,6 +72,27 @@ export function onBrowserPanelLoadError(callback: (errorDescription: string) => 
   window.coscribeDesktop.onBrowserPanelLoadError(callback);
 }
 
+/** Element-picking, Electron migration Phase 3. Unlike the non-desktop
+ * canvas path's own hoverElement (React state driving a React-rendered
+ * overlay), there is no hover-rect data to read back here at all -- the
+ * highlight is drawn directly inside the live page's own DOM by
+ * browserPanelContent.ts (this window's React can't paint on top of a
+ * natively-composited child view either way), so this side only ever
+ * needs to turn pick mode on/off and receive the final committed pick. */
+export interface BrowserPanelPickedPayload {
+  screenshot: string;
+  text: string;
+  tag: string;
+}
+
+export async function browserPanelSetPickMode(enabled: boolean): Promise<void> {
+  await window.coscribeDesktop.browserPanelSetPickMode(enabled);
+}
+
+export function onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): void {
+  window.coscribeDesktop.onBrowserPanelPicked(callback);
+}
+
 declare global {
   interface Window {
     coscribeDesktop: {
@@ -85,6 +106,8 @@ declare global {
       browserPanelReload(): Promise<void>;
       onBrowserPanelNavigated(callback: (payload: BrowserPanelNavigatedPayload) => void): void;
       onBrowserPanelLoadError(callback: (errorDescription: string) => void): void;
+      browserPanelSetPickMode(enabled: boolean): Promise<void>;
+      onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): void;
     };
   }
 }

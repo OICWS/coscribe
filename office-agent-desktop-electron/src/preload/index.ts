@@ -42,8 +42,10 @@ const BROWSER_PANEL_NAVIGATE_CHANNEL = "browser-panel:navigate";
 const BROWSER_PANEL_BACK_CHANNEL = "browser-panel:back";
 const BROWSER_PANEL_FORWARD_CHANNEL = "browser-panel:forward";
 const BROWSER_PANEL_RELOAD_CHANNEL = "browser-panel:reload";
+const BROWSER_PANEL_SET_PICK_MODE_CHANNEL = "browser-panel:set-pick-mode";
 const BROWSER_PANEL_NAVIGATED_EVENT = "browser-panel:navigated";
 const BROWSER_PANEL_LOAD_ERROR_EVENT = "browser-panel:load-error";
+const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
 
 interface BrowserPanelRect {
   x: number;
@@ -56,6 +58,12 @@ interface BrowserPanelNavigatedPayload {
   url: string;
   canGoBack: boolean;
   canGoForward: boolean;
+}
+
+interface BrowserPanelPickedPayload {
+  screenshot: string;
+  text: string;
+  tag: string;
 }
 
 contextBridge.exposeInMainWorld("coscribeDesktop", {
@@ -108,6 +116,24 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
   onBrowserPanelLoadError(callback: (errorDescription: string) => void): void {
     ipcRenderer.on(BROWSER_PANEL_LOAD_ERROR_EVENT, (_event, errorDescription: string) =>
       callback(errorDescription),
+    );
+  },
+
+  /** Element-picking, Electron migration Phase 3. Toggling this forwards
+   * down to the panel's own content script (browserPanel.ts's own
+   * set-pick-mode handler), which draws the hover highlight directly in
+   * the live page's own DOM -- there is no highlight-rect state to read
+   * back here the way the old canvas path's hoverElement was, since this
+   * window's React can't draw on top of a natively-composited child view
+   * either way. onPicked fires once per commit (a click while picking),
+   * already carrying the cropped screenshot -- same shape
+   * BrowserCapture/onSendToChat already expect. */
+  browserPanelSetPickMode(enabled: boolean): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_SET_PICK_MODE_CHANNEL, enabled);
+  },
+  onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): void {
+    ipcRenderer.on(BROWSER_PANEL_PICKED_EVENT, (_event, payload: BrowserPanelPickedPayload) =>
+      callback(payload),
     );
   },
 });

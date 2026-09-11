@@ -11,9 +11,11 @@ import {
   browserPanelOpen as electronBrowserPanelOpen,
   browserPanelReload as electronBrowserPanelReload,
   browserPanelReposition as electronBrowserPanelReposition,
+  browserPanelSetPickMode as electronBrowserPanelSetPickMode,
   isElectron,
   onBrowserPanelLoadError,
   onBrowserPanelNavigated,
+  onBrowserPanelPicked,
   type BrowserPanelRect,
 } from "../lib/electron";
 
@@ -455,6 +457,13 @@ export function BrowserPanel({
     onBrowserPanelLoadError((errorDescription) => {
       setElectronLoadError(errorDescription);
     });
+    onBrowserPanelPicked((payload) => {
+      setPicked(payload);
+      // One pick exits pick mode, same as the non-desktop canvas path's
+      // own WS "picked" handler -- the effect below reacting to pickMode
+      // then tells the content script to stop highlighting.
+      setPickMode(false);
+    });
 
     return () => {
       cancelled = true;
@@ -465,6 +474,17 @@ export function BrowserPanel({
     // See the WS effect above's own comment on including tauriMode/
     // electronMode here.
   }, [electronMode]);
+
+  // Element-picking, Electron migration Phase 3: forwards pickMode's own
+  // toggle down to the panel's content script, which draws the highlight
+  // itself (see browserPanelContent.ts). Deliberately its own effect,
+  // separate from the open/reposition one above -- that one only ever
+  // runs once per mount ([electronMode] doesn't change), while pickMode
+  // toggles repeatedly over the component's lifetime.
+  useEffect(() => {
+    if (!electronMode) return;
+    void electronBrowserPanelSetPickMode(pickMode);
+  }, [electronMode, pickMode]);
 
   // Tracks this panel's own on-screen display size -- purely a local
   // rendering concern now (the canvas's own CSS box + backing pixel
@@ -814,14 +834,15 @@ export function BrowserPanel({
           )}
         </div>
       ) : electronMode ? (
-        // Electron migration Phase 2: a real, natively-embedded
-        // WebContentsView paints directly on top of this empty div (see
-        // the effect above) -- no canvas, no IME bridge, no synthetic
-        // input relay, all of that machinery the non-desktop path below
-        // needs simply doesn't apply to a true native child view. No
-        // "Select an element" button yet -- that's Phase 3, not
-        // implemented here; showing a button that doesn't do anything
-        // would be worse than not showing one at all.
+        // A real, natively-embedded WebContentsView paints directly on
+        // top of this empty div (see the effect above) -- no canvas, no
+        // IME bridge, no synthetic input relay, all of that machinery
+        // the non-desktop path below needs simply doesn't apply to a
+        // true native child view. Element-picking (Phase 3): the
+        // highlight itself is drawn inside the live page's own DOM by
+        // browserPanelContent.ts, not here -- this side only toggles
+        // pick mode on/off and receives the final committed pick (see
+        // the pickMode-sync effect below and onBrowserPanelPicked).
         <>
           <div className="flex items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-2">
             <button
@@ -867,6 +888,14 @@ export function BrowserPanel({
             >
               ⟳
             </button>
+            <button
+              type="button"
+              title="Select an element to send to the chat"
+              className={`rounded-md border px-2 py-1 text-xs ${pickMode ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]" : "border-[var(--border)] hover:bg-[var(--card-bg)]"}`}
+              onClick={() => setPickMode((v) => !v)}
+            >
+              Select
+            </button>
           </div>
 
           {electronLoadError && (
@@ -894,6 +923,37 @@ export function BrowserPanel({
               </div>
             )}
           </div>
+
+          {picked && (
+            <div className="flex flex-col gap-2 border-t border-[var(--border)] p-2.5">
+              <img
+                src={`data:image/jpeg;base64,${picked.screenshot}`}
+                alt="Selected element"
+                className="max-h-32 w-full rounded-md border border-[var(--border)] object-contain"
+              />
+              {picked.text && <p className="truncate text-xs text-[var(--muted)]">{picked.text}</p>}
+              <div className="flex justify-end gap-2">
+                <button type="button" className="rounded-md border border-[var(--border)] px-3 py-1 text-xs" onClick={() => setPicked(null)}>
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs text-[var(--accent-fg)]"
+                  onClick={() => {
+                    onSendToChat({
+                      name: `${picked.tag || "element"}.jpg`,
+                      dataUrl: `data:image/jpeg;base64,${picked.screenshot}`,
+                      text: picked.text || undefined,
+                      tag: picked.tag || undefined,
+                    });
+                    setPicked(null);
+                  }}
+                >
+                  Add to chat
+                </button>
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <>

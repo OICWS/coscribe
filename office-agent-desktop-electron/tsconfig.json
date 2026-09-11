@@ -4,7 +4,14 @@
     "module": "CommonJS",
     "moduleResolution": "Node10",
     "ignoreDeprecations": "6.0",
-    "lib": ["ES2022"],
+    // "dom" is needed for browserPanelContent.ts specifically (Electron
+    // migration Phase 3's element-picking content script -- the only
+    // file in this package that runs in a real page/DOM context and
+    // touches document/window/HTMLDivElement/MouseEvent directly). Safe
+    // to include project-wide: it only adds ambient *types*, main-
+    // process files that never reference document/window are unaffected
+    // either way.
+    "lib": ["ES2022", "dom"],
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
