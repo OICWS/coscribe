@@ -464,6 +464,53 @@ def test_usage_events_are_live_per_response_not_summed_across_a_tool_call(
     assert usage_60_index < tool_result_index
 
 
+def test_usage_event_includes_cache_stats_when_the_provider_reports_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real, user-reported gap: the token counter only ever showed a
+    running total_tokens, with no way to tell whether prompt caching was
+    actually reducing anything -- a long, tool-heavy conversation looks
+    identical either way from that one number alone. langchain-core's
+    standard `input_token_details.cache_read` field (populated for
+    Anthropic's own explicit cache_control breakpoints, and, unprompted
+    by any coscribe code, by langchain_openai for any OpenAI-compatible
+    provider that reports its own `prompt_tokens_details.cached_tokens`
+    -- GLM's documented "implicit caching" is exactly this shape) is now
+    surfaced in the "usage" event as cache_read_tokens/input_tokens/
+    cache_hit_rate. See test_usage_event_sent_when_the_model_reports_
+    usage_metadata right above for the *absence* case (no
+    input_token_details at all) -- this proves the *presence* case,
+    including the exact hit-rate arithmetic."""
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="hi there!",
+                usage_metadata=UsageMetadata(
+                    input_tokens=1000,
+                    output_tokens=50,
+                    total_tokens=1050,
+                    input_token_details={"cache_read": 800},
+                ),
+            )
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_usage_cache") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    usage_message = next(m for m in messages if m["type"] == "usage")
+    assert usage_message == {
+        "type": "usage",
+        "total_tokens": 1050,
+        "cache_read_tokens": 800,
+        "input_tokens": 1000,
+        "cache_hit_rate": 0.8,
+    }
+
+
 def test_no_usage_event_when_the_model_never_reports_usage_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

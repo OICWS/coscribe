@@ -103,6 +103,16 @@ export interface QuestionRequiredEvent {
 export interface UsageEvent {
   type: "usage";
   total_tokens: number;
+  /** Present only when the provider actually reported prompt-cache
+   * stats for this call (Anthropic's explicit cache_control breakpoints,
+   * or an OpenAI-compatible provider's own implicit caching -- GLM
+   * documents this, no client-side opt-in needed). Absent, not zero,
+   * when nothing was reported -- "no cache data" and "cache genuinely
+   * missed" read very differently to someone checking whether caching
+   * is working at all. */
+  cache_read_tokens?: number;
+  input_tokens?: number;
+  cache_hit_rate?: number;
 }
 
 export interface TasksChangedEvent {

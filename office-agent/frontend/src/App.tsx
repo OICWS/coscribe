@@ -262,7 +262,13 @@ function App() {
               commands={commands}
               modePill={<ModePill planMode={state.planMode} acceptEdits={state.acceptEdits} sendRaw={sendRaw} />}
               modelPicker={<ModelPicker currentModel={state.model} onSwitch={onSwitchModel} />}
-              usageRing={<ContextRing totalTokens={state.totalTokens} contextWindow={state.contextWindow} />}
+              usageRing={
+                <ContextRing
+                  totalTokens={state.totalTokens}
+                  contextWindow={state.contextWindow}
+                  cacheStats={state.cacheStats}
+                />
+              }
               onSend={onSend}
               onStop={onStop}
               onLocalError={onLocalError}

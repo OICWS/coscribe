@@ -65,6 +65,13 @@ export interface ChatState {
   workspaceExplicit: boolean;
   items: LogItem[];
   totalTokens: number;
+  /** Prompt-cache stats from the most recent "usage" event, null when
+   * the provider hasn't reported any yet this session (see UsageEvent's
+   * own comment on why "no data" and "genuinely zero" stay distinguishable
+   * all the way through). Not accumulated across turns -- mirrors
+   * totalTokens' own "latest running total, not a sum" shape, and
+   * Codex CLI's own per-call cache_hit_rate metric this was modeled on. */
+  cacheStats: { cacheReadTokens: number; inputTokens: number; hitRate: number } | null;
   turnInFlight: boolean;
   error: string | null;
   /** Bumped on tasks_changed/workflow_saved/workflow_run_progress -- a
@@ -106,6 +113,7 @@ export const initialChatState: ChatState = {
   workspaceExplicit: false,
   items: [],
   totalTokens: 0,
+  cacheStats: null,
   turnInFlight: false,
   error: null,
   workflowEventTick: 0,
@@ -359,7 +367,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
 
     case "usage":
-      return { ...state, totalTokens: action.total_tokens };
+      return {
+        ...state,
+        totalTokens: action.total_tokens,
+        cacheStats:
+          action.cache_read_tokens !== undefined &&
+          action.input_tokens !== undefined &&
+          action.cache_hit_rate !== undefined
+            ? {
+                cacheReadTokens: action.cache_read_tokens,
+                inputTokens: action.input_tokens,
+                hitRate: action.cache_hit_rate,
+              }
+            : state.cacheStats,
+      };
 
     case "error":
       return {

@@ -161,6 +161,41 @@ def _now_iso_lg() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _usage_event(usage: UsageMetadata) -> dict[str, Any]:
+    """Build the "usage" WS event from a response's UsageMetadata,
+    including prompt-cache stats when the provider reports them --
+    real, user-reported gap: the token counter only ever showed
+    total_tokens, with no way to tell whether prompt caching was
+    actually reducing anything or a long, tool-heavy conversation was
+    genuinely just that large. `input_token_details.cache_read` is
+    langchain-core's own standard field for "how many of this call's
+    input tokens were served from cache" -- populated for Anthropic
+    (this project's own explicit cache_control breakpoints) *and*,
+    unprompted by any coscribe code, for any OpenAI-compatible provider
+    too (langchain_openai maps the raw API's own `prompt_tokens_details.
+    cached_tokens` into this same field -- confirmed by reading its
+    source directly). GLM specifically documents "implicit caching":
+    automatic, no cache_control equivalent needed, so this field simply
+    starts appearing once a call's prompt prefix repeats one already
+    seen. Omitted (not sent as 0) when the provider didn't report it at
+    all, so the frontend can distinguish "no cache activity reported"
+    from "genuinely zero tokens were cached this call" -- the two read
+    very differently to a user trying to tell whether caching is
+    working at all. cache_hit_rate is computed here, not on the
+    frontend, so every caller (there are three) gets the identical
+    definition (cache_read / input_tokens, Codex CLI's own metric,
+    chosen over total_tokens as the denominator since output tokens are
+    never cacheable and would understate the real hit rate)."""
+    event: dict[str, Any] = {"type": "usage", "total_tokens": usage["total_tokens"]}
+    cache_read = usage.get("input_token_details", {}).get("cache_read")
+    input_tokens = usage.get("input_tokens")
+    if cache_read is not None and input_tokens:
+        event["cache_read_tokens"] = cache_read
+        event["input_tokens"] = input_tokens
+        event["cache_hit_rate"] = cache_read / input_tokens
+    return event
+
+
 def _can_resolve_approvals(websocket: Any) -> bool:
     """True for a real client connection able to actually answer an
     approval_required prompt; False for a silent/background stand-in
@@ -1018,9 +1053,7 @@ class ChatSessionLG:
                 # own docstring), so sending it here, at every boundary this
                 # function already runs at, is a correct running total, not
                 # an approximation.
-                await websocket.send_json(
-                    {"type": "usage", "total_tokens": segment.usage_metadata["total_tokens"]}
-                )
+                await websocket.send_json(_usage_event(segment.usage_metadata))
             segment = None
 
         stream = agent.astream(turn_input, config=config, stream_mode=["messages"])
@@ -1591,9 +1624,7 @@ class ChatSessionLG:
             text = await self._resolve_pending_approvals(websocket) or ""
             await websocket.send_json({"type": "agent_message", "text": _format_reply(text)})
             if self._last_usage_metadata is not None:
-                await websocket.send_json(
-                    {"type": "usage", "total_tokens": self._last_usage_metadata["total_tokens"]}
-                )
+                await websocket.send_json(_usage_event(self._last_usage_metadata))
             await websocket.send_json({"type": "tasks_changed"})
 
     async def _handle_compact(self, websocket: WebSocket) -> None:
@@ -2628,7 +2659,5 @@ class ChatSessionLG:
         # all, in which case the event is omitted entirely rather than
         # showing a fabricated number.
         if self._last_usage_metadata is not None:
-            await websocket.send_json(
-                {"type": "usage", "total_tokens": self._last_usage_metadata["total_tokens"]}
-            )
+            await websocket.send_json(_usage_event(self._last_usage_metadata))
         await websocket.send_json({"type": "tasks_changed"})

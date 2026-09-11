@@ -5,6 +5,10 @@ import { formatTokenCount } from "../lib/format";
 interface ContextRingProps {
   totalTokens: number;
   contextWindow: number;
+  /** null when the provider hasn't reported prompt-cache stats yet this
+   * session -- see reducer.ts's own comment on why that stays distinct
+   * from "reported, zero tokens cached." */
+  cacheStats: { cacheReadTokens: number; inputTokens: number; hitRate: number } | null;
 }
 
 const RADIUS = 9;
@@ -18,7 +22,7 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
  * (useClickOutside + an absolutely-positioned panel opening upward).
  * Opens right-aligned (`right-0`) since it sits flush against the
  * composer's own right edge -- a left-aligned panel would run off it. */
-export function ContextRing({ totalTokens, contextWindow }: ContextRingProps) {
+export function ContextRing({ totalTokens, contextWindow, cacheStats }: ContextRingProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   useClickOutside(rootRef, () => setOpen(false), open);
@@ -61,6 +65,15 @@ export function ContextRing({ totalTokens, contextWindow }: ContextRingProps) {
           <div className="h-1.5 overflow-hidden rounded-full bg-[var(--border)]">
             <div className="h-full bg-[var(--accent)]" style={{ width: `${percent}%` }} />
           </div>
+          {cacheStats && (
+            <div className="mt-1.5 flex items-center justify-between gap-3 border-t border-[var(--border)] pt-1.5">
+              <span className="text-[var(--muted)]">Cache hit (last call)</span>
+              <span>
+                {formatTokenCount(cacheStats.cacheReadTokens)} / {formatTokenCount(cacheStats.inputTokens)} (
+                {(cacheStats.hitRate * 100).toFixed(0)}%)
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
