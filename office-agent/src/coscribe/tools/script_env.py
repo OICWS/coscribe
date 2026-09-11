@@ -157,6 +157,33 @@ def fallbacks_for_platform() -> list[str]:
     return [found for found in (shutil.which(name) for name in fallback_names) if found]
 
 
+def working_interpreters(candidates: list[str]) -> list[str]:
+    """Filter `candidates` down to the ones that actually run as a Python
+    interpreter -- for the Environment tab's "auto-detected" *display*
+    list specifically, not for _venv_create_candidates' own try-in-order
+    fallback chain (that one is deliberately left unfiltered: trying a bad
+    candidate there costs nothing, it fails instantly and falls through).
+    Showing one there is different -- it's offered to the user as a
+    clickable "use this" chip, and on a packaged desktop build
+    sys.executable is *always* wrong (the app's own frozen exe, not a
+    real python.exe -- see _venv_create_candidates' docstring), so
+    presenting it as "auto-detected" would be actively misleading rather
+    than merely redundant. Real-hardware-reported: the interpreter picker
+    listed the app's own coscribe-server.exe as an auto-detected
+    candidate on a packaged build."""
+    working = []
+    for candidate in candidates:
+        try:
+            result = subprocess.run(
+                [candidate, "--version"], capture_output=True, text=True, timeout=5.0
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode == 0:
+            working.append(candidate)
+    return working
+
+
 def venv_python(venv_dir: Path) -> Path:
     # venv's own bin/Scripts layout genuinely differs by platform (unlike
     # e.g. the soffice subprocess calls elsewhere, which don't need a

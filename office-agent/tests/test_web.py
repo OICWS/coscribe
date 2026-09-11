@@ -56,7 +56,7 @@ from coscribe.config import Settings
 from coscribe.runtime import secrets as secrets_module
 from coscribe.runtime_lg.audit import AuditLog
 from coscribe.tools.presentations import PresentationToolkit
-from coscribe.web.app import create_app_lg
+from coscribe.web.app import ScriptEnvPackageInstall, create_app_lg
 
 
 class FakeToolCallingChatModel(BaseChatModel):
@@ -3333,6 +3333,55 @@ def test_set_script_env_interpreter_rejects_a_bad_path(
     body = response.json()
     assert body["success"] is False
     assert body["error"]
+
+
+def test_script_env_package_install_does_not_block_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for a real, live-reported bug: this endpoint used
+    to call install_package directly inside its `async def` handler, which
+    runs the blocking subprocess.run wait *on the single asyncio event
+    loop* -- freezing every other request this process serves for as long
+    as pip takes, not just this one response. Live symptom: after setting
+    a new interpreter override (which deletes the existing venv, see
+    set_interpreter_override) and clicking Add on a package, the whole
+    app looked dead -- Settings' other tabs came back empty, and a chat
+    message sent over the WebSocket got no response at all.
+
+    Proven here by making install_package artificially slow (a plain
+    time.sleep, standing in for a real multi-minute pip subprocess) and
+    confirming a concurrent, unrelated request still completes quickly
+    instead of queuing behind it -- only possible if the slow call is
+    actually offloaded to a thread (asyncio.to_thread) rather than
+    awaited inline on the same loop. Uses client.portal (the anyio
+    BlockingPortal TestClient itself runs the app's event loop through --
+    see test_wake_poll_loop_publishes_background_events_for_fired_wakes_
+    and_triggers' docstring for the same idiom) to genuinely run the slow
+    call concurrently with a normal client.get, rather than TestClient's
+    usual one-request-at-a-time synchronous dispatch."""
+
+    def _slow_install(state_dir: Path, name: str) -> dict[str, object]:
+        time.sleep(0.5)
+        return {"success": True, "error": None}
+
+    monkeypatch.setattr("coscribe.web.app.install_package", _slow_install)
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        route = next(
+            r
+            for r in client.app.routes
+            if getattr(r, "path", None) == "/api/script-env/packages" and "POST" in (r.methods or set())
+        )
+        start = time.monotonic()
+        slow_future = client.portal.start_task_soon(route.endpoint, ScriptEnvPackageInstall(package="six"))
+        time.sleep(0.05)  # let the slow call actually start before racing it
+        fast_response = client.get("/api/tools")
+        fast_elapsed = time.monotonic() - start
+        slow_result = slow_future.result(timeout=5)
+
+    assert fast_response.status_code == 200
+    assert fast_elapsed < 0.4  # well under the 0.5s sleep -- it wasn't queued behind it
+    assert slow_result == {"success": True, "error": None}
 
 
 def _node_npm_available_and_reachable() -> bool:
