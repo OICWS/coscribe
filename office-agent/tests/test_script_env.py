@@ -69,6 +69,33 @@ def test_ensure_script_env_creates_a_working_venv(real_state_dir: Path) -> None:
 
 
 @pytestmark_network
+def test_ensure_script_env_falls_back_to_a_real_python_when_sys_executable_cant_create_a_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for a real, live-reported bug: a packaged desktop
+    build's sys.executable is the frozen coscribe-server.exe itself, not
+    a real python.exe -- `subprocess.run([sys.executable, "-m", "venv",
+    path])` never reaches venv's module runner at all, it's rejected by
+    this app's own --host/--port argparse as "unrecognized arguments"
+    instead, on a fresh Windows machine that had never used this feature
+    before ("unrecognized arguments: -m venv <script-env path>", verbatim
+    from the report). Simulated here by pointing sys.executable at a
+    binary that exits nonzero for any arguments (stands in for the
+    frozen exe's own argparse rejecting "-m venv <path>") -- proves
+    _venv_create_candidates' fallback chain (py/python3/python found via
+    PATH) still produces a real, working venv instead of surfacing that
+    failure. Uses a fresh tmp_path, not the module-scoped real_state_dir
+    fixture -- ensure_script_env is idempotent (returns early if the venv
+    already exists), so reusing that shared fixture here would skip the
+    fallback path entirely rather than exercising it."""
+    monkeypatch.setattr("coscribe.tools.script_env.sys.executable", "/bin/false")
+
+    venv_dir = ensure_script_env(tmp_path)
+
+    assert venv_python(venv_dir).is_file()
+
+
+@pytestmark_network
 def test_ensure_script_env_is_idempotent(real_state_dir: Path) -> None:
     first = ensure_script_env(real_state_dir)
     second = ensure_script_env(real_state_dir)

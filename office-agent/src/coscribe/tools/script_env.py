@@ -27,6 +27,7 @@ Code's own Bash tool on a sandboxless host).
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -41,6 +42,38 @@ _SETUP_TIMEOUT = 300.0
 # promises this. Anything else the user wants is on them to add from the
 # Environment settings tab.
 _BASELINE_PACKAGES = ("openpyxl", "python-docx", "python-pptx", "pandas", "pdfplumber")
+
+
+def _venv_create_candidates() -> list[str]:
+    """Interpreters to try, in order, for bootstrapping the script-env
+    venv. sys.executable first -- correct and sufficient in a normal dev
+    install, where it's the real interpreter coscribe itself runs on. The
+    rest are a fallback for when it isn't: a frozen desktop build makes
+    sys.executable resolve to the app's own packaged executable rather
+    than a real python.exe, so `subprocess.run([sys.executable, "-m",
+    "venv", path])` doesn't reach venv's module runner at all -- it gets
+    caught by *this app's own* `--host`/`--port` argparse (web/app.py's
+    main()) as unrecognized arguments instead. Real, live-reported bug on
+    a fresh Windows machine: "unrecognized arguments: -m venv
+    <script-env path>". Deliberately not gated on `sys.frozen` (that flag
+    is PyInstaller-specific -- e.g. Nuitka, which this project has also
+    experimented with, uses a different one) -- trying sys.executable
+    first and only falling back on an actual failure works regardless of
+    which freezing tool ends up building the desktop exe, and costs
+    nothing extra when it already works today (a bad `-m venv` call fails
+    at this app's own argument parsing, instantly, before venv creation
+    ever starts -- no wasted venv-timeout wait, no partial venv left
+    behind to clean up).
+
+    "py" tried before "python"/"python3" on Windows specifically: the
+    official python.org installer always registers the "py" launcher on
+    PATH (via C:\\Windows) even when the "Add python.exe to PATH"
+    checkbox was left unchecked -- not every real end user's default
+    choice -- so it's a genuinely more reliable find on Windows, not just
+    a synonym for "python"."""
+    fallback_names = ["py", "python3", "python"] if sys.platform == "win32" else ["python3", "python"]
+    fallbacks = [found for found in (shutil.which(name) for name in fallback_names) if found]
+    return [sys.executable, *fallbacks]
 
 
 def venv_python(venv_dir: Path) -> Path:
@@ -72,14 +105,31 @@ def ensure_script_env(state_dir: Path) -> Path:
     if venv_python(venv_dir).is_file():
         return venv_dir
     venv_dir.parent.mkdir(parents=True, exist_ok=True)
+    candidates = _venv_create_candidates()
     result = subprocess.run(
-        [sys.executable, "-m", "venv", str(venv_dir)],
+        [candidates[0], "-m", "venv", str(venv_dir)],
         capture_output=True,
         text=True,
         timeout=_VENV_TIMEOUT,
     )
+    for interpreter in candidates[1:]:
+        if result.returncode == 0:
+            break
+        result = subprocess.run(
+            [interpreter, "-m", "venv", str(venv_dir)],
+            capture_output=True,
+            text=True,
+            timeout=_VENV_TIMEOUT,
+        )
     if result.returncode != 0:
-        raise RuntimeError(f"Could not create the script environment: {result.stderr.strip()}")
+        raise RuntimeError(
+            "Could not create the script environment (tried: "
+            + ", ".join(candidates)
+            + f"). Last error: {result.stderr.strip()}. If this machine has no "
+            "system Python installed, install Python 3 from python.org -- the "
+            '"Add python.exe to PATH" checkbox doesn\'t need to be checked, the '
+            '"py" launcher it also installs is enough -- then try again.'
+        )
     seed_result = subprocess.run(
         [str(venv_python(venv_dir)), "-m", "pip", "install", *_BASELINE_PACKAGES],
         capture_output=True,
