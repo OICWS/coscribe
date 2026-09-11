@@ -4033,6 +4033,20 @@ Packaging: `electron-builder` config in `package.json` (portable + NSIS Windows 
 
 **Project-management note, not a code finding**: to work around a real GitHub Actions free-tier storage-quota wall hit during this phase's real-hardware testing (documented as time-weighted GB-hours billing, not a live snapshot -- deleting old artifacts doesn't retroactively free an already-elevated month's usage), the user forked the working tree (as of the Sixth finding above) into a new **public** repository, `OICWS/coscribe` -- public repos get unlimited free Actions minutes/storage. `office-agent-desktop/` (the Tauri shell being retired) and its own CI workflows were deliberately left out of that fork (not needed by the Electron path this phase is actually testing); `office-agent-desktop-electron/scripts/stage-sidecar.sh` was made self-contained there instead of delegating to the (now-absent) Tauri script. Real-hardware testing continues from `OICWS/coscribe` going forward -- fixes land in both repos until/unless the private `OICWS/project` repo is formally retired in favor of the public one.
 
+**Ninth real-hardware finding, backend: `run_python_script`'s venv creation failed on a fresh Windows machine with "unrecognized arguments: -m venv \<path\>".** Root-caused (background agent) to `sys.executable` resolving to the packaged `coscribe-server.exe` itself in a PyInstaller build, not a real `python.exe` -- `subprocess.run([sys.executable, "-m", "venv", path])` never reaches venv's module runner at all, it's caught by this app's own `--host`/`--port` argparse instead. Fixed: `tools/script_env.py`'s `_venv_create_candidates()` tries `sys.executable` first (correct in dev), then falls back through `shutil.which("py"/"python3"/"python")` (Windows-ordered, `py` first since the official installer always registers it even without "Add to PATH" checked) -- deliberately not gated on `sys.frozen` (PyInstaller-specific; this project has also experimented with Nuitka) so the same logic works regardless of freezing tool. New regression test monkeypatches `sys.executable` to a failing binary and confirms the fallback chain still produces a working venv; verified as a true negative (reverting the fix reproduces the exact reported error text).
+
+**Tenth real-hardware finding, frontend: a new message could be sent while a turn was still in flight.** The Send-button-to-Stop-button swap in `Composer.tsx` was purely cosmetic -- the Enter-key submit path never actually checked `turnInFlight`. Fixed by gating `submit()` on it, while explicitly preserving the `/stop`-as-text escape hatch (`App.tsx`'s deliberate bypass so typing "/stop" always reaches the backend even mid-turn). Verified live against a real running server + real browser (Playwright): sent message 1, immediately attempted message 2 -- it stayed in the draft box, unsent, until turn 1 actually finished, then sent cleanly on retry.
+
+**Eleventh, a new feature, not a bug fix: prompt-cache-hit-rate display.** Requested after a real report that one GLM 4.6v conversation burned 5M+ tokens with "no visible caching happening." Researched how comparable agent tools surface this before designing coscribe's own version (per your explicit ask -- pi, DeepSeek Harness, Cowork, Claude Code, Codex): landed on Codex's own metric definition, `cache_hit_rate = cached_tokens / input_tokens` (not `/total_tokens`, since output is never cacheable). `web/session.py`'s `_usage_event()` reads LangChain's standard `UsageMetadata.input_token_details.cache_read` (a cross-provider field -- `langchain_openai` already maps GLM's OpenAI-compatible `prompt_tokens_details.cached_tokens` into it automatically, no coscribe-side GLM-specific code needed) and adds a "Cache hit (last call)" row to `ContextRing.tsx`'s popover. Confirmed live against real GLM traffic: 0% on an early turn (expected -- nothing cached yet), rising to 92% after several turns in the same conversation, confirming the underlying mechanism works and the earlier 0% reports were just "not enough turns yet," not a bug.
+
+**Twelfth real-hardware finding, frontend: the Environment tab's Add/Remove/list-load calls only had `try/finally`, no `catch`.** An unexpected failure (a 500 from the venv failing to create, a dropped connection) threw from `rest.ts`'s `checkOk()` and became a silent unhandled rejection -- the spinner stopped, but the actual error message never reached the user ("clicked Add, nothing happened"). This turned out to be the same underlying symptom as an earlier pasted DevTools log showing `/api/script-env/packages` 500s with no visible UI reaction. Fixed by adding `catch` blocks to `install()`/`remove()`/`refresh()` in `PackageListSection.tsx`, surfacing the real error via the existing status banner.
+
+**Thirteenth, a new feature: manual Python-interpreter override.** A real machine with Python genuinely installed still failed every auto-detected candidate -- root-caused to two independent, compounding causes: (1) a GUI app's inherited PATH can be stale relative to a freshly-installed Python (Explorer's own environment block doesn't refresh until logoff/logon), and (2) Windows' `python.exe`/`python3.exe` "app execution alias" stubs under `WindowsApps` resolve via `shutil.which` without being real interpreters. No amount of smarter auto-detection closes either gap -- researched how comparable tools solve this (VS Code's Python extension hits the identical wall) and mirrored its answer: auto-detect as the default, plus an always-available manual "enter interpreter path" escape hatch. `tools/script_env.py` gained `get_interpreter_override`/`set_interpreter_override` (validated by actually running `--version`, never trusting a path that merely exists; a configured override outranks even `sys.executable`; setting a new one deletes the existing script-env venv so it actually rebuilds with the chosen interpreter). New `PythonInterpreterSection.tsx` in the Environment tab: a path field plus clickable auto-detected chips. Separately found and fixed: the auto-detected list itself could show a candidate guaranteed to fail if clicked (a packaged build's `sys.executable` *is* the app's own frozen exe -- live-reported: the picker listed `coscribe-server.exe` as "auto-detected") -- added `working_interpreters()` to filter the *display* list to candidates that actually run `--version` successfully, while leaving `_venv_create_candidates`' own try-in-order fallback chain unfiltered (a bad candidate there is instant and harmless, unlike offering it to a user as a "use this" chip). Confirmed live: selecting one's own external venv as the base interpreter builds a fresh, fully isolated coscribe-owned venv from it (does not inherit that venv's existing packages) -- discussed with the user and confirmed this isolation is the intended, wanted behavior, not a gap to fix.
+
+**Fourteenth real-hardware finding, and the most severe of this round: the script-env/node-env REST endpoints were blocking the entire process's single asyncio event loop.** `install_package`/`list_packages`/`uninstall_package`/`set_interpreter_override` all shell out via `subprocess.run` with multi-minute timeouts (venv creation allows 120s, baseline package seeding 300s) -- called directly inside their `async def` FastAPI handlers (no `asyncio.to_thread`), the blocking wait froze *every other request this process served*, not just that one response: other Settings tabs came back empty (their GETs were queued behind it), and a chat message sent over the WebSocket got no response at all, looking exactly like a dropped connection. This bug already existed before the interpreter picker (any first-ever venv creation hit it too), just rarely enough to go unnoticed -- the picker's rebuild-on-override-change behavior made it trivial to trigger, and landed squarely in the exact recovery flow meant to fix a broken setup: live-reported, setting an interpreter override then clicking Add froze the whole app for over a minute. Fixed by wrapping each call in `asyncio.to_thread`, matching the pattern already used elsewhere in the same file (`install_browser`, `npm_latest_version`). Proven with a regression test that races a slow `install_package` against a concurrent unrelated request via `client.portal` (anyio's `BlockingPortal`, the same mechanism `TestClient` itself runs the app's event loop through) -- confirmed as a true negative (fails without the fix, reproducing the exact ~0.5s-queued-behind symptom) -- and re-confirmed against a real running server + real subprocess calls in this sandbox (a real package install completed in ~1s while a concurrent unrelated request returned in ~0.16s, not queued behind it).
+
+**Phase 1 now considered real-hardware-stable.** Fourteen real-hardware/live-report rounds in, no open Electron-shell-specific bugs remain (the Ninth through Fourteenth findings above are all backend/frontend, not shell-specific -- confirming the shell itself, not just its surrounding features, has settled). Phase 2 (`WebContentsView` embedding, replacing the Browser panel's screencast/CDP-relay implementation with a true native child view) starts next.
+
 ---
 
 ## Later -- real intentions, not actively scheduled
@@ -4040,6 +4054,65 @@ Packaging: `electron-builder` config in `package.json` (portable + NSIS Windows 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
 above) comes first; these get picked back up once that's done and there's
 a concrete reason to prioritize a new surface.
+
+- **Stop can't actually interrupt a Playwright MCP action already in
+  progress** -- not started; noted here per your request ("先记录到
+  roadmap", explicitly "不投入" for now). Live-reported: `/stop` during a
+  `playwright_browser_*` call left the tool visibly still running
+  underneath a UI that showed the turn as stopped, until a hard app
+  restart. Researched real prior art before proposing anything (MCP spec,
+  the installed `mcp` Python SDK's own source, playwright-mcp's issue
+  tracker, an "Agent Patterns Catalog" stop/cancel writeup, and a Claude
+  Code issue showing the *same* class of bug in a more mature
+  implementation): the MCP spec does define client-sent
+  `notifications/cancelled` (stdio transport; HTTP transport instead
+  treats closing the SSE stream as the cancel signal) but a server
+  receiving it "MAY ignore ... if the request cannot be cancelled" -- no
+  guarantee. The installed SDK (`mcp` 1.29.0, read directly:
+  `shared/session.py`'s `send_request()`) never sends that notification
+  when the caller's own asyncio Task is cancelled, and exposes no public
+  request-id hook a caller could use to send it manually without
+  reaching into private internals. Separately, playwright-mcp itself
+  (Microsoft's own) shows no evidence in its docs/issues of honoring
+  mid-action cancellation at all -- its only long-running-operation
+  tools are timeouts (`PLAYWRIGHT_MCP_TIMEOUT_ACTION`/`_NAVIGATION`) and
+  progress notifications, not real interruption. The Agent Patterns
+  Catalog's own "Stop/Cancel" pattern write-up explicitly excludes this
+  exact situation from its recommended "propagate a cancellation token"
+  approach ("when cancellation cannot propagate cleanly and would leave
+  inconsistent state"). Recommended path when this gets picked back up:
+  an honest UX message on Stop ("stopped waiting, but this step may
+  still be finishing in the background") rather than sinking effort into
+  a protocol-level fix the server would likely ignore anyway. One
+  genuine silver lining confirmed live: with accept-edits on, hitting
+  Stop in the narrow window *before* a queued tool call actually starts
+  executing does cleanly abort it ("User rejected the tool call ... The
+  tool was not executed") -- only an already-*executing* call can't be
+  recalled.
+
+- **Prompt-cache hit rate could likely be improved, not just displayed**
+  -- not started; noted here per your request. The display feature
+  itself (this file's Phase 8ae, Eleventh finding) is confirmed working
+  (92% after several turns in one real GLM conversation), but no
+  investigation has happened yet into *raising* that rate (e.g. whether
+  anything in a turn's request shape avoidably varies and caps how much
+  of the prefix stays stable). Deliberately deferred -- explicitly not
+  blocking on this ("暂时现在不管").
+
+- **A one-time font-swap flash on load** -- not started; noted here per
+  your request. Live-reported: a few seconds after the app becomes
+  interactive, right around when the model picker/provider list finishes
+  loading, the whole UI's font visibly flashes once. Not yet root-caused
+  with certainty, but the likely cause: `@fontsource/ibm-plex-sans`'s
+  default `font-display: swap` renders with a fallback system font
+  first, then swaps to the real webfont once it downloads -- a classic
+  FOUC-shaped flash, though the exact timing coincidence with the model
+  list specifically hasn't been confirmed as causal versus two unrelated
+  events just landing close together. Low severity (the user's own
+  description: "看起来变换不大") -- deferred rather than guessing at a
+  `font-display`/preload fix without being able to visually verify it in
+  this sandbox (no real browser rendering available here beyond
+  automated, non-visual checks).
 
 - **Startup latency: MCP client imported unconditionally, even with zero
   connectors configured** -- not started; noted here per your request
