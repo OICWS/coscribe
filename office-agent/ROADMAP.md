@@ -4049,11 +4049,38 @@ Packaging: `electron-builder` config in `package.json` (portable + NSIS Windows 
 
 ---
 
+## Phase 8af -- Browser panel: Electron shell Phase 2 (`WebContentsView` embedding), first real-hardware round
+
+Built per the plan's own Phase 2 scope: `office-agent-desktop-electron/src/main/browserPanel.ts` (one singleton `WebContentsView`, attached via `mainWindow.contentView.addChildView()`/positioned via `setBounds()`, IPC handlers for open/reposition/close/navigate/back/forward/reload routed straight to the view's own `webContents` methods, no CDP), an intentionally empty `src/preload/browserPanelContent.ts` wired in now so Phase 3 doesn't need a second real-hardware round just to add it, and a new `electronMode` branch in `BrowserPanel.tsx` alongside the untouched `tauriMode`/non-desktop paths. `browser_panel.py`/`/ws/browser` left completely untouched, exactly as planned. Verified in this sandbox: `tsc`/`build`/`lint` clean on both sides; a headless Xvfb + Playwright `_electron` smoke test was attempted but never produced output and was killed after running far past its own timeouts -- inconclusive, not a pass or a fail, most likely this sandbox's own lack of a real GPU/compositor for a natively-embedded child view specifically (plain BrowserWindow rendering worked fine in Phase 1's own Xvfb test) rather than an app bug, but not confirmed either way. Real hardware is what actually matters here regardless.
+
+**First real-hardware round, all of the plan's own Real-hardware checkpoint 2 items confirmed working**: real page rendering (sharp, scrolls correctly); window resize, drag-to-resize the panel's own width, and moving the window all track correctly with no visible lag; minimize/restore survives; closing and reopening the panel preserves the page's state instead of reloading ("就好像网页放在后台" -- exactly the intended `removeChildView`-not-`destroy` design); native text input (including IME) confirmed working with zero extra code, as expected for a true interactive surface. **The pass/fail bar itself passed**: quit via tray "Quit" with the panel open and previously used exits the app cleanly, no Task Manager needed -- the actual regression this whole migration exists to fix.
+
+**One real bug found and fixed**: clicking a real `target="_blank"` link (a Google search result) spawned a whole separate native OS window showing that page instead of navigating within the panel -- Electron's own default behavior for any `webContents` that doesn't override it via `setWindowOpenHandler`, wrong for a single embedded panel with no browser chrome/tabs concept. Fixed: `setWindowOpenHandler` now denies the popup and navigates the same view instead, keeping every link the user clicks inside the panel (matching the old screencast implementation, which had no "new window" concept at all to get wrong).
+
+**One confirmed pre-existing, non-regressing gap, not fixed**: the embedded page's own Ctrl+scroll/Ctrl+Plus-Minus zoom doesn't do anything. Not a regression from the old screencast path either (that one only ever forwarded raw wheel deltas as CDP mouse-wheel events, with no ctrl-modifier zoom handling of its own) -- genuinely never implemented in either version. Deferred, not started -- see "Later" section below.
+
+**One confirmed, known, non-code characteristic, not a bug**: every freshly-unpacked build's very first launch is slow enough to look hung (the splash page's own 180s failure UI fires, and the sidecar's log file is empty the whole time -- confirmed live, this is not new). Matches this file's own Phase 8ae "Seventh real-hardware round" finding (Windows Defender's real-time scan of a large, unsigned, freshly-downloaded binary tree on its first execution) exactly, and the user confirmed this now happens on *every* fresh build's first run, not a one-off: "每次新包第一次运行都是要启动很久...第一次进不去，或者要等很久时间." A second launch of the same already-scanned build is fast (seconds). No code fix exists for this -- it's genuinely an OS/AV characteristic, not an app bug; the only real mitigation is code-signing the executable (a cost/process decision, not something to do unilaterally here) since a trusted signature substantially reduces this class of heuristic scan delay. Worth remembering as expected behavior on every future first-launch-of-a-new-build test, not something to re-diagnose from scratch each time.
+
+**Not yet re-tested**: the `setWindowOpenHandler` fix above (fixed after this round's report, not yet confirmed on real hardware). **Not yet built**: Phase 3 (element-picking, reusing `browser_panel.py`'s own `_element_at()` JS as a content script in the now-wired-in `browserPanelContent.ts`), Phase 4 (cutover/cleanup).
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
 above) comes first; these get picked back up once that's done and there's
 a concrete reason to prioritize a new surface.
+
+- **Electron Browser panel: Ctrl+scroll/Ctrl+Plus-Minus zoom on the
+  embedded page doesn't do anything** -- not started; noted here per
+  your request. Confirmed on real hardware (Phase 8af's first round) as
+  a genuine gap, not a regression -- the old screencast implementation
+  never supported page zoom either (it only ever forwarded raw wheel
+  deltas as CDP mouse-wheel scroll events, no ctrl-modifier handling).
+  Would need `browserPanel.ts`'s panel `webContents` to listen for a
+  ctrl-held wheel/key event and call `setZoomLevel()`/`setZoomFactor()`
+  itself, since a bare `WebContentsView` has no built-in browser-chrome
+  zoom keybindings the way a full Chrome window does.
 
 - **Stop can't actually interrupt a Playwright MCP action already in
   progress** -- not started; noted here per your request ("先记录到
