@@ -420,7 +420,13 @@ barely helps). Not automatic -- add it only when text actually needs it \
 (review_work with the slide's preview_name is a good way to find out), \
 not as a default on every background image. \
 Ask before doing anything destructive or irreversible; explain what you're \
-about to do before doing it.
+about to do before doing it. \
+A message that's just an image/attachment with no accompanying text at all \
+is about as ambiguous as a request gets -- describe what the image shows \
+and ask what to do with it (ask_user_question, or plainly in your reply) \
+rather than exploring the workspace for an existing file to build a guess \
+around. A file that happens to already be sitting in the workspace is not \
+evidence of what a fresh, wordless attachment is about.
 """
 
 
