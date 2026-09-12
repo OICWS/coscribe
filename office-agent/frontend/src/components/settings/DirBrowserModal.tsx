@@ -9,16 +9,13 @@ interface DirBrowserModalProps {
 }
 
 /** Browser-mode-only in-app directory browser (see this file's own name)
- * -- inside a desktop shell (Tauri or Electron), this renders nothing
- * itself and instead opens the real OS folder picker via lib/desktop.ts's
+ * -- inside the Electron desktop shell, this renders nothing itself and
+ * instead opens the real OS folder picker via lib/desktop.ts's
  * pickFolderNative, calling onSelect/onClose with its result directly.
  * Falls back to the in-app browser below if that call fails for any
- * reason (ACL denied on Tauri, plugin not registered) -- see
- * pickFolderNative's own docstring for why that's a real, not just
- * theoretical, caught case. A plain browser tab (isDesktop() false)
- * always uses the in-app browser, same as before either native path
- * existed -- there is no OS-level picker a served-over-HTTP page could
- * call instead. */
+ * reason. A plain browser tab (isDesktop() false) always uses the in-app
+ * browser, same as before the native path existed -- there is no
+ * OS-level picker a served-over-HTTP page could call instead. */
 export function DirBrowserModal({ onSelect, onClose }: DirBrowserModalProps) {
   const [useFallback, setUseFallback] = useState(!isDesktop());
   const [path, setPath] = useState<string | null>(null);

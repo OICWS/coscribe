@@ -103,7 +103,7 @@ INIT_PROMPT = (
 def _app_data_dir() -> Path:
     """Per-user application-data directory -- the fallback _dotenv_path
     below uses when the process has no meaningful project-directory cwd
-    (office-agent-desktop's Tauri shell spawns the sidecar with no
+    (office-agent-desktop's Electron shell spawns the sidecar with no
     natural project dir to look for a `.env` in, and the same is true
     running the PyInstaller-packaged binary directly). Same convention
     most desktop apps use: `%APPDATA%\\coscribe` on Windows,
@@ -123,9 +123,10 @@ def _dotenv_path() -> Path:
     completely unchanged from before -- and only falls back to
     _app_data_dir() (creating it if needed) when no such file exists,
     which is the normal case for office-agent-desktop's sidecar (no
-    natural project cwd) or the packaged binary run directly. The Tauri
-    shell additionally spawns the sidecar with this same directory as
-    its cwd (belt-and-suspenders, not required for this to work) -- so
+    natural project cwd) or the packaged binary run directly. The
+    Electron shell additionally spawns the sidecar with this same
+    directory as its cwd (belt-and-suspenders, not required for this to
+    work) -- so
     this fallback mainly matters for running the packaged binary on its
     own, e.g. this project's own PyInstaller smoke test."""
     cwd_env = Path(".env")

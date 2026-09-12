@@ -1,8 +1,8 @@
 {
-  "name": "coscribe-desktop-electron",
+  "name": "coscribe-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "Electron shell for coscribe-web -- spawns the existing server as a supervised local sidecar and opens a window pointed at it. Replaces office-agent-desktop (Tauri) once it clears its own real-hardware checkpoints -- see office-agent/ROADMAP.md's Browser panel native-window migration plan for why.",
+  "description": "Electron shell for coscribe-web -- spawns the existing server as a supervised local sidecar and opens a window pointed at it. Replaced an earlier Tauri shell (not part of this repo) at the Browser panel native-window migration's Phase 4 cutover -- see office-agent/ROADMAP.md for why.",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dist:portable": "npm run build && electron-builder --win dir",
     "dist:nsis": "npm run build && electron-builder --win nsis",
-    "icon": "echo 'icons/ is copied from src-tauri/icons/ -- regenerate both from the same source, see office-agent-desktop/README.md'"
+    "icon": "echo icons/ was copied from coscribes original Tauri shells src-tauri/icons/ -- not part of this repo, see office-agent-desktop/README.md"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
@@ -22,7 +22,7 @@
     "dotenv": "^16.4.7"
   },
   "build": {
-    "appId": "com.coscribe.desktop.electron",
+    "appId": "com.coscribe.desktop",
     "productName": "coscribe",
     "directories": {
       "output": "release"

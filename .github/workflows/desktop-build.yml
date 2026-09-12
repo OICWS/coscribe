@@ -1,14 +1,18 @@
-name: desktop build electron (Windows)
+name: desktop build (Windows)
 
-# Manual-only, mirrors desktop-build.yml's own reasoning: a heavy job,
-# not run on every push. This is the Electron shell replacing
-# office-agent-desktop (Tauri) -- see office-agent/ROADMAP.md's Browser
-# panel native-window migration plan for why, and
-# office-agent-desktop-electron/README.md for what this shell is.
+# Manual-only: a heavy job, not run on every push. This is the Electron
+# shell, the primary (and only, in this repo) desktop build as of the
+# migration's Phase 4 cutover -- see office-agent/ROADMAP.md's Browser
+# panel native-window migration plan for the full history, and
+# office-agent-desktop/README.md for what this shell is. This repo
+# never carried the original Tauri shell it replaced (only the working
+# tree as of this migration's Sixth real-hardware finding was forked
+# into this public repo, and the Tauri shell was deliberately left out
+# of that fork).
 #
-# No code-signing secrets are configured -- same as the Tauri workflow,
-# the resulting installer/portable exe is unsigned and will trigger
-# Windows SmartScreen's usual warning. Expected, not a bug.
+# No code-signing secrets are configured -- the resulting installer/
+# portable exe is unsigned and will trigger Windows SmartScreen's usual
+# warning. Expected, not a bug.
 "on":
   workflow_dispatch: {}
 
@@ -49,17 +53,16 @@ jobs:
           # See pyproject.toml's dependencies comment: aisuite 0.1.14 pins
           # httpx<0.28.0, which conflicts with google-genai>=1.5.0's own
           # httpx>=0.28.1 requirement, so this has to be a separate step
-          # (same two-step install desktop-build.yml/office-agent-ci.yml
-          # already document).
+          # (same two-step install office-agent-ci.yml already documents).
           .venv/Scripts/python -m pip install -U "google-genai>=2.13.0,<2.14.0"
           .venv/Scripts/python -m pip install pyinstaller
 
       - name: Stage the PyInstaller sidecar
-        working-directory: office-agent-desktop-electron
+        working-directory: office-agent-desktop
         run: bash scripts/stage-sidecar.sh
 
       - name: npm ci (Electron + electron-builder)
-        working-directory: office-agent-desktop-electron
+        working-directory: office-agent-desktop
         run: npm ci
 
       # `--win dir` (not electron-builder's own "portable" target) --
@@ -67,32 +70,29 @@ jobs:
       # extracting exe, which unpacks its whole payload (Electron's
       # runtime + the sidecar, ~300MB) to a temp directory on *every*
       # launch, taking minutes. `dir` produces the plain unpacked
-      # win-unpacked/ folder instead -- exactly Tauri's own "portable"
-      # model (an exe + resources folder, zipped, no extraction step,
-      # instant launch every time).
+      # win-unpacked/ folder instead -- an exe + resources folder,
+      # zipped, no extraction step, instant launch every time.
       - name: Build unpacked portable folder
-        working-directory: office-agent-desktop-electron
+        working-directory: office-agent-desktop
         run: npm run dist:portable
 
       - name: Build NSIS installer
-        working-directory: office-agent-desktop-electron
+        working-directory: office-agent-desktop
         run: npm run dist:nsis
 
-      # retention-days: 3 -- see desktop-build.yml's own comment on this:
-      # these are throwaway real-hardware test builds (this one's ~300MB+
-      # per run, even bigger than the Tauri shell's), and the 90-day
-      # default let accumulated runs blow through the account's 500MB
-      # free Actions-storage quota.
+      # retention-days: 3 -- these are throwaway real-hardware test
+      # builds (~300MB+ per run), and the 90-day default let accumulated
+      # runs blow through the account's 500MB free Actions-storage quota.
       - uses: actions/upload-artifact@v4
         with:
-          name: coscribe-desktop-electron-windows-portable
-          path: office-agent-desktop-electron/release/win-unpacked/**
+          name: coscribe-desktop-windows-portable
+          path: office-agent-desktop/release/win-unpacked/**
           if-no-files-found: error
           retention-days: 3
 
       - uses: actions/upload-artifact@v4
         with:
-          name: coscribe-desktop-electron-windows-installer
-          path: office-agent-desktop-electron/release/*Setup*.exe
+          name: coscribe-desktop-windows-installer
+          path: office-agent-desktop/release/*Setup*.exe
           if-no-files-found: error
           retention-days: 3

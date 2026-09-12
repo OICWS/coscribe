@@ -786,13 +786,15 @@ COSCRIBE_ENV_VARS = [
     "COSCRIBE_MAX_TURNS",
 ]
 
-# Rust-consumed, not Settings-backed (see office-agent-desktop/src-tauri/
-# src/lib.rs's window-close handler, which reads this same .env file
-# directly -- this Python process never branches on it) -- so it's a
-# separate list from COSCRIBE_ENV_VARS above for the same reason
+# Desktop-shell-consumed, not Settings-backed (see office-agent-desktop's
+# sidecar.ts's shouldKeepRunningInBackground(), which reads this same
+# .env file directly -- this Python process never branches on it; the
+# now-legacy Tauri shell's own src-tauri/src/lib.rs did the equivalent
+# before the Electron migration) -- so it's a separate list from
+# COSCRIBE_ENV_VARS above for the same reason
 # PROVIDER_DEFAULT_MODEL_ENV_VARS already is: update_config's own
 # restart_required computation is keyed off COSCRIBE_ENV_VARS membership,
-# and this one needs no coscribe-web restart to take effect (the Rust
+# and this one needs no coscribe-web restart to take effect (the desktop
 # shell just re-reads the file at the next window-close, live).
 DESKTOP_ENV_VARS = ["COSCRIBE_BACKGROUND_ON_CLOSE"]
 
@@ -2346,10 +2348,11 @@ def _watch_parent_windows(parent_pid: int) -> None:
 
 def _exit_when_orphaned() -> None:
     """When launched as office-agent-desktop's sidecar
-    (COSCRIBE_EXIT_WITH_PARENT=1, set by the Tauri shell when it
+    (COSCRIBE_EXIT_WITH_PARENT=1, set by the Electron shell -- or the
+    now-legacy Tauri shell before it, which set the same flag -- when it
     spawns this process), exit if the parent dies -- even on an abrupt
-    crash that skips the shell's own graceful child.kill() on
-    RunEvent::Exit/RunEvent::ExitRequested. A no-op for the ordinary
+    crash that skips the shell's own graceful kill of this process on
+    quit. A no-op for the ordinary
     CLI/browser case (the env var is unset), and never runs at all
     unless a desktop shell opted in.
 

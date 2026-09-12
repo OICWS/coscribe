@@ -1,21 +1,20 @@
-/** Thin dispatcher over the two desktop shells this app can run inside
- * (Tauri, being phased out; Electron, its replacement -- see
- * office-agent/ROADMAP.md's Browser panel native-window migration plan
- * for why) plus the plain-browser-tab case. Exists so components like
- * DirBrowserModal.tsx don't grow their own three-way isTauri()/
- * isElectron()/neither branching -- they call this module's functions
- * once, and this is the only place that needs to know both shells
- * exist. Once the Tauri shell is retired (migration Phase 4), this
- * collapses to a thin electron.ts re-export and tauri.ts is deleted
- * entirely. */
+/** Thin re-export over electron.ts, plus the plain-browser-tab case.
+ * Used to also dispatch between Tauri and Electron (the two desktop
+ * shells during the migration -- see office-agent/ROADMAP.md's Browser
+ * panel native-window migration plan) so components like
+ * DirBrowserModal.tsx didn't need their own isTauri()/isElectron()/
+ * neither branching; collapsed to just this, per this file's own prior
+ * plan, once the Tauri shell was retired at the migration's Phase 4
+ * cutover (tauri.ts deleted entirely). Kept as its own module rather
+ * than having callers import electron.ts directly -- if another desktop
+ * shell is ever added again, this is the one place that would need to
+ * know. */
 
-import { isTauri, pickFolderNative as pickFolderNativeTauri } from "./tauri";
 import { isElectron, pickFolderNative as pickFolderNativeElectron } from "./electron";
 
-export type DesktopKind = "tauri" | "electron" | "web";
+export type DesktopKind = "electron" | "web";
 
 export function desktopKind(): DesktopKind {
-  if (isTauri()) return "tauri";
   if (isElectron()) return "electron";
   return "web";
 }
@@ -26,12 +25,9 @@ export function isDesktop(): boolean {
 
 /** Native OS folder picker, whichever desktop shell (if any) is active.
  * Callers should still catch a rejection as a fallback signal, not just
- * check isDesktop() first -- see tauri.ts's own pickFolderNative
- * docstring for why a denied-by-ACL error is a real, not just
- * theoretical, case on that shell specifically. */
+ * check isDesktop() first. */
 export async function pickFolderNative(): Promise<string | null> {
   const kind = desktopKind();
-  if (kind === "tauri") return pickFolderNativeTauri();
   if (kind === "electron") return pickFolderNativeElectron();
   throw new Error("pickFolderNative() called outside a desktop shell");
 }

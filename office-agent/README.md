@@ -1474,15 +1474,18 @@ streaming support is vendored for them too.
 
 ## Desktop app
 
-`../office-agent-desktop/` is a Tauri shell around this same web UI --
-not a second interface to maintain. It starts `coscribe-web` as a
-supervised local subprocess ("sidecar") on a free port and opens a native
-window pointed directly at it (`WebviewUrl::External`, no bundled
-frontend of its own -- see `office-agent-desktop/src-tauri/src/lib.rs`'s
-own module docs for the design and why that's simpler here than the usual
-Tauri+Python-sidecar pattern, which needs a separate frontend build).
-Browser mode (`coscribe-web` + a normal browser tab) keeps working
-completely independently.
+`../office-agent-desktop/` is an Electron shell around this same web UI
+-- not a second interface to maintain. It starts `coscribe-web` as a
+supervised local subprocess ("sidecar") on a free port and opens a
+window pointed directly at it -- see `office-agent-desktop/src/main/
+index.ts`'s own module docs for the design. Browser mode (`coscribe-web`
++ a normal browser tab) keeps working completely independently.
+
+This replaced an earlier Tauri shell at the Browser panel native-window
+migration's Phase 4 cutover (see `../office-agent/ROADMAP.md`) -- this
+public repo never carried that Tauri shell itself (deliberately left
+out of the fork; the private `OICWS/project` repo keeps it as a
+rollback net).
 
 Two things only matter for the desktop build, not the browser one:
 - **`_exit_when_orphaned` (`web/app.py`)**: when the shell sets
@@ -1501,15 +1504,16 @@ Two things only matter for the desktop build, not the browser one:
   `./.env` already exists in cwd, so the Settings panel's "paste your API
   key" flow works identically in both modes.
 
-Building/running the desktop app needs its own toolchain (Rust + Node)
-and its own PyInstaller-frozen copy of `coscribe-web` (**onedir**,
+Building/running the desktop app needs its own toolchain (Node only, no
+Rust) and its own PyInstaller-frozen copy of `coscribe-web` (**onedir**,
 never onefile -- see `coscribe/packaging/coscribe-server.spec`'s
 own docstring for the measured startup-latency reason, directly
 continuing this project's own import-time work above). See
 `office-agent-desktop/`'s own docs for the exact build steps; the short
 version is `office-agent-desktop/scripts/stage-sidecar.sh` (builds the
-PyInstaller binary and stages it into `src-tauri/binaries/sidecar/`) then
-`npm run tauri dev` / `npm run tauri build` from `office-agent-desktop/`.
+PyInstaller binary and stages it into `resources/sidecar/`) then
+`npm start` / `npm run dist:portable` / `npm run dist:nsis` from
+`office-agent-desktop/`.
 
 ## Test
 

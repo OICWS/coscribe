@@ -2,7 +2,8 @@
 """PyInstaller spec for the bundled `coscribe-server` (desktop sidecar).
 
 One-DIR bundle (exe + `_internal/` support folder) shipped via
-coscribe-desktop's Tauri `resources` slot -- deliberately NOT
+coscribe-desktop's `extraResources` slot (Electron; the now-legacy Tauri
+shell's equivalent was its own `resources` slot) -- deliberately NOT
 `--onefile`. A onefile build self-extracts its whole archive to a temp
 dir on EVERY launch (a real, measured problem in a comparable Tauri +
 Python sidecar project this was modeled on: 6-7s of splash-screen delay
@@ -42,9 +43,10 @@ PyInstaller appends `.exe` to `name`. Built as a normal console app on
 every OS -- a windowed (console=False) build leaves sys.stdout/stderr as
 None, which breaks uvicorn's own startup logging and hangs the server.
 To avoid a console window flashing in the desktop app, coscribe-
-desktop's Tauri shell spawns this sidecar with the Windows
-CREATE_NO_WINDOW flag instead (see office-agent-desktop/src-tauri/
-src/lib.rs), which hides the window while keeping stdio intact.
+desktop's Electron shell spawns this sidecar with `windowsHide: true`
+instead (see office-agent-desktop/src/main/sidecar.ts -- the now-legacy
+Tauri shell used the equivalent Windows CREATE_NO_WINDOW flag before
+it), which hides the window while keeping stdio intact.
 """
 
 import os
@@ -151,8 +153,10 @@ exe = EXE(
     # target_arch left unset -> PyInstaller builds for the host architecture.
 )
 # Onedir: dist/coscribe-server/{coscribe-server[.exe], _internal/}.
-# office-agent-desktop's build scripts stage this whole folder into
-# src-tauri/binaries/sidecar/ for Tauri's `resources` bundling.
+# office-agent-desktop's build scripts (stage-sidecar.sh) stage this
+# whole folder into resources/sidecar/ for Electron's `extraResources`
+# bundling (the now-legacy Tauri shell staged the equivalent into
+# src-tauri/binaries/sidecar/ for its own `resources` bundling).
 coll = COLLECT(
     exe,
     a.binaries,

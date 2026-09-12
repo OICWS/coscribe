@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import { CloseIcon } from "./icons";
-import { browserPanelClose, browserPanelOpen, browserPanelReposition, isTauri, type PanelRect } from "../lib/tauri";
 import {
   browserPanelBack as electronBrowserPanelBack,
   browserPanelClose as electronBrowserPanelClose,
@@ -183,33 +180,12 @@ export function BrowserPanel({
   const [canvasSize, setCanvasSize] = useState(canvasSizeRef.current);
   const [hoverElement, setHoverElement] = useState<HoveredElement | null>(null);
   const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
-  // Stable for the life of this component (isTauri() can't change mid-
-  // session) -- computed once here rather than calling isTauri() at
-  // every use site below, purely for readability at the render/effect
-  // call sites.
-  const tauriMode = isTauri();
-  // Surfaces a failed browser_panel_open/reposition instead of leaving
-  // the placeholder silently saying "Native browser window" forever --
-  // real-hardware-reported: the native window failing to appear at all
-  // (a WebView2/permissions/positioning problem) looked visually
-  // identical to it working but just not being visible yet, with no way
-  // to tell the two apart without this. This is a release build, so
-  // there is no devtools console to check either (same class of issue
-  // as the now-deleted Stage 0 spike's eprintln! going nowhere).
-  const [nativeError, setNativeError] = useState<string | null>(null);
-  // Shown alongside the placeholder text -- the computed rect this side
-  // actually sent to Rust, plus the CDP port browser_panel_open handed
-  // back. A real, "open succeeded, no error thrown" real-hardware report
-  // still showed the placeholder's own text uncovered (should be
-  // impossible if the native window is genuinely positioned on top of
-  // it and opaque), so the next thing worth ruling out is the rect
-  // itself being wrong (off-screen, zero-sized, etc.) rather than
-  // guessing blind again.
-  const [nativeDebug, setNativeDebug] = useState<string | null>(null);
 
   // Electron migration Phase 2 -- see the effect below and electron.ts's
   // own module docs. electronMode is stable for the life of this
-  // component, same reasoning tauriMode already documents.
+  // component (isElectron() can't change mid-session) -- computed once
+  // here rather than calling isElectron() at every use site below,
+  // purely for readability at the render/effect call sites.
   const electronMode = isElectron();
   const [electronUrl, setElectronUrl] = useState("");
   const [electronAddressValue, setElectronAddressValue] = useState("");
@@ -232,17 +208,14 @@ export function BrowserPanel({
   };
 
   useEffect(() => {
-    // Stage 1 of the Tauri native-window plan (see the effect below)
-    // doesn't wire the panel window to any backend yet -- no screencast,
-    // no CDP attach, nothing this WS connection would drive. Electron
-    // mode has its own real navigation IPC (the effect further below) and
-    // never needs this WS/CDP path at all. Guarding here rather than not
-    // registering the effect at all keeps this file's Hooks call order
-    // identical across all three paths (isTauri()/isElectron() never
-    // change within one mount, so this is safe either way, but matching
+    // Electron mode has its own real navigation IPC (the effect further
+    // below) and never needs this WS/CDP path at all. Guarding here
+    // rather than not registering the effect at all keeps this file's
+    // Hooks call order identical across both paths (isElectron() never
+    // changes within one mount, so this is safe either way, but matching
     // React's own "same hooks every render" rule by convention rather
     // than relying on that is cheap insurance).
-    if (tauriMode || electronMode) return;
+    if (electronMode) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/browser`);
     wsRef.current = ws;
@@ -296,110 +269,21 @@ export function BrowserPanel({
       ws.close();
       wsRef.current = null;
     };
-    // tauriMode/electronMode are derived from isTauri()/isElectron(),
-    // static environment checks that cannot change for the life of this
-    // component -- included so this satisfies exhaustive-deps without
-    // actually causing any re-subscription in practice.
-  }, [tauriMode, electronMode]);
+    // electronMode is derived from isElectron(), a static environment
+    // check that cannot change for the life of this component --
+    // included so this satisfies exhaustive-deps without actually
+    // causing any re-subscription in practice.
+  }, [electronMode]);
 
-  // Browser panel native-window plan, Stage 1 (Tauri desktop only --
-  // see ROADMAP.md "Browser panel: native second-window architecture").
-  // Opens a real, separate, top-level WebviewWindow
-  // (browser_panel_window.rs) and keeps it positioned exactly over this
-  // panel's own placeholder region (the containerRef div rendered
-  // below, in place of the canvas for this path) -- Rust itself
-  // computes nothing, it only positions/sizes/shows/hides a window when
-  // told to; every rect is computed here.
-  //
-  // innerPosition() (the webview *content* area's own screen origin),
-  // not outerPosition() (the whole OS window including its title
-  // bar/borders) -- a deliberate deviation from this plan's own
-  // original design note, made once the real API was checked rather
-  // than assumed: innerPosition() already excludes the title bar/border
-  // thickness, which differs by OS theme and window state and isn't
-  // otherwise computable from JS at all, so there's no separate chrome-
-  // offset math to get wrong.
-  //
-  // Three independent signals can each change where this panel's own
-  // placeholder sits on screen, so all three are watched: the main
-  // window moving (onMoved), the main window resizing (onResized -- its
-  // own content area can grow/shrink independently of the panel's own
-  // width), and the placeholder div's own layout changing without the
-  // window itself moving at all (the resize-handle drag above, or the
-  // nav rail collapsing) -- a ResizeObserver on containerRef, same
-  // signal the non-Tauri canvas path already uses for its own on-screen
-  // size, reused here for repositioning instead.
-  useEffect(() => {
-    if (!tauriMode) return;
-    let cancelled = false;
-    let unlistenMoved: UnlistenFn | undefined;
-    let unlistenResized: UnlistenFn | undefined;
-    let resizeObserver: ResizeObserver | undefined;
-
-    const computeRect = async (): Promise<PanelRect | null> => {
-      const container = containerRef.current;
-      if (!container) return null;
-      const inner = await getCurrentWindow().innerPosition();
-      const domRect = container.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      return {
-        x: Math.round(inner.x + domRect.left * dpr),
-        y: Math.round(inner.y + domRect.top * dpr),
-        width: Math.round(domRect.width * dpr),
-        height: Math.round(domRect.height * dpr),
-      };
-    };
-
-    const reposition = async () => {
-      const rect = await computeRect();
-      if (!rect || cancelled) return;
-      try {
-        await browserPanelReposition(rect);
-        if (!cancelled) setNativeDebug(`rect ${rect.x},${rect.y} ${rect.width}x${rect.height}`);
-      } catch {
-        // Panel window not open yet -- e.g. a resize firing before the
-        // initial open() below has resolved. Nothing to reposition.
-      }
-    };
-
-    (async () => {
-      try {
-        const rect = await computeRect();
-        if (!rect || cancelled) return;
-        await browserPanelOpen(rect);
-        if (cancelled) return;
-        setNativeDebug(`rect ${rect.x},${rect.y} ${rect.width}x${rect.height}`);
-        const win = getCurrentWindow();
-        unlistenMoved = await win.onMoved(() => void reposition());
-        unlistenResized = await win.onResized(() => void reposition());
-        if (containerRef.current) {
-          resizeObserver = new ResizeObserver(() => void reposition());
-          resizeObserver.observe(containerRef.current);
-        }
-      } catch (err) {
-        if (!cancelled) setNativeError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      unlistenMoved?.();
-      unlistenResized?.();
-      resizeObserver?.disconnect();
-      void browserPanelClose();
-    };
-    // See the WS effect above's own comment on including tauriMode here.
-  }, [tauriMode]);
-
-  // Browser panel, Electron migration Phase 2 -- real embedding, unlike
-  // the Tauri effect above (still Stage 1, a placeholder with nothing
-  // wired to a backend). A `WebContentsView` is a true child of the main
-  // window, not a synced sibling top-level window like Tauri's own
-  // approach -- `setBounds()` takes coordinates relative to the parent
+  // Browser panel, Electron migration Phase 2 -- real embedding. A
+  // `WebContentsView` is a true child of the main window, not a synced
+  // sibling top-level window the way the now-retired Tauri shell's own
+  // approach was -- `setBounds()` takes coordinates relative to the parent
   // window's own content area, so computeRect here is just
   // getBoundingClientRect() with no devicePixelRatio/innerPosition() math
-  // at all (contrast with the Tauri effect's own computeRect above), and
-  // the main window *moving* needs no reposition call (the child's
+  // at all (the Tauri shell's own equivalent, before it was retired,
+  // needed exactly that math for its synced-sibling-window approach),
+  // and the main window *moving* needs no reposition call (the child's
   // position relative to its own parent doesn't change when the parent
   // moves). Two independent things can still change where this panel's
   // own container sits *within* the window, so both are watched: a plain
@@ -471,8 +355,7 @@ export function BrowserPanel({
       resizeObserver?.disconnect();
       void electronBrowserPanelClose();
     };
-    // See the WS effect above's own comment on including tauriMode/
-    // electronMode here.
+    // See the WS effect above's own comment on including electronMode here.
   }, [electronMode]);
 
   // Element-picking, Electron migration Phase 3: forwards pickMode's own
@@ -811,29 +694,7 @@ export function BrowserPanel({
         </div>
       </div>
 
-      {tauriMode ? (
-        // Stage 1 only (see the effect above): a real native window
-        // renders directly on top of this placeholder once positioned,
-        // so there is deliberately no toolbar/canvas/IME-bridge/pick-UI
-        // here yet -- none of it is wired to any backend for this path
-        // until Stage 2 (CDP attach + navigation) and Stage 3 (element
-        // picking). The placeholder's own text is only ever visible
-        // for the brief moment before the native window's first
-        // reposition lands, or if that failed -- both worth being able
-        // to see rather than a silent blank rectangle either way.
-        <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden bg-black/5">
-          {nativeError ? (
-            <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-red-500">
-              Native window failed to open: {nativeError}
-            </div>
-          ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-center text-sm text-[var(--muted)]">
-              <span>Native browser window</span>
-              {nativeDebug && <span className="text-xs opacity-70">{nativeDebug}</span>}
-            </div>
-          )}
-        </div>
-      ) : electronMode ? (
+      {electronMode ? (
         // A real, natively-embedded WebContentsView paints directly on
         // top of this empty div (see the effect above) -- no canvas, no
         // IME bridge, no synthetic input relay, all of that machinery
@@ -908,9 +769,9 @@ export function BrowserPanel({
           )}
 
           <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden bg-black/5">
-            {/* Same caveat the Tauri placeholder above already documents:
-             * the real WebContentsView is a separately-composited native
-             * surface painting directly on top of this div once
+            {/* Worth noting for a future reader: the real WebContentsView
+             * is a separately-composited native surface painting
+             * directly on top of this div once
              * positioned, so this text is only actually visible for the
              * brief moment before that happens (an empty view still
              * shows its own blank white background, covering this). Kept

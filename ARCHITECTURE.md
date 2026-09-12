@@ -21,10 +21,12 @@
 > 作为"当初为什么这么设计"的历史记录，不作为当前实现的准确描述。
 > "前端：本地 Web UI（技术选型未定，后期再定）"一句也已不准确：Web UI
 > 早就跑通了，现在又多了一个桌面端——`office-agent-desktop/`，
-> 一个 Tauri 壳，启动同一个 `coscribe-web` 服务器作为本地 sidecar
-> 子进程，原生窗口直接指向它，不是另一套前端。详见
+> 一个 Electron 壳，启动同一个 `coscribe-web` 服务器作为本地 sidecar
+> 子进程，窗口直接指向它，不是另一套前端（最早是 Tauri 壳，为了原生嵌入
+> Browser 面板换成了 Electron，见 `office-agent/ROADMAP.md`的迁移记录；
+> 这个公开仓库本身没有携带那个 Tauri 壳）。详见
 > `office-agent/README.md`的"Desktop app"一节和
-> `office-agent-desktop/src-tauri/src/lib.rs`自身的设计说明。
+> `office-agent-desktop/src/main/index.ts`自身的设计说明。
 > 前端本身也已从原生 HTML/JS 重写为 React + TypeScript（分 A/B/C/D 四个
 > 阶段完成，逐阶段真实验证后 cutover）——`office-agent/frontend/`，
 > `npm run build` 直接产出到 `src/coscribe/web/static/`（现在是构建
