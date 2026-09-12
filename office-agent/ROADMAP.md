@@ -4069,6 +4069,18 @@ The install-time AV-scan warm-up (`installer.nsh`) remains unverified -- the use
 
 ---
 
+## Phase 8ag -- Browser panel: Electron shell Phase 3 (element-picking), first real-hardware round
+
+Built per the plan's own Phase 3 scope: `browserPanelContent.ts` (the panel's own preload, re-injected on every navigation like a content script) draws the hover highlight/label directly inside the live page's own DOM (`document.elementFromPoint`/`getBoundingClientRect`, mirroring `browser_panel.py`'s `_element_at()` exactly) since the host window's React can't paint over a natively-composited child view; `browserPanel.ts` forwards pick-mode on/off and turns a committed pick into a real screenshot via `webContents.capturePage()`, no CDP/DPI math needed. `BrowserPanel.tsx`'s electron branch gained the "Select" button and reused the existing picked-preview/"Add to chat" UI.
+
+**First real-hardware round: smooth and correct across the board** -- Select tracks the cursor with no lag, tested against Google (search, click a result, back -- all correct), cropping looked right, and the click-while-picking-never-actually-navigates behavior held (no stray new windows, no accidental navigation while selecting). **Second real-hardware round, specifically answering the plan's own Open Question 1**: tested against two sites with real, non-trivial CSP -- Select worked normally on both. Confirms preload-injected content scripts run in Chromium's isolated-world context regardless of the page's own `script-src` CSP, as the plan's own research suggested but explicitly hadn't verified before calling this done (this project has been burned by an "reads as safe in the docs" assumption going untested before -- Phase 8ab's `.parent()` webview hang -- so this got a real check rather than being assumed).
+
+**One real bug found, unrelated to the picking mechanism itself, in the surrounding agent behavior**: sending a picked screenshot with zero accompanying text (a bare attachment, no instruction) led the model to list the workspace, find an unrelated `.pptx` file left over from earlier testing, and start working on that instead of asking what the screenshot was for. Not a state-leak or cross-thread bug (confirmed: the file genuinely already existed in that same workspace from earlier testing) -- `ask_user_question`'s own docstring already covers exactly this case ("use this when you're about to guess at a genuinely ambiguous requirement"), but nothing in `coordinator.py`'s own `INSTRUCTIONS` anchored a wordless attachment specifically as that case, and the model's own judgment this particular time was to explore rather than ask. Fixed with an explicit rule appended to `INSTRUCTIONS`: describe what the image shows and ask what to do with it, don't treat an unrelated file already in the workspace as evidence of intent for a fresh, wordless attachment. Not a hard guarantee (still model judgment, not a constraint the graph enforces), just a more direct anchor than the tool's own generic guidance alone.
+
+**Phase 3 is now considered real-hardware-confirmed** -- every checkpoint item from the plan passed, including the last one (a real click while picking never actually follows the link/triggers the button underneath, confirmed directly against Google's own search-result links: "真的只是选中，然后截图"). Phase 4 (cutover: retire the Tauri shell, promote `office-agent-desktop-electron` to the primary build, update docs/CI) starts next.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
