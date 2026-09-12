@@ -4114,6 +4114,20 @@ Picks up the "Later" backlog's startup-latency finding (item 2, above -- found w
 
 ---
 
+## Phase 8aj -- Unified corporate-proxy support: web_search + the Browser panel now honor it too
+
+Picks up the "Later" backlog's proxy finding (above -- from your out-of-session "怎么配置代理" ask, recorded then, not acted on until now). LLM API calls already worked with no code needed (each provider SDK reads `HTTP_PROXY`/`HTTPS_PROXY` itself); the other two outbound paths didn't:
+
+- **New shared helper, `runtime/proxy.py`'s `configured_proxy()`**: reads `HTTPS_PROXY` (any case), falling back to `HTTP_PROXY`, via `urllib.request.getproxies()` -- also picks up Windows' own system/registry proxy setting, not just an env var. One helper, two callers, wired into `runtime/__init__.py`'s existing re-export pattern alongside `secrets.py`/`hooks.py`/etc.
+- **`tools/websearch.py`**: `DDGS()` -> `DDGS(proxy=configured_proxy())`. `ddgs`'s own constructor has a `proxy=` kwarg completely separate from the `DDGS_PROXY` env var its docs mention (confirmed by reading `ddgs.ddgs.DDGS.__init__` directly, as the backlog item already had) -- a typical corporate `.env` won't have that second, library-specific name, so forwarding the standard one explicitly is the fix, not documenting a new env var to set.
+- **`web/browser_panel.py`**: `launch()` now appends `--proxy-server=<value>` to Chrome's launch args when `configured_proxy()` returns one. Chromium's own env-var-based proxy auto-detection is platform-dependent -- reliable enough on Linux, not on Windows (this project's actual target), where it normally needs a real system/registry setting or this explicit flag instead.
+- **Verified live in the private repo's sandbox** (identical code applied here; this public repo's own clone has no local Python venv to re-run the suite in, per this repo's established verification pattern): spawned a real headless Chromium (a pre-installed Playwright browser, pointed at via `COSCRIBE_BROWSER_PANEL_EXE`) with `HTTPS_PROXY` set, spied on the actual `asyncio.create_subprocess_exec` args, and confirmed `--proxy-server=...` was present *and* the CDP session still connected successfully afterward (the flag only affects page navigation, not the debugging-port control channel). Also confirmed via a bare `curl -x $HTTPS_PROXY` that a sandbox's own network egress mechanically works for arbitrary outbound hosts (a plain `https://example.com` succeeded); a live `web_search()` call reached `html.duckduckgo.com`/`en.wikipedia.org` but got a connection reset from each -- confirmed as that sandbox's own network-policy/anti-bot reality (the *same* reset happens with a bare `curl` to those exact hosts through the identical proxy, nothing to do with this fix), not something a further code change here could address.
+- **Tests**: `tests/test_proxy.py` (new -- uppercase/lowercase env var reading, `HTTP_PROXY` fallback, `HTTPS_PROXY` precedence over `HTTP_PROXY`, unset-is-None), two new cases in `tests/test_websearch_tool.py` (proxy forwarded to `DDGS.__init__` when set, `None` when not). No new test added directly against `browser_panel.py`'s `launch()` -- that module's own existing test file deliberately keeps real-Chromium-dependent behavior out of the automated suite (see its docstring: verified via a standalone smoke test during development instead), a precedent this phase followed rather than broke.
+- **Docs**: `.env.example` gained a real (commented-out) `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` example with an explanation of why `.env` works (the `override=True` load). `README.md`'s Settings-panel section had a stale claim ("proxy vars have to be set in the shell before the process starts") predating that same `override=True` fix -- corrected to say `.env` works, and explain why proxy vars are still left out of the Settings UI itself (a masked/never-round-tripped text field is a worse editing experience for a plain URL, not a functional limitation).
+- **Verified in the private repo's sandbox**: `ruff check src tests` clean; `mypy src` -- identical 192 pre-existing errors (one more file now checked, no new errors); full `pytest -q` -- 893 passed (886 + 7 new). This public repo's own clone was syntax-checked via `py_compile` only, per its established pattern (no local venv to run the full suite in here). A real corporate-proxy round-trip (an actual authenticating corporate proxy, not a sandbox's own passthrough one) is still something only your real environment can confirm -- nothing to test further here beyond what's above.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
@@ -4345,13 +4359,14 @@ a concrete reason to prioritize a new surface.
      rest of this scope skip the sandbox work entirely.
   4. **No public, anyone-publishes plugin marketplace for now** -- see
      "Explicitly not adopting" below.
-- **Unified corporate-proxy support** -- not started; noted here per your
-  explicit request (asked "怎么配置代理" out of session, then said "记下
-  来" for this exact scope before any code changed). **Requirement: when
-  this gets built, adding a proxy must cover all three outbound paths at
-  once -- LLM API calls, web_search, and the Browser panel -- not just
-  LLM calls.** Current state per surface, from actually reading the code
-  (not assumed):
+- [x] **Unified corporate-proxy support -- fixed, see Phase 8aj below.**
+  Was: not started, noted here per your explicit request (asked "怎么配置
+  代理" out of session, then said "记下来" for this exact scope before any
+  code changed). **Requirement: when this gets built, adding a proxy must
+  cover all three outbound paths at once -- LLM API calls, web_search, and
+  the Browser panel -- not just LLM calls.** Current state per surface, as
+  it stood before that phase, from actually reading the code (not
+  assumed):
   - **LLM API calls (Anthropic/OpenAI/Gemini) already work today**, no
     code needed -- each provider SDK (httpx for Anthropic/OpenAI, grpc for
     Gemini) reads the standard `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env
@@ -4384,13 +4399,11 @@ a concrete reason to prioritize a new surface.
     per-platform behavior. Fix would be adding
     `--proxy-server=<HTTPS_PROXY or HTTP_PROXY>` to `launch()`'s `args`
     when one of those env vars is set.
-  - Docs gap either way: `.env.example` doesn't mention
+  - Docs gap either way: `.env.example` didn't mention
     `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` at all (not even as a comment),
     and `README.md`'s existing proxy note ("have to be set in the shell
-    before the process starts") predates the `override=True` fix above
-    and is now misleading -- `.env` works too. Worth fixing whenever the
-    code above gets built, not really worth a standalone doc-only pass
-    before then.
+    before the process starts") predated the `override=True` fix above
+    and was misleading by that point -- `.env` works too.
 
 ---
 

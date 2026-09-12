@@ -63,6 +63,49 @@ def test_web_search_handles_missing_fields_gracefully(monkeypatch: pytest.Monkey
     assert results == [{"title": "", "url": "", "snippet": ""}]
 
 
+def test_web_search_forwards_https_proxy_to_ddgs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_init(self: Any, proxy: str | None = None, **kwargs: Any) -> None:
+        captured["proxy"] = proxy
+
+    def _fake_text(self: Any, query: str, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    monkeypatch.setattr("ddgs.ddgs.DDGS.__init__", _fake_init)
+    monkeypatch.setattr("ddgs.ddgs.DDGS.text", _fake_text)
+    for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
+
+    web_search("anything")
+
+    assert captured["proxy"] == "http://proxy.example.com:8080"
+
+
+def test_web_search_passes_no_proxy_when_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_init(self: Any, proxy: str | None = None, **kwargs: Any) -> None:
+        captured["proxy"] = proxy
+
+    def _fake_text(self: Any, query: str, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    monkeypatch.setattr("ddgs.ddgs.DDGS.__init__", _fake_init)
+    monkeypatch.setattr("ddgs.ddgs.DDGS.text", _fake_text)
+    for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
+        monkeypatch.delenv(var, raising=False)
+
+    web_search("anything")
+
+    assert captured["proxy"] is None
+
+
 def test_web_search_tool_metadata() -> None:
     tools = build_websearch_tools()
     assert len(tools) == 1

@@ -60,6 +60,7 @@ import httpx
 import websockets
 from websockets.asyncio.client import ClientConnection
 
+from ..runtime.proxy import configured_proxy
 from .browser_detect import find_windows_browser
 
 logger = logging.getLogger(__name__)
@@ -243,6 +244,17 @@ class BrowserPanelSession:
         # run as root.
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             args.append("--no-sandbox")
+        # Chromium's own env-var-based proxy auto-detection is platform-
+        # dependent -- reliable enough on Linux, but on Windows (this
+        # project's actual target) it normally needs a real system/
+        # registry proxy setting instead, not a bare inherited
+        # HTTP_PROXY/HTTPS_PROXY. Pass it explicitly via --proxy-server
+        # so a corporate-proxy .env setting reaches this headless
+        # instance the same way it already reaches the LLM provider SDKs
+        # (see runtime/proxy.py, also used by tools/websearch.py).
+        proxy = configured_proxy()
+        if proxy:
+            args.append(f"--proxy-server={proxy}")
         args.append("about:blank")
         self._process = await asyncio.create_subprocess_exec(
             *args,

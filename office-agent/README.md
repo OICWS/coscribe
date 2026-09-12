@@ -1457,9 +1457,14 @@ round-trips through the browser. Nothing hot-reloads -- `Settings` and the
 provider clients are all built once at process startup -- so saving shows
 a "restart required" notice rather than silently doing nothing; that
 matches editing `.env` by hand today, it's just safer to do from the UI.
-Proxy variables (`HTTPS_PROXY`/`HTTP_PROXY`) aren't in the panel: they have
-to be set in the shell before the process starts, so a browser field for
-them would be misleading.
+Proxy variables (`HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`) aren't in the
+Settings panel, but `.env` works fine for them (see `.env.example`) --
+`_prepare_env`'s `load_dotenv(..., override=True)` makes a `.env` value
+win over a stale OS-level proxy already set, the same real corporate-
+machine bug that fix was written for. Left out of the panel because a
+masked/never-round-tripped text field would be a worse editing experience
+for a plain URL than just opening `.env` directly, not because `.env`
+doesn't work for it.
 
 Binds to `127.0.0.1` by default; this is a local single-user tool, not
 meant to be exposed beyond your own machine.

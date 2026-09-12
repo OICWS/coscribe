@@ -2,6 +2,7 @@ from .compaction import COMPACT_INSTRUCTIONS
 from .hooks import HookResult, empty_hooks_config, load_hooks_config, run_hook
 from .llm_client import LLMClient
 from .provider_config import load_custom_providers
+from .proxy import configured_proxy
 from .secrets import (
     delete_secret,
     env_delete_secret_if_ref,
@@ -25,6 +26,7 @@ __all__ = [
     "HookResult",
     "LLMClient",
     "ToolMetadata",
+    "configured_proxy",
     "delete_secret",
     "empty_hooks_config",
     "env_delete_secret_if_ref",

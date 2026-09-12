@@ -30,6 +30,7 @@ from typing import Any
 
 from ddgs import DDGS
 
+from ..runtime.proxy import configured_proxy
 from ..runtime.types import tool_metadata
 
 # `from ddgs import DDGS` above is actually `ddgs`'s own `_DDGSProxy` (a
@@ -55,7 +56,11 @@ def web_search(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[
         query: what to search for
         max_results: how many results to return (default 5)
     """
-    results = DDGS().text(query, max_results=max_results)
+    # DDGS's constructor takes its own proxy= kwarg -- separate from the
+    # DDGS_PROXY env var its docs mention, which a typical corporate
+    # .env/HTTP_PROXY setup won't have. configured_proxy() forwards the
+    # standard HTTP_PROXY/HTTPS_PROXY instead (see runtime/proxy.py).
+    results = DDGS(proxy=configured_proxy()).text(query, max_results=max_results)
     return [
         {
             "title": str(result.get("title", "")),
