@@ -62,7 +62,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from dotenv import dotenv_values, load_dotenv, set_key
@@ -93,13 +93,11 @@ from ..runtime import (
 )
 from ..runtime.types import get_tool_metadata
 from ..runtime_lg import (
-    connect_mcp_tools_lg,
     extract_text,
     poll_due_scheduled_tasks,
     poll_due_wakes,
     strip_mode_note,
 )
-from ..runtime_lg.mcp import McpServerConnection, connect_one_mcp_server_lg
 from ..tools import load_builtin_skills, load_skills
 from ..tools._workspace import WorkspaceScope
 from ..tools.mcp import load_mcp_server_configs, validate_mcp_config
@@ -123,6 +121,16 @@ from .background_events import BackgroundEvent, BackgroundEventBus
 from .browser_detect import find_windows_browser
 from .browser_panel import BrowserPanelError, BrowserPanelSession
 from .session import ChatSessionLG
+
+if TYPE_CHECKING:
+    # Real type only needed for a local variable annotation below (never
+    # evaluated at runtime -- `from __future__ import annotations` is in
+    # effect) -- kept out of the real import graph so `import coscribe.
+    # web.app` doesn't drag in langchain_mcp_adapters/mcp for a user with
+    # no MCP servers configured. See connect_mcp_tools_lg/connect_one_mcp_
+    # server_lg below for the same reasoning applied to the functions that
+    # actually need this module at runtime.
+    from ..runtime_lg.mcp import McpServerConnection
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # office docs/PDFs, not video files
 _PREVIEW_NAME_RE = re.compile(r"[0-9a-f]{32}\.png")  # tools/_thumbnail.py's uuid4().hex naming
@@ -1163,6 +1171,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         list, same imprecision as treating a real server that happens to
         expose zero tools as "didn't connect"; accepted here since real
         MCP servers always expose at least one tool in practice."""
+        # Deferred import -- see the top-of-file comment above MCP_STARTUP_TIMEOUT_SECONDS.
+        from ..runtime_lg.mcp import connect_one_mcp_server_lg
+
         new_tools, connection = await connect_one_mcp_server_lg(name, config)
         if not new_tools or connection is None:
             return False
@@ -1261,6 +1272,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 # startup on it -- asyncio.shield() keeps the connect
                 # task itself running rather than cancelling it just
                 # because this wait_for gave up on it.
+                # Deferred import -- see the top-of-file comment above MCP_STARTUP_TIMEOUT_SECONDS.
+                from ..runtime_lg.mcp import connect_mcp_tools_lg
+
                 connect_task: asyncio.Task[Any] = asyncio.create_task(
                     connect_mcp_tools_lg(settings.mcp_config_path)
                 )

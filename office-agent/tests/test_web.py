@@ -336,7 +336,7 @@ def _client_lg(
         return [], None
 
     monkeypatch.setattr(
-        "coscribe.web.app.connect_one_mcp_server_lg", _fake_connect_one_mcp_server_lg
+        "coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", _fake_connect_one_mcp_server_lg
     )
     monkeypatch.setattr(
         "coscribe.web.app.LLMClient",
@@ -2839,7 +2839,7 @@ def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
         return [_fake_tool_fn], {"fetch": _FakeConnection()}
 
     monkeypatch.setattr("coscribe.web.app.MCP_STARTUP_TIMEOUT_SECONDS", 0.05)
-    monkeypatch.setattr("coscribe.web.app.connect_mcp_tools_lg", _slow_connect_mcp_tools_lg)
+    monkeypatch.setattr("coscribe.runtime_lg.mcp.connect_mcp_tools_lg", _slow_connect_mcp_tools_lg)
 
     config_path = tmp_path / "mcp.json"
     config_path.write_text(
@@ -2940,7 +2940,7 @@ def test_post_mcp_server_splices_tools_into_both_new_and_already_open_sessions(
         # overwrite this one (bit me once already; see the surrounding
         # comment in _client_lg for why the default exists at all).
         monkeypatch.setattr(
-            "coscribe.web.app.connect_one_mcp_server_lg", _fake_connect_returns_a_tool
+            "coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", _fake_connect_returns_a_tool
         )
         response = client.post(
             "/api/mcp/servers",

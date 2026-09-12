@@ -83,7 +83,6 @@ from .runtime import (
 )
 from .runtime.provider_config import load_custom_providers
 from .runtime_lg import poll_due_scheduled_tasks, poll_due_wakes
-from .runtime_lg.mcp import connect_mcp_tools_lg
 from .tools import load_builtin_skills, load_skills
 from .tools.workflows import reconcile_interrupted_runs
 
@@ -368,6 +367,11 @@ async def _chat_async(
     mcp_tools: list[Any] = []
     mcp_connections: dict[str, Any] = {}
     if settings.mcp_config_path is not None:
+        # Deferred import -- pulls in langchain_mcp_adapters/mcp, which
+        # otherwise cost every cold start ~250-360ms even with zero MCP
+        # servers configured. See runtime_lg/__init__.py's __getattr__.
+        from .runtime_lg.mcp import connect_mcp_tools_lg
+
         mcp_tools, mcp_connections = await connect_mcp_tools_lg(settings.mcp_config_path)
         if mcp_tools:
             typer.echo(f"Loaded {len(mcp_tools)} MCP tool(s).\n")
@@ -493,6 +497,8 @@ async def _check_wakes_async(settings: Any) -> None:
     mcp_tools: list[Any] = []
     mcp_connections: dict[str, Any] = {}
     if settings.mcp_config_path is not None:
+        from .runtime_lg.mcp import connect_mcp_tools_lg  # see the other call site's note
+
         mcp_tools, mcp_connections = await connect_mcp_tools_lg(settings.mcp_config_path)
 
     checkpoint_path = settings.state_dir / "runtime_lg_checkpoints.sqlite"

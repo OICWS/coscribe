@@ -5,7 +5,6 @@ the vendored Gemini provider. Not imported by cli.py/web/coordinator.py yet
 from .agent import build_langgraph_agent, tool_name
 from .audit import AuditLog, record_decision, redact_secrets
 from .exec_policy import EXEC_POLICY_TOOL_NAMES, ExecPolicy, load_exec_policy
-from .mcp import connect_mcp_tools_lg
 from .messages import (
     extract_text,
     render_transcript_lg,
@@ -57,3 +56,17 @@ __all__ = [
     "tool_result_value",
     "write_skill_lg",
 ]
+
+
+def __getattr__(name: str) -> object:
+    # `connect_mcp_tools_lg` pulls in langchain_mcp_adapters (and the mcp
+    # SDK it drags in) -- measured at ~250-360ms of startup import time
+    # even for a user with zero MCP servers configured, since a plain
+    # `from .mcp import connect_mcp_tools_lg` above would run unconditionally
+    # on every `import coscribe.runtime_lg`. PEP 562 module __getattr__
+    # defers that import until something actually reaches for the name.
+    if name == "connect_mcp_tools_lg":
+        from .mcp import connect_mcp_tools_lg
+
+        return connect_mcp_tools_lg
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

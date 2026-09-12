@@ -4100,6 +4100,20 @@ All three build phases (shell parity, `WebContentsView` embedding + navigation, 
 
 ---
 
+## Phase 8ai -- Startup latency: MCP client no longer imported unconditionally (sandbox-verified)
+
+Picks up the "Later" backlog's startup-latency finding (item 2, above -- found while investigating your "即使不添加任何connector...非常缓慢" report). `runtime_lg/__init__.py`'s own top-level `from .mcp import connect_mcp_tools_lg` wasn't the whole story once actually traced through: `web/app.py` also directly imported `..runtime_lg.mcp` at its own top level (for `McpServerConnection`/`connect_one_mcp_server_lg`), and `cli.py` imported `connect_mcp_tools_lg` from `.runtime_lg.mcp` directly too -- so fixing only `__init__.py` would not have saved anything for either real entry point, since both re-imported the same heavy submodule themselves regardless. Fixed all three:
+
+- **`runtime_lg/__init__.py`**: `from .mcp import connect_mcp_tools_lg` replaced with a PEP 562 module `__getattr__` that imports `.mcp` lazily, only when something actually reaches for `connect_mcp_tools_lg` via the package.
+- **`web/app.py`**: `McpServerConnection` (only ever used as a local-variable type annotation, never evaluated at runtime under `from __future__ import annotations`) moved under `if TYPE_CHECKING:`. `connect_one_mcp_server_lg` and `connect_mcp_tools_lg` moved to local imports at their two real call sites (`_connect_and_register_mcp_server_lg`, and `lifespan`'s `if settings.mcp_config_path is not None:` block) -- both call sites were already gated on MCP actually being configured, so this is a pure "don't pay for what you don't use" change, not a behavior change.
+- **`cli.py`**: same treatment -- `connect_mcp_tools_lg` moved to a local import at its two call sites, both already gated on `settings.mcp_config_path is not None`.
+- Confirmed `agent.py`/`audit.py`/`exec_policy.py`/`messages.py`/`providers.py`/`scheduled_tasks.py`/`selfwake.py`/`skill_authoring.py`/`subagents.py`/`workflows.py` -- the rest of `runtime_lg/__init__.py`'s eager imports -- have no transitive import of `.mcp` themselves, so none of them would have silently re-opened the door this closes.
+- **Test fallout, fixed**: `test_web.py`/`test_cli.py` monkeypatched the now-removed re-exported names (`coscribe.web.app.connect_mcp_tools_lg`/`connect_one_mcp_server_lg`, `coscribe.cli.connect_mcp_tools_lg`) -- a local `from ..runtime_lg.mcp import x` inside a function reads whatever `runtime_lg.mcp.x` currently is at call time, so retargeting those three monkeypatch calls at `coscribe.runtime_lg.mcp.connect_mcp_tools_lg`/`connect_one_mcp_server_lg` directly (the true source, same module `test_mcp_lg.py` already imports from) keeps every existing test's stubbing intact with no behavior change.
+- **Verified in the private repo's sandbox** (identical code applied here; this public repo's own clone has no local Python venv to re-run the suite in, per this repo's established verification pattern -- Python changes are syntax-checked here via `py_compile`, with the full test/lint/type-check pass done once in the private repo before mirroring): `ruff check src tests` clean; `mypy src` diffed line-for-line against the pre-change baseline -- identical 192 errors, all pre-existing `untyped-decorator`/pydantic-BaseModel-subclass noise shifted by a few line numbers, zero new errors; full `pytest -q` suite passes (886 tests). Measured directly, not assumed: `python3 -X importtime -c "import coscribe.web.app"` no longer shows `langchain_mcp_adapters`/`mcp.types` anywhere in the trace at all (previously ~250-360ms combined); a plain wall-clock `import coscribe.web.app` dropped from ~1.9-2.3s to ~1.7-1.9s across repeated runs (noisy sandbox timing, but consistently faster, never slower).
+- Items 1 (structural LangChain/LangGraph/MCP/FastAPI-stack import weight) and 3 (first-access Defender-scan cost on the desktop build's `_internal/` DLLs) from that same backlog bullet are unrelated causes, still open -- this phase only closes the one concretely-fixable piece.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
@@ -4201,25 +4215,16 @@ a concrete reason to prioritize a new surface.
      startup or import tree of this size to pay at all) -- some gap here
      is inherent to the LangChain/LangGraph/MCP/FastAPI stack this project
      is built on, not a coscribe bug.
-  2. **Concrete and fixable, same lazy-import pattern already proven for
-     docx/pptx/xlsx**: `runtime_lg/__init__.py` line 8,
-     `from .mcp import connect_mcp_tools_lg`, is an unconditional
-     module-level import, pulled in unconditionally by both `cli.py` and
-     `web/app.py` at their own top level -- so `langchain_mcp_adapters`
-     (and the `mcp` SDK it drags in, including that 123ms `mcp.types`
-     line above) gets imported at every single startup, regardless of
-     whether the user has any MCP server configured at all. Directly
-     matches what you reported ("即使不添加任何connector...非常缓慢").
-     Measured at ~250-360ms cumulative for
-     `langchain_mcp_adapters.client`/`mcp` in the trace. Fix: defer this
-     import into `connect_mcp_tools_lg`'s own function body (or wherever
-     it's actually invoked), matching `documents.py`/`spreadsheets.py`/
-     `presentations.py`'s existing lazy-import discipline -- check first
-     whether any *tool-facing* function elsewhere in `runtime_lg/mcp.py`
-     is typed with `MultiServerMCPClient`/`Connection`/`BaseTool` etc. in
-     a way LangChain's schema introspection would force the import back
-     open at registration time regardless (the exact caveat that pass's
-     own writeup already checked for and ruled out for docx/pptx/xlsx).
+  2. [x] **Concrete and fixable, same lazy-import pattern already proven
+     for docx/pptx/xlsx -- fixed, see Phase 8ai below.** Was:
+     `runtime_lg/__init__.py` line 8, `from .mcp import
+     connect_mcp_tools_lg`, an unconditional module-level import, pulled
+     in unconditionally by both `cli.py` and `web/app.py` at their own top
+     level -- so `langchain_mcp_adapters` (and the `mcp` SDK it drags in,
+     including that 123ms `mcp.types` line above) got imported at every
+     single startup, regardless of whether the user had any MCP server
+     configured at all. Directly matched what you reported ("即使不添加任
+     何connector...非常缓慢").
   3. **Unverified in this sandbox, plausibly also real**: the desktop
      build is a PyInstaller `onedir` bundle (deliberately not `onefile`,
      see `packaging/coscribe-server.spec`'s own docstring on why) -- but
