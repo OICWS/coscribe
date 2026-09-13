@@ -183,6 +183,26 @@ function sendStatus(url: string): void {
   });
 }
 
+/** Real, confirmed Electron/Chromium bug, not a guess:
+ * https://github.com/electron/electron/issues/39993 -- a single
+ * `setBounds()` call can leave the view painting at its *previous*
+ * bounds (marked "needs layout" internally, but not actually flushed)
+ * even though `getBounds()` immediately reports the new rect. The
+ * view's own compositor backing surface then stays sized/rasterized for
+ * the stale bounds and just gets visually stretched to fill the real
+ * (larger) on-screen area -- exactly the "content correctly positioned,
+ * but blurry/low-res" symptom this was written to fix, first live-
+ * reported against a real 3440x1440 monitor no earlier real-hardware
+ * round had tested against. The issue's own confirmed workaround:
+ * setting the identical bounds a second time forces the layout that the
+ * first call only scheduled. Upstream fixed this for some cases (PRs
+ * #39994/#40035-37) but calling twice is harmless and cheap regardless
+ * of whether the pinned Electron version already has that fix. */
+function setBoundsReliably(view: WebContentsView, rect: PanelRect): void {
+  view.setBounds(rect);
+  view.setBounds(rect);
+}
+
 function openBrowserPanel(win: BrowserWindow, rect: PanelRect): void {
   const view = ensurePanelView();
   if (attachedWindow !== win) {
@@ -197,11 +217,11 @@ function openBrowserPanel(win: BrowserWindow, rect: PanelRect): void {
   } else if (!win.contentView.children.includes(view)) {
     win.contentView.addChildView(view);
   }
-  view.setBounds(rect);
+  setBoundsReliably(view, rect);
 }
 
 function repositionBrowserPanel(rect: PanelRect): void {
-  panelView?.setBounds(rect);
+  if (panelView) setBoundsReliably(panelView, rect);
 }
 
 function closeBrowserPanel(): void {

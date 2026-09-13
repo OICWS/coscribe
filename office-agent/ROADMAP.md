@@ -4128,6 +4128,20 @@ Picks up the "Later" backlog's proxy finding (above -- from your out-of-session 
 
 ---
 
+## Phase 8ak -- Browser panel: blurry/low-res content on a 3440x1440 monitor, fix applied, not yet real-hardware-confirmed
+
+First real build+test from the renamed Phase 4 paths, on a genuinely new machine/monitor combination -- every prior real-hardware round happened on a different, apparently more standard-resolution display (testing itself happened against the private `OICWS/project` checkout; this repo gets the identical code fix mirrored here).
+
+The embedded page's own content rendered visibly blurry/low-resolution compared to the panel's own UI chrome (address bar, buttons) in the very same window -- confirmed as a real asymmetry, not a subjective impression, via a direct side-by-side legibility comparison (address bar text crisp, page text underneath visibly softer) at a real 3440x1440 resolution, reproducing at both 125% and 100% Windows scaling (ruling out a simple "wrong OS scale setting" explanation) and regardless of panel width or closing/reopening the panel.
+
+**Root-caused against upstream, not guessed**: [electron/electron#39993](https://github.com/electron/electron/issues/39993), a real, confirmed Electron/Chromium bug -- a single `WebContentsView`/`BrowserView.setBounds()` call can leave the view's internal compositor surface painting at its *previous* size even though `getBounds()` immediately reports the new one, so content renders from a stale (smaller) backing texture stretched to fill the real on-screen size -- matching this session's exact reported symptom, and plausibly explaining why it never surfaced on an earlier, presumably lower-native-resolution test monitor. The issue's own confirmed workaround, quoted directly from its resolution: "setting the same bounds twice will make BrowserView paint correctly."
+
+**Fix applied**: `browserPanel.ts`'s new `setBoundsReliably()` helper calls `view.setBounds(rect)` twice in a row, used in both `openBrowserPanel` (the initial open) and `repositionBrowserPanel` (every subsequent resize/reposition) in place of the single call each previously made. `npm run typecheck`/`build` clean in the private repo's sandbox -- this is a rendering/GPU-compositor behavior with no way to visually verify blur or sharpness from a Linux sandbox with no GUI at all, so **this fix is unverified pending the next real-hardware build+test** on the same high-res monitor that reproduced the bug.
+
+Also corrected during this round: a report that Ctrl+scroll/Ctrl+Plus-Minus zoom was "previously fixed, now broken" -- checked against this file's own Phase 8af/"Later" entries and confirmed it was never implemented in either the screencast or Electron path, in any version.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
