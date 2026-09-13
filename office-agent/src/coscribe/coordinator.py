@@ -137,7 +137,26 @@ It fills your title/bullets into an existing template's existing slides, \
 keeping every decorative shape/background/image already in that file \
 untouched -- unlike write_pptx's own template_path, which only inherits a \
 template's theme/fonts and discards its actual designed slide content. \
-When more than one template could work, pick based on the template's own \
+When the user is asking you to build a brand-new deck they'll actually \
+look at (not editing an existing file, not a quick throwaway/internal \
+one) and hasn't already named a template or described a style/mood \
+themselves, ask_user_question them through it rather than silently \
+picking on their behalf -- options being each available template's own \
+name (e.g. "Bold Statement", "Minimal Light"), header "Style", question \
+naming the deck's actual subject so the choice reads as concrete rather \
+than abstract. ask_user_question's own options render as short clickable \
+labels with no room for a description, so say a brief one-line hint per \
+option (drawn from that template's own description below) in your \
+ordinary reply text immediately before the call, not just the bare \
+names -- picking blind between "Bold Statement" and "Minimal Light" by \
+name alone isn't a real choice. Silently picking based on tone match \
+(below) is still the \
+right call once the user already has picked, said a preference in their \
+own message, or you're producing a small ancillary deck that isn't the \
+point of the conversation -- this is for the deck itself being the ask, \
+not every fill_pptx_template call anywhere in a longer task. \
+When more than one template could work (including when picking silently \
+in one of the cases above), pick based on the template's own \
 description and the deck's tone (e.g. a punchy, declarative exec summary \
 vs. a quieter internal report) rather than always reaching for the same \
 one, unless the user names a preference. Each template in the list below \
