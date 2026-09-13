@@ -3,6 +3,7 @@ import { uploadFile } from "../lib/rest";
 import type { CommandInfo } from "../types/session";
 import type { BrowserCapture } from "./BrowserPanel";
 import { PlusIcon, ReturnIcon, StopIcon } from "./icons";
+import type { PptxShapeCapture } from "./PptxShapeOverlay";
 import { RunStatus } from "./RunStatus";
 
 /** Commands that get an instant "state" reply and never run an agent
@@ -33,6 +34,12 @@ interface PendingImage {
   dataUrl: string;
   text?: string;
   tag?: string;
+  /** Distinguishes a PptxShapeCapture from a plain BrowserCapture/file
+   * upload so the outgoing-note wording below matches its real source --
+   * undefined covers both a plain upload (no note at all) and a
+   * BrowserCapture (the original "from the browser panel" wording, kept
+   * as the default so that call site didn't need touching). */
+  source?: "pptx";
 }
 
 interface PendingFile {
@@ -58,6 +65,13 @@ interface ComposerProps {
    * same capture would get re-appended on any later unrelated re-render. */
   externalImage: BrowserCapture | null;
   onExternalImageConsumed: () => void;
+  /** Same pattern as externalImage/onExternalImageConsumed above, for a
+   * shape clicked in a pptx preview (PptxShapeOverlay) instead of an
+   * element picked in the Browser panel -- two props rather than
+   * generalizing into one queue since there are exactly two sources
+   * today and each already has its own dedicated App.tsx state slot. */
+  externalPptxCapture: PptxShapeCapture | null;
+  onExternalPptxCaptureConsumed: () => void;
 }
 
 export function Composer({
@@ -72,6 +86,8 @@ export function Composer({
   onLocalError,
   externalImage,
   onExternalImageConsumed,
+  externalPptxCapture,
+  onExternalPptxCaptureConsumed,
 }: ComposerProps) {
   const [value, setValue] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
@@ -88,6 +104,12 @@ export function Composer({
     setPendingImages((prev) => [...prev, externalImage]);
     onExternalImageConsumed();
   }, [externalImage, onExternalImageConsumed]);
+
+  useEffect(() => {
+    if (!externalPptxCapture) return;
+    setPendingImages((prev) => [...prev, externalPptxCapture]);
+    onExternalPptxCaptureConsumed();
+  }, [externalPptxCapture, onExternalPptxCaptureConsumed]);
 
   const resize = () => {
     const el = textareaRef.current;
@@ -163,11 +185,19 @@ export function Composer({
     // the image, never the text it can't reliably read back out of a
     // picture (small text, a truncated/cropped icon label, etc). Same
     // "(...)" contextual-note convention as the file-attachment note
-    // above, not a separate mechanism.
+    // above, not a separate mechanism. A pptx-shape pick's own `.text`
+    // is already the full note content (a precise path/slide/shape_index
+    // locator, not just a loose description -- see PptxShapeOverlay's
+    // own comment), so it's used verbatim instead of wrapped in the
+    // browser-panel-specific phrasing.
     const picksWithText = pendingImages.filter((img) => img.text);
     if (picksWithText.length > 0) {
       const note = picksWithText
-        .map((img) => `(Selected <${img.tag ?? "element"}> from the browser panel -- text: "${img.text}")`)
+        .map((img) =>
+          img.source === "pptx"
+            ? `(Selected from the pptx preview: ${img.text})`
+            : `(Selected <${img.tag ?? "element"}> from the browser panel -- text: "${img.text}")`,
+        )
         .join("\n");
       outgoingText = outgoingText ? `${outgoingText}\n\n${note}` : note;
     }

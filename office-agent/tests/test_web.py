@@ -2544,6 +2544,67 @@ def test_get_preview_rejects_path_traversal_attempts(
     assert response.status_code == 404
 
 
+def test_get_pptx_shapes_returns_shapes_and_slide_dimensions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backs the click-a-shape-in-the-preview feature (ChatLog.tsx's
+    PptxShapeOverlay) -- a plain UI-facing REST read, not a tool call."""
+    _write_test_deck(tmp_path / "workspace")
+
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/pptx-shapes", params={"path": "deck.pptx", "slide": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["slide"] == 1
+    assert body["shape_count"] == 1
+    assert body["slide_width_in"] > 0
+    assert body["slide_height_in"] > 0
+    [shape] = body["shapes"]
+    assert shape["index"] == 0
+    assert shape["left_in"] == pytest.approx(1.0)
+    assert shape["top_in"] == pytest.approx(1.0)
+    assert shape["width_in"] == pytest.approx(2.0)
+    assert shape["height_in"] == pytest.approx(1.0)
+    assert shape["text_preview"] == "hello"
+
+
+def test_get_pptx_shapes_400s_for_a_missing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/pptx-shapes", params={"path": "nope.pptx", "slide": 1})
+
+    assert response.status_code == 400
+
+
+def test_get_pptx_shapes_400s_for_an_out_of_range_slide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_test_deck(tmp_path / "workspace")
+
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/pptx-shapes", params={"path": "deck.pptx", "slide": 5})
+
+    assert response.status_code == 400
+
+
+def test_get_pptx_shapes_400s_for_a_path_outside_the_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    outside = tmp_path / "outside.pptx"
+    Presentation().save(str(outside))
+
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/pptx-shapes", params={"path": str(outside), "slide": 1})
+
+    assert response.status_code == 400
+
+
 def test_get_commands_includes_plan_accept_edits_and_compact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

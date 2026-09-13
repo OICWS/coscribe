@@ -1638,6 +1638,29 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(preview_path, media_type="image/png")
 
+    @app.get("/api/pptx-shapes")
+    async def get_pptx_shapes(path: str, slide: int) -> JSONResponse:
+        # Backs the click-a-shape-in-the-preview-to-target-it feature
+        # (ChatLog.tsx's PptxShapeOverlay): the frontend already has
+        # `path` from the tool call's own `arguments.path` and picks
+        # `slide` from `arguments.slide` (edits) or defaults to 1 (a
+        # fresh write_pptx), then overlays clickable regions on top of
+        # the already-rendered preview image using this endpoint's
+        # inch-based bboxes (converted to on-screen percentages -- see
+        # PresentationToolkit.list_pptx_shapes's own docstring for why
+        # inches, not pixels). Same underlying method the LLM-facing
+        # list_pptx_shapes tool calls -- this is a plain, ungated REST
+        # read, not a tool call, since it's UI-only (never reaches the
+        # model, never touches the audit log a real tool call would).
+        from ..tools.presentations import PresentationToolkit
+
+        toolkit = PresentationToolkit(settings.workspace_root, state_dir=settings.state_dir)
+        try:
+            result = await asyncio.to_thread(toolkit.list_pptx_shapes, path=path, slide=slide)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(result)
+
     # -- /api/config, /api/mcp/*, /api/providers/* -- direct ports of
     # web/app.py's identical endpoints (see this module's docstring for the
     # one behavioral difference: config changes here apply to the next new

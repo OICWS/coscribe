@@ -4146,12 +4146,75 @@ Also corrected during this round: a report that Ctrl+scroll/Ctrl+Plus-Minus zoom
 
 ---
 
+## Phase 8al -- PPTX quality/completeness discussion; click-a-shape-in-the-preview-to-target-it (small tier), sandbox-verified end-to-end
+
+Prompted by direct feedback: PPTX generation quality/aesthetics still unsatisfying, plus concrete gaps (SmartArt authoring, video/embedded-object support, some complex templates). Researched real open-source prior art before proposing anything, per an explicit "调研一下市面上所有开源高分高星的项目...不要重复造轮子" ask -- not guessed, not vibes:
+
+- **[ppt-master](https://github.com/hugohe3/ppt-master)** (MIT, independently verified live -- 53.9k stars/4.3k forks/2029 commits, real technical substance, not a star-farmed clone despite several near-identical forks under other usernames muddying the first search results): generates each slide as SVG (a model's own visual-design strength), then converts SVG shapes to native DrawingML -- real, editable PowerPoint objects, not a rasterized image. Distributed as an agent-driven skill/workflow (prompts + scripts a coding agent like Claude Code runs), not an installable library -- same shape as this project's own Skills mechanism, so "adopt the idea, not the code" is the natural fit here regardless of its permissive license.
+- **[PPTAgent](https://github.com/icip-cas/PPTAgent)** (real academic project, EMNLP 2025, not a random GitHub repo): generates by analyzing a library of *real, human-designed* reference slides, picking the closest match, then editing its content in place -- the starting point is always a real design, never an LLM inventing colors/layout from scratch. Most directly relevant to the aesthetics complaint specifically.
+- **[Presenton](https://github.com/presenton/presenton)** (Apache 2.0, active, 10.2k stars, ships its own MCP server) -- technically pluggable into coscribe's existing MCP-connector mechanism with no new code, but it's a full standalone web app (async job queue, its own upload endpoints) that overlaps heavily with coscribe's existing native pptx tools -- same "overlaps with an existing capability" reasoning that already excluded `markitdown-mcp` from the connector catalog (see the "Later" backlog's extensibility bullet). Not recommended for direct adoption; noted so the option is on record.
+
+Also clarified live: OLE-embedded objects (the missing-capability item) means embedding an actually-editable other-program document (a live Excel table, say) inside a slide, not a picture -- `python-pptx` already exposes this natively (`shapes.add_movie()`/`add_ole_object()`, confirmed by inspecting a real `SlideShapes` instance), unlike SmartArt authoring, which `python-pptx` has zero support for at all (no `add_smartart` method exists) -- creating/editing arbitrary SmartArt from scratch would mean reimplementing a chunk of PowerPoint's own diagram-layout algorithm. One idea confirmed sound and consistent with how `add_pptx_animation` already works in this codebase (`_new_timing_tree`/`_add_animation_step` manipulate raw `<p:timing>` XML directly, since python-pptx has no animation API either): a generic "read/edit the pptx's own internal XML" capability would cover *editing text inside an already-existing SmartArt diagram* (its layout is already valid, only the data-model text nodes need changing) without needing to author new diagram layouts -- and would generalize past SmartArt to any OOXML feature python-pptx hasn't wrapped. Real idea, not started yet -- see "Later" below for the deferred pieces.
+
+Agreed sequencing, three tracks, smallest first:
+
+1. **[x] Click a shape in the rendered preview to target it for a follow-up edit -- shipped, this phase.**
+2. Real reference-slide-template library (borrowing PPTAgent's idea) + a theme-picker (`ask_user_question`, four options) merged into one thing -- not started.
+3. Generic pptx-internal-XML read/edit tool (borrowing the SVG/XML-manipulation idea, inspired by ppt-master and this codebase's own animation precedent) -- not started, see "Later".
+
+### Track 1, shipped: PptxShapeOverlay
+
+Mirrors the Browser panel's own "Select an element, add to chat" interaction exactly (same `{name, dataUrl, text, tag}` capture shape Composer.tsx already consumes) rather than inventing a new one -- but a saved `.pptx`'s `shape_index` is a stable, precise address in a way a live DOM element index never is, so the attached note carries the model everything it needs to call `edit_pptx_shape`/`edit_pptx_text` directly (`"deck.pptx", slide 2, shape_index 3 (title) -- text: "..."`), not just a loose description the way a picked web element's text is.
+
+- **`PresentationToolkit.list_pptx_shapes`** (`presentations.py`) gained two new top-level fields, `slide_width_in`/`slide_height_in` -- the whole deck's canvas size, needed to turn each shape's existing inch-based bbox into an on-screen percentage overlay independent of the rendered preview's actual pixel dimensions. Backward-compatible addition; every existing field/consumer (the LLM-facing tool) unaffected.
+- **New `GET /api/pptx-shapes` REST endpoint** (`web/app.py`) -- a plain UI-facing read (never reaches the model, never touches the audit log a real tool call would), calling the exact same `PresentationToolkit.list_pptx_shapes` method the LLM-facing tool uses. Workspace-scoped the same way `/api/upload` already is.
+- **New `PptxShapeOverlay.tsx`** -- wraps an already-rendered slide preview `<img>` with one invisible clickable region per shape (fetched from the new endpoint), highlighting on hover. Clicking crops the *already-loaded* preview image client-side via canvas (no extra network round trip) and hands the crop + a structured locator note to `onPick`.
+- **`ChatLog.tsx`** wires this in wherever a pptx preview already renders -- both `ToolCallRow`'s always-visible completed-call thumbnail and `ApprovalPreview`'s before/after grid (an edit's own before/after, both clickable, so targeting a *follow-up* edit doesn't require waiting for the pending one to resolve first). Detects "is this a pptx preview" via `arguments.path` ending in `.pptx`; targets `arguments.slide` when present (every edit tool), defaulting to slide 1 for a fresh `write_pptx` (whose own preview is always the deck's first slide).
+- **`Composer.tsx`** gained a second external-capture prop pair (`externalPptxCapture`/`onExternalPptxCaptureConsumed`), mirroring the Browser panel's existing one rather than generalizing into a shared queue (exactly two sources exist today, each with its own dedicated `App.tsx` state slot already) -- and the outgoing-note-building logic now branches on a new `source: "pptx"` tag so the note reads "(Selected from the pptx preview: ...)" instead of the Browser-panel-specific wording, using the pptx capture's own pre-built locator text verbatim rather than re-wrapping it.
+
+**Verified in the private repo's sandbox, not just typechecked -- a real end-to-end browser test, since this is a UI feature** (identical code mirrored here): no live Anthropic key available there either, so rather than skip real verification, stood up the actual FastAPI app with `web/session.py`'s `resolve_chat_model` swapped for a scripted fake model (the exact technique `tests/test_web.py` already uses, just driven by a real headless-Chromium Playwright session instead of `TestClient`) and drove a real `write_pptx` turn through the real WS protocol. Confirmed live: the approval card renders a real preview image; clicking the "Hello World" title region produces overlay buttons whose own tooltips show the exact real shape text (proving the `/api/pptx-shapes` fetch and percentage-bbox math both work); clicking one crops correctly and the composer shows the resulting attachment chip; a follow-up message's actual outgoing WebSocket frame read exactly `"make this bigger\n\n(Selected from the pptx preview: \"test.pptx\", slide 1, shape_index 0 (PLACEHOLDER (14)) -- text: \"Hello World\")"` with the cropped PNG attached as a real image. `ruff check`/`mypy` clean in the private repo (mypy: 193 errors, identical pre-existing noise plus one new but harmless `untyped-decorator` hit on the new route, same class every other `@app.get` route already has); 4 new backend tests (`test_get_pptx_shapes_*`) plus the full suite (897 passed) all green there. This public repo's own clone: frontend `tsc -b && vite build` and `oxlint` clean, backend Python syntax-checked via `py_compile` only, per this repo's established pattern (no local venv here).
+
+**Real limitation, not yet addressed**: the shape-type label shown in the note (`"PLACEHOLDER (14)"` for a title placeholder) is python-pptx's own raw enum `str()`, same slightly-technical format `list_pptx_shapes` has always exposed to the model -- functionally fine (the model only needs `shape_index` to act), but not the friendliest label a human would want to see if this ever grows a visible on-hover tooltip beyond a debug `title` attribute. Left as-is for this pass; worth a small label-mapping table if this becomes more visible later.
+
+**Not yet real-hardware-confirmed**: whether the interaction *feels* good on an actual click (hit-target sizing on a small thumbnail, hover discoverability, whether cropping via canvas produces acceptable image quality at typical preview resolutions) -- the plumbing is proven correct end-to-end, but "does this feel like a good editing affordance" is a real-usage judgment call this sandbox can't make.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
 above) comes first; these get picked back up once that's done and there's
 a concrete reason to prioritize a new surface.
 
+- **PPTX quality: a real reference-slide-template library, replacing
+  generate-colors-from-scratch** -- not started; see Phase 8al above for
+  the full research (borrows PPTAgent's own approach) and the agreed
+  sequencing (track 2 of 3, after the click-to-target-a-shape feature
+  that already shipped). Merges with a theme-picker idea (`ask_user_
+  question`, four options before generating) discussed in the same
+  round -- each "theme" would be a real, curated reference deck to
+  adapt content into, not just a `bg=/accent=` color-token string the
+  model invents live. Concrete open sub-question worth resolving before
+  starting: `ask_user_question`'s own `options` are plain text labels,
+  no per-option preview image support today -- a v1 picking by name/
+  description alone, or a real investment in rendering a small preview
+  thumbnail per option first, is a real scope decision, not a detail.
+- **PPTX quality/completeness: a generic pptx-internal-XML read/edit
+  tool** -- not started; see Phase 8al above (track 3 of 3). Inspired by
+  ppt-master's SVG/XML-manipulation approach and this codebase's own
+  `add_pptx_animation` precedent (already manipulates raw `<p:timing>`
+  XML directly, since python-pptx has no animation API either). Real,
+  scoped use case identified: editing text *inside an already-existing*
+  SmartArt diagram (valid layout already present, only the data-model's
+  text nodes need changing) without needing to author new SmartArt
+  layouts from scratch (python-pptx has zero support for that, confirmed
+  -- no `add_smartart` method exists at all). Would generalize past
+  SmartArt to any OOXML feature python-pptx hasn't wrapped a high-level
+  tool around. Needs real design work before starting: how much raw XML
+  surface to expose to the model (a full-file diff/patch tool in the
+  `apply_patch`-for-OOXML shape, versus a narrower "edit this one known
+  data-model node" tool) is an open, consequential choice, not a detail
+  to figure out while coding.
 - **Electron Browser panel: Ctrl+scroll/Ctrl+Plus-Minus zoom on the
   embedded page doesn't do anything** -- not started; noted here per
   your request. Confirmed on real hardware (Phase 8af's first round) as

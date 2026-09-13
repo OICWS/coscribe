@@ -2788,7 +2788,15 @@ class PresentationToolkit:
         slide you haven't inspected yet: `shape_index` there is this
         list's own `index`, and guessing it blind on a slide with
         several shapes is exactly the failure mode this tool exists to
-        avoid."""
+        avoid.
+
+        `slide_width_in`/`slide_height_in` are the whole deck's own
+        canvas size (every slide in one .pptx shares one size) -- besides
+        being useful context for reasoning about layout, this is also
+        what web/app.py's GET /api/pptx-shapes (the click-to-target-a-
+        shape preview feature) uses to turn each shape's inch-based
+        bbox into an on-screen percentage overlay, independent of
+        whatever pixel size the rendered preview image happens to be."""
         from pptx import Presentation
 
         file_path = self._check_readable(path)
@@ -2798,7 +2806,13 @@ class PresentationToolkit:
             raise ValueError(f"Slide {slide} out of range: deck has {slide_count} slides")
         target_slide = prs.slides[slide - 1]
         shapes = [_describe_shape(index, shape) for index, shape in enumerate(target_slide.shapes)]
-        return {"slide": slide, "shape_count": len(shapes), "shapes": shapes}
+        return {
+            "slide": slide,
+            "shape_count": len(shapes),
+            "shapes": shapes,
+            "slide_width_in": _emu_to_inches(prs.slide_width),
+            "slide_height_in": _emu_to_inches(prs.slide_height),
+        }
 
     @locked_by_path
     def edit_pptx_shape(

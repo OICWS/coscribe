@@ -6,6 +6,7 @@ import { ModePill } from "./components/ModePill";
 import { ModelPicker } from "./components/ModelPicker";
 import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
 import { NavRail, type NavMode, type RunTab } from "./components/NavRail";
+import type { PptxShapeCapture } from "./components/PptxShapeOverlay";
 import { RunPanel } from "./components/RunPanel";
 import { DirBrowserModal } from "./components/settings/DirBrowserModal";
 import { SettingsModal } from "./components/settings/SettingsModal";
@@ -33,6 +34,9 @@ function App() {
   // after handing it off so the same capture can't be re-applied on an
   // unrelated future re-render.
   const [pendingBrowserCapture, setPendingBrowserCapture] = useState<BrowserCapture | null>(null);
+  // Same pattern, for a shape clicked in a pptx preview (ChatLog.tsx's
+  // PptxShapeOverlay) instead of an element picked in the Browser panel.
+  const [pendingPptxCapture, setPendingPptxCapture] = useState<PptxShapeCapture | null>(null);
   const [navMode, setNavMode] = useState<NavMode>("create");
   const [runTab, setRunTab] = useState<RunTab>("workflows");
   const [commands, setCommands] = useState<CommandInfo[]>([]);
@@ -157,6 +161,7 @@ function App() {
 
   const onSelectWorkspace = (path: string) => socketRef.current?.send({ type: "select_workspace", path });
   const onBrowserPanelCapture = (capture: BrowserCapture) => setPendingBrowserCapture(capture);
+  const onPptxShapePicked = (capture: PptxShapeCapture) => setPendingPptxCapture(capture);
 
   const onToggleSkill = (name: string, enabled: boolean) => {
     const next = new Set(state.enabledSkills);
@@ -254,6 +259,7 @@ function App() {
               onAnswerQuestion={onAnswerQuestion}
               onEditMessage={state.turnInFlight ? undefined : onEditMessage}
               onSuggestion={onSuggestion}
+              onPptxShapePicked={onPptxShapePicked}
             />
             {state.error && <div className="px-4 py-1 text-sm text-red-500">{state.error}</div>}
             <Composer
@@ -274,6 +280,8 @@ function App() {
               onLocalError={onLocalError}
               externalImage={pendingBrowserCapture}
               onExternalImageConsumed={() => setPendingBrowserCapture(null)}
+              externalPptxCapture={pendingPptxCapture}
+              onExternalPptxCaptureConsumed={() => setPendingPptxCapture(null)}
             />
           </>
         ) : (

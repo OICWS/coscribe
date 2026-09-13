@@ -11,6 +11,7 @@ import type { LogItem } from "../state/reducer";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
 import { ChevronDownIcon, PencilIcon } from "./icons";
+import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { QuestionCard } from "./QuestionCard";
 
 /** react-markdown + remark/rehype + katex is the single biggest dependency
@@ -31,6 +32,20 @@ function previewPathOf(result: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/** Click-a-shape-to-target-it (PptxShapeOverlay) only makes sense for a
+ * .pptx preview -- write_docx/write_xlsx thumbnails share the exact same
+ * preview_path shape but have no shape_index concept to click into.
+ * `arguments.slide` covers every edit tool that targets one slide
+ * (edit_pptx_shape, delete/duplicate/reorder_pptx_slide, ...); a bare
+ * write_pptx has no `slide` argument at all, and its own preview is
+ * always the deck's first slide (see tools/_thumbnail.py). */
+function pptxOverlayTargetOf(arguments_: Record<string, unknown>): { path: string; slide: number } | null {
+  const path = arguments_.path;
+  if (typeof path !== "string" || !path.toLowerCase().endsWith(".pptx")) return null;
+  const slide = arguments_.slide;
+  return { path, slide: typeof slide === "number" ? slide : 1 };
+}
+
 type ToolOrApprovalItem = Extract<LogItem, { kind: "tool" | "approval" }>;
 
 interface ChatLogProps {
@@ -44,9 +59,19 @@ interface ChatLogProps {
   /** Runs a suggested prompt from EmptyState, shown in place of the
    * (otherwise empty) message list on a brand-new thread. */
   onSuggestion: (prompt: string) => void;
+  /** A shape clicked in a pptx preview (PptxShapeOverlay) -- threaded up
+   * to App.tsx exactly like BrowserPanel's own onSendToChat. */
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }
 
-export function ChatLog({ items, onApprove, onAnswerQuestion, onEditMessage, onSuggestion }: ChatLogProps) {
+export function ChatLog({
+  items,
+  onApprove,
+  onAnswerQuestion,
+  onEditMessage,
+  onSuggestion,
+  onPptxShapePicked,
+}: ChatLogProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const entries = groupToolRuns(items);
 
@@ -67,9 +92,14 @@ export function ChatLog({ items, onApprove, onAnswerQuestion, onEditMessage, onS
       <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-4 py-4">
         {entries.map((entry) =>
           entry.kind === "tool_run" ? (
-            <ToolRunGroupView key={entry.id} group={entry} onApprove={onApprove} />
+            <ToolRunGroupView
+              key={entry.id}
+              group={entry}
+              onApprove={onApprove}
+              onPptxShapePicked={onPptxShapePicked}
+            />
           ) : entry.kind === "tool" || entry.kind === "approval" ? (
-            <ToolCallRow key={entry.id} item={entry} onApprove={onApprove} />
+            <ToolCallRow key={entry.id} item={entry} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
           ) : entry.kind === "question" ? (
             <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
           ) : (
@@ -111,9 +141,11 @@ function SummaryLabel({ parts }: { parts: SummaryParts }) {
 function ToolRunGroupView({
   group,
   onApprove,
+  onPptxShapePicked,
 }: {
   group: ToolRunGroup;
   onApprove: (id: string, approved: boolean) => void;
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const [manuallyOpen, setManuallyOpen] = useState(false);
   const hasPendingApproval = groupHasPendingApproval(group);
@@ -122,7 +154,7 @@ function ToolRunGroupView({
     return (
       <div className="flex flex-col gap-1.5 self-start">
         {group.items.map((item) => (
-          <ToolCallRow key={item.id} item={item} onApprove={onApprove} />
+          <ToolCallRow key={item.id} item={item} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
         ))}
       </div>
     );
@@ -151,7 +183,7 @@ function ToolRunGroupView({
       {open && (
         <div className="mt-1.5 flex flex-col gap-1">
           {group.items.map((item) => (
-            <ToolCallRow key={item.id} item={item} onApprove={onApprove} />
+            <ToolCallRow key={item.id} item={item} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
           ))}
         </div>
       )}
@@ -174,9 +206,11 @@ function ToolRunGroupView({
 function ToolCallRow({
   item,
   onApprove,
+  onPptxShapePicked,
 }: {
   item: ToolOrApprovalItem;
   onApprove: (id: string, approved: boolean) => void;
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const [open, setOpen] = useState(() => item.kind === "approval" && item.status === "pending");
   // An approval item carries a result too, once its (approved) call
@@ -185,6 +219,7 @@ function ToolCallRow({
   // previewPathOf check either way, so a completed write_pptx/write_docx/
   // write_xlsx call gets its thumbnail here exactly like an ungated one.
   const previewPath = previewPathOf(item.result);
+  const pptxTarget = pptxOverlayTargetOf(item.arguments);
   const isPendingApproval = item.kind === "approval" && item.status === "pending";
 
   return (
@@ -205,13 +240,23 @@ function ToolCallRow({
           <SummaryLabel parts={summarizeItemParts(item)} />
         </span>
       </button>
-      {previewPath && (
-        <img
-          src={`/api/previews/${encodeURIComponent(previewPath)}`}
-          alt={`${item.toolName} preview`}
-          className="mt-1 block max-h-32 rounded-lg border border-[var(--border)]"
-        />
-      )}
+      {previewPath &&
+        (pptxTarget ? (
+          <PptxShapeOverlay
+            src={`/api/previews/${encodeURIComponent(previewPath)}`}
+            alt={`${item.toolName} preview`}
+            className="mt-1 block max-h-32 rounded-lg border border-[var(--border)]"
+            path={pptxTarget.path}
+            slide={pptxTarget.slide}
+            onPick={onPptxShapePicked}
+          />
+        ) : (
+          <img
+            src={`/api/previews/${encodeURIComponent(previewPath)}`}
+            alt={`${item.toolName} preview`}
+            className="mt-1 block max-h-32 rounded-lg border border-[var(--border)]"
+          />
+        ))}
       {open && (
         <div className="mt-1.5">
           {item.kind === "tool" ? (
@@ -221,7 +266,7 @@ function ToolCallRow({
               </pre>
             )
           ) : (
-            <ApprovalDetail item={item} onApprove={onApprove} />
+            <ApprovalDetail item={item} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
           )}
         </div>
       )}
@@ -235,13 +280,22 @@ function ToolCallRow({
  * "38BDF8"}` doesn't require reading JSON to picture the result. Either
  * side can be missing on its own (the dry run failed, or there was
  * nothing to diff against) -- rendered as a muted placeholder rather than
- * collapsing the layout, so "before" and "after" always line up. */
+ * collapsing the layout, so "before" and "after" always line up.
+ * `pptxTarget` (present only for a real .pptx edit -- see
+ * pptxOverlayTargetOf) makes both sides clickable the same way
+ * ToolCallRow's own completed-call thumbnail is, so picking a shape to
+ * target a *follow-up* edit doesn't require waiting for this one to
+ * resolve first. */
 function ApprovalPreview({
   beforePreview,
   afterPreview,
+  pptxTarget,
+  onPptxShapePicked,
 }: {
   beforePreview?: string | null;
   afterPreview?: string | null;
+  pptxTarget: { path: string; slide: number } | null;
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   return (
     <div className="mb-1.5 grid grid-cols-2 gap-2">
@@ -254,11 +308,22 @@ function ApprovalPreview({
         <div key={label} className="flex flex-col gap-1">
           <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted)]">{label}</div>
           {name ? (
-            <img
-              src={`/api/previews/${encodeURIComponent(name)}`}
-              alt={`${label} the edit`}
-              className="block w-full rounded-lg border border-[var(--border)]"
-            />
+            pptxTarget ? (
+              <PptxShapeOverlay
+                src={`/api/previews/${encodeURIComponent(name)}`}
+                alt={`${label} the edit`}
+                className="block w-full rounded-lg border border-[var(--border)]"
+                path={pptxTarget.path}
+                slide={pptxTarget.slide}
+                onPick={onPptxShapePicked}
+              />
+            ) : (
+              <img
+                src={`/api/previews/${encodeURIComponent(name)}`}
+                alt={`${label} the edit`}
+                className="block w-full rounded-lg border border-[var(--border)]"
+              />
+            )
           ) : (
             <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[10px] text-[var(--muted)]">
               no preview
@@ -280,9 +345,11 @@ function ApprovalPreview({
 function ApprovalDetail({
   item,
   onApprove,
+  onPptxShapePicked,
 }: {
   item: Extract<LogItem, { kind: "approval" }>;
   onApprove: (id: string, approved: boolean) => void;
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const isScript =
     item.toolName === "run_python_script" ||
@@ -290,9 +357,17 @@ function ApprovalDetail({
     item.toolName === "run_background_script";
   const scriptArgs = item.arguments;
   const hasPreview = Boolean(item.beforePreview || item.afterPreview);
+  const pptxTarget = pptxOverlayTargetOf(item.arguments);
   return (
     <>
-      {hasPreview && <ApprovalPreview beforePreview={item.beforePreview} afterPreview={item.afterPreview} />}
+      {hasPreview && (
+        <ApprovalPreview
+          beforePreview={item.beforePreview}
+          afterPreview={item.afterPreview}
+          pptxTarget={pptxTarget}
+          onPptxShapePicked={onPptxShapePicked}
+        />
+      )}
       {isScript ? (
         <div className="flex flex-col gap-1.5">
           {typeof scriptArgs.description === "string" && scriptArgs.description && (
