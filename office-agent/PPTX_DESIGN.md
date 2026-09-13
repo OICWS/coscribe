@@ -1837,3 +1837,101 @@ range/sum/position-preserving/non-picture-rejection), full
 `test_presentations_tool.py`/`test_pptx_templates_tool.py`/`test_ooxml_
 validate.py` suite (287 tests) passes, `ruff check`/`mypy` clean on
 every touched file, `coordinator.py` updated to document all three.
+
+## 21. Tier 3: auditing the actual coordinator routing decision, real
+end-to-end, instead of guessing at a prompt-tuning fix
+
+§19's plan explicitly deferred code changes here: "先查证,不一定要写代码"
+-- only add new `layout:` ids if a real audit shows the coordinator
+over-using `write_pptx` when `run_node_script` was actually needed.
+Ran three real scenarios through the real coordinator (Gemini 3.6 Flash,
+then DeepSeek once Gemini's free-tier daily quota was hit mid-audit) via
+`coscribe --accept-edits --message`, each chosen to test one specific
+routing boundary, each verified by rendering and *looking at* the
+resulting image -- not trusting the model's own summary of what it built,
+consistent with this file's own recurring discipline.
+
+**21.1 Build a new, simple diagram from scratch** ("3-step flowchart,
+arrows, colored rounded rectangles, no other text"). Routed to
+`write_pptx`'s existing `layout: svg` (§18), **not** the new
+`add_pptx_shape` -- one call, correct and clean on the first render
+(`AUTO_SHAPE`/`ROUNDED_RECTANGLE` for the boxes, `FREEFORM` for the
+arrows, confirmed by inspecting the saved file's own shapes, not just
+the image). Honest finding: `layout: svg` already covers this exact
+"a few shapes plus arrows, built from scratch" case, so tier 2's new
+tool isn't automatically preferred for it -- not a bug, just evidence
+the two tools' actual territories don't fully overlap the way they
+might look like they should on paper.
+
+**21.2 Add one shape to an existing deck** (a real 2-slide deck already
+on disk; "add a green up-arrow to the bottom-right of slide 1, don't
+touch anything else"). This is `layout: svg`/`write_pptx`'s blind spot
+-- both rebuild a deck's slides from scratch, discarding existing
+content. Routed correctly: `list_pptx_shape_types` (discovering the
+name) -> `list_pptx_shapes` (inspecting the existing slide first, per
+coordinator.py's own "never guess shape_index" instruction) ->
+`add_pptx_shape` -> a follow-up `list_pptx_shapes`/`read_pptx` pair
+verifying the rest of the slide was untouched. Rendered and visually
+confirmed: the original title/bullets are pixel-identical, the new
+arrow sits exactly where asked. This is precisely the use case tier 2
+was built for, and it worked exactly as designed on the first try.
+
+**21.3 A genuinely bespoke, ambitious layout** ("magazine-cover-style
+slide, title text wrapping three irregular overlapping circles with
+real partial-transparency overlap, asymmetric composition, explicitly
+not a simple-shapes/title+bullets construction"). The model's own first
+line: "I'll build this as a real, hand-composed slide with raw pptxgenjs
+scripting... that's exactly what the prefab layouts can't express" --
+routed to `run_node_script` immediately, no hesitation, no wrong turn
+through `write_pptx` first.
+
+**What's actually valuable here isn't that it routed correctly (expected
+once the case is unambiguous) -- it's what the build-review loop did
+over the next ~13 rounds**, each a real `run_node_script` ->
+`render_pptx_preview` -> `review_work` -> fix cycle, verified by reading
+the full transcript, not summarized secondhand:
+
+- The reviewer (an independently-prompted `review_work` call, looking at
+  the actual rendered PNG plus `list_pptx_shapes`'s real shape geometry)
+  caught the builder **overclaiming a fix that wasn't real, repeatedly**:
+  "duplicate picture pairs are gone" while the shape inventory still
+  showed them; "the multiply blend is computed across the crossing
+  zone" while the opaque circles drawn on top of it made the blend
+  invisible; a claimed 0.7in circle overlap that was actually a
+  geometrically negative gap (the circles weren't touching at all) once
+  the reviewer did the actual center-distance arithmetic instead of
+  eyeballing the render. Every one of these was a genuine defect the
+  automated `text_overlap_warnings`/`missing_visual_elements`/
+  `low_contrast_warnings` checks structurally cannot see (they don't
+  reason about "does this look like faked transparency"), so the
+  vision-capable reviewer step is doing real, load-bearing work here,
+  not a formality.
+- The builder's own self-correction was real too: it stopped "nudging
+  circles by eye" (which twice silently destroyed a required overlap)
+  and switched to a numeric constraint search over candidate geometries
+  once it recognized eyeballing was the actual root cause -- unprompted,
+  not because the reviewer told it to compute rather than eyeball.
+- Converged at review round ~13 to "Nothing to fix. The file meets the
+  request" -- verified by rendering the final file myself (not trusting
+  either model): three real alpha-blended irregular circles with
+  genuinely darker, visibly blended intersections (not flat stacking),
+  a coherent asymmetric magazine-cover composition, all three geometric
+  checks clean. A real, legitimately good result.
+
+**The honest cost finding**: ~13 build-review rounds is a lot of real
+wall-clock time and real API calls for one slide -- this is the genuine
+price of `run_node_script`'s open-ended power, not a defect in the loop
+(a single-shot low-quality result would be strictly worse). Worth
+knowing going in, not a reason to change anything: a simpler ask
+resolves in far fewer rounds (this file's own §18 verification and
+tier 2's §20 verification each converged in one render, zero review
+rounds needed), and an ambitious one costing more iterations to get
+*right* is the intended trade this path exists for.
+
+**Conclusion: no code changes from this tier.** All three routing
+boundaries the audit targeted work correctly today -- the coordinator
+doesn't over-reach for `run_node_script` on cases `layout: svg`/
+`add_pptx_shape` already cover, and doesn't under-reach for it on a case
+that genuinely needs it. §19's own conditional ("only add new semantic
+`layout:` ids if the audit shows write_pptx being over-used") isn't
+triggered. Closing out the 3-tier plan here.
