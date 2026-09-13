@@ -1846,6 +1846,7 @@ def test_set_pptx_notes_is_medium_risk_and_requires_approval(tmp_path: Path) -> 
 
 
 _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+_MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
 
 def test_set_pptx_transition_adds_transition_element(tmp_path: Path) -> None:
@@ -1860,6 +1861,11 @@ def test_set_pptx_transition_adds_transition_element(tmp_path: Path) -> None:
     transition_el = prs.slides[0].element.find(f"{{{_P_NS}}}transition")
     assert transition_el is not None
     assert [c.tag.split("}")[-1] for c in transition_el] == ["fade"]
+    # p14:dur is a PowerPoint-2010 extension attribute with no home in the
+    # base ECMA-376 schema -- valid OOXML only because mc:Ignorable marks
+    # its namespace prefix ignorable (see _mark_mce_ignorable's docstring).
+    # A real slide always carries both together, not just the attribute.
+    assert (prs.slides[0].element.get(f"{{{_MC_NS}}}Ignorable") or "").split() == ["p14"]
 
 
 def test_set_pptx_transition_none_removes_any_existing_transition(tmp_path: Path) -> None:
@@ -1873,6 +1879,9 @@ def test_set_pptx_transition_none_removes_any_existing_transition(tmp_path: Path
 
     prs = Presentation(tmp_path / "deck.pptx")
     assert prs.slides[0].element.find(f"{{{_P_NS}}}transition") is None
+    # No p14: content left on the slide -- mc:Ignorable shouldn't still
+    # claim there is any.
+    assert prs.slides[0].element.get(f"{{{_MC_NS}}}Ignorable") is None
 
 
 def test_set_pptx_transition_replaces_rather_than_duplicates(tmp_path: Path) -> None:
@@ -2732,6 +2741,59 @@ def test_fill_pptx_template_happy_path_preserves_decorative_shape_and_fills_plac
     assert shape.width == decorative["width"]
     assert shape.height == decorative["height"]
     assert str(shape.fill.fore_color.rgb) == decorative["fill_rgb"]
+
+
+def test_leftover_placeholder_warnings_flags_known_patterns() -> None:
+    from pptx import Presentation
+
+    from coscribe.tools.presentations import _leftover_placeholder_warnings
+
+    prs = Presentation()
+    cases = [
+        "Revenue grew lorem ipsum dolor this quarter",
+        "TODO: fill in the real numbers",
+        "[insert customer logo here]",
+        "xxxxx",
+        "This is a placeholder for the chart",
+        "Replace this sample text before sending",
+    ]
+    for text in cases:
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        slide.shapes.title.text = text
+
+    warnings = _leftover_placeholder_warnings(prs)
+    assert len(warnings) == len(cases)
+    assert [w["slide"] for w in warnings] == list(range(1, len(cases) + 1))
+
+
+def test_leftover_placeholder_warnings_does_not_flag_real_content() -> None:
+    from pptx import Presentation
+
+    from coscribe.tools.presentations import _leftover_placeholder_warnings
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    slide.shapes.title.text = "How to insert a chart: a sample workflow"
+
+    assert _leftover_placeholder_warnings(prs) == []
+
+
+def test_write_pptx_flags_leftover_todo_in_generated_content(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+
+    result = tools["write_pptx"](
+        path="deck.pptx", content="# Title\n- TODO: add real figures"
+    )
+
+    assert result["placeholder_warnings"] == [{"slide": 1, "text": "TODO"}]
+
+
+def test_write_pptx_placeholder_warnings_empty_for_clean_content(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+
+    result = tools["write_pptx"](path="deck.pptx", content="# Title\n- real content here")
+
+    assert result["placeholder_warnings"] == []
 
 
 def test_fill_pptx_template_too_few_chunks_for_fixed_slides_raises(

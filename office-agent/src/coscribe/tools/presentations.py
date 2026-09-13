@@ -62,6 +62,17 @@ saved file is re-opened and structurally verified before it's allowed to
 replace the user's real file -- but that verification is structural, not
 visual, since this sandbox has no real PowerPoint to test against, only
 LibreOffice. See ``ARCHITECTURE.md`` for the full reasoning.
+
+Every hand-XML write in this file (``set_pptx_transition``,
+``add_pptx_animation``, ``edit_pptx_theme_colors``, and the theme-blob
+edits inside ``write_pptx``/``fill_pptx_template`` for ``theme=``/CJK-font
+handling) also runs through ``_ooxml_validate.assert_ooxml_valid`` before
+the mutated element is ever serialized into the file -- a real ECMA-376
+schema check (see ``_ooxml_schemas/NOTICE.md``), not just the
+application-level checks above. This catches what those checks aren't
+designed to: a structurally wrong OOXML document that happens to still
+satisfy a narrower "did my specific edit land" check, or that ``prs.save()``
+and LibreOffice's own more forgiving parser would silently accept anyway.
 """
 
 from __future__ import annotations
@@ -77,6 +88,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from ..runtime.types import tool_metadata
 from ._file_locks import locked_by_path
+from ._ooxml_validate import assert_ooxml_valid
 from ._svg_slide import add_svg_slide
 from ._thumbnail import render_all_page_previews, render_thumbnail
 from ._workspace import WorkspaceScope
@@ -175,6 +187,16 @@ _CONTENT_BOTTOM_FRACTION = 0.9
 # precise timing, confirmed by inspecting real .pptx files' XML.
 _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 _P14_NS = "http://schemas.microsoft.com/office/powerpoint/2010/main"
+# Markup Compatibility and Extensibility (ECMA-376 Part 3) -- the mechanism
+# that makes a foreign-namespace attribute like `p14:dur` below valid OOXML
+# at all: a producer declares the namespace prefix "ignorable" via
+# `mc:Ignorable` on an ancestor, and a schema-strict consumer is specified
+# to strip that content before validating rather than reject it outright.
+# Confirmed live against `_ooxml_schemas/`: `CT_SlideTransition`/`CT_Slide`
+# have no `xsd:anyAttribute` wildcard, so `p14:dur` genuinely doesn't
+# validate against the bare ECMA-376 schema without this declaration --
+# `_ooxml_validate.py` implements the matching strip-before-validate side.
+_MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
 _TRANSITIONS = frozenset({"fade", "push", "wipe", "none"})
 
@@ -770,6 +792,41 @@ def _check_overflow(pdf_path: Path) -> list[dict[str, object]]:
     return warnings
 
 
+# Leftover template/placeholder text write_pptx's own model-written content
+# or fill_pptx_template's untouched template shapes (see that tool's own
+# "Template slots != source items" docstring paragraph) can leave behind --
+# the same class of defect Anthropic's own pptx skill's QA step greps
+# `markitdown` output for (`\bx{3,}\b|lorem|ipsum|\bTODO|\[insert`). Kept
+# deliberately narrow: real deck content legitimately says "sample" or
+# "insert" sometimes (a training deck about "how to insert a chart"), so
+# this flags specific, low-false-positive patterns -- literal repeated x's,
+# "lorem ipsum", a TODO marker, an unfilled "[insert ...]" bracket, and the
+# literal words "placeholder"/"sample text" -- not a broad content-quality
+# heuristic.
+_PLACEHOLDER_LEFTOVER_RE = re.compile(
+    r"\bx{3,}\b|lorem\s+ipsum|\bTODO\b|\[insert|\bplaceholder\b|\bsample\s+text\b",
+    re.IGNORECASE,
+)
+
+
+def _leftover_placeholder_warnings(prs: PresentationType) -> list[dict[str, object]]:
+    """Flag every shape whose text still matches `_PLACEHOLDER_LEFTOVER_RE`.
+    Scans every shape on every slide, not just title/body placeholders --
+    fill_pptx_template only ever writes into those two, so a template's
+    own other, undesigned-for text (a decorative caption, a leftover
+    sample stat) never gets touched by that tool at all, and this is the
+    QA net that catches it reaching the user's file regardless."""
+    warnings: list[dict[str, object]] = []
+    for index, slide in enumerate(prs.slides, start=1):
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            match = _PLACEHOLDER_LEFTOVER_RE.search(shape.text_frame.text)
+            if match:
+                warnings.append({"slide": index, "text": match.group(0)})
+    return warnings
+
+
 def _slide_chunks(content: str) -> list[str]:
     return [chunk for chunk in content.split("\n---\n") if chunk.strip()]
 
@@ -936,6 +993,7 @@ def _apply_cjk_font_fix(prs: PresentationType) -> None:
             ea.set("typeface", _CJK_FALLBACK_TYPEFACE)
             changed = True
         if changed:
+            assert_ooxml_valid(root, "_apply_cjk_font_fix")
             theme_part._blob = etree.tostring(  # noqa: SLF001
                 root, xml_declaration=True, encoding="UTF-8", standalone=True
             )
@@ -982,6 +1040,7 @@ def _apply_theme(prs: PresentationType, tokens: dict[str, str]) -> None:
                 if latin is None:
                     continue
                 latin.set("typeface", font_tokens[token_key])
+        assert_ooxml_valid(root, "_apply_theme")
         theme_part._blob = etree.tostring(  # noqa: SLF001
             root, xml_declaration=True, encoding="UTF-8", standalone=True
         )
@@ -1153,6 +1212,7 @@ def _set_slide_transition(slide_element: Any, transition: str, duration: float) 
     if existing is not None:
         slide_element.remove(existing)
     if transition == "none":
+        _unmark_mce_ignorable(slide_element, "p14")
         return
     transition_element = etree.SubElement(
         slide_element, f"{{{_P_NS}}}transition", nsmap={"p14": _P14_NS}
@@ -1160,6 +1220,35 @@ def _set_slide_transition(slide_element: Any, transition: str, duration: float) 
     transition_element.set("spd", _spd_for(duration))
     transition_element.set(f"{{{_P14_NS}}}dur", str(round(duration * 1000)))
     etree.SubElement(transition_element, f"{{{_P_NS}}}{transition}")
+    _mark_mce_ignorable(slide_element, "p14")
+
+
+def _mark_mce_ignorable(root_element: Any, prefix: str) -> None:
+    """Add `prefix` to `root_element`'s `mc:Ignorable` token list (creating
+    the attribute if absent, a no-op if `prefix` is already there) -- the
+    declaration real PowerPoint-authored slides carry alongside any p14:/
+    a14:-namespaced extension attribute, and what lets `_ooxml_validate.py`
+    tell a real OOXML defect apart from expected, declared extension
+    content instead of rejecting both alike."""
+    existing_tokens = (root_element.get(f"{{{_MC_NS}}}Ignorable") or "").split()
+    if prefix in existing_tokens:
+        return
+    root_element.set(f"{{{_MC_NS}}}Ignorable", " ".join([*existing_tokens, prefix]))
+
+
+def _unmark_mce_ignorable(root_element: Any, prefix: str) -> None:
+    """Inverse of `_mark_mce_ignorable` -- drops `prefix` from the token
+    list (and the attribute entirely once empty), keeping a slide that no
+    longer has any p14:-namespaced content from still claiming it does."""
+    remaining = [
+        token
+        for token in (root_element.get(f"{{{_MC_NS}}}Ignorable") or "").split()
+        if token != prefix
+    ]
+    if remaining:
+        root_element.set(f"{{{_MC_NS}}}Ignorable", " ".join(remaining))
+    elif root_element.get(f"{{{_MC_NS}}}Ignorable") is not None:
+        del root_element.attrib[f"{{{_MC_NS}}}Ignorable"]
 
 
 def _add_inline_runs(paragraph: Any, text: str) -> None:
@@ -2592,6 +2681,7 @@ class PresentationToolkit:
             "slide_count": len(prs.slides),
             "bytes_written": file_path.stat().st_size,
             "overflow_warnings": overflow_warnings,
+            "placeholder_warnings": _leftover_placeholder_warnings(prs),
             "qa_skipped_reason": qa_skipped_reason,
             "preview_path": preview_path,
             "preview_skipped_reason": preview_skipped_reason,
@@ -2706,6 +2796,7 @@ class PresentationToolkit:
             "slide_count": len(prs.slides),
             "bytes_written": file_path.stat().st_size,
             "overflow_warnings": overflow_warnings,
+            "placeholder_warnings": _leftover_placeholder_warnings(prs),
             "qa_skipped_reason": qa_skipped_reason,
             "preview_path": preview_path,
             "preview_skipped_reason": preview_skipped_reason,
@@ -2775,6 +2866,7 @@ class PresentationToolkit:
             "path": self._scope.relative(file_path),
             "slide": slide,
             "overflow_warnings": overflow_warnings,
+            "placeholder_warnings": _leftover_placeholder_warnings(prs),
             "qa_skipped_reason": qa_skipped_reason,
             "preview_path": preview_path,
             "preview_skipped_reason": preview_skipped_reason,
@@ -3522,6 +3614,7 @@ class PresentationToolkit:
             )
         prs, file_path, target_slide = self._open_slide(path, slide)
         _set_slide_transition(target_slide.element, transition, duration)
+        assert_ooxml_valid(target_slide.element, "set_pptx_transition")
         prs.save(str(file_path))
         return {"path": self._scope.relative(file_path), "slide": slide, "transition": transition}
 
@@ -3579,6 +3672,8 @@ class PresentationToolkit:
             _add_animation_step(
                 target_slide.element, shape_id, animation, duration_ms, trigger, delay_ms, None
             )
+
+        assert_ooxml_valid(target_slide.element, "add_pptx_animation")
 
         # Save to a temp file and verify before touching the real file --
         # if the read-back check fails, the user's file is left untouched
@@ -3696,6 +3791,7 @@ class PresentationToolkit:
                 continue
             for slot, hex_value in tokens.items():
                 _set_scheme_color(clr_scheme, slot, hex_value)
+            assert_ooxml_valid(root, "edit_pptx_theme_colors")
             theme_part._blob = etree.tostring(  # noqa: SLF001
                 root, xml_declaration=True, encoding="UTF-8", standalone=True
             )
@@ -3886,6 +3982,21 @@ def build_presentation_tools(
         heading_font=Georgia"` for a dark navy deck with a cyan accent.
         Applies to the whole deck (every slide, including ones added via
         `layout:` directives), not per-slide.
+
+        `heading_font`/`body_font` pick which font PowerPoint itself
+        renders with -- this tool's own `overflow_warnings` is only as
+        accurate as that. Arial/Calibri/Cambria/Times New Roman/Courier
+        New/Bookman Old Style/Century Schoolbook render true-to-width in
+        both the overflow check *and* real Office (every common Office
+        install has them, or a metric-compatible stand-in); anything else
+        (Georgia, Trebuchet MS, Impact, Arial Black, Garamond, Consolas,
+        Palatino Linotype -- and never Aptos, unreliable on old and new
+        Office installs alike) renders correctly in real PowerPoint but
+        makes `overflow_warnings` itself approximate, since whatever
+        machine LibreOffice runs on for this check may substitute a
+        different-width font for it -- size that font's own text
+        containers with ~10% extra slack rather than trusting a clean
+        overflow check at face value.
 
         Args:
             path: file to write, relative to the workspace root

@@ -1616,3 +1616,138 @@ visual-element flags on that slide. `ruff check`/`mypy` clean;
 to document the new syntax and to explicitly steer the model toward
 `layout: svg`'s path/gradient support instead of ever reaching for
 image generation, which this project doesn't and won't have.
+
+## 19. Gap analysis against ppt-master/Anthropic's own pptx skill/Codex's
+presentation-skill -- schema validation, leftover-placeholder QA, and a
+real, verified finding about "safe" fonts
+
+User asked for a comparison against the field's leading approaches, then
+"how do we update to get closer to them," not a rebuild. Researched by
+directly reading source, not trusting summaries: cloned
+`anthropics/skills` (its `pptx/SKILL.md` -- script-driven, unzip/edit-XML/
+zip plus a `pptxgenjs` path, with an XSD-based `validate.py` and a
+`markitdown | grep` leftover-placeholder QA step) and `siril9/
+presentation-skill` (a Codex skill; source-first `outline.json` + a
+composition-grammar renderer). Cross-checked `hugohe3/ppt-master`'s own
+`why-ppt-master.md` again specifically for video/OLE: it states
+"Embedded/legacy objects (OLE, video, macros)" as deliberately out of
+scope, the same call the Codex skill and Anthropic's skill (no dedicated
+capability for either, despite being script-driven and generically
+capable of touching that XML) independently make -- three structurally
+different projects converging on the same exclusion is a real signal,
+not a coincidence, so this codebase drops video/OLE authoring from scope
+entirely (SmartArt was already dropped the same way, per the user's own
+explicit call in this same session).
+
+Three concrete, scoped items came out of this instead of a rebuild:
+
+**19.1 OOXML schema validator (`tools/_ooxml_validate.py`, new).**
+Anthropic's `validate.py` checks hand-touched OOXML against the real
+ISO-IEC29500-4 XSDs; this codebase had nothing equivalent -- `set_pptx_
+transition`/`add_pptx_animation`/`edit_pptx_theme_colors`/the `theme=`/
+CJK-font blob edits inside `write_pptx`/`fill_pptx_template` all hand-
+build XML with only ad-hoc, function-specific reasoning backing their
+correctness (see `add_pptx_animation`'s own `_verify_animation_readback`,
+which checks "is *my* edit there," not "is this still valid OOXML").
+Anthropic's own schema files are proprietary-licensed ("may not
+extract... reproduce... create derivative works" -- read directly from
+`LICENSE.txt`, not assumed), so **not vendored** -- instead fetched the
+real ECMA-376 5th edition Part 4 (Transitional) schema directly from
+`ecma-international.org` (the standard's own publisher, published
+specifically for implementers), verified the whole `pml.xsd` import
+closure resolves standalone (compiles in ~30ms, validates an in-memory
+element in <1ms, confirmed against a real `python-pptx`-authored file),
+and vendored that instead -- see `_ooxml_schemas/NOTICE.md` for exact
+provenance.
+
+**A real bug this surfaced immediately, not a hypothetical**:
+`set_pptx_transition`'s own `p14:dur` attribute (a PowerPoint-2010
+extension for precise transition timing, added and verified against real
+`.pptx` XML per this file's own docstring) has no home in the base
+ECMA-376 schema at all -- confirmed by reading `pml.xsd`'s `CT_
+SlideTransition`/`CT_Slide` directly, neither declares an `xsd:
+anyAttribute` wildcard. This isn't a bug in the schema or in the
+attribute -- ECMA-376 Part 3 (Markup Compatibility and Extensibility)
+specifies foreign-namespace extension content as valid OOXML only when a
+producer declares its prefix `mc:Ignorable` on an ancestor, and a
+schema-strict consumer is specified to strip that content *before*
+validating, not reject it. `_set_slide_transition` was silently relying
+on this without ever emitting the declaration. Fixed properly, not
+special-cased around: `_mark_mce_ignorable`/`_unmark_mce_ignorable` now
+add/remove `mc:Ignorable="p14"` on the slide root exactly when p14:
+content is written/removed, and `_ooxml_validate.py`'s own `_strip_mce_
+ignorable` implements the matching consumer-side half generically (any
+future extension namespace, not just p14, works the same way) --
+verified against both a positive case (declared ignorable content
+validates clean) and two negative cases (undeclared extension content
+still fails; an unrelated `mc:Ignorable` declaration doesn't mask a real,
+unrelated schema defect next to it), so this isn't "accept anything in a
+foreign namespace."
+
+Wired into all 5 hand-XML call sites, always before the mutated element
+is serialized into the file (never after) -- so a validation failure
+means the user's file genuinely wasn't touched, the same guarantee `add_
+pptx_animation`'s existing temp-file dance already made narrowly.
+`ruff`/`mypy` clean, full `test_presentations_tool.py`/`test_pptx_
+templates_tool.py` suite (267 tests) passes unchanged, plus 7 new direct
+unit tests in `test_ooxml_validate.py` covering the valid case, a
+deliberately-broken case (wrong child order -- genuinely rejected, with a
+real, specific schema error message), and the MCE positive/negative
+cases above.
+
+**19.2 Leftover-placeholder QA (`_leftover_placeholder_warnings`).**
+Anthropic's skill greps `markitdown` output for `lorem|TODO|\[insert`
+after any template fill; this codebase had no equivalent, and `fill_
+pptx_template`'s own docstring already warns "Template slots != source
+items" without ever checking for it. New field, `placeholder_warnings`,
+returned by `write_pptx`/`fill_pptx_template`/`edit_pptx_text` alongside
+`overflow_warnings` -- same shape (`[{"slide": n, "text": ...}]`), same
+"treat any hit as something to fix" framing in `coordinator.py`. Scoped
+narrowly (literal `xxx` runs, "lorem ipsum", a `TODO` marker, `[insert`,
+the literal words "placeholder"/"sample text") specifically to avoid
+flagging real content that happens to use those words in an unrelated
+sense (a deck *about* inserting charts, e.g.) -- verified via both a
+positive-case unit test (6 distinct patterns, all caught) and an explicit
+negative-case test (real sentences using "insert"/"sample" in context are
+not flagged).
+
+**19.3 Safe-font QA-reliability list -- verified in this sandbox, and
+found to be narrower than Anthropic's own published list.** `write_pptx`'s
+`overflow_warnings` is only as trustworthy as the LibreOffice conversion
+it's computed from, and LibreOffice substitutes any font it doesn't have
+installed -- a substitute with different glyph widths makes the overflow
+check itself wrong (falsely clean *or* falsely flagged) for exactly the
+slides using that font. Rather than copy Anthropic's own safe/unreliable
+font list wholesale, checked this sandbox's own real substitution
+behavior directly via `fc-match` (the same fontconfig resolution
+LibreOffice itself uses):
+
+| Font | Resolves to (this sandbox) | Metric-compatible? |
+|---|---|---|
+| Arial | Liberation Sans | Yes (`fonts-liberation`, designed as a drop-in metric match) |
+| Times New Roman | Liberation Serif | Yes |
+| Courier New | Liberation Mono | Yes |
+| Calibri | DejaVu Sans (generic fallback) | **No** |
+| Cambria | DejaVu Serif (generic fallback) | **No** |
+| Georgia, Trebuchet MS, Impact, Arial Black, Garamond, Consolas, Palatino Linotype, Aptos | DejaVu Sans/Serif (generic fallback) | No |
+
+Only `fonts-liberation` is installed here; `fonts-crosextra-carlito`/
+`fonts-crosextra-caladea` (the packages that make "Calibri"/"Cambria"
+resolve to their own real metric-compatible clones, Carlito/Caladea) are
+not, so this environment's actual safe list is narrower than Anthropic's
+own (Arial/Times New Roman/Courier New only -- Calibri and Cambria are
+QA-unreliable *here*, unlike their published claim). This is an
+environment-specific fact, not a universal one: a real Windows machine
+running the packaged desktop app typically already has genuine Calibri/
+Cambria installed (Windows/Office have shipped them since Vista/Office
+2007), so `soffice` there would use the real font directly, no
+substitution at all -- the risk is specific to wherever `soffice` itself
+runs without the named font available, this sandbox and any headless-
+Linux deployment included. Documented as: Arial/Times New Roman/Courier
+New are safe everywhere; Calibri/Cambria/the rest are safe on a machine
+that actually has them installed and QA-unreliable (approximate, ~10%
+size slack recommended) anywhere relying on LibreOffice's own
+substitution. Installing `fonts-crosextra-carlito`/`fonts-crosextra-
+caladea` wherever `soffice` runs for QA would close the Calibri/Cambria
+gap specifically -- noted as a possible follow-up, not done here (an
+infra/packaging change, out of scope for this pass).

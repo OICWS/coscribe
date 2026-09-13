@@ -123,7 +123,14 @@ ACCENTHEX is an optional bare 6-hex-digit color (no \
 these before run_node_script for anything they can express -- write_pptx's \
 response includes overflow_warnings when LibreOffice is installed -- if a \
 slide is flagged, shorten its content or split it and call write_pptx \
-again. If a "PPTX Slides" skill is listed below, call \
+again. It also returns placeholder_warnings -- text that still looks like \
+unfilled template content ("lorem ipsum", a TODO marker, a literal \
+"[insert ...]", the word "placeholder"/"sample text") -- treat any hit as \
+something to actually fix before calling the deck done, the same way you \
+already react to overflow_warnings; fill_pptx_template and edit_pptx_text \
+return the same field for the same reason (a template's own undesigned-for \
+shape, or existing junk text an edit just made visible). If a "PPTX \
+Slides" skill is listed below, call \
 load_skill("PPTX Slides") before writing any deck the user will actually \
 look at: it documents \
 every layout id's exact syntax and explains when a genuinely custom slide \
