@@ -11,6 +11,21 @@
 # PyInstaller does not cross-compile: run this on each target platform
 # before building that platform's app -- a Linux-built sidecar cannot
 # ship inside a Windows bundle.
+#
+# Always rebuilds the frontend first (below), rather than trusting
+# whatever happens to already be sitting in src/coscribe/web/static/ --
+# a real, costly live bug, not a hypothetical: a checkout that was
+# several commits behind at the time of one `npm run build` (against
+# the private repo) left a stale frontend baked into every sidecar
+# built afterward, even once the branch itself was correctly updated to
+# HEAD (nothing here or in git ties the build *output* to the source
+# commit it came from). The symptom looked exactly like a native-
+# embedding bug -- the stale frontend predated isElectron() detection
+# working, so the Browser panel silently fell back to the legacy
+# screencast implementation instead, produced CDP-relay errors, and
+# cost a long real-hardware debugging session before the actual cause
+# (stale static assets, not a runtime bug) was found. Rebuilding here
+# every time this script runs is cheap compared to that.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +34,17 @@ REPO_ROOT="$(dirname "$ELECTRON_ROOT")"
 OFFICE_AGENT="$REPO_ROOT/office-agent"
 
 SIDECAR_DEST="$ELECTRON_ROOT/resources/sidecar"
+
+echo "==> Building frontend (coscribe-web's static assets)"
+(
+  cd "$OFFICE_AGENT/frontend"
+  npm install
+  # Outputs directly into ../src/coscribe/web/static/ (see
+  # frontend/vite.config.ts's own build.outDir) -- picked up below by
+  # collect_data_files("coscribe") in coscribe-server.spec, no separate
+  # copy step needed.
+  npm run build
+)
 
 # A Windows venv puts entry points under Scripts/, not bin/ -- this script
 # runs under Git for Windows' bash (its own shebang assumes bash, and that's

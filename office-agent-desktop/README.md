@@ -83,16 +83,25 @@ doesn't need one.
 
 ```bash
 npm install                # once
-bash scripts/stage-sidecar.sh   # builds coscribe-web via PyInstaller,
-                                  # stages it into resources/sidecar/
+bash scripts/stage-sidecar.sh   # rebuilds the frontend, then coscribe-web
+                                  # itself via PyInstaller, stages the result
+                                  # into resources/sidecar/
 npm start                  # tsc build + launch electron .
 ```
 
 `stage-sidecar.sh` must be re-run whenever `office-agent`'s own source
-changes and you want this shell to pick it up -- `npm start` does
-**not** rebuild the Python sidecar itself, only the Electron main
-process. Re-run it on each target platform separately -- PyInstaller
-does not cross-compile.
+changes (frontend or backend) and you want this shell to pick it up --
+`npm start` does **not** rebuild the Python sidecar itself, only the
+Electron main process. Re-run it on each target platform separately --
+PyInstaller does not cross-compile.
+
+**Always run it after pulling, even if you think nothing frontend-
+facing changed** -- a real, costly live bug came from assuming a prior
+build's frontend output was still valid because "this session's own
+changes didn't touch it," when the checkout that produced that output
+had actually been several commits behind at build time. `stage-sidecar.sh`
+rebuilding the frontend unconditionally, every run, is what actually
+closes that gap -- see the script's own comment.
 
 ## Building distributables
 

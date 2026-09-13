@@ -38,12 +38,6 @@ jobs:
           cache: npm
           cache-dependency-path: office-agent/frontend/package-lock.json
 
-      - name: Build frontend (coscribe-web's static assets)
-        working-directory: office-agent/frontend
-        run: |
-          npm ci
-          npm run build
-
       - name: Set up office-agent's venv
         working-directory: office-agent
         run: |
@@ -57,6 +51,9 @@ jobs:
           .venv/Scripts/python -m pip install -U "google-genai>=2.13.0,<2.14.0"
           .venv/Scripts/python -m pip install pyinstaller
 
+      # Also builds the frontend itself (npm install && npm run build in
+      # office-agent/frontend) as its own first step -- see the script's
+      # own comment for why that's no longer a separate step here.
       - name: Stage the PyInstaller sidecar
         working-directory: office-agent-desktop
         run: bash scripts/stage-sidecar.sh
