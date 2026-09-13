@@ -4025,6 +4025,279 @@ def test_edit_pptx_shape_rejects_fill_color_on_a_table(tmp_path: Path) -> None:
         )
 
 
+def test_edit_pptx_shape_sets_two_color_gradient_fill(tmp_path: Path) -> None:
+    from pptx import Presentation
+    from pptx.enum.dml import MSO_FILL
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="layout: icon-list\n# Icons\n- [A] alpha\n")
+
+    tools["edit_pptx_shape"](
+        path="deck.pptx", slide=1, shape_index=1, fill_color="0F172A", fill_color_2="38BDF8"
+    )
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    shape = list(prs.slides[0].shapes)[1]
+    assert shape.fill.type == MSO_FILL.GRADIENT
+    stops = shape.fill.gradient_stops
+    assert str(stops[0].color.rgb) == "0F172A"
+    assert str(stops[1].color.rgb) == "38BDF8"
+
+
+def test_edit_pptx_shape_gradient_angle_applies(tmp_path: Path) -> None:
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="layout: icon-list\n# Icons\n- [A] alpha\n")
+
+    tools["edit_pptx_shape"](
+        path="deck.pptx",
+        slide=1,
+        shape_index=1,
+        fill_color="0F172A",
+        fill_color_2="38BDF8",
+        gradient_angle=45.0,
+    )
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    shape = list(prs.slides[0].shapes)[1]
+    assert shape.fill.gradient_angle == 45.0
+
+
+def test_edit_pptx_shape_fill_color_2_without_fill_color_raises(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="layout: icon-list\n# Icons\n- [A] alpha\n")
+    with pytest.raises(ValueError, match="fill_color_2 needs fill_color"):
+        tools["edit_pptx_shape"](path="deck.pptx", slide=1, shape_index=1, fill_color_2="38BDF8")
+
+
+def test_edit_pptx_shape_gradient_angle_without_fill_color_2_raises(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="layout: icon-list\n# Icons\n- [A] alpha\n")
+    with pytest.raises(ValueError, match="gradient_angle only applies"):
+        tools["edit_pptx_shape"](
+            path="deck.pptx", slide=1, shape_index=1, fill_color="0F172A", gradient_angle=45.0
+        )
+
+
+def test_list_pptx_shapes_describes_gradient_fill(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="layout: icon-list\n# Icons\n- [A] alpha\n")
+    tools["edit_pptx_shape"](
+        path="deck.pptx", slide=1, shape_index=1, fill_color="0F172A", fill_color_2="38BDF8"
+    )
+
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    fill = shapes[1]["fill"]
+    assert fill == {"type": "gradient", "colors": ["#0F172A", "#38BDF8"], "angle": 90.0}
+
+
+# --- add_pptx_shape / list_pptx_shape_types (Tier 2: diagram-building shapes) ---
+
+
+def test_list_pptx_shape_types_returns_sorted_known_names(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    names = tools["list_pptx_shape_types"]()
+    assert names == sorted(names)
+    assert "RIGHT_ARROW" in names
+    assert "FLOWCHART_DECISION" in names
+    assert "ROUNDED_RECTANGLE" in names
+
+
+def test_add_pptx_shape_adds_shape_with_position_size_and_text(tmp_path: Path) -> None:
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+
+    result = tools["add_pptx_shape"](
+        path="deck.pptx",
+        slide=1,
+        shape_type="RIGHT_ARROW",
+        left_in=1.0,
+        top_in=2.0,
+        width_in=3.0,
+        height_in=1.5,
+        text="Next **step**",
+    )
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    shapes = list(prs.slides[0].shapes)
+    shape = shapes[result["shape_index"]]
+    assert shape.auto_shape_type == MSO_SHAPE.RIGHT_ARROW
+    assert shape.left == 914400
+    assert shape.top == 1828800
+    assert shape.width == 2743200
+    assert shape.height == 1371600
+    assert shape.text_frame.text == "Next step"
+    assert shape.text_frame.paragraphs[0].runs[1].font.bold is True
+
+
+def test_add_pptx_shape_sets_fill_and_line_color(tmp_path: Path) -> None:
+    from pptx import Presentation
+    from pptx.enum.dml import MSO_COLOR_TYPE
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+
+    result = tools["add_pptx_shape"](
+        path="deck.pptx",
+        slide=1,
+        shape_type="FLOWCHART_DECISION",
+        left_in=1.0,
+        top_in=1.0,
+        width_in=2.0,
+        height_in=2.0,
+        fill_color="38BDF8",
+        line_color="0F172A",
+    )
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    shape = list(prs.slides[0].shapes)[result["shape_index"]]
+    assert shape.fill.fore_color.type == MSO_COLOR_TYPE.RGB
+    assert str(shape.fill.fore_color.rgb) == "38BDF8"
+    assert str(shape.line.color.rgb) == "0F172A"
+
+
+def test_add_pptx_shape_returned_index_targets_the_right_shape(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+
+    result = tools["add_pptx_shape"](
+        path="deck.pptx",
+        slide=1,
+        shape_type="OVAL",
+        left_in=1.0,
+        top_in=1.0,
+        width_in=1.0,
+        height_in=1.0,
+    )
+
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    assert shapes[result["shape_index"]]["shape_type"] is not None
+    assert shapes[result["shape_index"]]["left_in"] == 1.0
+
+
+def test_add_pptx_shape_rejects_unknown_shape_type(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+    with pytest.raises(ValueError, match="Unknown shape_type"):
+        tools["add_pptx_shape"](
+            path="deck.pptx",
+            slide=1,
+            shape_type="NOT_A_REAL_SHAPE",
+            left_in=1.0,
+            top_in=1.0,
+            width_in=1.0,
+            height_in=1.0,
+        )
+
+
+def test_add_pptx_shape_rejects_bad_fill_color(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+    with pytest.raises(ValueError, match="6-hex-digit color"):
+        tools["add_pptx_shape"](
+            path="deck.pptx",
+            slide=1,
+            shape_type="OVAL",
+            left_in=1.0,
+            top_in=1.0,
+            width_in=1.0,
+            height_in=1.0,
+            fill_color="#38BDF8",
+        )
+
+
+# --- crop_pptx_image (Tier 2: general picture cropping) ---
+
+
+def test_crop_pptx_image_sets_crop_fractions(tmp_path: Path) -> None:
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+    _make_test_png(tmp_path / "red.png")
+    tools["add_pptx_image"](
+        path="deck.pptx", slide=1, image_path="red.png", left=1.0, top=1.0, width=2.0, height=2.0
+    )
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    pic_index = next(s["index"] for s in shapes if s["is_picture"])
+
+    result = tools["crop_pptx_image"](
+        path="deck.pptx",
+        slide=1,
+        shape_index=pic_index,
+        crop_left=0.1,
+        crop_right=0.2,
+        crop_top=0.05,
+        crop_bottom=0.15,
+    )
+    assert result["crop_left"] == 0.1
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    shape = list(prs.slides[0].shapes)[pic_index]
+    assert shape.crop_left == pytest.approx(0.1)
+    assert shape.crop_right == pytest.approx(0.2)
+    assert shape.crop_top == pytest.approx(0.05)
+    assert shape.crop_bottom == pytest.approx(0.15)
+
+
+def test_crop_pptx_image_leaves_position_and_size_untouched(tmp_path: Path) -> None:
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+    _make_test_png(tmp_path / "red.png")
+    tools["add_pptx_image"](
+        path="deck.pptx", slide=1, image_path="red.png", left=1.0, top=1.0, width=2.0, height=2.0
+    )
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    pic_index = next(s["index"] for s in shapes if s["is_picture"])
+    before = shapes[pic_index]
+
+    tools["crop_pptx_image"](path="deck.pptx", slide=1, shape_index=pic_index, crop_left=0.3)
+
+    after = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"][pic_index]
+    assert after["left_in"] == before["left_in"]
+    assert after["top_in"] == before["top_in"]
+    assert after["width_in"] == before["width_in"]
+    assert after["height_in"] == before["height_in"]
+
+
+def test_crop_pptx_image_rejects_out_of_range_fraction(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+    _make_test_png(tmp_path / "red.png")
+    tools["add_pptx_image"](path="deck.pptx", slide=1, image_path="red.png")
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    pic_index = next(s["index"] for s in shapes if s["is_picture"])
+
+    with pytest.raises(ValueError, match=r"\[0\.0, 1\.0\)"):
+        tools["crop_pptx_image"](path="deck.pptx", slide=1, shape_index=pic_index, crop_left=1.0)
+
+
+def test_crop_pptx_image_rejects_left_plus_right_over_one(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+    _make_test_png(tmp_path / "red.png")
+    tools["add_pptx_image"](path="deck.pptx", slide=1, image_path="red.png")
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    pic_index = next(s["index"] for s in shapes if s["is_picture"])
+
+    with pytest.raises(ValueError, match="crop_left"):
+        tools["crop_pptx_image"](
+            path="deck.pptx", slide=1, shape_index=pic_index, crop_left=0.6, crop_right=0.6
+        )
+
+
+def test_crop_pptx_image_rejects_non_picture_shape(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+    with pytest.raises(ValueError, match="isn't a picture"):
+        tools["crop_pptx_image"](path="deck.pptx", slide=1, shape_index=0, crop_left=0.1)
+
+
 # --- edit_pptx_table_cell / merge_pptx_table_cells (Tier 1 #2: table editing) ---
 
 

@@ -200,6 +200,38 @@ _MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
 _TRANSITIONS = frozenset({"fade", "push", "wipe", "none"})
 
+# add_pptx_shape's own curated subset of python-pptx's ~180-member
+# MSO_SHAPE enum (every name below verified against the real installed
+# enum, not guessed) -- basic shapes, arrows, flowchart nodes, and
+# callouts, the same categories hugohe3/ppt-master's own feature list
+# names ("block arrows, chevrons, callouts, flowchart nodes"). Excludes
+# the long tail of rarely-used/legacy AutoShapes (line-callout variants
+# 1-4 with every border/accent-bar permutation, the 10/12/16/24/32-point
+# star sizes, seal/ribbon banners, etc.) -- a smaller, well-named set a
+# model can pick from by name alone beats exposing the full enum, the
+# same reasoning add_pptx_icon's own curated Lucide subset already uses.
+_SHAPE_TYPES = frozenset(
+    {
+        # Basic
+        "RECTANGLE", "ROUNDED_RECTANGLE", "OVAL", "ISOSCELES_TRIANGLE",
+        "RIGHT_TRIANGLE", "DIAMOND", "PARALLELOGRAM", "TRAPEZOID", "PENTAGON",
+        "HEXAGON", "OCTAGON", "CROSS", "PLAQUE", "CAN", "CUBE",
+        # Arrows
+        "RIGHT_ARROW", "LEFT_ARROW", "UP_ARROW", "DOWN_ARROW", "LEFT_RIGHT_ARROW",
+        "UP_DOWN_ARROW", "BENT_ARROW", "CHEVRON", "NOTCHED_RIGHT_ARROW", "U_TURN_ARROW",
+        # Flowchart
+        "FLOWCHART_PROCESS", "FLOWCHART_DECISION", "FLOWCHART_TERMINATOR",
+        "FLOWCHART_DATA", "FLOWCHART_DOCUMENT", "FLOWCHART_PREPARATION",
+        "FLOWCHART_PREDEFINED_PROCESS", "FLOWCHART_CONNECTOR",
+        # Callouts
+        "ROUNDED_RECTANGULAR_CALLOUT", "RECTANGULAR_CALLOUT", "OVAL_CALLOUT",
+        "CLOUD_CALLOUT",
+        # Decorative
+        "CLOUD", "HEART", "LIGHTNING_BOLT", "SUN", "MOON", "STAR_5_POINT",
+        "STAR_4_POINT", "SMILEY_FACE", "DONUT", "NO_SYMBOL", "BLOCK_ARC", "ARC",
+    }
+)
+
 # add_pptx_hyperlink's scope, deliberately: external URLs only, via
 # python-pptx's own public Hyperlink API (Shape.click_action.hyperlink /
 # Run.hyperlink) -- no hand-rolled XML at all, unlike set_pptx_transition/
@@ -2224,14 +2256,32 @@ def _smartart_text(shape: Any) -> list[str]:
     return texts
 
 
-def _describe_shape_fill(shape: Any) -> str | None:
-    """A shape's solid fill color as `"#RRGGBB"` (literal) or
-    `"theme:ACCENT_1"` (a `theme_color` reference) -- `None` when the
-    shape has no fill concept at all (a table/chart `GraphicFrame`, which
-    has no `.fill` attribute), no fill set, or a non-solid fill
-    (gradient/picture/pattern -- out of scope for `list_pptx_shapes`,
-    which only needs enough to target a plain accent-colored shape)."""
-    from pptx.enum.dml import MSO_COLOR_TYPE, MSO_FILL
+def _describe_fill_color(color: Any) -> str | None:
+    """One `ColorFormat`'s own value as `"#RRGGBB"`/`"theme:ACCENT_1"` --
+    the shared per-color logic `_describe_shape_fill` uses for both a
+    solid fill's single color and a gradient fill's two-or-more stops."""
+    from pptx.enum.dml import MSO_COLOR_TYPE
+
+    if color.type == MSO_COLOR_TYPE.SCHEME:
+        return f"theme:{color.theme_color.name}"
+    if color.type == MSO_COLOR_TYPE.RGB:
+        return f"#{color.rgb}"
+    return None
+
+
+def _describe_shape_fill(shape: Any) -> str | dict[str, object] | None:
+    """A shape's fill: a solid fill's color as `"#RRGGBB"` (literal) or
+    `"theme:ACCENT_1"` (a `theme_color` reference); a gradient fill (see
+    `edit_pptx_shape`'s `fill_color_2`) as `{"type": "gradient", "colors":
+    [...], "angle": <degrees or None>}`, one entry in `colors` per stop,
+    in gradient order -- lets a model confirm what it just set via
+    `list_pptx_shapes` the same way it can for a solid color. `None` when
+    the shape has no fill concept at all (a table/chart `GraphicFrame`,
+    which has no `.fill` attribute), no fill set, or a picture/pattern
+    fill (out of scope -- `list_pptx_shapes` only needs enough to target
+    or verify a plain accent-colored/gradient shape, not describe every
+    fill type OOXML supports)."""
+    from pptx.enum.dml import MSO_FILL
 
     fill = getattr(shape, "fill", None)
     if fill is None:
@@ -2240,14 +2290,31 @@ def _describe_shape_fill(shape: Any) -> str | None:
         fill_type = fill.type
     except (AttributeError, TypeError):
         return None
+    if fill_type == MSO_FILL.GRADIENT:
+        angle: float | None
+        try:
+            angle = fill.gradient_angle
+        except ValueError:
+            angle = None  # non-linear (e.g. radial) -- angle doesn't apply
+        except TypeError:
+            # Real python-pptx bug, hit live while testing this: a fresh
+            # `fill.gradient()`'s <a:lin> element has no `ang` attribute
+            # at all (angle "inherited"), and gradient_angle's own getter
+            # does `360.0 - None` in that case instead of treating it the
+            # same as no <a:lin> at all. edit_pptx_shape works around this
+            # by always setting an explicit angle after calling
+            # `.gradient()` (see below), but a gradient from an externally
+            # -authored file could still hit this, so this is defensive
+            # here too, not just relying on that workaround.
+            angle = None
+        return {
+            "type": "gradient",
+            "colors": [_describe_fill_color(stop.color) for stop in fill.gradient_stops],
+            "angle": angle,
+        }
     if fill_type != MSO_FILL.SOLID:
         return None
-    color = fill.fore_color
-    if color.type == MSO_COLOR_TYPE.SCHEME:
-        return f"theme:{color.theme_color.name}"
-    if color.type == MSO_COLOR_TYPE.RGB:
-        return f"#{color.rgb}"
-    return None
+    return _describe_fill_color(fill.fore_color)
 
 
 def _describe_shape(index: int, shape: Any) -> dict[str, object]:
@@ -2325,9 +2392,10 @@ def _get_table_shape(target_slide: Any, slide_number: int, shape_index: int) -> 
 
 
 def _get_picture_shape(target_slide: Any, slide_number: int, shape_index: int) -> Any:
-    """Shared bounds-and-kind validation for replace_pptx_image -- raises
-    a clear, actionable error if shape_index doesn't point at a picture
-    (a `<p:pic>` shape, python-pptx's `MSO_SHAPE_TYPE.PICTURE`)."""
+    """Shared bounds-and-kind validation for replace_pptx_image/
+    recolor_pptx_icon/crop_pptx_image -- raises a clear, actionable
+    error if shape_index doesn't point at a picture (a `<p:pic>` shape,
+    python-pptx's `MSO_SHAPE_TYPE.PICTURE`)."""
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
     shape = _get_shape_at_index(target_slide, slide_number, shape_index)
@@ -2918,6 +2986,8 @@ class PresentationToolkit:
         height_in: Optional[float] = None,  # noqa: UP045
         rotation: Optional[float] = None,  # noqa: UP045
         fill_color: str = "",
+        fill_color_2: str = "",
+        gradient_angle: Optional[float] = None,  # noqa: UP045
     ) -> dict[str, object]:
         """Change an existing shape's geometry and/or fill color in
         place, on any already-existing .pptx -- call `list_pptx_shapes`
@@ -2925,10 +2995,29 @@ class PresentationToolkit:
         0-based in on-slide order) and confirm you're targeting the
         right shape; text content, other shapes, and the rest of the
         deck are untouched. Every geometry parameter is optional -- only
-        the ones given are changed."""
+        the ones given are changed.
+
+        `fill_color` alone sets a plain solid fill, same as before. Give
+        `fill_color_2` too for a two-stop linear gradient (`fill_color`
+        is the first stop, `fill_color_2` the second) -- real OOXML
+        `<a:gradFill>` via python-pptx's own native gradient API, not a
+        picture or hand-built XML. `gradient_angle` (degrees, 0 =
+        left-to-right, 90 = top-to-bottom, increasing clockwise) only
+        applies alongside `fill_color_2`; omit it to keep python-pptx's
+        own default 90-degree (top-to-bottom) gradient."""
         from pptx.dml.color import RGBColor
         from pptx.util import Inches
 
+        if fill_color_2 and not fill_color:
+            raise ValueError(
+                "edit_pptx_shape: fill_color_2 needs fill_color too -- fill_color "
+                "is the gradient's first stop, fill_color_2 its second."
+            )
+        if gradient_angle is not None and not fill_color_2:
+            raise ValueError(
+                "edit_pptx_shape: gradient_angle only applies alongside a "
+                "two-color gradient fill -- pass fill_color_2 too."
+            )
         if (
             left_in is None
             and top_in is None
@@ -2944,6 +3033,11 @@ class PresentationToolkit:
         if fill_color and not _THEME_HEX_RE.match(fill_color):
             raise ValueError(
                 f"fill_color {fill_color!r} must be a 6-hex-digit color (no '#'), e.g. '38BDF8'."
+            )
+        if fill_color_2 and not _THEME_HEX_RE.match(fill_color_2):
+            raise ValueError(
+                f"fill_color_2 {fill_color_2!r} must be a 6-hex-digit color (no '#'), "
+                f"e.g. '38BDF8'."
             )
         prs, file_path, target_slide = self._open_slide(path, slide)
         shape = _get_shape_at_index(target_slide, slide, shape_index)
@@ -2965,8 +3059,23 @@ class PresentationToolkit:
                     f"fill to set -- fill_color only applies to a shape with a fill "
                     f"(not a table/chart)."
                 )
-            fill.solid()
-            fill.fore_color.rgb = RGBColor.from_string(fill_color)  # type: ignore[no-untyped-call]
+            if fill_color_2:
+                fill.gradient()
+                stops = fill.gradient_stops
+                stops[0].color.rgb = RGBColor.from_string(fill_color)  # type: ignore[no-untyped-call]
+                stops[1].color.rgb = RGBColor.from_string(fill_color_2)  # type: ignore[no-untyped-call]
+                # Always set an explicit angle, not just when the caller
+                # gave one -- a fresh `fill.gradient()`'s <a:lin> element
+                # has no `ang` attribute at all, and python-pptx's own
+                # gradient_angle *getter* crashes with a TypeError trying
+                # to read that back (`360.0 - None`), confirmed live while
+                # testing this. 90.0 matches gradient()'s own documented
+                # default (top-to-bottom) -- this just makes that default
+                # actually readable afterward instead of only writable.
+                fill.gradient_angle = gradient_angle if gradient_angle is not None else 90.0
+            else:
+                fill.solid()
+                fill.fore_color.rgb = RGBColor.from_string(fill_color)  # type: ignore[no-untyped-call]
         prs.save(str(file_path))
 
         return {
@@ -2984,6 +3093,96 @@ class PresentationToolkit:
         element.getparent().remove(element)
         prs.save(str(file_path))
         return {"path": self._scope.relative(file_path), "slide": slide, "shape_index": shape_index}
+
+    def list_pptx_shape_types(self) -> list[str]:
+        """Every `shape_type` name `add_pptx_shape` accepts, sorted -- a
+        curated subset of python-pptx's full MSO_SHAPE enum (basic
+        shapes, arrows, flowchart nodes, callouts). No path/slide
+        argument: this is a static list, the same regardless of which
+        file or slide you're working on."""
+        return sorted(_SHAPE_TYPES)
+
+    @locked_by_path
+    def add_pptx_shape(
+        self,
+        path: str,
+        slide: int,
+        shape_type: str,
+        left_in: float,
+        top_in: float,
+        width_in: float,
+        height_in: float,
+        text: str = "",
+        fill_color: str = "",
+        line_color: str = "",
+    ) -> dict[str, object]:
+        """Add a new preset-geometry shape (an arrow, flowchart node,
+        callout, or basic shape -- call `list_pptx_shape_types()` for
+        the full curated set) onto an existing slide, at the exact
+        position/size you give -- unlike write_pptx's own icon-list/
+        stat-callout layouts, which position their own shapes
+        automatically, this is for building a specific diagram (a
+        process flow of arrows and boxes, a comparison of callouts)
+        shape by shape. `text`, if given, is centered inside the shape
+        (markdown `**bold**`/`*italic*` supported, same as every other
+        text tool in this file). `fill_color`/`line_color` are
+        6-hex-digit colors (no '#'); omit either to keep the shape's own
+        default theme styling. Returns the new shape's own
+        `shape_index` -- pass it straight to `edit_pptx_shape`/
+        `add_pptx_hyperlink`/`delete_pptx_shape` to keep working on it."""
+        from pptx.dml.color import RGBColor
+        from pptx.enum.shapes import MSO_SHAPE
+        from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+        from pptx.util import Inches
+
+        if shape_type not in _SHAPE_TYPES:
+            raise ValueError(
+                f"Unknown shape_type {shape_type!r} -- call list_pptx_shape_types() "
+                f"to see the available names."
+            )
+        if fill_color and not _THEME_HEX_RE.match(fill_color):
+            raise ValueError(
+                f"fill_color {fill_color!r} must be a 6-hex-digit color (no '#'), "
+                f"e.g. '38BDF8'."
+            )
+        if line_color and not _THEME_HEX_RE.match(line_color):
+            raise ValueError(
+                f"line_color {line_color!r} must be a 6-hex-digit color (no '#'), "
+                f"e.g. '38BDF8'."
+            )
+        prs, file_path, target_slide = self._open_slide(path, slide)
+        shape = target_slide.shapes.add_shape(
+            getattr(MSO_SHAPE, shape_type),
+            Inches(left_in),
+            Inches(top_in),
+            Inches(width_in),
+            Inches(height_in),
+        )
+        if text:
+            text_frame = shape.text_frame
+            text_frame.word_wrap = True
+            text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+            paragraph = text_frame.paragraphs[0]
+            paragraph.alignment = PP_ALIGN.CENTER
+            _add_inline_runs(paragraph, text)
+        if fill_color:
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = RGBColor.from_string(fill_color)  # type: ignore[no-untyped-call]
+        if line_color:
+            shape.line.color.rgb = RGBColor.from_string(line_color)  # type: ignore[no-untyped-call]
+        shape_index = len(target_slide.shapes) - 1
+        prs.save(str(file_path))
+
+        state_dir = Path(self._state_dir) if self._state_dir is not None else None
+        preview_path, preview_skipped_reason = render_thumbnail(file_path, state_dir)
+        return {
+            "path": self._scope.relative(file_path),
+            "slide": slide,
+            "shape_type": shape_type,
+            "shape_index": shape_index,
+            "preview_path": preview_path,
+            "preview_skipped_reason": preview_skipped_reason,
+        }
 
     @locked_by_path
     def replace_pptx_image(
@@ -3011,6 +3210,64 @@ class PresentationToolkit:
             "path": self._scope.relative(file_path),
             "slide": slide,
             "shape_index": shape_index,
+            "preview_path": preview_path,
+            "preview_skipped_reason": preview_skipped_reason,
+        }
+
+    @locked_by_path
+    def crop_pptx_image(
+        self,
+        path: str,
+        slide: int,
+        shape_index: int,
+        crop_left: float = 0.0,
+        crop_right: float = 0.0,
+        crop_top: float = 0.0,
+        crop_bottom: float = 0.0,
+    ) -> dict[str, object]:
+        """Crop an existing picture shape in place -- each `crop_*` is a
+        fraction (0.0-1.0) of the image's own original width/height to
+        trim from that edge; the shape's on-slide position/size are
+        untouched, only which part of the image shows through inside
+        that same box changes (`Picture.crop_*`, the exact mechanism
+        `set_pptx_background_image` already uses for its own cover-crop
+        -- native python-pptx API, no hand-built XML). Call
+        `list_pptx_shapes` first to find the picture's `shape_index`
+        (`is_picture: true`). Sets all four values together every call
+        (not incremental) -- pass only the edges you actually want
+        trimmed, the rest default to 0.0 (uncropped)."""
+        if not (0.0 <= crop_left < 1.0 and 0.0 <= crop_right < 1.0):
+            raise ValueError("crop_left/crop_right must each be within [0.0, 1.0).")
+        if not (0.0 <= crop_top < 1.0 and 0.0 <= crop_bottom < 1.0):
+            raise ValueError("crop_top/crop_bottom must each be within [0.0, 1.0).")
+        if crop_left + crop_right >= 1.0:
+            raise ValueError(
+                f"crop_left ({crop_left}) + crop_right ({crop_right}) must be < 1.0 "
+                f"-- otherwise no part of the image's width would remain visible."
+            )
+        if crop_top + crop_bottom >= 1.0:
+            raise ValueError(
+                f"crop_top ({crop_top}) + crop_bottom ({crop_bottom}) must be < 1.0 "
+                f"-- otherwise no part of the image's height would remain visible."
+            )
+        prs, file_path, target_slide = self._open_slide(path, slide)
+        shape = _get_picture_shape(target_slide, slide, shape_index)
+        shape.crop_left = crop_left
+        shape.crop_right = crop_right
+        shape.crop_top = crop_top
+        shape.crop_bottom = crop_bottom
+        prs.save(str(file_path))
+
+        state_dir = Path(self._state_dir) if self._state_dir is not None else None
+        preview_path, preview_skipped_reason = render_thumbnail(file_path, state_dir)
+        return {
+            "path": self._scope.relative(file_path),
+            "slide": slide,
+            "shape_index": shape_index,
+            "crop_left": crop_left,
+            "crop_right": crop_right,
+            "crop_top": crop_top,
+            "crop_bottom": crop_bottom,
             "preview_path": preview_path,
             "preview_skipped_reason": preview_skipped_reason,
         }
@@ -4192,6 +4449,8 @@ def build_presentation_tools(
         height_in: Optional[float] = None,  # noqa: UP045
         rotation: Optional[float] = None,  # noqa: UP045
         fill_color: str = "",
+        fill_color_2: str = "",
+        gradient_angle: Optional[float] = None,  # noqa: UP045
     ) -> dict[str, object]:
         """Move, resize, rotate, and/or recolor an existing shape on an
         existing PowerPoint (.pptx) file's slide, without touching its
@@ -4218,7 +4477,15 @@ def build_presentation_tools(
                 leave unchanged.
             fill_color: new solid fill color, 6-hex-digit, no '#' (e.g.
                 "38BDF8"). Omit to leave the fill unchanged. Only applies
-                to a shape that has a fill (not a table/chart).
+                to a shape that has a fill (not a table/chart). Alone,
+                sets a plain solid fill.
+            fill_color_2: second gradient stop -- give this alongside
+                fill_color for a two-stop linear gradient fill instead of
+                solid (fill_color is the first stop). Omit for a solid fill.
+            gradient_angle: gradient direction in degrees (0 = left-to-
+                right, 90 = top-to-bottom, increasing clockwise). Only
+                applies alongside fill_color_2; omit to keep the default
+                90-degree top-to-bottom gradient.
         """
         return toolkit.edit_pptx_shape(
             path=path,
@@ -4230,6 +4497,8 @@ def build_presentation_tools(
             height_in=height_in,
             rotation=rotation,
             fill_color=fill_color,
+            fill_color_2=fill_color_2,
+            gradient_angle=gradient_angle,
         )
 
     def replace_pptx_image(
@@ -4256,6 +4525,105 @@ def build_presentation_tools(
         """
         return toolkit.replace_pptx_image(
             path=path, slide=slide, shape_index=shape_index, image_path=image_path
+        )
+
+    def list_pptx_shape_types() -> list[str]:
+        """List every shape_type name add_pptx_shape accepts -- a
+        curated subset of python-pptx's full preset-geometry shape enum
+        (basic shapes, arrows, flowchart nodes, callouts). No arguments:
+        this is a static list, not specific to any file or slide."""
+        return toolkit.list_pptx_shape_types()
+
+    def add_pptx_shape(
+        path: str,
+        slide: int,
+        shape_type: str,
+        left_in: float,
+        top_in: float,
+        width_in: float,
+        height_in: float,
+        text: str = "",
+        fill_color: str = "",
+        line_color: str = "",
+    ) -> dict[str, object]:
+        """Add a new preset-geometry shape (an arrow, flowchart node,
+        callout, or basic shape) onto an existing PowerPoint (.pptx)
+        file's slide, at an exact position/size -- for building a
+        specific diagram (a process flow of arrows and boxes, a
+        comparison of callouts) shape by shape, unlike write_pptx's own
+        icon-list/stat-callout layouts, which position their own shapes
+        automatically.
+
+        Call list_pptx_shape_types() first to see the available names.
+
+        Args:
+            path: path to an existing .pptx already in the workspace
+            slide: 1-based slide index to add the shape to
+            shape_type: one of list_pptx_shape_types()'s names, e.g.
+                "RIGHT_ARROW", "FLOWCHART_DECISION", "ROUNDED_RECTANGLE"
+            left_in: horizontal position in inches from the slide's left edge
+            top_in: vertical position in inches from the slide's top edge
+            width_in: shape width in inches
+            height_in: shape height in inches
+            text: optional text centered inside the shape (markdown
+                **bold**/*italic* supported). Omit for no text.
+            fill_color: optional solid fill color, 6-hex-digit, no '#'
+                (e.g. "38BDF8"). Omit to keep the shape's default theme fill.
+            line_color: optional outline color, 6-hex-digit, no '#'. Omit
+                to keep the shape's default theme outline.
+        """
+        return toolkit.add_pptx_shape(
+            path=path,
+            slide=slide,
+            shape_type=shape_type,
+            left_in=left_in,
+            top_in=top_in,
+            width_in=width_in,
+            height_in=height_in,
+            text=text,
+            fill_color=fill_color,
+            line_color=line_color,
+        )
+
+    def crop_pptx_image(
+        path: str,
+        slide: int,
+        shape_index: int,
+        crop_left: float = 0.0,
+        crop_right: float = 0.0,
+        crop_top: float = 0.0,
+        crop_bottom: float = 0.0,
+    ) -> dict[str, object]:
+        """Crop an existing picture shape on an existing PowerPoint
+        (.pptx) file's slide, in place -- the shape's on-slide position/
+        size are untouched, only which part of the image shows through
+        inside that same box changes.
+
+        Call list_pptx_shapes(path, slide) first to find the picture's
+        shape_index (is_picture: true).
+
+        Args:
+            path: path to an existing .pptx already in the workspace
+            slide: 1-based slide index the picture is on
+            shape_index: which shape is the picture, 0-based in on-slide
+                order -- this is list_pptx_shapes's own "index" field
+            crop_left: fraction (0.0-1.0) of the image's own width to trim
+                from its left edge. Defaults to 0.0 (no crop).
+            crop_right: fraction (0.0-1.0) of the image's own width to trim
+                from its right edge. Defaults to 0.0 (no crop).
+            crop_top: fraction (0.0-1.0) of the image's own height to trim
+                from its top edge. Defaults to 0.0 (no crop).
+            crop_bottom: fraction (0.0-1.0) of the image's own height to
+                trim from its bottom edge. Defaults to 0.0 (no crop).
+        """
+        return toolkit.crop_pptx_image(
+            path=path,
+            slide=slide,
+            shape_index=shape_index,
+            crop_left=crop_left,
+            crop_right=crop_right,
+            crop_top=crop_top,
+            crop_bottom=crop_bottom,
         )
 
     def list_pptx_icons() -> list[str]:
@@ -4754,7 +5122,10 @@ def build_presentation_tools(
         tool_metadata(list_pptx_shapes, risk_category="READ", category="documents"),
         tool_metadata(edit_pptx_shape, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(delete_pptx_shape, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(list_pptx_shape_types, risk_category="READ", category="documents"),
+        tool_metadata(add_pptx_shape, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(replace_pptx_image, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(crop_pptx_image, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(list_pptx_icons, risk_category="READ", category="documents"),
         tool_metadata(add_pptx_icon, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(recolor_pptx_icon, risk_category="WRITE_LOCAL", category="documents"),

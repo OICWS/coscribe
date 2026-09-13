@@ -250,8 +250,10 @@ list_pptx_shapes(path, slide) first -- it lists every shape's index, \
 type, position/size, rotation, a text preview, and fill color -- then \
 edit_pptx_shape(path, slide, shape_index, left_in, top_in, width_in, \
 height_in, rotation, fill_color) with only the properties you're \
-changing. Never guess shape_index without calling list_pptx_shapes \
-first on a slide you haven't already inspected. To remove a shape \
+changing -- add fill_color_2 (and optionally gradient_angle) for a \
+two-stop linear gradient fill instead of solid. Never guess shape_index \
+without calling list_pptx_shapes first on a slide you haven't already \
+inspected. To remove a shape \
 entirely (any type -- a plain shape, a picture, a table, or real \
 SmartArt), call delete_pptx_shape(path, slide, shape_index) with that \
 same shape_index; this can't be undone. list_pptx_shapes also flags \
@@ -263,10 +265,26 @@ changed, read its text there first, then delete_pptx_shape it and \
 rebuild the same idea using this file's other shape/icon/table tools \
 (e.g. write_pptx's own icon-list layout for a simple step/point list). \
 \
+To build a specific diagram (a process flow of arrows and boxes, a \
+decision tree, a comparison of callouts) shape by shape at exact \
+positions -- something write_pptx's own icon-list/stat-callout layouts \
+don't cover, since those position their own shapes automatically -- call \
+list_pptx_shape_types() for the available preset names (arrows, \
+flowchart nodes, callouts, basic shapes), then add_pptx_shape(path, \
+slide, shape_type, left_in, top_in, width_in, height_in, text, \
+fill_color, line_color) once per shape. It returns the new shape's own \
+shape_index, so a follow-up edit_pptx_shape/add_pptx_hyperlink call can \
+target it directly without a separate list_pptx_shapes round-trip. \
+\
 To swap out an existing picture (a photo, an icon) for a different one \
 on an existing .pptx without touching its position, size, or crop, find \
 its shape_index via list_pptx_shapes (is_picture: true) then call \
-replace_pptx_image(path, slide, shape_index, image_path). \
+replace_pptx_image(path, slide, shape_index, image_path). To crop an \
+existing picture (change which part of the image shows through its own \
+on-slide box, without moving or resizing that box) instead, call \
+crop_pptx_image(path, slide, shape_index, crop_left, crop_right, \
+crop_top, crop_bottom) -- each a 0.0-1.0 fraction of the image's own \
+width/height to trim from that edge, all four given together each call. \
 \
 To add a real icon (not write_pptx's own icon-list glyph-in-a-circle) \
 to a slide -- either one you're editing or one you're building -- call \

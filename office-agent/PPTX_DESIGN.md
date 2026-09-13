@@ -1751,3 +1751,89 @@ substitution. Installing `fonts-crosextra-carlito`/`fonts-crosextra-
 caladea` wherever `soffice` runs for QA would close the Calibri/Cambria
 gap specifically -- noted as a possible follow-up, not done here (an
 infra/packaging change, out of scope for this pass).
+
+## 20. §19's tier 2: diagram-building shapes, gradient fills, general
+image cropping -- all pure high-level python-pptx API, no new hand-XML
+
+Follow-up to §19's gap analysis: ppt-master's own feature list names
+"native shapes -- preset geometry with working adjustment handles (block
+arrows, chevrons, callouts, flowchart nodes...)", "picture crop and
+shape-clip", and "gradients" as real, shipped capabilities this codebase
+didn't expose as general tools -- but the underlying python-pptx APIs
+were *already proven* inside this file, just hardcoded to one internal
+use each: `add_shape(MSO_SHAPE.OVAL, ...)`/`add_shape(MSO_SHAPE.
+ROUNDED_RECTANGLE, ...)` for the icon-list/stat-callout layouts' own
+circles/cards, `Picture.crop_*` for `set_pptx_background_image`'s own
+cover-crop. This tier is "expose the existing primitive generically,"
+not new research -- confirmed before writing any code, not assumed.
+
+**20.1 `add_pptx_shape`/`list_pptx_shape_types`.** A curated 49-name
+subset of python-pptx's ~180-member `MSO_SHAPE` enum (every name
+verified against the real installed enum first, not guessed) --
+basic shapes, arrows, flowchart nodes, callouts, matching the exact
+categories ppt-master's own list names. `add_pptx_shape(path, slide,
+shape_type, left_in, top_in, width_in, height_in, text, fill_color,
+line_color)` places one at an exact position/size (unlike icon-list/
+stat-callout, which position their own shapes automatically) -- for
+building a specific process-flow/decision-tree/comparison diagram shape
+by shape. Returns the new shape's own `shape_index` so a follow-up
+`edit_pptx_shape`/`add_pptx_hyperlink` call can target it without a
+separate `list_pptx_shapes` round-trip.
+
+**20.2 `edit_pptx_shape` gains a gradient fill (`fill_color_2`,
+`gradient_angle`).** Real `<a:gradFill>` via python-pptx's own native
+gradient API (`fill.gradient()`/`gradient_stops[i].color.rgb`/
+`gradient_angle`) -- no hand-built XML, so (unlike §19's OOXML
+validator targets) this needed no schema-validation wiring at all,
+correct by construction the same way `add_pptx_chart`'s high-level
+chart API already is.
+
+**A real python-pptx bug hit live while testing this, not
+hypothetical**: `fill.gradient()`'s freshly-created `<a:lin>` element
+has no `ang` attribute at all (angle left "inherited"), and python-
+pptx's own `gradient_angle` *getter* doesn't handle that case --
+`_GradFill.gradient_angle`'s code does `360.0 - clockwise_angle` when
+`lin` exists, unconditionally, and crashes with `TypeError: unsupported
+operand type(s) for -: 'float' and 'NoneType'` the moment anything (this
+codebase's own `list_pptx_shapes`, testing this feature, or a future
+caller) tries to *read back* a gradient's angle before one was ever
+explicitly written. Worked around on both sides: `edit_pptx_shape`
+always sets an explicit `gradient_angle` (defaulting to 90.0, matching
+`gradient()`'s own documented "default gradient... is linear at angle
+90-degrees" claim -- this just makes that default actually readable
+afterward, not only writable) rather than leaving a gradient it just
+created in the state that crashes; `_describe_shape_fill` (the function
+behind `list_pptx_shapes`'s own `fill` field, extended this tier to
+describe a gradient's stops/angle the same way it already did a solid
+color) additionally catches `TypeError` defensively, since an
+externally-authored file's gradient could hit the same upstream gap
+regardless of this codebase's own workaround.
+
+**20.3 `crop_pptx_image`.** Generalizes `Picture.crop_left/right/top/
+bottom` (already proven inside `set_pptx_background_image`) to any
+picture shape a model finds via `list_pptx_shapes` (`is_picture: true`)
+-- crops in place, position/size of the shape's own on-slide box
+untouched, only which part of the image shows through inside it
+changes. Sets all four fractions together each call (not incremental,
+each defaulting to 0.0/uncropped) -- simpler and more predictable than
+tracking partial crop state across calls, matching
+`set_pptx_background_image`'s own existing all-four-at-once precedent
+rather than `edit_pptx_shape`'s "only change what's given" pattern,
+since a crop rectangle is normally decided as one complete choice, not
+incrementally adjusted one edge at a time.
+
+**Verified real, not just unit-tested**: built an actual deck through
+these three tools together (a 5-shape process-flow diagram -- two
+flowchart terminators, two arrows, one decision diamond with a
+2-stop 45-degree gradient -- plus a cropped image), rendered it through
+the real LibreOffice pipeline (`render_pptx_preview`), and visually
+inspected the resulting PNG: every shape's type/fill/line/bold-text
+rendered correctly, the gradient diamond showed real, visible color
+transition along the given angle, and `text_overlap_warnings`/
+`slides_missing_visual_elements`/`low_contrast_warnings` all came back
+clean. 21 new unit tests (gradient fill/angle/validation, shape
+creation/fill/line/text/shape_index-chaining/validation, crop fraction/
+range/sum/position-preserving/non-picture-rejection), full
+`test_presentations_tool.py`/`test_pptx_templates_tool.py`/`test_ooxml_
+validate.py` suite (287 tests) passes, `ruff check`/`mypy` clean on
+every touched file, `coordinator.py` updated to document all three.
