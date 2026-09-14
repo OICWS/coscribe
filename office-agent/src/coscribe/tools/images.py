@@ -35,6 +35,14 @@ from urllib.parse import urlsplit
 from ddgs import DDGS
 
 from ..runtime.types import tool_metadata
+from ._licensed_image_search import (
+    AssetCandidate,
+    ImageSearchRequest,
+    build_attribution_text,
+    score_candidate,
+    search_openverse,
+    search_wikimedia,
+)
 from ._workspace import WorkspaceScope
 
 # See websearch.py's own comment on the same subject: `from ddgs import
@@ -81,6 +89,101 @@ def search_images(query: str, max_results: int = _DEFAULT_MAX_RESULTS) -> list[d
             "height": result.get("height", ""),
         }
         for result in results
+    ]
+
+
+_LICENSED_SEARCH_TIMEOUT = 20.0
+_DEFAULT_LICENSED_MAX_RESULTS = 5
+
+
+def search_licensed_images(
+    query: str,
+    orientation: str = "",
+    min_width: int = 0,
+    min_height: int = 0,
+    required_terms: str = "",
+    max_results: int = _DEFAULT_LICENSED_MAX_RESULTS,
+) -> list[dict[str, object]]:
+    """Search Openverse and Wikimedia Commons (both real, zero-API-key
+    providers -- no signup, no key to configure) for openly licensed
+    images, unlike search_images above: every result here is already
+    classified into exactly one license tier, "no-attribution" (CC0/
+    Public Domain -- use freely, no on-slide credit needed) or
+    "attribution-required" (CC BY/CC BY-SA -- add attribution_text as a
+    small credit line on the slide, e.g. via edit_pptx_text/add_pptx_shape)
+    -- anything else (CC BY-NC, CC BY-ND, all-rights-reserved, unknown) is
+    rejected outright, never returned. Results are ranked (query
+    relevance dominates; license/size/orientation are tie-breakers) and
+    deduplicated across both providers, best first.
+
+    Returns candidate metadata only -- nothing is downloaded until you
+    call download_image on one result's download_url. Wikimedia Commons
+    skews educational/scientific/geographic/historical; Openverse
+    aggregates more broadly (Flickr, museums, and others) -- both are
+    tried and merged, not one preferred over the other.
+
+    Args:
+        query: what to search for, e.g. "mountain landscape sunset"
+        orientation: "landscape", "portrait", "square", or "" (any)
+        min_width: reject candidates narrower than this, in pixels (0 = no minimum)
+        min_height: reject candidates shorter than this, in pixels (0 = no minimum)
+        required_terms: optional comma-separated terms that must each appear
+            in a candidate's own title/author/page URL for it to be
+            accepted -- an entity-safety gate for an exact subject (a
+            company name, a named landmark) where a visually nice but
+            wrong image is worse than none, e.g. "eiffel tower,paris".
+            Use "A|B" within one comma-separated entry for alternatives
+            (either satisfies that entry), e.g. "Jiefangbei|Liberation
+            Monument"; every comma-separated entry is required.
+        max_results: how many top-ranked results to return (default 5)
+    """
+    import httpx
+
+    request = ImageSearchRequest(
+        query=query,
+        orientation=orientation,
+        min_width=min_width,
+        min_height=min_height,
+        required_terms=tuple(term.strip() for term in required_terms.split(",") if term.strip()),
+    )
+    ranked: list[tuple[float, AssetCandidate]] = []
+    seen_urls: set[str] = set()
+    with httpx.Client(timeout=_LICENSED_SEARCH_TIMEOUT) as client:
+        for search_fn in (search_openverse, search_wikimedia):
+            try:
+                candidates = search_fn(client, request)
+            except httpx.HTTPError:
+                continue  # one provider being unreachable shouldn't fail the other
+            for candidate in candidates:
+                dedupe_key = candidate.download_url.split("?", 1)[0].rstrip("/").lower()
+                if not dedupe_key or dedupe_key in seen_urls:
+                    continue
+                score = score_candidate(candidate, request)
+                if score == float("-inf"):
+                    continue
+                seen_urls.add(dedupe_key)
+                ranked.append((score, candidate))
+
+    ranked.sort(key=lambda entry: entry[0], reverse=True)
+    return [
+        {
+            "title": candidate.title,
+            "author": candidate.author,
+            "provider": candidate.provider,
+            "download_url": candidate.download_url,
+            "source_page_url": candidate.source_page_url,
+            "license_name": candidate.license_name,
+            "license_url": candidate.license_url,
+            "license_tier": candidate.license_tier,
+            "attribution_text": (
+                build_attribution_text(candidate)
+                if candidate.license_tier == "attribution-required"
+                else ""
+            ),
+            "width": candidate.width,
+            "height": candidate.height,
+        }
+        for _score, candidate in ranked[:max_results]
     ]
 
 
@@ -175,5 +278,6 @@ def build_image_tools(
 
     return [
         tool_metadata(search_images, risk_category="READ", category="web"),
+        tool_metadata(search_licensed_images, risk_category="READ", category="web"),
         tool_metadata(download_image, risk_category="EXTERNAL", category="web"),
     ]

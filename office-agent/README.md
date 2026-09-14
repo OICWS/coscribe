@@ -781,6 +781,26 @@ backend, so a soft anti-bot block there fails the whole search outright
 rather than just returning fewer results -- retrying the same query after
 a short wait is normal, not a sign the tool is broken.
 
+When usage rights actually matter (the deck is going external, or the
+user asks for something "royalty-free"/"commercially usable"),
+`search_licensed_images(query, orientation="", min_width=0, min_height=0,
+required_terms="", max_results=5)` searches Openverse and Wikimedia
+Commons instead -- two real, zero-API-key providers, no signup needed.
+Every result is already classified into exactly one of two tiers:
+`"no-attribution"` (CC0/Public Domain -- use freely, no credit needed) or
+`"attribution-required"` (CC BY/CC BY-SA -- comes with a ready-made
+`attribution_text` string for an on-slide credit line); anything else
+(CC BY-NC, CC BY-ND, all-rights-reserved, unknown) is rejected outright
+and never returned. Results are ranked by query relevance first, then
+license tier/orientation/size as tie-breakers, and deduplicated across
+both providers. `download_image` is still how you actually fetch the
+chosen result -- `search_licensed_images` only returns candidate
+metadata, same division of labor as `search_images`. Pass a
+comma-separated `required_terms` (e.g. `"eiffel tower,paris"`, or
+`"Jiefangbei|Liberation Monument"` for either-satisfies alternatives
+within one entry) when a specific name/landmark/entity must be exactly
+right rather than just visually plausible.
+
 If text over a background image ends up hard to read,
 `add_pptx_scrim(path, slide, opacity=0.35, color="000000")` adds a
 full-slide semi-transparent color layer between the background and the

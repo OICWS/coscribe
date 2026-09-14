@@ -2429,3 +2429,138 @@ passes, `ruff check`/`mypy` clean.
 named this round), `svg_quality/checker.py`, `narration_sync.py`/TTS.
 Not claimed as "too coupled" without having actually read them --
 correctly flagged as open, not yet verified either way.
+
+## 28. `search_licensed_images`: closing the "no license-filtered image
+search" gap named in `images.py`'s own docstring
+
+The other candidate §27 left open. `image_search.py` itself turned out
+to be a much larger CLI/review-pool/manifest system (2862 lines) than
+assumed -- not something to port wholesale -- but its underlying
+provider modules (`image_sources/provider_common.py`,
+`provider_openverse.py`, `provider_wikimedia.py`) are genuinely
+self-contained, confirmed by reading the actual import graph: zero
+dependency on ppt-master's workspace/IR system. Two zero-API-key
+sources -- Openverse (aggregates CC-licensed images across
+Flickr/museums/etc.) and Wikimedia Commons (strong on
+educational/scientific/geographic/historical imagery) -- both
+smoke-tested live against the real APIs, not assumed reachable.
+
+This closes a real, previously-documented gap: `tools/images.py`'s own
+module docstring already named "images found this way are not
+license-filtered... unlike a curated stock-photo API such as
+Unsplash/Pexels, which was considered and explicitly not chosen" as a
+known limitation of the existing `search_images` (DuckDuckGo). New
+`search_licensed_images(query, orientation, min_width, min_height,
+required_terms, max_results)` in `tools/images.py` is the curated
+alternative, sitting alongside it rather than replacing it -- both are
+`risk_category="READ"`/`category="web"` tools the model can choose
+between depending on whether the user cares about usage rights.
+
+**Retyped and adapted, not vendored** -- same ceremony level as §27's
+transitions table (credited via an in-code module docstring naming the
+source file/commit SHA, not a formal vendored-package NOTICE.md), not
+§25's "vendor whole files unmodified" treatment: real adaptation was
+needed, not just retyping. New `_licensed_image_search.py` keeps the
+real, hard-won knowledge -- which license strings each provider
+actually returns and which tier they map to, the two providers' real
+API endpoints/response shapes, the scoring heuristic -- and drops
+ppt-master's own much larger surrounding system (review-pool
+thumbnails, an `image_sources.json` provenance manifest,
+promote/batch/manual-URL workflows), none of which applies to
+coscribe's own shape: search returns candidates, the model picks one
+and calls the *existing* `download_image` tool -- no new download code
+needed at all, `download_image` (already httpx-based, Pillow-validated,
+size-capped) is reused entirely unmodified.
+
+**`requests` -> `httpx`**, coscribe's own established HTTP client
+(`tools/images.py`'s `download_image` already uses it, with the same
+real-browser-shaped `User-Agent` some hosts require) -- a deliberate
+adaptation, not a second redundant HTTP dependency.
+
+**License classification**: every candidate lands in exactly one of two
+accepted tiers -- `"no-attribution"` (CC0/Public Domain, free to use, no
+credit needed) or `"attribution-required"` (CC BY/CC BY-SA, ships with a
+ready-made `attribution_text` string for an on-slide credit) -- anything
+else (CC BY-NC, CC BY-ND, all-rights-reserved, unknown) is rejected
+outright, never returned. Scoring ranks by query relevance first
+(dominant), then license tier / orientation / minimum-size compliance /
+pixel count as tie-breakers, deduplicated across both providers by
+normalized download URL; one provider erroring doesn't fail the other.
+
+**Two real, live-verified gaps found and fixed during testing, not
+assumed correct from reading the code alone** -- this session's
+standing "verify against reality" discipline caught both:
+1. Openverse's real `license` field is a **bare slug** ("by", "by-sa",
+   "cc0") with the version in a *separate* `license_version` field --
+   confirmed live against the real API (`license_version` was not being
+   read at all in the first draft). `normalize_license_name`'s regex
+   required a leading "cc" prefix, so a raw "by" leaked into the
+   user-facing `attribution_text` unnormalized ("license: by (url)").
+   Fixed by combining `license_name`+`license_version` before
+   normalizing, and making the "cc" prefix optional in the regex.
+2. That combination itself broke the CC0/Public-Domain canon-table
+   lookup -- "cc0" + "1.0" combines to "cc0 1.0", which no longer
+   exact-matches the canon dict's "cc0" key. Fixed by stripping a
+   trailing " <version>" token before the canon lookup (careful to
+   anchor on a preceding space, since "cc0" itself contains a digit --
+   a naive trailing-digit strip would have eaten the "0" in "cc0" too,
+   caught by testing before it shipped, not assumed safe).
+Both are covered by regression tests (`test_licensed_image_search.py`'s
+`normalize_license_name` cases, `test_images_tool.py`'s
+`test_search_licensed_images_normalizes_openverse_bare_license_slug`)
+and re-verified live afterward, not just unit-tested.
+
+**A third real bug, caught by the full suite, not by unit tests**:
+`required_terms` first shipped as `list[str] | None = None` -- the
+exact `X | None`-unwrapping bug `test_coordinator.py::
+test_all_tool_schemas_are_gemini_compatible` exists specifically to
+catch (aisuite's schema builder only unwraps `typing.Optional[X]`, not
+PEP 604's `X | None`, so it would have serialized as the literal string
+`"list[str] | None"` and made every Gemini tool-calling request
+containing this tool fail with 400 INVALID_ARGUMENT). Investigating
+further: `list[str]` (with or without `| None`) isn't actually
+representable at all -- aisuite's schema builder has no `list`-to-
+`"array"` mapping, confirmed by testing directly against it, and no
+other tool in this codebase has ever used a native list-typed
+parameter. `required_terms` is now a comma-separated `str = ""`
+(`"A|B"` for either-satisfies alternatives within one entry, matching
+`write_pptx`'s `theme` and `edit_pptx_theme_colors`'s `colors` -- this
+codebase's own established convention for multi-value tool params),
+parsed via `.split(",")` at the top of the function.
+
+**Verified real, not just unit-tested**: live queries against the real
+Openverse/Wikimedia Commons APIs (`search_licensed_images("mountain
+landscape sunset", orientation="landscape")`), followed by a full
+end-to-end pass through the *existing* `download_image` tool on the top
+result and a visual inspection (via the Read tool) of the downloaded
+image -- confirmed a genuine, relevant, correctly-licensed photograph,
+not broken/placeholder content. The attribution-required path was
+separately verified with a real result requiring credit, confirming
+`attribution_text`'s exact generated string.
+
+**Tests**: ~35 pure-logic unit tests in `test_licensed_image_search.py`
+(license classification/normalization, relevance scoring, query
+simplification, attribution-text formatting) plus httpx-mocked tests in
+`test_images_tool.py` (merges and ranks both providers, respects
+`max_results`, deduplicates across providers, survives one provider
+erroring, rejects candidates missing a `required_terms` match, and the
+two live-discovered normalization regressions above) plus a tool
+metadata test. Full suite, `ruff check`/`mypy` clean.
+
+**`coordinator.py`**: added guidance on when to reach for
+`search_licensed_images` over `search_images` -- when the user cares
+about usage rights (deck going external, published, or an explicit
+"royalty-free"/"commercially usable" ask) -- including that
+`download_image` is still the way to actually fetch the chosen result,
+and that `required_terms` should be used when a specific
+name/landmark/entity must be exactly right rather than just visually
+plausible.
+
+**Deliberately out of scope, same reasoning as §27's SVG-pipeline
+exclusion**: ppt-master's review-pool/promote/batch/manual-URL
+workflows and `image_sources.json` provenance manifest -- none of it
+applies to coscribe's simpler "search returns candidates, the model
+downloads one" shape.
+
+**Still not checked, honestly**: `svg_quality/checker.py`,
+`narration_sync.py`/TTS -- unchanged from §27's own open list.

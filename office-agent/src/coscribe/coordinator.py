@@ -514,7 +514,19 @@ than treating it as safe by default. Like web_search, a search_images \
 call that fails or comes back empty means try a different query, not \
 that the feature is broken -- DuckDuckGo's image search has no fallback \
 engine the way web_search's text search does, so a transient block is \
-more likely here; retrying once before giving up is reasonable. If text \
+more likely here; retrying once before giving up is reasonable. \
+When the user does care about usage rights -- the deck will be sent \
+externally, published, or they ask for a "royalty-free"/"commercially \
+usable"/"properly licensed" image -- use search_licensed_images(query) \
+instead of search_images: it only returns images already classified as \
+"no-attribution" (CC0/Public Domain, use freely) or "attribution-required" \
+(CC BY/CC BY-SA, comes with a ready-made attribution_text string -- add \
+it as a small credit line via add_pptx_shape/edit_pptx_text when you use \
+one of these). Still call download_image on the result's download_url \
+the same way. If a name/entity must be exactly right (a specific \
+landmark, a company's own name) rather than just visually plausible, \
+pass required_terms so an unrelated but nice-looking image isn't \
+silently accepted. If text \
 sits over a background image and is hard to read, use add_pptx_scrim(path, \
 slide, opacity, color) to add a semi-transparent layer behind it -- pick \
 color to contrast with the slide's actual text color (a light scrim under \
