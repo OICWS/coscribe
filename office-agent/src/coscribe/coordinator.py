@@ -251,7 +251,11 @@ type, position/size, rotation, a text preview, and fill color -- then \
 edit_pptx_shape(path, slide, shape_index, left_in, top_in, width_in, \
 height_in, rotation, fill_color) with only the properties you're \
 changing -- add fill_color_2 (and optionally gradient_angle) for a \
-two-stop linear gradient fill instead of solid. Never guess shape_index \
+two-stop linear gradient fill instead of solid, or text_color to \
+recolor every run of text already in the shape (a title/body \
+placeholder is a shape like any other here -- this is the tool for \
+"make this title a different color", not edit_pptx_theme_colors, see \
+below). Never guess shape_index \
 without calling list_pptx_shapes first on a slide you haven't already \
 inspected. To remove a shape \
 entirely (any type -- a plain shape, a picture, a table, or real \
@@ -275,6 +279,17 @@ slide, shape_type, left_in, top_in, width_in, height_in, text, \
 fill_color, line_color) once per shape. It returns the new shape's own \
 shape_index, so a follow-up edit_pptx_shape/add_pptx_hyperlink call can \
 target it directly without a separate list_pptx_shapes round-trip. \
+**A plain geometric arrow/box/flowchart-node request -- "add an arrow", \
+"add a green box" -- means add_pptx_shape, never add_pptx_icon below, \
+even though a same-ish-sounding icon (e.g. a "trending-up" pictogram) \
+might exist:** add_pptx_icon inserts a *raster picture*, which has no \
+`fill`/`fill_color_2`/`line_color` to set afterward and can only be \
+recolored as one flat tint (recolor_pptx_icon) -- reaching for it on a \
+"shape" request is what silently makes a later "give it a gradient" \
+follow-up impossible to fulfill. Reserve add_pptx_icon (below) for when \
+the user actually wants a recognizable pictogram (a gear, a lightbulb, a \
+checkmark glyph), not a generic geometric shape that happens to share a \
+name with one. \
 \
 To swap out an existing picture (a photo, an icon) for a different one \
 on an existing .pptx without touching its position, size, or crop, find \
@@ -329,11 +344,21 @@ placeholder/shape across the whole deck that references a theme color, \
 so confirm with the user which slot they actually mean (a slot name \
 doesn't self-evidently map to "the color in the title" without reading \
 it first) before editing -- this is the most far-reaching single edit \
-in this tool file. Note: coscribe's own generated decorative shapes \
-(icon-list circles, stat-callout cards, scrims) use hardcoded colors, \
-not theme references, so editing theme colors on a coscribe-generated \
-deck won't recolor those -- it's most useful on a real uploaded/ \
-downloaded template whose own design already references theme colors. \
+in this tool file. **Set the user's expectations honestly before \
+calling it, not after: this tool does NOT recolor plain title/body \
+text** -- that text is drawn from dk1 (or an explicit literal color), \
+not accent1-6, on both coscribe's own generated decks (icon-list \
+circles, stat-callout cards, and scrims use hardcoded colors too, not \
+theme references) and most real uploaded/downloaded templates. Calling \
+edit_pptx_theme_colors and then telling the user their titles are now a \
+new color is a real mistake to avoid -- verify with read_pptx_theme_colors \
+or list_pptx_shapes if genuinely unsure, don't assume accent1 governs \
+text just because it sounds like it should. If the user's actual goal is \
+"make this text a different color", that is edit_pptx_shape's own \
+text_color parameter (above), not this tool -- and if that still doesn't \
+land as expected, say so plainly rather than reaching for run_node_script/ \
+run_python_script to hand-roll a fix; guessing at python-pptx's fill/color \
+API from memory is exactly how a real mistake compounds into several. \
 \
 Unlike \
 write_pptx, run_node_script returns no preview of its \

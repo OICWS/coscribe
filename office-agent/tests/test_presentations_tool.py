@@ -4080,6 +4080,57 @@ def test_edit_pptx_shape_gradient_angle_without_fill_color_2_raises(tmp_path: Pa
         )
 
 
+def test_edit_pptx_shape_sets_text_color_on_title(tmp_path: Path) -> None:
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# **Bold** Title\n- one\n- two")
+
+    tools["edit_pptx_shape"](path="deck.pptx", slide=1, shape_index=0, text_color="2563EB")
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    title = prs.slides[0].shapes.title
+    for paragraph in title.text_frame.paragraphs:
+        for run in paragraph.runs:
+            assert str(run.font.color.rgb) == "2563EB"
+
+
+def test_edit_pptx_shape_text_color_does_not_touch_text_content(tmp_path: Path) -> None:
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- one\n- two")
+
+    tools["edit_pptx_shape"](path="deck.pptx", slide=1, shape_index=0, text_color="2563EB")
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    slide = prs.slides[0]
+    assert slide.shapes.title.text == "Title"
+    text = tools["read_pptx"](path="deck.pptx", slide=1)
+    assert "one" in text
+    assert "two" in text
+
+
+def test_edit_pptx_shape_rejects_text_color_on_a_table(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    content = "# Table\n| A | B |\n| --- | --- |\n| 1 | 2 |\n"
+    tools["write_pptx"](path="deck.pptx", content=content)
+
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    table_index = next(s["index"] for s in shapes if s["is_table"])
+    with pytest.raises(ValueError, match="no text to color"):
+        tools["edit_pptx_shape"](
+            path="deck.pptx", slide=1, shape_index=table_index, text_color="2563EB"
+        )
+
+
+def test_edit_pptx_shape_rejects_bad_text_color(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet")
+    with pytest.raises(ValueError, match="6-hex-digit color"):
+        tools["edit_pptx_shape"](path="deck.pptx", slide=1, shape_index=0, text_color="#2563EB")
+
+
 def test_list_pptx_shapes_describes_gradient_fill(tmp_path: Path) -> None:
     tools = _tools_by_name(tmp_path)
     tools["write_pptx"](path="deck.pptx", content="layout: icon-list\n# Icons\n- [A] alpha\n")

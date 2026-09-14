@@ -1935,3 +1935,86 @@ doesn't over-reach for `run_node_script` on cases `layout: svg`/
 that genuinely needs it. §19's own conditional ("only add new semantic
 `layout:` ids if the audit shows write_pptx being over-used") isn't
 triggered. Closing out the 3-tier plan here.
+
+## 22. Real-hardware bugs from the first user round with the packaged
+Electron app -- a `text_color` gap, and a shape/icon tool-selection miss
+
+The user packaged the app (real Windows hardware, real PowerPoint, real
+GLM-4.5-air as the coordinator model) and ran the §19-21 test plan. The
+"no repair-dialog" check (§19's whole point) passed clean. Two real
+defects came out of the rest, both root-caused from the actual transcript
+rather than guessed at.
+
+**22.1 "Add a green up-arrow shape" reached `add_pptx_icon`, not the new
+`add_pptx_shape`.** The model called `add_pptx_icon(icon_name=
+"trending-up", color="1E3A8A")` -- wrong tool (a raster Lucide pictogram,
+not a vector shape) *and* wrong color (blue, not the requested green).
+`coordinator.py` documented both tools but never said which one wins when
+a request sounds like it could be either -- "trending-up" reads as a
+plausible name for "an upward arrow" to a model that hasn't internalized
+the real difference (a picture with no fill to edit later, vs. a real
+`MSO_SHAPE` AutoShape). Fixed with an explicit, bolded rule in
+`add_pptx_shape`'s own paragraph: a plain geometric shape request always
+means `add_pptx_shape`, `add_pptx_icon` is reserved for an actual
+recognizable pictogram, name collisions with an icon notwithstanding.
+
+**22.2 The real, expensive failure this caused**: because the "arrow" was
+a picture, `edit_pptx_shape`'s gradient parameters (tier 2, §20) had
+nothing to attach to. Rather than surface that cleanly, the model spent
+several rounds hand-rolling `run_node_script`/`run_python_script` fixes
+using **hallucinated python-pptx API** (`fill.gradient_fill_properties.
+stop_list[0].color.rgb`, `MSOGradientStyle.LINEAR` -- neither exists; the
+real API is exactly what `edit_pptx_shape`'s own tier-2 implementation
+already uses, `fill.gradient()`/`gradient_stops[i].color.rgb`/
+`gradient_angle`), each attempt also hitting an unrelated real Windows
+subprocess-encoding bug (`'charmap' codec can't encode` -- `run_python_
+script`/`run_node_script` not forcing UTF-8 for a script containing
+Chinese text; a real bug, but in a different subsystem, not fixed in this
+pass) before giving up and telling the user to add the gradient by hand
+in PowerPoint. §22.1's fix addresses the root cause -- reaching
+`add_pptx_shape` in the first place means this entire detour never
+starts.
+
+**22.3 A separate, real capability gap, not just a routing miss: no way
+to recolor existing text.** The user asked to change the theme's accent
+color, expecting titles to turn blue; they didn't (real python-pptx
+behavior: plain title/body text draws from `dk1`, not `accent1`, unless a
+run explicitly references the theme color, which write_pptx-generated
+text never does). The model's own explanation to the user was
+confidently wrong ("这个颜色现在将作为...标题...的强调色"), then it tried the
+same "guess an API, hand-roll a script" pattern as §22.2 to fake a fix
+(literally inserting `<span style="color:#2563EB">...</span>` as plain
+*text content* via `edit_pptx_text`, since that tool's markdown parser
+has no color syntax -- visible in the real file as literal angle-bracket
+text). The actual gap: `edit_pptx_shape` could recolor a shape's *fill*
+but nothing recolored existing *text*.
+
+**Fixed by adding `text_color` to `edit_pptx_shape`** (not a new tool --
+a title/body placeholder is already addressable as a shape via
+`list_pptx_shapes`/`shape_index`, so "recolor this shape's fill and/or
+its text" belongs on the one tool that already owns "recolor this
+shape"). Sets every run in the shape's text frame to one RGB color via
+python-pptx's own `run.font.color.rgb` -- no hand-XML, so (like the
+gradient fill in §20) needed no `_ooxml_validate` wiring. Also tightened
+`edit_pptx_theme_colors`'s own coordinator.py guidance to state the real
+behavior up front (plain title/body text is not theme-color-linked on
+either a coscribe-generated or most real-world decks) instead of leaving
+a model to assume otherwise and confidently tell a user something false,
+and to explicitly name `text_color` as the actual tool for "make this
+text a different color" plus a direct instruction against the
+guess-the-API-and-hand-roll-a-script pattern both real failures shared.
+
+**Verified real, not just unit-tested**: built a deck with `write_pptx`,
+called `edit_pptx_shape(shape_index=<title>, text_color="2563EB")`,
+rendered through the real LibreOffice pipeline, and visually confirmed
+the title rendered in the requested blue while the bullet text (a
+separate shape, untouched) stayed black -- the exact real-world scenario
+the user hit. 4 new tests (recolors every run, leaves text content and
+other shapes untouched, rejects a table/no-text-frame shape, rejects a
+malformed hex), full `test_presentations_tool.py`/`test_pptx_templates_
+tool.py`/`test_ooxml_validate.py` suite (291 tests) passes, `ruff check`/
+`mypy` clean.
+
+**Not fixed in this pass, noted for later**: the Windows `charmap`
+subprocess-encoding bug (§22.2) -- real, but lives in `tools/scripts.py`/
+`tools/node_scripts.py`, a different subsystem than this file covers.

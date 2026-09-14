@@ -2988,14 +2988,15 @@ class PresentationToolkit:
         fill_color: str = "",
         fill_color_2: str = "",
         gradient_angle: Optional[float] = None,  # noqa: UP045
+        text_color: str = "",
     ) -> dict[str, object]:
-        """Change an existing shape's geometry and/or fill color in
-        place, on any already-existing .pptx -- call `list_pptx_shapes`
-        first to find `shape_index` (this is that list's own `index`,
-        0-based in on-slide order) and confirm you're targeting the
-        right shape; text content, other shapes, and the rest of the
-        deck are untouched. Every geometry parameter is optional -- only
-        the ones given are changed.
+        """Change an existing shape's geometry, fill color, and/or text
+        color in place, on any already-existing .pptx -- call
+        `list_pptx_shapes` first to find `shape_index` (this is that
+        list's own `index`, 0-based in on-slide order) and confirm
+        you're targeting the right shape; text *content*, other shapes,
+        and the rest of the deck are untouched. Every parameter is
+        optional -- only the ones given are changed.
 
         `fill_color` alone sets a plain solid fill, same as before. Give
         `fill_color_2` too for a two-stop linear gradient (`fill_color`
@@ -3004,7 +3005,17 @@ class PresentationToolkit:
         picture or hand-built XML. `gradient_angle` (degrees, 0 =
         left-to-right, 90 = top-to-bottom, increasing clockwise) only
         applies alongside `fill_color_2`; omit it to keep python-pptx's
-        own default 90-degree (top-to-bottom) gradient."""
+        own default 90-degree (top-to-bottom) gradient.
+
+        `text_color` recolors every run of text already inside the
+        shape (a title/body placeholder counts -- it's a shape like any
+        other via `list_pptx_shapes`) -- this is the tool for "make this
+        title/paragraph a different color," not `edit_pptx_theme_colors`
+        (see that tool's own docstring: changing a theme accent color
+        only recolors elements that explicitly *reference* that theme
+        color -- coscribe's own decorative shapes and, just as often,
+        plain title/body text, do not -- so it routinely leaves text
+        exactly the color it already was)."""
         from pptx.dml.color import RGBColor
         from pptx.util import Inches
 
@@ -3025,10 +3036,11 @@ class PresentationToolkit:
             and height_in is None
             and rotation is None
             and not fill_color
+            and not text_color
         ):
             raise ValueError(
                 "edit_pptx_shape needs at least one property to change (position, "
-                "size, rotation, or fill_color)."
+                "size, rotation, fill_color, or text_color)."
             )
         if fill_color and not _THEME_HEX_RE.match(fill_color):
             raise ValueError(
@@ -3038,6 +3050,10 @@ class PresentationToolkit:
             raise ValueError(
                 f"fill_color_2 {fill_color_2!r} must be a 6-hex-digit color (no '#'), "
                 f"e.g. '38BDF8'."
+            )
+        if text_color and not _THEME_HEX_RE.match(text_color):
+            raise ValueError(
+                f"text_color {text_color!r} must be a 6-hex-digit color (no '#'), e.g. '38BDF8'."
             )
         prs, file_path, target_slide = self._open_slide(path, slide)
         shape = _get_shape_at_index(target_slide, slide, shape_index)
@@ -3076,6 +3092,17 @@ class PresentationToolkit:
             else:
                 fill.solid()
                 fill.fore_color.rgb = RGBColor.from_string(fill_color)  # type: ignore[no-untyped-call]
+        if text_color:
+            if not shape.has_text_frame:
+                raise ValueError(
+                    f"Shape {shape_index} on slide {slide} ({shape.shape_type}) has no "
+                    f"text to color -- text_color only applies to a shape with a text "
+                    f"frame (not a table/chart/picture)."
+                )
+            rgb = RGBColor.from_string(text_color)  # type: ignore[no-untyped-call]
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    run.font.color.rgb = rgb
         prs.save(str(file_path))
 
         return {
@@ -4451,12 +4478,16 @@ def build_presentation_tools(
         fill_color: str = "",
         fill_color_2: str = "",
         gradient_angle: Optional[float] = None,  # noqa: UP045
+        text_color: str = "",
     ) -> dict[str, object]:
-        """Move, resize, rotate, and/or recolor an existing shape on an
-        existing PowerPoint (.pptx) file's slide, without touching its
-        text or any other shape -- the tool for adjusting one element of
-        an already-designed deck (a real uploaded template, or one
-        coscribe already generated) rather than rebuilding the slide.
+        """Move, resize, rotate, and/or recolor an existing shape (its
+        fill and/or its text color) on an existing PowerPoint (.pptx)
+        file's slide, without touching its text *content* or any other
+        shape -- the tool for adjusting one element of an already-
+        designed deck (a real uploaded template, or one coscribe already
+        generated) rather than rebuilding the slide. A title/body
+        placeholder is a shape like any other here -- find it via
+        list_pptx_shapes and use text_color to recolor it.
 
         Call list_pptx_shapes(path, slide) first to find the right
         shape_index and confirm its current position/size/fill before
@@ -4486,6 +4517,15 @@ def build_presentation_tools(
                 right, 90 = top-to-bottom, increasing clockwise). Only
                 applies alongside fill_color_2; omit to keep the default
                 90-degree top-to-bottom gradient.
+            text_color: new color for every run of text already in the
+                shape, 6-hex-digit, no '#'. Omit to leave text color
+                unchanged. Only applies to a shape with a text frame
+                (not a table/chart/picture). This is the tool for "make
+                this title/paragraph a different color" -- changing a
+                deck's theme accent color (edit_pptx_theme_colors)
+                usually does NOT recolor plain title/body text, since
+                that text typically doesn't reference the theme's accent
+                color at all.
         """
         return toolkit.edit_pptx_shape(
             path=path,
@@ -4499,6 +4539,7 @@ def build_presentation_tools(
             fill_color=fill_color,
             fill_color_2=fill_color_2,
             gradient_angle=gradient_angle,
+            text_color=text_color,
         )
 
     def replace_pptx_image(
