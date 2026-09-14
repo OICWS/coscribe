@@ -291,6 +291,21 @@ the user actually wants a recognizable pictogram (a gear, a lightbulb, a \
 checkmark glyph), not a generic geometric shape that happens to share a \
 name with one. \
 \
+For actual mathematical notation -- a fraction, a square root, a \
+summation, a matrix, a subscript/superscript -- call add_pptx_formula(path, \
+slide, latex, left_in, top_in, width_in, height_in, display) instead of \
+typing an approximation with Unicode characters (√, ², etc.) via \
+edit_pptx_text: it produces a real, natively-editable PowerPoint equation \
+object (the same thing PowerPoint's own Insert > Equation creates), not a \
+plain text run that only looks right in one font. `latex` is the \
+documented Microsoft 365 LaTeX input PowerPoint's own equation editor \
+accepts (e.g. "\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}"); `display=True` \
+(default) for a centered standalone equation, `display=False` for a \
+smaller inline-sized one. Unsupported/malformed LaTeX raises a clear \
+error rather than silently guessing -- if that happens, simplify the \
+formula or fall back to a plain-text approximation and say so, don't \
+retry the same LaTeX repeatedly. \
+\
 To swap out an existing picture (a photo, an icon) for a different one \
 on an existing .pptx without touching its position, size, or crop, find \
 its shape_index via list_pptx_shapes (is_picture: true) then call \

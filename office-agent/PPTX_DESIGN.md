@@ -2138,3 +2138,103 @@ tasks.py` (this section) were the exceptions, both because they write a
 same Chinese-comment-plus-print shape as §23's two tests, run through
 `run_background_script` instead), full suite passes, `ruff check`/`mypy`
 clean on every touched file.
+
+## 25. `add_pptx_formula`: real OMML equations, vendored from
+`hugohe3/ppt-master`'s LaTeX compiler -- §16/§19's competitive research
+finally acted on, narrowly and deliberately
+
+User explicitly authorized using ppt-master's code and/or ideas ("MIT项目，
+使用代码/借鉴思路...我决定没问题") and asked for a concrete next-steps plan.
+Cloned the real repo and read the actual source before planning anything
+(same discipline as §19) -- and found ppt-master is *far* larger than
+earlier research in this file suggested: not an "SVG→DrawingML converter"
+but a full production pipeline (image search/generation, a whole-slide
+SVG authoring+quality-check system at 9834+5603+8384 lines across three
+files alone, native charts/tables/diagrams, transitions/animations,
+narration/TTS, template distillation), all built around ppt-master's own
+bespoke "workspace/IR/roundtrip-manifest" project model. Confirmed by
+reading the actual import graphs of `svg_to_pptx/pptx_package/cli.py` and
+`mirror_template_materialize.py`: both reach deep into that workspace
+system. **Literally porting that code isn't realistic** -- it would mean
+adopting ppt-master's whole architecture, which conflicts with coscribe's
+own (an agent calling discrete tools directly against the user's real
+file, no separate "project workspace"). Recorded explicitly as *not*
+being attempted, with the concrete reason, rather than silently dropped.
+
+**One real exception, verified self-contained before vendoring, not
+assumed**: `skills/ppt-master/scripts/svg_to_pptx/native_objects/
+formula_{ast,parser,profile,omml,compiler}.py` -- a LaTeX→OMML (Office
+Math Markup Language) compiler. Confirmed by copying just these 5 files
+into a scratch directory and importing them with zero other ppt-master
+code present: `formula_compiler.py`'s two public functions
+(`compile_latex_to_omml`/`compile_latex_to_inline_omml`) only reach into
+each other, nothing workspace-related. (`formula.py`/`inline_formula.py`
+-- ppt-master's own callers of this compiler -- were deliberately *not*
+vendored: they import `drawingml.context`/`drawingml.utils`, i.e. they
+*are* workspace-coupled; coscribe's own `add_pptx_formula` does that
+gluing itself, against its own existing python-pptx conventions.)
+
+Vendored, unmodified, into `src/coscribe/tools/_native_formula/`, with a
+`NOTICE.md` recording exact provenance (commit `6e3ce9c5a3b994a0e22
+3a14a0f7eddf42fd0b9f5`, MIT license text in full) -- same convention as
+`providers/_vendor`'s existing aisuite vendoring, including the matching
+`pyproject.toml` `extend-exclude`/mypy `exclude` entries so a future diff
+against upstream stays meaningful instead of drowning in this codebase's
+own lint/type conventions.
+
+**A real, concrete technical question resolved by reading ppt-master's
+own contract doc, not guessed**: how does an OMML fragment actually embed
+inside a DrawingML text paragraph? `references/native-formula.md`
+answers directly -- wrapped in `<a14:m>` (the PowerPoint-2010 DrawingML
+extension namespace), containing `<m:oMathPara>`/`<m:oMath>`. This is
+*exactly* the same class of foreign-namespace extension content as
+`p14:dur` (§19) -- `<a:p>`'s base ECMA-376 content model has no slot for
+either. That meant `add_pptx_formula` needed **zero new validation
+machinery**: `_mark_mce_ignorable`/`assert_ooxml_valid` (already generic,
+not p14-hardcoded, confirmed by reading their own implementation) handle
+`a14` exactly as they already handle `p14`, unmodified. A second layer
+turned out unnecessary too: `emit_omml()` (inside the vendored
+`formula_omml.py`) already calls its own `validate_omml_fragment()`
+internally before returning -- `compile_latex_to_omml`'s output is
+self-validated before coscribe's code ever sees it, so no extra
+schema-validation wiring against the already-vendored (§19) but
+never-used `shared-math.xsd` was needed either. (That schema stays
+vendored, unused, on record for whoever eventually needs stricter OMML
+validation than ppt-master's own checker provides.)
+
+**`add_pptx_formula(path, slide, latex, left_in, top_in, width_in,
+height_in, display=True)`** -- same "new object at an exact position"
+shape as `add_pptx_shape`, not an edit-existing-text tool (inserting a
+formula into the middle of already-typed text would need splitting
+existing runs around a cursor position, real added complexity deferred
+as a v2, not attempted here). Creates a fresh text box via python-pptx's
+own `add_textbox`, reaches into its first paragraph's lxml element
+(`paragraph._p`, the one place this file already does this for
+`_adjust_template_content_slides`) to append the `<a14:m>` wrapper,
+marks `mc:Ignorable="a14"` on the slide root, validates, saves.
+`FormulaCompileError` (the vendored compiler's own real error, e.g.
+unbalanced braces) surfaces as `ValueError` with the actual message, not
+a generic failure.
+
+**Verified real, not just unit-tested**: rendered a block quadratic
+formula and an inline `x_i^2 + y_i^2 = r^2` through the real LibreOffice
+pipeline and looked at the PNG directly -- this was flagged as a genuine
+open risk going in (LibreOffice's OMML rendering fidelity was unknown),
+resolved positively: the fraction bar, radical, plus-minus, and
+subscripts/superscripts all render correctly, not garbled or blank. 6
+new tests (block vs. inline XML shape, `mc:Ignorable` is actually set,
+malformed LaTeX raises with the real message, a real LibreOffice
+round-trip doesn't hit `preview_skipped_reason`, EXEC/approval metadata),
+full `test_presentations_tool.py`/`test_pptx_templates_tool.py`/
+`test_ooxml_validate.py` suite (297 tests) passes, `ruff check`/`mypy`
+clean on every touched file (the vendored files themselves excluded from
+both, per the new `pyproject.toml` entries, same as the aisuite
+precedent). `coordinator.py` updated with explicit guidance against
+typing Unicode-character math approximations via `edit_pptx_text`
+instead of reaching for this tool.
+
+**Second workstream from the same plan -- a coscribe-native
+`extract_pptx_template` (PPTAgent-inspired template distillation,
+replacing the workspace-coupled `mirror_template_materialize.py` this
+codebase can't port) -- not started in this pass**, tracked as the next
+piece of the same approved plan.

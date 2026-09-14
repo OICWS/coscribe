@@ -198,6 +198,20 @@ _P14_NS = "http://schemas.microsoft.com/office/powerpoint/2010/main"
 # `_ooxml_validate.py` implements the matching strip-before-validate side.
 _MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
+# add_pptx_formula's own pair: the PowerPoint-2010 DrawingML extension
+# namespace real PowerPoint uses to embed a native Office Math equation
+# inside a text paragraph (`<a14:m>`, wrapping `<m:oMathPara>`/`<m:oMath>`),
+# and Office Math's own namespace -- confirmed against
+# hugohe3/ppt-master's own documented contract (`references/native-
+# formula.md`: "Export replaces the whole group with a14:m > m:oMathPara >
+# m:oMath"), not guessed. Same foreign-namespace-extension-content shape as
+# `p14:dur` above -- `<a:p>`'s base ECMA-376 content model has no slot for
+# either `a14:m` or `m:oMath`, so this needs the exact same `mc:Ignorable`
+# treatment (`_mark_mce_ignorable`/`_ooxml_validate.py`'s strip-before-
+# validate side), reused unmodified rather than duplicated.
+_A14_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
+_M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+
 _TRANSITIONS = frozenset({"fade", "push", "wipe", "none"})
 
 # add_pptx_shape's own curated subset of python-pptx's ~180-member
@@ -3212,6 +3226,92 @@ class PresentationToolkit:
         }
 
     @locked_by_path
+    def add_pptx_formula(
+        self,
+        path: str,
+        slide: int,
+        latex: str,
+        left_in: float,
+        top_in: float,
+        width_in: float,
+        height_in: float,
+        display: bool = True,
+    ) -> dict[str, object]:
+        """Add a real, natively-editable PowerPoint equation (the same
+        Office Math object PowerPoint's own Insert > Equation creates)
+        onto an existing slide, at the exact position/size you give --
+        for actual mathematical notation (fractions, roots, summations,
+        matrices), not a text approximation typed with Unicode
+        characters. Always creates a fresh text box containing exactly
+        one formula, the same "new object at a position" shape as
+        add_pptx_shape above -- for a formula that belongs alongside
+        other text in an existing paragraph, this isn't that (v1 scope).
+
+        `latex` is the documented Microsoft 365 LaTeX equation syntax --
+        the same input PowerPoint's own equation editor accepts when you
+        type LaTeX and press space, e.g.
+        r"\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}". Unsupported/malformed LaTeX
+        raises ValueError with the real compiler error, not a silent
+        best-effort guess.
+
+        Args:
+            path: path to an existing .pptx already in the workspace
+            slide: 1-based slide index to add the equation to
+            latex: the LaTeX source for the equation
+            left_in: horizontal position in inches from the slide's left edge
+            top_in: vertical position in inches from the slide's top edge
+            width_in: text box width in inches
+            height_in: text box height in inches
+            display: True (default) for a centered, standalone block
+                equation; False for a smaller inline-sized expression.
+        """
+        from lxml import etree
+        from pptx.util import Inches
+
+        from ._native_formula import (
+            FormulaCompileError,
+            compile_latex_to_inline_omml,
+            compile_latex_to_omml,
+        )
+
+        try:
+            omml_xml = (
+                compile_latex_to_omml(latex) if display else compile_latex_to_inline_omml(latex)
+            )
+        except FormulaCompileError as exc:
+            raise ValueError(f"Could not compile LaTeX formula {latex!r}: {exc}") from exc
+
+        prs, file_path, target_slide = self._open_slide(path, slide)
+        shape = target_slide.shapes.add_textbox(
+            Inches(left_in), Inches(top_in), Inches(width_in), Inches(height_in)
+        )
+        paragraph = shape.text_frame.paragraphs[0]
+        p_element = paragraph._p  # noqa: SLF001
+        # `<a14:m>` wrapping `<m:oMathPara>`/`<m:oMath>` -- the exact shape
+        # hugohe3/ppt-master's own documented contract uses (see _A14_NS's
+        # comment above). A fresh text box's first paragraph has no runs
+        # yet, so this is simply appended as the paragraph's sole content.
+        math_root = etree.fromstring(omml_xml.encode("utf-8"))
+        a14_wrapper = etree.SubElement(p_element, f"{{{_A14_NS}}}m", nsmap={"a14": _A14_NS})
+        a14_wrapper.append(math_root)
+
+        _mark_mce_ignorable(target_slide.element, "a14")
+        assert_ooxml_valid(target_slide.element, "add_pptx_formula")
+        prs.save(str(file_path))
+
+        shape_index = len(target_slide.shapes) - 1
+        state_dir = Path(self._state_dir) if self._state_dir is not None else None
+        preview_path, preview_skipped_reason = render_thumbnail(file_path, state_dir)
+        return {
+            "path": self._scope.relative(file_path),
+            "slide": slide,
+            "shape_index": shape_index,
+            "display": display,
+            "preview_path": preview_path,
+            "preview_skipped_reason": preview_skipped_reason,
+        }
+
+    @locked_by_path
     def replace_pptx_image(
         self, path: str, slide: int, shape_index: int, image_path: str
     ) -> dict[str, object]:
@@ -4626,6 +4726,53 @@ def build_presentation_tools(
             line_color=line_color,
         )
 
+    def add_pptx_formula(
+        path: str,
+        slide: int,
+        latex: str,
+        left_in: float,
+        top_in: float,
+        width_in: float,
+        height_in: float,
+        display: bool = True,
+    ) -> dict[str, object]:
+        """Add a real, natively-editable PowerPoint equation (the same
+        Office Math object PowerPoint's own Insert > Equation creates)
+        onto an existing PowerPoint (.pptx) file's slide, at an exact
+        position/size -- for actual mathematical notation (fractions,
+        roots, summations, matrices), not a text approximation typed
+        with Unicode characters. Always creates a fresh text box
+        containing exactly one formula, the same "new object at a
+        position" shape as add_pptx_shape.
+
+        `latex` is the documented Microsoft 365 LaTeX equation syntax --
+        the same input PowerPoint's own equation editor accepts when you
+        type LaTeX and press space. Unsupported/malformed LaTeX raises a
+        clear error rather than a silent best-effort guess.
+
+        Args:
+            path: path to an existing .pptx already in the workspace
+            slide: 1-based slide index to add the equation to
+            latex: the LaTeX source for the equation, e.g.
+                "\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}"
+            left_in: horizontal position in inches from the slide's left edge
+            top_in: vertical position in inches from the slide's top edge
+            width_in: text box width in inches
+            height_in: text box height in inches
+            display: True (default) for a centered, standalone block
+                equation; False for a smaller inline-sized expression.
+        """
+        return toolkit.add_pptx_formula(
+            path=path,
+            slide=slide,
+            latex=latex,
+            left_in=left_in,
+            top_in=top_in,
+            width_in=width_in,
+            height_in=height_in,
+            display=display,
+        )
+
     def crop_pptx_image(
         path: str,
         slide: int,
@@ -5165,6 +5312,7 @@ def build_presentation_tools(
         tool_metadata(delete_pptx_shape, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(list_pptx_shape_types, risk_category="READ", category="documents"),
         tool_metadata(add_pptx_shape, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(add_pptx_formula, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(replace_pptx_image, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(crop_pptx_image, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(list_pptx_icons, risk_category="READ", category="documents"),

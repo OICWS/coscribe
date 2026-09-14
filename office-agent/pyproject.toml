@@ -192,8 +192,12 @@ packages = ["src/coscribe"]
 line-length = 100
 target-version = "py311"
 # Vendored, unmodified-from-upstream code (see the header comment in each file):
-# left alone so a future diff against aisuite's source stays meaningful.
-extend-exclude = ["src/coscribe/providers/gemini_provider.py", "src/coscribe/providers/_vendor"]
+# left alone so a future diff against aisuite's/ppt-master's source stays meaningful.
+extend-exclude = [
+    "src/coscribe/providers/gemini_provider.py",
+    "src/coscribe/providers/_vendor",
+    "src/coscribe/tools/_native_formula",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -205,6 +209,7 @@ warn_unused_ignores = true
 exclude = [
     "src/coscribe/providers/gemini_provider.py",
     "src/coscribe/providers/_vendor",
+    "src/coscribe/tools/_native_formula",
 ]
 
 [[tool.mypy.overrides]]
