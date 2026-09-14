@@ -439,26 +439,176 @@ _SHAPE_TYPES = frozenset(
     }
 )
 
-# add_pptx_hyperlink's scope, deliberately: external URLs only, via
-# python-pptx's own public Hyperlink API (Shape.click_action.hyperlink /
-# Run.hyperlink) -- no hand-rolled XML at all, unlike set_pptx_transition/
-# add_pptx_animation. "Jump to another slide" hyperlinks are a real,
-# common PowerPoint feature too, but need a TargetMode="Internal"
-# relationship plus an action="ppaction://hlinksldjump" attribute that
-# python-pptx's Hyperlink class has no public support for -- would mean
-# hand-rolled XML for a nice-to-have, not built here; revisit if asked
-# for specifically.
+# add_pptx_hyperlink's scope: external URLs via python-pptx's own public
+# Hyperlink API (Shape.click_action.hyperlink/Run.hyperlink), plus
+# internal "jump to another slide" links via a *different* public
+# python-pptx API this file previously missed: ActionSetting.target_slide
+# (Shape.click_action.target_slide, settable to a real Slide object) --
+# confirmed by reading python-pptx's own source before assuming otherwise,
+# not carried over from an earlier, now-stale assumption that no public
+# support existed. That setter already builds the exact real relationship/
+# attribute pair hugohe3/ppt-master's own `hyperlink_contract.py` names
+# (`SLIDE_REL_TYPE` = the real "…/relationships/slide" type, `action =
+# "ppaction://hlinksldjump"`) -- no hand-rolled XML needed at all, unlike
+# set_pptx_transition/add_pptx_animation/add_pptx_audio, since python-
+# pptx's own maintainers had already wired this up (its `action` property
+# even already recognizes `PP_ACTION.NAMED_SLIDE` on the *read* side; only
+# the write-side setter had gone unnoticed here). The `"#slide-N"` url
+# syntax below borrows ppt-master's own real convention (`hyperlink_
+# contract.py`'s `_SLIDE_TARGET_RE`) rather than inventing a new one.
 _HYPERLINK_SCHEMES = ("http://", "https://", "mailto:", "ftp://")
+_SLIDE_TARGET_RE = re.compile(r"^#slide-([1-9][0-9]*)$")
 
 
 def _validate_hyperlink_url(url: str) -> None:
     if not url.strip():
         raise ValueError("add_pptx_hyperlink: url must not be empty.")
+    if _SLIDE_TARGET_RE.match(url):
+        return
     if not url.startswith(_HYPERLINK_SCHEMES):
         raise ValueError(
             f"add_pptx_hyperlink: url {url!r} must start with one of "
-            f"{', '.join(_HYPERLINK_SCHEMES)} -- got a scheme-less or unsupported value."
+            f"{', '.join(_HYPERLINK_SCHEMES)}, or be \"#slide-N\" to jump to slide N -- "
+            "got a scheme-less or unsupported value."
         )
+
+
+def _resolve_slide_jump_target(prs: PresentationType, slide: int, url: str) -> Any | None:
+    """None if `url` isn't a `"#slide-N"` target; otherwise the real
+    `Slide` object N refers to, raising a helpful, real-count-naming
+    error if N is out of range -- matching this file's own established
+    out-of-range error convention elsewhere (e.g. `_open_slide`)."""
+    match = _SLIDE_TARGET_RE.match(url)
+    if match is None:
+        return None
+    target_number = int(match.group(1))
+    slide_count = len(prs.slides)
+    if not 1 <= target_number <= slide_count:
+        raise ValueError(
+            f"add_pptx_hyperlink: slide target {url!r} on slide {slide} is out of range "
+            f"-- deck has {slide_count} slides."
+        )
+    return prs.slides[target_number - 1]
+
+
+# check_pptx_delivery's own curated cross-platform-safe font list -- real,
+# hard-won knowledge (which font *names* ship pre-installed on real
+# Windows/Mac machines across scripts, not guessable from first
+# principles), retyped and credited from hugohe3/ppt-master's
+# `svg_to_pptx/drawingml/utils.py`'s own `PPT_SAFE_FONTS` (commit
+# `6e3ce9c5a3b994a0e223a14a0f7edd42fd0b9f5`) -- the same "external
+# knowledge, retyped and credited" ceremony level `add_pptx_shape`'s own
+# curated `MSO_SHAPE` subset and `set_pptx_transition`'s retyped registry
+# already use, not vendored as a whole file (it's one flat set of
+# lowercase strings, nothing to meaningfully diff against upstream).
+# Lowercase, matching how it's compared (case-insensitively) below.
+_SAFE_FONTS = frozenset(
+    {
+        "microsoft yahei", "simhei", "simsun", "kaiti", "fangsong", "dengxian",
+        "microsoft jhenghei", "microsoft jhenghei ui", "pmingliu", "mingliu",
+        "mingliu_hkscs", "dfkai-sb",
+        "pingfang sc", "heiti sc", "songti sc", "stsong",
+        "pingfang tc", "pingfang hk", "heiti tc", "songti tc", "kaiti tc",
+        "yu gothic", "yu gothic ui", "yu mincho",
+        "meiryo", "meiryo ui",
+        "ms gothic", "ms mincho", "ms pgothic", "ms pmincho", "ms ui gothic",
+        "malgun gothic", "gulim", "dotum", "batang",
+        "nirmala ui", "mangal", "kokila", "aparajita", "utsaah",
+        "leelawadee ui", "leelawadee", "cordia new", "angsana new", "browallia new",
+        "david", "miriam", "frank ruehl", "gisha", "levenim mt", "narkisim", "aharoni",
+        "arial", "arial black", "calibri", "segoe ui", "verdana",
+        "helvetica", "helvetica neue", "tahoma", "trebuchet ms",
+        "times new roman", "times", "georgia", "cambria", "cambria math", "palatino",
+        "garamond", "book antiqua",
+        "consolas", "courier new", "menlo", "monaco",
+        "impact",
+    }
+)
+# 20MB -- roughly the point real email providers start rejecting or
+# aggressively compressing an attachment; a round, memorable threshold
+# rather than a precisely-researched one, deliberately conservative so
+# the advisory fires before delivery actually fails.
+_DELIVERY_MEDIA_ADVISORY_BYTES = 20_000_000
+
+
+def _analyze_pptx_delivery(file_path: Path) -> dict[str, Any]:
+    """The python-pptx-dependent half of check_pptx_delivery -- hidden
+    slides, font usage, and per-slide motion (transitions/animations/
+    audio) -- split out from the raw-zip-level half so a file broken
+    enough that python-pptx can't fully walk it (python-pptx parses
+    slide parts lazily, so this can surface anywhere in here, not only
+    at `Presentation()` construction) can be caught as one unit by the
+    caller and still return the zip-level findings rather than crashing
+    the whole audit -- confirmed against a deliberately-corrupted test
+    fixture, not assumed sufficient from wrapping only the constructor."""
+    from lxml import etree
+    from pptx import Presentation
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+    from pptx.oxml.ns import qn
+
+    prs = Presentation(str(file_path))
+
+    hidden_slides = [
+        index + 1
+        for index, slide in enumerate(prs.slides)
+        if (slide.element.get("show") or "").strip().lower() in ("0", "false")
+    ]
+
+    fonts_used: set[str] = set()
+    for master in prs.slide_masters:
+        try:
+            theme_root = etree.fromstring(master.part.part_related_by(RT.THEME).blob)
+        except (KeyError, etree.XMLSyntaxError):
+            # A real, if malformed/unusual, file this read-only audit
+            # must still report on rather than crash -- a missing or
+            # unparsable theme part is itself worth surfacing via
+            # advisories below, not a reason to abort the whole audit.
+            continue
+        font_scheme = theme_root.find(f".//{qn('a:fontScheme')}")
+        if font_scheme is None:
+            continue
+        for role in ("majorFont", "minorFont"):
+            latin = font_scheme.find(f"{qn(f'a:{role}')}/{qn('a:latin')}")
+            typeface = latin.get("typeface") if latin is not None else None
+            if typeface and typeface != "+mn-lt" and typeface != "+mj-lt":
+                fonts_used.add(typeface)
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    if run.font.name:
+                        fonts_used.add(run.font.name)
+    unsafe_fonts = sorted(font for font in fonts_used if font.strip().lower() not in _SAFE_FONTS)
+
+    transition_slides: list[int] = []
+    animation_slides: list[int] = []
+    audio_slides: list[int] = []
+    for index, slide in enumerate(prs.slides, start=1):
+        if slide.element.find(f"{{{_P_NS}}}transition") is not None:
+            transition_slides.append(index)
+        timing = slide.element.find(f"{{{_P_NS}}}timing")
+        if timing is None:
+            continue
+        main_child = timing.find(f".//{{{_P_NS}}}cTn[@nodeType='mainSeq']/{{{_P_NS}}}childTnLst")
+        if main_child is not None and len(main_child):
+            animation_slides.append(index)
+        if timing.find(f".//{{{_P_NS}}}audio") is not None:
+            audio_slides.append(index)
+
+    return {
+        "slide_count": len(prs.slides),
+        "hidden_slides": hidden_slides,
+        "fonts_used": sorted(fonts_used),
+        "unsafe_fonts": unsafe_fonts,
+        "motion": {
+            "transitions": transition_slides,
+            "animations": animation_slides,
+            "audio": audio_slides,
+        },
+    }
+
 
 # presetID/presetClass/presetSubtype values and the exact effect-node shape
 # (p:set for the visibility toggle, then p:animEffect/p:anim/p:animScale/
@@ -2719,7 +2869,9 @@ def _describe_shape(index: int, shape: Any) -> dict[str, object]:
     preview, position/size in inches (matching `edit_pptx_shape`'s own
     `*_in` parameters), rotation, fill color if it's a plain solid fill,
     whole-shape hyperlink address (matching `add_pptx_hyperlink`'s own
-    whole-shape mode) if one is set, and whether it's real SmartArt
+    whole-shape mode) if one is set -- `"#slide-N"` for an internal slide
+    jump, same syntax `add_pptx_hyperlink`'s own `url` accepts, not the
+    raw internal relationship target -- and whether it's real SmartArt
     (`is_smartart`) -- if so, `smartart_text` lists every node's own
     text, since neither python-pptx nor this file can generate or edit
     real SmartArt (the layout algorithm lives in PowerPoint itself, not
@@ -2727,6 +2879,28 @@ def _describe_shape(index: int, shape: Any) -> dict[str, object]:
     actually said before deciding how to rebuild the slide with this
     file's other tools."""
     from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    hyperlink: str | None
+    try:
+        jump_target = shape.click_action.target_slide
+    except ValueError:
+        # A real, if unusual, PowerPoint construct this tool never
+        # writes itself but must not crash reading back: a "next
+        # slide"/"previous slide" navigation action on the last/first
+        # slide, where python-pptx's own target_slide resolution raises
+        # rather than returning None.
+        jump_target = None
+    if jump_target is not None:
+        slides = shape.part.package.presentation_part.presentation.slides
+        # The same "#slide-N" syntax add_pptx_hyperlink's own `url`
+        # accepts -- reading this field back and feeding it straight into
+        # another add_pptx_hyperlink call must round-trip, not show the
+        # raw internal relationship target (e.g. "slide2.xml", which
+        # isn't even guaranteed to match display order after slides are
+        # reordered/duplicated).
+        hyperlink = f"#slide-{slides.index(jump_target) + 1}"
+    else:
+        hyperlink = shape.click_action.hyperlink.address
 
     text_preview: str | None = None
     if shape.has_text_frame:
@@ -2750,7 +2924,7 @@ def _describe_shape(index: int, shape: Any) -> dict[str, object]:
         "smartart_text": _smartart_text(shape) if is_smartart else None,
         "text_preview": text_preview,
         "fill": _describe_shape_fill(shape),
-        "hyperlink": shape.click_action.hyperlink.address,
+        "hyperlink": hyperlink,
     }
     if shape.has_table:
         table = shape.table
@@ -4738,9 +4912,13 @@ class PresentationToolkit:
         _validate_hyperlink_url(url)
         prs, file_path, target_slide = self._open_slide(path, slide)
         shape = _get_shape_at_index(target_slide, slide, shape_index)
+        jump_target = _resolve_slide_jump_target(prs, slide, url)
 
         if text is None:
-            shape.click_action.hyperlink.address = url
+            if jump_target is not None:
+                shape.click_action.target_slide = jump_target
+            else:
+                shape.click_action.hyperlink.address = url
             prs.save(str(file_path))
             return {
                 "path": self._scope.relative(file_path),
@@ -4772,7 +4950,21 @@ class PresentationToolkit:
                 f"{available_texts!r}. The text must match one whole run exactly; "
                 "hyperlinking part of a run isn't supported."
             )
-        matching_run.hyperlink.address = url
+        if jump_target is not None:
+            from pptx.action import ActionSetting
+
+            # Run has no public `.click_action` the way Shape does (only
+            # the external-URL-only `.hyperlink`) -- ActionSetting itself
+            # is fully run-compatible (its own constructor's type union
+            # already includes CT_TextCharacterProperties, a run's own
+            # `rPr` element type), confirmed empirically before relying
+            # on it, matching Shape.click_action's own construction
+            # pattern (`ActionSetting(cNvPr, self)` there).
+            ActionSetting(matching_run._r.get_or_add_rPr(), matching_run).target_slide = (  # noqa: SLF001
+                jump_target
+            )
+        else:
+            matching_run.hyperlink.address = url
         prs.save(str(file_path))
         return {
             "path": self._scope.relative(file_path),
@@ -4780,6 +4972,107 @@ class PresentationToolkit:
             "shape_index": shape_index,
             "url": url,
             "text": text,
+        }
+
+    def check_pptx_delivery(self, path: str) -> dict[str, object]:
+        import zipfile
+        from collections import Counter
+
+        file_path = self._check_readable(path)
+
+        with zipfile.ZipFile(file_path) as archive:
+            infos = [info for info in archive.infolist() if not info.is_dir()]
+            name_counts = Counter(info.filename for info in infos)
+            duplicate_parts = sorted(name for name, count in name_counts.items() if count > 1)
+            try:
+                corrupt_member = archive.testzip()
+            except (NotImplementedError, RuntimeError) as exc:
+                corrupt_member = f"<unreadable: {exc}>"
+            media_infos = [info for info in infos if info.filename.startswith("ppt/media/")]
+            media_total_bytes = sum(info.file_size for info in media_infos)
+            media_largest = [
+                {"part": info.filename, "bytes": info.file_size}
+                for info in sorted(media_infos, key=lambda info: info.file_size, reverse=True)[
+                    :5
+                ]
+            ]
+
+        try:
+            pptx_report = _analyze_pptx_delivery(file_path)
+        except Exception as exc:
+            # A file broken enough that python-pptx itself can't fully
+            # load/walk it (corrupt beyond just a duplicate/oversized
+            # part -- python-pptx parses slide parts lazily, so this can
+            # surface anywhere in _analyze_pptx_delivery, not only at
+            # Presentation() construction) must still return whatever
+            # the raw-zip pass above already found, rather than crashing
+            # this read-only audit outright -- hit for real against a
+            # deliberately-corrupted test fixture, not a hypothetical.
+            advisories: list[str] = []
+            if corrupt_member:
+                advisories.append(f"ZIP integrity failed at {corrupt_member!r}.")
+            if duplicate_parts:
+                advisories.append(f"Duplicate package parts: {', '.join(duplicate_parts)}.")
+            advisories.append(
+                f"Could not fully analyze this file as a presentation "
+                f"({type(exc).__name__}: {exc}) -- only the raw package-level checks "
+                "below could run."
+            )
+            return {
+                "path": self._scope.relative(file_path),
+                "zip_integrity": "corrupt" if corrupt_member else "ok",
+                "corrupt_member": corrupt_member,
+                "duplicate_parts": duplicate_parts,
+                "slide_count": None,
+                "hidden_slides": None,
+                "fonts": None,
+                "media": {
+                    "count": len(media_infos),
+                    "total_bytes": media_total_bytes,
+                    "largest": media_largest,
+                },
+                "motion": None,
+                "advisories": advisories,
+            }
+
+        advisories = []
+        if corrupt_member:
+            advisories.append(f"ZIP integrity failed at {corrupt_member!r}.")
+        if duplicate_parts:
+            advisories.append(f"Duplicate package parts: {', '.join(duplicate_parts)}.")
+        if pptx_report["hidden_slides"]:
+            advisories.append(
+                f"{len(pptx_report['hidden_slides'])} hidden slide(s) won't show "
+                f"during a normal slideshow: {pptx_report['hidden_slides']}."
+            )
+        if pptx_report["unsafe_fonts"]:
+            advisories.append(
+                f"Font(s) not on the common cross-platform-safe list: "
+                f"{', '.join(pptx_report['unsafe_fonts'])} -- may substitute or render "
+                "differently on a machine that doesn't have them installed."
+            )
+        if media_total_bytes > _DELIVERY_MEDIA_ADVISORY_BYTES:
+            advisories.append(
+                f"Embedded media totals {media_total_bytes / 1_000_000:.1f}MB across "
+                f"{len(media_infos)} file(s) -- consider compressing images before "
+                "sending, especially by email."
+            )
+
+        return {
+            "path": self._scope.relative(file_path),
+            "zip_integrity": "corrupt" if corrupt_member else "ok",
+            "corrupt_member": corrupt_member,
+            "duplicate_parts": duplicate_parts,
+            "slide_count": pptx_report["slide_count"],
+            "hidden_slides": pptx_report["hidden_slides"],
+            "fonts": {"used": pptx_report["fonts_used"], "unsafe": pptx_report["unsafe_fonts"]},
+            "media": {
+                "count": len(media_infos),
+                "total_bytes": media_total_bytes,
+                "largest": media_largest,
+            },
+            "motion": pptx_report["motion"],
+            "advisories": advisories,
         }
 
     def read_pptx_theme_colors(self, path: str) -> dict[str, object]:
@@ -6015,25 +6308,67 @@ def build_presentation_tools(
         exactly; hyperlinking part of a run (a substring within it)
         isn't supported.
 
-        `url` must start with "http://", "https://", "mailto:", or
-        "ftp://" -- "jump to another slide" internal navigation links
-        aren't supported (a different, hand-built-XML mechanism; ask if
-        you need it).
+        `url` is either an external destination -- must start with
+        "http://", "https://", "mailto:", or "ftp://" -- or `"#slide-N"`
+        (1-based) to make this an *internal* "jump to slide N" navigation
+        link instead, PowerPoint's own real click-action for this (not a
+        generic external link to some internal address).
 
         This is pure `python-pptx` public API (`Run.hyperlink`/
-        `Shape.click_action.hyperlink`), no hand-written XML.
+        `Shape.click_action.hyperlink` for external URLs,
+        `Shape.click_action.target_slide` for slide jumps), no
+        hand-written XML.
 
         Args:
             path: file to modify, relative to the workspace root
             slide: 1-based slide number the shape is on
             shape_index: 0-based shape order on that slide (see above)
-            url: destination URL, e.g. "https://example.com"
+            url: destination URL (e.g. "https://example.com") or
+                "#slide-N" to jump to slide N within this presentation
             text: exact text of one run to hyperlink; omit to hyperlink
                 the whole shape instead
         """
         return toolkit.add_pptx_hyperlink(
             path=path, slide=slide, shape_index=shape_index, url=url, text=text
         )
+
+    def check_pptx_delivery(path: str) -> dict[str, object]:
+        """Read-only audit of a finished .pptx before sending it --
+        package integrity, font portability, media footprint, hidden
+        slides, and a motion summary. Doesn't render or open the file
+        visually (pair with render_pptx_preview/review_work for that);
+        this is about problems that only show up in the file's own
+        structure.
+
+        `zip_integrity`: `"ok"` or `"corrupt"` (with `corrupt_member`
+        naming which internal part, if any, failed a raw ZIP CRC check --
+        a genuinely broken file, not a cosmetic issue).
+        `duplicate_parts`: internal part names that appear more than
+        once in the archive (should never happen in a file this project
+        's own tools produced; a real defect if it does).
+        `slide_count`/`hidden_slides`: 1-based slide numbers marked
+        hidden (won't show during a normal slideshow -- easy to leave
+        behind by accident after duplicating/reordering slides).
+        `fonts.used`/`fonts.unsafe`: every font name actually referenced
+        (theme major/minor fonts plus any per-run override), and the
+        subset not on a curated list of fonts that ship pre-installed on
+        real Windows/Mac machines -- an unsafe font may silently
+        substitute (changing line breaks/sizing) on a machine that
+        doesn't have it.
+        `media`: total embedded media size/count and the 5 largest files
+        by byte size -- a quick way to see what's bloating the file
+        before emailing it.
+        `motion`: which 1-based slide numbers have a transition, a real
+        object animation, or an add_pptx_audio-style audio track --
+        useful to sanity-check a complex deck's own motion actually
+        landed where expected.
+        `advisories`: human-readable summary strings for anything above
+        worth flagging; empty if nothing stood out.
+
+        Args:
+            path: file to inspect, relative to the workspace root
+        """
+        return toolkit.check_pptx_delivery(path=path)
 
     def read_pptx_theme_colors(path: str) -> dict[str, object]:
         """Read an existing .pptx file's real master theme color palette
@@ -6130,6 +6465,7 @@ def build_presentation_tools(
         ),
         tool_metadata(add_pptx_audio, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(add_pptx_hyperlink, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(check_pptx_delivery, risk_category="READ", category="documents"),
         tool_metadata(read_pptx_theme_colors, risk_category="READ", category="documents"),
         tool_metadata(edit_pptx_theme_colors, risk_category="WRITE_LOCAL", category="documents"),
     ]

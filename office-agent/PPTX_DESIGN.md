@@ -2861,3 +2861,166 @@ subtitle generation/merging, TTS generation itself) -- none of that
 applies without the surrounding project structure it's built for, and
 none of it was a pre-existing coscribe capability being upgraded the way
 §27/§29 upgraded transitions/animations.
+
+## 31. `add_pptx_hyperlink` grows internal "jump to slide N" links --
+zero hand-XML needed, because the earlier "no public API" comment
+turned out stale
+
+Asked to keep surveying ppt-master broadly rather than starting from a
+narrower "what's left" list. Read a wider batch of previously-unchecked
+scripts' own docstrings/imports before picking anything: `svg_quality`-
+adjacent and workspace-coupled ones (`pptx_effects.py`/`pptx_gradients.py`
+-- already confirmed §29-adjacent as import/roundtrip-preservation
+machinery, not builders -- `template_text_slots.py`,
+`semantic_table.py`'s own compact/expand authoring-JSON format) turned
+out not to be new capability gaps; `hyperlink_contract.py` (399 lines,
+pure stdlib) was the one that led somewhere real.
+
+**The real finding wasn't in ppt-master's code at all -- it was that
+this file's own §-adjacent comment (`add_pptx_hyperlink`'s scope note,
+present since that tool was first built) was simply wrong by the time
+this was rechecked.** It claimed "python-pptx's Hyperlink class has no
+public support" for internal slide-jump links, which was the reason
+this was never built. Reading `hyperlink_contract.py`'s own real
+constants (`SLIDE_REL_TYPE` = the actual `"…/relationships/slide"` type,
+`SLIDE_JUMP_ACTION` = `"ppaction://hlinksldjump"`) prompted rechecking
+that claim against the actually-installed python-pptx version rather
+than trusting old code comments at face value -- and found
+`pptx.action.ActionSetting.target_slide`, a fully public, documented,
+*already fully correct* property (`Shape.click_action.target_slide = a_
+real_Slide_object`) that builds exactly those same two real values
+internally. Its own `action` *read* side even already recognizes
+`PP_ACTION.NAMED_SLIDE` (`action_verb == "hlinksldjump"`) -- only the
+*write*-side setter had gone unnoticed when the original comment was
+written. Confirmed empirically (a real round-trip: set, save, reopen,
+read back the correct target slide) before relying on it, not assumed
+correct from reading the setter's source alone.
+
+**Net result: no hand-rolled XML, no vendoring, nothing borrowed from
+ppt-master's own implementation** -- only its docstring/constants served
+as the prompt to go re-verify a stale internal assumption. The one real
+thing borrowed is the *url syntax*: `"#slide-N"` (1-based) as the trigger
+for slide-jump mode, matching `hyperlink_contract.py`'s own real
+`_SLIDE_TARGET_RE` convention exactly rather than inventing a new one.
+
+**Runs needed one small extra step.** `Run` has no public `.click_action`
+the way `Shape` does (only the external-URL-only `.hyperlink`) --
+`ActionSetting` itself turned out fully run-compatible on inspection (its
+own constructor's type union already includes `CT_TextCharacterProperties`,
+a run's own `rPr` element type), matching the exact construction pattern
+`Shape.click_action`'s own property getter already uses internally
+(`ActionSetting(cNvPr, self)` there; `ActionSetting(run._r.get_or_add_rPr(),
+run)` here) -- confirmed with the same real round-trip test as the
+whole-shape case, not assumed to work by symmetry alone.
+
+**A second real inconsistency found and fixed while verifying, not
+assumed absent**: `list_pptx_shapes`'s own pre-existing `hyperlink` field
+(reading `shape.click_action.hyperlink.address`) reported a slide-jump
+shape's link as the *raw internal relationship target* (`"slide2.xml"`)
+once one could actually be created -- confirmed by testing the read-back
+directly, not assumed fine because the write side worked. That's not
+even reliably the slide's display-order number (python-pptx's own part
+filenames are creation-order-based, not guaranteed to track slide
+reordering), and a model reading it back would have no way to feed it
+into another `add_pptx_hyperlink` call. Fixed to detect any slide-jump
+action (`shape.click_action.target_slide is not None`, which also covers
+first/last/next/previous-slide actions a hand-authored template might
+already contain, though `add_pptx_hyperlink` itself only ever writes the
+named-slide-N form) and report it in the same `"#slide-N"` syntax the
+`url` parameter accepts -- a real round-trip guarantee, not just a
+one-way write.
+
+**Verified real, not just unit-tested**: whole-shape and run-level slide
+jumps each confirmed via a real save/reopen/read-back cycle (not just
+that the call didn't raise); `list_pptx_shapes`'s corrected field
+confirmed against a freshly-written slide-jump link; out-of-range slide
+targets rejected with the real slide count named (matching this file's
+own established error-message convention); a 3-slide deck with both a
+whole-shape and a run-level slide jump converted cleanly through the
+real LibreOffice `soffice --convert-to pdf` pipeline and round-tripped
+through python-pptx with warnings treated as errors -- the honest
+ceiling here too: confirming the jump actually *navigates* correctly
+still needs a human clicking through a real slideshow. 6 new tests. Full
+suite, `ruff check`/`mypy` clean.
+
+**Still open, not yet checked this round**: a comprehensive read-only
+"delivery audit" tool (package integrity, font-portability advisories,
+media footprint, hidden-slide/motion summary) inspired by
+`pptx_delivery_check.py` (1133 lines) -- its own low-level OOXML-parsing
+machinery (`pptx_to_svg/ooxml_loader.py`) is generic enough to be
+genuinely portable, but redundant with what `python-pptx` (already a
+coscribe dependency) already parses; the *checks themselves* are the
+real, portable idea, worth building against coscribe's own existing
+python-pptx-based conventions rather than porting a second OOXML reader
+alongside it. Flagged, not yet built.
+
+## 32. `check_pptx_delivery` -- the delivery-audit idea from §31's own
+closing note, built against coscribe's own conventions rather than
+porting ppt-master's second OOXML reader
+
+Followed through on §31's own flagged-but-not-built idea in the same
+round. `pptx_delivery_check.py` (1133 lines) is real and valuable --
+"Inspect a finished PPTX without modifying it and report package
+integrity, delivery portability, media footprint, hidden slides, and
+motion presence" (its own docstring) -- but its own low-level OOXML
+parsing (`pptx_to_svg/ooxml_loader.py`, 506 lines) would duplicate what
+`python-pptx` (already a coscribe dependency) already does. Built the
+*checks* fresh against `python-pptx`/raw `zipfile`/coscribe's own
+already-established `_P_NS`-based XML reading instead of porting a
+second package reader alongside the one already in use everywhere else
+in this file.
+
+**Scope, deliberately narrower than the 1133-line source**: package
+integrity (real ZIP CRC check via `zipfile.testzip()`, duplicate
+internal part names), font portability (theme major/minor fonts plus
+every per-run override, checked against a curated safe-font list), media
+footprint (total embedded bytes/count, top-5 largest files), hidden
+slides (`<p:sld show="0">`, no public python-pptx API for this --
+checked schema first: `xsd:boolean` per `CT_Slide`'s own definition,
+default `"true"`), and a motion summary reusing this file's own existing
+namespace/tag knowledge from §27/§29/§30 (`<p:transition>`/`<p:timing>`
+mainSeq/`<p:audio>` presence) rather than any new parsing. Content-type-
+registry validation, orphaned-relationship checks, and the full
+error/advisory taxonomy the source's own 1133 lines build out were left
+out -- the four categories above are the ones with a clear, standalone
+payoff for coscribe's own users; the rest would mean porting most of the
+original file's own scope for diminishing marginal value.
+
+**One real, curated list retyped and credited, same ceremony as
+`add_pptx_shape`'s `MSO_SHAPE` subset/§27's transition registry**: the
+~65-entry safe-font set is hugohe3/ppt-master's own `PPT_SAFE_FONTS`
+(`svg_to_pptx/drawingml/utils.py`, commit
+`6e3ce9c5a3b994a0e223a14a0f7edd42fd0b9f5`) -- real, hard-won knowledge
+(which font *names* actually ship pre-installed across Windows/Mac,
+spanning CJK/Indic/Hebrew/Thai scripts alongside the standard Western
+set) genuinely not derivable from first principles, not vendored as a
+file since it's one flat set of strings with nothing to meaningfully
+diff against upstream.
+
+**A real robustness gap found by testing against a deliberately-broken
+fixture, not assumed handled**: the first version wrapped only
+`Presentation(file_path)`'s own constructor in a try/except, reasoning
+that was where a badly-corrupt file would fail. Testing against a
+duplicate-named `ppt/slides/slide1.xml` part (a real defect the raw-zip
+pass already detects) found the opposite: `Presentation()` itself
+succeeds (python-pptx parses slide parts lazily), and the crash
+(`AttributeError: 'lxml.etree._Element' object has no attribute
+'spTree'`) only surfaces later, mid-iteration, when the garbage-resolved
+slide is actually walked for shapes. Fixed by extracting the entire
+python-pptx-dependent half into its own function
+(`_analyze_pptx_delivery`) and wrapping *that whole call* in one
+try/except, so any failure anywhere in it -- not just at construction --
+falls back to returning the raw-zip-level findings (`corrupt_member`,
+`duplicate_parts`, media footprint) the caller already had, with an
+advisory naming what couldn't be fully checked, rather than crashing the
+whole read-only audit outright.
+
+**Verified real, not just unit-tested**: a rich deck built with this
+session's own `set_pptx_transition`/`add_pptx_animation`/
+`add_pptx_audio` correctly reports motion on the exact slides expected;
+a hidden slide, an unsafe font (`Comic Sans MS`), and an oversized-media
+threshold each correctly trigger their own advisory; a deliberately
+duplicate-part-corrupted file is both detected at the raw-zip level *and*
+triggers the graceful fallback rather than crashing. 8 new tests
+including the fallback bug as an explicit regression. Full suite,
+`ruff check`/`mypy` clean.

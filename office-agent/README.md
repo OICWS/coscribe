@@ -660,20 +660,41 @@ don't want its old text carried into the merge. Row/column insertion and
 row-height/column-width resizing aren't supported yet.
 
 `add_pptx_hyperlink(path, slide, shape_index, url, text=None)` makes a
-shape or a piece of its text clickable, linking to an external URL --
-pure `python-pptx` public API (`Run.hyperlink`/
-`Shape.click_action.hyperlink`), no hand-written XML, unlike
-`set_pptx_transition`/`add_pptx_animation` above. Find `shape_index` via
-`list_pptx_shapes` the same way as the shape-editing tools above. Omit
-`text` to hyperlink the *whole shape* (an image, an icon, an autoshape,
-even a table) via its click action; pass `text` to hyperlink just one
-run inside a text frame -- it must match that run's exact text (raises,
-listing the shape's actual run texts, if nothing matches; hyperlinking a
-substring within a run isn't supported). `url` must start with
-`"http://"`, `"https://"`, `"mailto:"`, or `"ftp://"` -- linking to
-another slide in the same deck (an internal, `TargetMode="Internal"`
-hyperlink) isn't supported, since `python-pptx`'s own hyperlink API has
-no first-class support for it either.
+shape or a piece of its text clickable, linking to an external URL or
+jumping to another slide in the same deck -- pure `python-pptx` public
+API (`Run.hyperlink`/`Shape.click_action.hyperlink` for external URLs,
+`Shape.click_action.target_slide` for slide jumps), no hand-written XML,
+unlike `set_pptx_transition`/`add_pptx_animation`/`add_pptx_audio`
+above. Find `shape_index` via `list_pptx_shapes` the same way as the
+shape-editing tools above. Omit `text` to hyperlink the *whole shape*
+(an image, an icon, an autoshape, even a table) via its click action;
+pass `text` to hyperlink just one run inside a text frame -- it must
+match that run's exact text (raises, listing the shape's actual run
+texts, if nothing matches; hyperlinking a substring within a run isn't
+supported). `url` is either an external destination -- must start with
+`"http://"`, `"https://"`, `"mailto:"`, or `"ftp://"` -- or `"#slide-N"`
+(1-based) to jump to slide N within this presentation instead, real
+PowerPoint's own actual click-action for that (`list_pptx_shapes`'s own
+`hyperlink` field reports an existing slide-jump shape back in this same
+`"#slide-N"` syntax, not the raw internal relationship target).
+
+`check_pptx_delivery(path)` is a read-only audit of a finished `.pptx`
+before sending it -- package integrity (real ZIP CRC check, duplicate
+internal part names), font portability (every font actually referenced,
+theme fonts included, flagged against a curated list of fonts that ship
+pre-installed on real Windows/Mac machines -- an unsafe one may silently
+substitute on a machine that doesn't have it), media footprint (total
+embedded size/count plus the 5 largest files, a quick way to see what's
+bloating the file before emailing it), hidden slides (easy to leave
+behind after duplicating/reordering), and a motion summary (which
+1-based slide numbers have a transition, a real object animation, or an
+`add_pptx_audio`-style track). Returns structured fields plus a plain-
+English `advisories` list for anything worth flagging (empty if nothing
+stood out). Doesn't render or open the file visually -- pair with
+`render_pptx_preview`/`review_work` for that; this is about problems
+that only show up in the file's own structure. Falls back to just the
+package-level findings (rather than raising) if the file is broken
+enough that even `python-pptx` itself can't fully parse it.
 
 `read_pptx_theme_colors(path)` returns an existing `.pptx`'s real master
 theme color palette (its `<a:clrScheme>`) -- the same 12 colors
