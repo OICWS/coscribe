@@ -1847,6 +1847,9 @@ def test_set_pptx_notes_is_medium_risk_and_requires_approval(tmp_path: Path) -> 
 
 _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 _MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+_P14_NS = "http://schemas.microsoft.com/office/powerpoint/2010/main"
+_P15_NS = "http://schemas.microsoft.com/office/powerpoint/2012/main"
+_P159_NS = "http://schemas.microsoft.com/office/powerpoint/2015/09/main"
 
 
 def test_set_pptx_transition_adds_transition_element(tmp_path: Path) -> None:
@@ -1904,7 +1907,112 @@ def test_set_pptx_transition_rejects_unknown_transition(tmp_path: Path) -> None:
     tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
 
     with pytest.raises(ValueError, match="Unknown transition"):
-        tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="zoom")
+        tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="not-a-real-transition")
+
+
+def test_set_pptx_transition_supports_a_p14_extension_effect(tmp_path: Path) -> None:
+    """"vortex" lives in the PowerPoint-2010 extension namespace (p14),
+    not the base ECMA-376 "p" namespace fade/push/wipe use -- both the
+    effect element itself and the p14:dur attribute need mc:Ignorable."""
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+
+    tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="vortex", duration=0.8)
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    transition_el = prs.slides[0].element.find(f"{{{_P_NS}}}transition")
+    assert transition_el is not None
+    effect = transition_el[0]
+    assert effect.tag == f"{{{_P14_NS}}}vortex"
+    assert effect.get("dir") == "r"
+    assert (prs.slides[0].element.get(f"{{{_MC_NS}}}Ignorable") or "").split() == ["p14"]
+
+
+def test_set_pptx_transition_supports_a_p159_extension_effect(tmp_path: Path) -> None:
+    """"morph" is the one native transition in the newest (2015/09,
+    p159) extension namespace."""
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+
+    tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="morph")
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    transition_el = prs.slides[0].element.find(f"{{{_P_NS}}}transition")
+    effect = transition_el[0]
+    assert effect.tag == f"{{{_P159_NS}}}morph"
+    ignorable = (prs.slides[0].element.get(f"{{{_MC_NS}}}Ignorable") or "").split()
+    assert set(ignorable) == {"p14", "p159"}
+
+
+def test_set_pptx_transition_switching_namespaces_cleans_up_the_old_prefix(
+    tmp_path: Path,
+) -> None:
+    """p14 -> p15 -> base "p": each switch must leave mc:Ignorable naming
+    only the prefix(es) the *current* transition actually uses, not a
+    stale leftover from whichever effect was set before it."""
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+
+    tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="vortex")  # p14
+    tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="fracture")  # p15
+    prs = Presentation(tmp_path / "deck.pptx")
+    ignorable = (prs.slides[0].element.get(f"{{{_MC_NS}}}Ignorable") or "").split()
+    assert set(ignorable) == {"p14", "p15"}
+
+    tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="fade")  # base "p"
+    prs = Presentation(tmp_path / "deck.pptx")
+    ignorable = (prs.slides[0].element.get(f"{{{_MC_NS}}}Ignorable") or "").split()
+    assert ignorable == ["p14"]  # only the p14:dur attribute remains foreign
+
+
+def test_set_pptx_transition_resolves_legacy_aliases(tmp_path: Path) -> None:
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+
+    tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="wheel")  # alias for "clock"
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    transition_el = prs.slides[0].element.find(f"{{{_P_NS}}}transition")
+    effect = transition_el[0]
+    assert effect.tag == f"{{{_P_NS}}}wheel"
+    assert effect.get("spokes") == "1"
+
+
+def test_set_pptx_transition_is_schema_valid_for_every_registered_transition(
+    tmp_path: Path,
+) -> None:
+    """Every single one of the 48 native transitions + 8 aliases actually
+    produces schema-valid OOXML (via the real assert_ooxml_valid call
+    set_pptx_transition itself makes) -- not just the few spot-checked
+    above. A real, cheap way to catch a typo'd element/attribute name
+    across the whole retyped registry at once."""
+    from coscribe.tools.presentations import _TRANSITION_ALIASES, _TRANSITION_SPECS
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+
+    for transition in (*_TRANSITION_SPECS, *_TRANSITION_ALIASES):
+        tools["set_pptx_transition"](path="deck.pptx", slide=1, transition=transition)
+
+
+def test_list_pptx_transition_types_matches_the_real_registry(tmp_path: Path) -> None:
+    from coscribe.tools.presentations import _TRANSITION_ALIASES, _TRANSITION_SPECS
+
+    tools = _tools_by_name(tmp_path)
+
+    result = tools["list_pptx_transition_types"]()
+
+    assert result == sorted({*_TRANSITION_SPECS, *_TRANSITION_ALIASES})
+    assert "none" not in result
+    assert len(result) == 48 + 8
 
 
 def test_set_pptx_transition_out_of_range_slide_names_real_count(tmp_path: Path) -> None:
@@ -1935,6 +2043,61 @@ def test_set_pptx_transition_survives_libreoffice_conversion(tmp_path: Path) -> 
     tools = _tools_by_name(tmp_path)
     tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
     tools["set_pptx_transition"](path="deck.pptx", slide=1, transition="fade", duration=0.8)
+
+    result = subprocess.run(
+        [
+            "soffice",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(tmp_path),
+            str(tmp_path / "deck.pptx"),
+        ],
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    assert result.returncode == 0
+    assert (tmp_path / "deck.pdf").is_file()
+
+
+@pytest.mark.real_libreoffice
+@pytest.mark.skipif(
+    not _libreoffice_actually_works(),
+    reason="LibreOffice not installed or not functional in this environment",
+)
+def test_set_pptx_transition_exotic_effects_survive_libreoffice_conversion(
+    tmp_path: Path,
+) -> None:
+    """A mix across all 4 namespace tiers (base "p", p14, p15, p159) plus
+    a legacy alias, on one real 5-slide deck -- not just the single base
+    "fade" case above. Can't verify the transition *animation* itself in
+    a static test (that needs a human watching real PowerPoint/LibreOffice
+    play it back), but a real subprocess conversion succeeding, plus a
+    warnings-as-errors python-pptx round-trip, is the strongest automated
+    check available: it proves the file isn't corrupted the way a
+    hand-XML mistake across a 48-entry retyped registry plausibly could
+    produce for at least one entry."""
+    import subprocess
+    import warnings
+
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](
+        path="deck.pptx",
+        content="# S1\n- a\n---\n# S2\n- b\n---\n# S3\n- c\n---\n# S4\n- d\n---\n# S5\n- e",
+    )
+    for slide, transition in enumerate(["vortex", "fracture", "morph", "fade", "wheel"], start=1):
+        tools["set_pptx_transition"](
+            path="deck.pptx", slide=slide, transition=transition, duration=0.7
+        )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        prs = Presentation(tmp_path / "deck.pptx")
+        assert len(prs.slides) == 5
 
     result = subprocess.run(
         [

@@ -2329,3 +2329,103 @@ an unusable slide), plus an explicit instruction to set the user's
 expectations honestly: only the design is kept, not a pixel-perfect
 clone and not the reference deck's own original wording. `README.md`
 updated alongside the existing bundled-templates paragraph.
+
+## 27. `set_pptx_transition` grows from 4 to 56 transitions -- a
+correction to §25/26's "everything but the formula compiler is too
+coupled to port" conclusion
+
+User asked directly whether §25's plan had actually exhausted ppt-master's
+portable surface, or just stopped after the first two wins. Honest
+answer: not exhaustive -- checked the ones most likely to matter and
+moved on. Went back and checked the import graph of two more candidates
+by actually reading them, not re-categorizing by directory name:
+`image_search.py` (self-contained provider abstraction, two zero-
+API-key sources -- Openverse, Wikimedia Commons -- real candidate for
+the "no image sourcing" gap §16 already named, not yet acted on) and
+`pptx_transitions.py`, which turned out to be **pure standard library**
+(`io`/`math`/`posixpath`/`re`/`zipfile` only) -- more self-contained than
+even the formula compiler (§25), and zero-cost to verify: coscribe's own
+`set_pptx_transition` supported exactly 4 transitions
+(`fade`/`push`/`wipe`/`none`); ppt-master's registry has 48 real
+PowerPoint-native effects (Morph, Honeycomb, Vortex, Page Curl, Cube,
+Checkerboard, ...) across PowerPoint's own Subtle/Exciting/Dynamic
+Content gallery categories, plus 8 legacy aliases -- confirmed against
+real, reverse-engineered PowerPoint XML in that module, not something
+independently derivable. User picked this one to do first ("先做
+transitions这个,我希望能力逐渐对齐ppt-master").
+
+**Retyped, not vendored.** Unlike §25's formula compiler (a genuinely
+opaque algorithm worth diffing against upstream unmodified), what's
+useful here is a *data table* -- each transition's element name/XML
+attributes/namespace prefix -- plus a much smaller amount of adaptation
+logic than the full file has (effect_options/read-back/sound-embedding/
+AlternateContent-XML-string-building are all real but not ported this
+pass, see below). Retyped `_TRANSITION_SPECS`/`_TRANSITION_ALIASES`
+directly into `presentations.py` as coscribe-owned constants, credited
+in a comment (source file, commit SHA) rather than a formal vendored-
+package NOTICE.md -- the same level of ceremony `add_pptx_shape`'s own
+49-name curated `MSO_SHAPE` subset already uses for "external knowledge,
+retyped and credited" (§20), not §25's "vendor whole files unmodified"
+treatment, reserved for genuinely opaque algorithms.
+
+**A real technical subtlety, resolved by testing, not assumed**:
+ppt-master's own approach wraps every extension-namespaced effect (p14/
+p15/p159) in a full `<mc:AlternateContent><mc:Choice Requires="...">
+...<mc:Fallback>...` structure, giving a real visual fallback in an
+older/non-MCE-aware PowerPoint. coscribe's existing `p14:dur`/`a14:m`
+precedent (§19/§25) uses the simpler bare-element-plus-`mc:Ignorable`
+form instead -- both are valid MCE per ECMA-376 Part 3, but they're
+different mechanisms, and mixing them incorrectly could produce a file
+that fails coscribe's own schema validator (which only knows how to
+strip `mc:Ignorable`-declared content, not evaluate `mc:AlternateContent`
+`Choice`/`Fallback` branches). Chose to **extend the proven mechanism
+rather than introduce a second one**: every non-base-namespace effect
+(prefix `p14`/`p15`/`p159`) is still a bare `<{prefix}:{element}>` child
+of `<p:transition>`, `mc:Ignorable` marked for exactly the prefix(es) in
+use. Since transitions are this codebase's sole owner of `p14`/`p15`/
+`p159` (animations don't use them; `add_pptx_formula` owns the unrelated
+`a14`, confirmed by grep before assuming), switching between transitions
+that need different prefixes is handled by unconditionally unmarking all
+three before marking exactly the one(s) the new transition needs --
+simpler and just as correct as tracking what the *previous* transition
+used. `_TRANSITION_SPECS`' own `fallback` field (ppt-master's own
+AlternateContent-fallback data) is kept in the retyped table for a
+possible future upgrade to the fuller mechanism, but unused by this
+pass's simpler one.
+
+**Deliberately narrower than the source, documented as such**: each of
+the 48 effects ships with exactly one sensible default variant (e.g.
+"push" always enters from the right, matching ppt-master's own default)
+-- the source's `_TRANSITION_EFFECT_OPTIONS` system (per-transition
+direction/orientation/shape/style customization, itself hundreds more
+lines) is real and scoped out of this pass, not silently dropped.
+
+**New `list_pptx_transition_types()`** (mirrors `list_pptx_shape_types`'s
+own precedent exactly -- a static list tool, `category="documents"`,
+`risk_category="READ"`) rather than dumping 56 names into
+`set_pptx_transition`'s own docstring. Added to `test_web.py`'s
+reviewer-tools contract list (the same real, live gotcha §20's
+`list_pptx_shape_types` addition already hit once this session).
+
+**Verified real, not just unit-tested**: a 5-slide deck given transitions
+spanning all four namespace tiers (`vortex`=p14, `fracture`=p15,
+`morph`=p159, `fade`=base, `wheel`=alias) round-tripped cleanly through
+python-pptx with warnings treated as errors, and converted through the
+real LibreOffice `soffice --convert-to pdf` pipeline with no error --
+the honest ceiling of automated verification here, since confirming a
+transition *animation* actually plays correctly needs a human watching
+real PowerPoint/LibreOffice, not a static test. 8 new tests (a p14
+effect's exact XML shape, a p159 effect's exact XML shape, namespace-
+switching cleans up the old prefix correctly, alias resolution, **every
+single one of the 56 registered names individually passes real schema
+validation** -- a cheap, comprehensive typo-catcher across the whole
+retyped table -- the new list tool matches the real registry, plus the
+exotic-effects LibreOffice round-trip above), one pre-existing test
+fixed (`"zoom"` was the old placeholder for "not yet supported," now
+legitimately valid -- swapped for a genuinely invalid name). Full suite
+passes, `ruff check`/`mypy` clean.
+
+**Still not checked, honestly**: `image_search.py` (the other candidate
+named this round), `svg_quality/checker.py`, `narration_sync.py`/TTS.
+Not claimed as "too coupled" without having actually read them --
+correctly flagged as open, not yet verified either way.

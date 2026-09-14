@@ -482,8 +482,17 @@ width=None, height=None)` inserts a picture already on disk onto an
 existing slide (position/size in inches); `set_pptx_notes(path, slide,
 notes)` sets that slide's speaker notes, replacing them entirely.
 `set_pptx_transition(path, slide, transition, duration=1.0)` sets the
-slide-change transition (`"fade"`/`"push"`/`"wipe"`/`"none"`) for advancing
-into that slide.
+slide-change transition for advancing into that slide -- any of
+PowerPoint's own real native transitions (48 effects across its own
+Subtle/Exciting/Dynamic Content gallery categories -- `list_pptx_
+transition_types()` returns the full list, e.g. `"morph"`, `"vortex"`,
+`"honeycomb"`, `"cube"`, `"page_curl"`, plus the originally-supported
+`"fade"`/`"push"`/`"wipe"`), or `"none"`. Each effect uses PowerPoint's
+own sensible default variant (e.g. `"push"` always enters from the
+right) -- no direction/shape/style customization yet, a deliberately
+scoped-down v1 of the much larger registry this is adapted from (see
+`PPTX_DESIGN.md` §27). A handful of legacy names (`"strips"`, `"wheel"`,
+...) resolve as aliases onto one of the 48 canonical ones.
 
 `fill_pptx_template(path, template_id, content, overwrite)` fills your
 title/bullets into one of coscribe's own bundled, hand-designed decks

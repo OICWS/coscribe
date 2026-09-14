@@ -218,7 +218,187 @@ _MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 _A14_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
 _M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
-_TRANSITIONS = frozenset({"fade", "push", "wipe", "none"})
+# PowerPoint 2012/2015 extension namespaces -- set_pptx_transition's own
+# pair beyond _P14_NS above, needed for the newer transition effects below
+# (Morph is p159; the 2013 "Exciting"-category ones -- Fracture, Crush,
+# Airplane, Origami, etc. -- are p15). Same foreign-namespace-extension
+# reasoning as _P14_NS/_A14_NS: real PowerPoint XML for these effects,
+# confirmed against hugohe3/ppt-master's own reverse-engineered registry
+# (`pptx_transitions.py`), not guessed.
+_P15_NS = "http://schemas.microsoft.com/office/powerpoint/2012/main"
+_P159_NS = "http://schemas.microsoft.com/office/powerpoint/2015/09/main"
+
+_TRANSITION_NAMESPACES = {"p": _P_NS, "p14": _P14_NS, "p15": _P15_NS, "p159": _P159_NS}
+# The three extension prefixes a transition (and only a transition -- this
+# codebase's only other p14 user, add_pptx_formula, owns a14 instead) can
+# ever need mc:Ignorable for -- see _set_slide_transition's own comment on
+# why unmarking all three unconditionally before setting a new transition
+# is correct rather than fragile.
+_TRANSITION_MCE_PREFIXES = ("p14", "p15", "p159")
+
+# PowerPoint's real native transition gallery (48 effects across its own
+# Subtle/Exciting/Dynamic Content categories) plus common legacy aliases
+# (8 more) -- retyped from hugohe3/ppt-master's own `pptx_transitions.py`
+# (`_TRANSITION_SPECS`/`TRANSITION_ALIASES`, commit `6e3ce9c5a3b994a0e223
+# a14a0f7eddf42fd0b9f5`), the real element/attribute mapping for each
+# effect having been reverse-engineered against actual PowerPoint-authored
+# XML there -- not independently guessable, and not worth re-deriving.
+# Deliberately narrower than the source in one way: each effect here is
+# its own single, sensible default variant (e.g. "push" always defaults to
+# `dir="r"`) with no exposed per-transition options (direction/shape/style
+# overrides) -- ppt-master's own effect_options system is real, scoped-out
+# extra surface for a later pass, not ported here. "prefix" absent means
+# the base "p" (ECMA-376) namespace; "fallback" is only meaningful for a
+# non-"p" prefix, naming which base transition an older/non-MCE-aware
+# reader should see instead (this codebase's own mc:Ignorable-based
+# approach doesn't use it today -- see _set_slide_transition -- but it's
+# kept in the data for a future AlternateContent-based upgrade).
+_TRANSITION_SPECS: dict[str, dict[str, Any]] = {
+    "fade": {"element": "fade", "attrs": {}},
+    "push": {"element": "push", "attrs": {"dir": "r"}},
+    "wipe": {"element": "wipe", "attrs": {"dir": "r"}},
+    "split": {"element": "split", "attrs": {"orient": "horz", "dir": "out"}},
+    "cover": {"element": "cover", "attrs": {"dir": "r"}},
+    "random": {"element": "random", "attrs": {}},
+    "blinds": {"element": "blinds", "attrs": {"dir": "vert"}},
+    "checkerboard": {"element": "checker", "attrs": {"dir": "horz"}},
+    "comb": {"element": "comb", "attrs": {"dir": "horz"}},
+    "cut": {"element": "cut", "attrs": {"thruBlk": "0"}},
+    "dissolve": {"element": "dissolve", "attrs": {}},
+    "random_bars": {"element": "randomBar", "attrs": {"dir": "vert"}},
+    "zoom": {"element": "warp", "attrs": {"dir": "in"}, "prefix": "p14", "fallback": "fade"},
+    "morph": {
+        "element": "morph",
+        "attrs": {"option": "byObject"},
+        "prefix": "p159",
+        "fallback": "fade",
+    },
+    "reveal": {"element": "reveal", "attrs": {"dir": "r"}, "prefix": "p14", "fallback": "fade"},
+    "shape": {"element": "circle", "attrs": {}},
+    "uncover": {"element": "pull", "attrs": {"dir": "r"}},
+    "flash": {"element": "flash", "attrs": {}, "prefix": "p14", "fallback": "fade"},
+    "fall_over": {
+        "element": "prstTrans",
+        "attrs": {"prst": "fallOver", "invX": "1"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "drape": {
+        "element": "prstTrans",
+        "attrs": {"prst": "drape", "invX": "1"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "curtains": {
+        "element": "prstTrans",
+        "attrs": {"prst": "curtains"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "wind": {
+        "element": "prstTrans",
+        "attrs": {"prst": "wind"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "prestige": {
+        "element": "prstTrans",
+        "attrs": {"prst": "prestige"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "fracture": {
+        "element": "prstTrans",
+        "attrs": {"prst": "fracture"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "crush": {
+        "element": "prstTrans",
+        "attrs": {"prst": "crush"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "peel_off": {
+        "element": "prstTrans",
+        "attrs": {"prst": "peelOff", "invX": "1"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "page_curl": {
+        "element": "prstTrans",
+        "attrs": {"prst": "pageCurlSingle", "invX": "1"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "airplane": {
+        "element": "prstTrans",
+        "attrs": {"prst": "airplane"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "origami": {
+        "element": "prstTrans",
+        "attrs": {"prst": "origami"},
+        "prefix": "p15",
+        "fallback": "fade",
+    },
+    "clock": {"element": "wheel", "attrs": {"spokes": "1"}},
+    "ripple": {"element": "ripple", "attrs": {}, "prefix": "p14", "fallback": "fade"},
+    "honeycomb": {"element": "honeycomb", "attrs": {}, "prefix": "p14", "fallback": "fade"},
+    "glitter": {"element": "glitter", "attrs": {}, "prefix": "p14", "fallback": "fade"},
+    "vortex": {"element": "vortex", "attrs": {"dir": "r"}, "prefix": "p14", "fallback": "fade"},
+    "shred": {"element": "shred", "attrs": {"dir": "out"}, "prefix": "p14", "fallback": "fade"},
+    "switch": {"element": "switch", "attrs": {"dir": "r"}, "prefix": "p14", "fallback": "fade"},
+    "flip": {"element": "flip", "attrs": {"dir": "r"}, "prefix": "p14", "fallback": "fade"},
+    "gallery": {"element": "gallery", "attrs": {"dir": "r"}, "prefix": "p14", "fallback": "fade"},
+    "cube": {"element": "prism", "attrs": {"dir": "r"}, "prefix": "p14", "fallback": "fade"},
+    "doors": {"element": "doors", "attrs": {"dir": "vert"}, "prefix": "p14", "fallback": "fade"},
+    "box": {"element": "zoom", "attrs": {}},
+    "pan": {"element": "pan", "attrs": {"dir": "r"}, "prefix": "p14", "fallback": "fade"},
+    "ferris_wheel": {
+        "element": "ferris",
+        "attrs": {"dir": "r"},
+        "prefix": "p14",
+        "fallback": "fade",
+    },
+    "conveyor": {
+        "element": "conveyor",
+        "attrs": {"dir": "r"},
+        "prefix": "p14",
+        "fallback": "fade",
+    },
+    "rotate": {
+        "element": "prism",
+        "attrs": {"dir": "r", "isContent": "1"},
+        "prefix": "p14",
+        "fallback": "fade",
+    },
+    "window": {"element": "window", "attrs": {}, "prefix": "p14", "fallback": "fade"},
+    "orbit": {
+        "element": "prism",
+        "attrs": {"dir": "r", "isContent": "1", "isInverted": "1"},
+        "prefix": "p14",
+        "fallback": "fade",
+    },
+    "fly_through": {"element": "flythrough", "attrs": {}, "prefix": "p14", "fallback": "fade"},
+}
+
+# Legacy/compatibility names mapping onto one of the 48 canonical keys
+# above -- e.g. an older "strips"/"wheel" name a caller (or a round-
+# tripped PPTX) might still use.
+_TRANSITION_ALIASES: dict[str, str] = {
+    "strips": "wipe",
+    "circle": "shape",
+    "diamond": "shape",
+    "newsflash": "flash",
+    "plus": "shape",
+    "pull": "uncover",
+    "wedge": "clock",
+    "wheel": "clock",
+}
+
+_TRANSITIONS = frozenset({*_TRANSITION_SPECS, *_TRANSITION_ALIASES, "none"})
 
 # add_pptx_shape's own curated subset of python-pptx's ~180-member
 # MSO_SHAPE enum (every name below verified against the real installed
@@ -1257,22 +1437,50 @@ def _set_slide_transition(slide_element: Any, transition: str, duration: float) 
     this tool touches, appending at the end of `slide_element` is always
     schema-correct here. "none" means no <p:transition> element at all,
     which is how PowerPoint itself represents no transition.
+
+    p14:dur (precise millisecond timing) is written for every effect, not
+    just the 12 whose own preset element already lives in the base "p"
+    namespace -- same reasoning either way: the base ECMA-376 schema only
+    has the coarse `spd` (fast/med/slow) attribute, `p14:dur` is what real
+    PowerPoint XML actually carries for the exact duration a caller gave.
+    A non-"p"-namespaced effect (p14/p15/p159, e.g. "morph"/"vortex")
+    means both the effect's own preset element *and* the p14:dur attribute
+    need marking -- unmarking all three extension prefixes unconditionally
+    before marking exactly the one(s) this transition actually needs is
+    simpler and just as correct as tracking what the *previous* transition
+    used, since transitions are this codebase's sole owner of p14/p15/p159
+    (add_pptx_formula owns a14 instead, untouched here).
     """
     from lxml import etree
 
     existing = slide_element.find(f"{{{_P_NS}}}transition")
     if existing is not None:
         slide_element.remove(existing)
+    for prefix in _TRANSITION_MCE_PREFIXES:
+        _unmark_mce_ignorable(slide_element, prefix)
     if transition == "none":
-        _unmark_mce_ignorable(slide_element, "p14")
         return
+    canonical = _TRANSITION_ALIASES.get(transition, transition)
+    spec = _TRANSITION_SPECS[canonical]
+    prefix = str(spec.get("prefix", "p"))
+    namespace = _TRANSITION_NAMESPACES[prefix]
+
     transition_element = etree.SubElement(
         slide_element, f"{{{_P_NS}}}transition", nsmap={"p14": _P14_NS}
     )
     transition_element.set("spd", _spd_for(duration))
     transition_element.set(f"{{{_P14_NS}}}dur", str(round(duration * 1000)))
-    etree.SubElement(transition_element, f"{{{_P_NS}}}{transition}")
+    effect_element = etree.SubElement(
+        transition_element,
+        f"{{{namespace}}}{spec['element']}",
+        nsmap={prefix: namespace} if prefix != "p" else None,
+    )
+    for key, value in spec["attrs"].items():
+        effect_element.set(key, str(value))
+
     _mark_mce_ignorable(slide_element, "p14")
+    if prefix != "p":
+        _mark_mce_ignorable(slide_element, prefix)
 
 
 def _mark_mce_ignorable(root_element: Any, prefix: str) -> None:
@@ -3283,6 +3491,13 @@ class PresentationToolkit:
         file or slide you're working on."""
         return sorted(_SHAPE_TYPES)
 
+    def list_pptx_transition_types(self) -> list[str]:
+        """Every `transition` name `set_pptx_transition` accepts, sorted --
+        PowerPoint's real native transition gallery (48 effects) plus 8
+        legacy aliases. No path/slide argument: this is a static list, the
+        same regardless of which file or slide you're working on."""
+        return sorted(_TRANSITIONS - {"none"})
+
     @locked_by_path
     def add_pptx_shape(
         self,
@@ -5292,20 +5507,32 @@ def build_presentation_tools(
     ) -> dict[str, object]:
         """Set the slide-change transition for one slide in a PowerPoint (.pptx) file.
 
-        `transition` is one of `"fade"`, `"push"`, `"wipe"`, or `"none"` (a
-        deliberately small, safe set -- not every transition PowerPoint
-        supports). `duration` is in seconds and controls how long the
-        transition animation takes when advancing *into* this slide.
+        `transition` is any of PowerPoint's own real native transitions --
+        call `list_pptx_transition_types()` for the full list (48 effects
+        across PowerPoint's own Subtle/Exciting/Dynamic Content gallery
+        categories -- "fade"/"push"/"wipe"/"morph"/"vortex"/"honeycomb"/
+        "cube"/"page_curl", etc. -- plus a few legacy aliases), or "none".
+        Each effect uses PowerPoint's own sensible default variant (e.g.
+        "push" always enters from the right) -- no direction/shape/style
+        customization yet. `duration` is in seconds and controls how long
+        the transition animation takes when advancing *into* this slide.
 
         Args:
             path: file to modify, relative to the workspace root
             slide: 1-based slide number to set the transition on
-            transition: "fade", "push", "wipe", or "none"
+            transition: any name from list_pptx_transition_types(), or "none"
             duration: transition length in seconds
         """
         return toolkit.set_pptx_transition(
             path=path, slide=slide, transition=transition, duration=duration
         )
+
+    def list_pptx_transition_types() -> list[str]:
+        """List every `transition` name `set_pptx_transition` accepts --
+        PowerPoint's own real native transition gallery (48 effects) plus
+        8 legacy aliases. No arguments: this is a static list, not
+        specific to any file."""
+        return toolkit.list_pptx_transition_types()
 
     def add_pptx_animation(
         path: str,
@@ -5524,6 +5751,9 @@ def build_presentation_tools(
         tool_metadata(add_pptx_scrim, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(set_pptx_notes, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(set_pptx_transition, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(
+            list_pptx_transition_types, risk_category="READ", category="documents"
+        ),
         tool_metadata(add_pptx_animation, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(add_pptx_hyperlink, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(read_pptx_theme_colors, risk_category="READ", category="documents"),
