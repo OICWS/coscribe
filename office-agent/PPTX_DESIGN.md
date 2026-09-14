@@ -2070,3 +2070,71 @@ crash directly -- the tests instead confirm the fix's actual code path
 the strongest verification available without real Windows hardware.
 `test_scripts_tool.py`/`test_node_scripts_tool.py` (17 tests) pass,
 `ruff check`/`mypy` clean.
+
+## 24. Auditing the rest of the codebase for §23's bug class -- one more
+real duplicate found, several hardening fixes applied preventively
+
+§23 fixed one instance of "no explicit UTF-8 on Windows" (the OS has no
+UTF-8 default the way modern Linux does). Asked to check for other
+instances of the same class, audited every `subprocess.run(...,
+text=True, ...)`, `Path.write_text()`/`read_text()`, and
+`asyncio.create_subprocess_exec()` call in `src/` for a missing
+`encoding=`.
+
+**A real duplicate, not just theoretical risk**: `tools/background_
+tasks.py`'s `run_background_script` (the third EXEC tool -- fire-and-
+forget scripts longer than `run_python_script`'s 600s cap) has its own,
+separate `script_path.write_text(script)` with no encoding -- the exact
+same bug, in a different tool that happens to duplicate the write step
+rather than share it. Its Python branch also passed `env=None` (inherit
+the parent's environment unmodified), so even after fixing the write, a
+background Python script's own `print()` of Chinese text would still
+crash inside the child -- same missing-`PYTHONIOENCODING`/`PYTHONUTF8`
+gap as `run_python_script` had before §23. Fixed identically: `encoding=
+"utf-8"` on the write, `PYTHONIOENCODING=utf-8`/`PYTHONUTF8=1` merged
+into the child's env. (Its output-reading side was already correct --
+`proc.stdout.read()` captures raw bytes into a binary log file, decoded
+later with `.decode("utf-8", errors="replace")` -- so only the write side
+and the child's own env needed fixing.)
+
+**Preventive hardening, not confirmed bugs** (no live report, but the
+identical unguarded pattern): every remaining `subprocess.run(...,
+text=True, ...)` with no `encoding=` -- `tools/node_env.py` and
+`tools/script_env.py`'s npm/pip install/list/uninstall/`--version` calls
+(7 and 4 call sites respectively), and `runtime/hooks.py`'s `run_hook`
+(shell-command hooks, which capture output as text and are fed a
+JSON payload via `input=`, though `json.dumps`'s default `ensure_ascii=
+True` already makes that specific input ASCII-safe regardless -- the
+output-capture side was the real gap). All given the same `encoding=
+"utf-8", errors="replace"` treatment as §23's fix, on the reasoning that
+a Windows `%APPDATA%` path routinely embeds the OS username, which is
+often Chinese on a Chinese-locale install -- pip/npm error output echoing
+that path back is a plausible, if lower-probability, trigger for the same
+crash. Also fixed: `tools/mcp.py`/`runtime/provider_config.py`/`runtime/
+hooks.py`'s config-file `read_text()` calls (no encoding on the read side,
+even though every writer of those same files elsewhere already passes
+`encoding="utf-8"` -- a real read/write codec mismatch waiting for a
+Chinese MCP server name or provider note), and `spreadsheets.py`'s
+LibreOffice recalc-macro `write_text()` (the macro string itself is
+static/ASCII-only today, zero live risk, fixed only for consistency in
+case it's ever edited to include non-ASCII).
+
+**Confirmed clean, no changes needed**: every `subprocess.run` call
+converting office files via `soffice`/`pdftoppm` (spreadsheets.py,
+_thumbnail.py, presentations.py's `_render_to_pdf`) uses
+`capture_output=True` *without* `text=True` -- stdout/stderr stay raw
+bytes, never implicitly decoded, so there's no codec to get wrong. Every
+other `write_text`/`read_text` call in `src/` already passed
+`encoding="utf-8"` explicitly (files.py, skills.py, memory.py,
+selfwake.py, background_tasks.py's JSON records, pptx_templates.py,
+web/app.py's dozen-plus sidecar/config writers, skill_authoring.py) --
+this codebase's own convention was already correct almost everywhere;
+`tools/scripts.py`/`tools/node_scripts.py` (§23) and `tools/background_
+tasks.py` (this section) were the exceptions, both because they write a
+*model-generated* script file, a pattern that didn't exist yet when the
+"always pass encoding=" convention was established elsewhere.
+
+**Verified**: 1 new regression test (`test_background_tasks.py`, the
+same Chinese-comment-plus-print shape as §23's two tests, run through
+`run_background_script` instead), full suite passes, `ruff check`/`mypy`
+clean on every touched file.

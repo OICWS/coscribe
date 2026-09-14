@@ -92,6 +92,8 @@ def ensure_node_env(state_dir: Path) -> Path:
         cwd=str(node_env_dir),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=_SETUP_TIMEOUT,
     )
     if result.returncode != 0:
@@ -111,6 +113,8 @@ def list_packages(state_dir: Path) -> list[dict[str, str]]:
         cwd=str(node_env_dir),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=_NPM_TIMEOUT,
     )
     if result.returncode != 0:
@@ -139,6 +143,8 @@ def install_package(
             cwd=str(node_env_dir),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -158,6 +164,8 @@ def uninstall_package(
             cwd=str(node_env_dir),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:

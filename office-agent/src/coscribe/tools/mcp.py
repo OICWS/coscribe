@@ -124,7 +124,7 @@ def load_mcp_server_configs(config_path: Path) -> dict[str, MCPConfig]:
     caller here keeps getting a plain string regardless of whether it's
     stored on disk as a keyring reference or (legacy, or keyring
     unavailable) plaintext."""
-    raw = json.loads(config_path.read_text())
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
     servers = raw.get("mcpServers")
     if not isinstance(servers, dict):
         raise ValueError(f'{config_path}: expected a top-level "mcpServers" object')

@@ -91,7 +91,12 @@ def set_interpreter_override(state_dir: Path, python_path: str | None) -> dict[s
         return {"success": True, "error": None}
     try:
         result = subprocess.run(
-            [python_path, "--version"], capture_output=True, text=True, timeout=10.0
+            [python_path, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10.0,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"success": False, "error": f"Could not run {python_path!r}: {exc}"}
@@ -177,7 +182,12 @@ def working_interpreters(candidates: list[str]) -> list[str]:
     for candidate in candidates:
         try:
             result = subprocess.run(
-                [candidate, "--version"], capture_output=True, text=True, timeout=5.0
+                [candidate, "--version"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5.0,
             )
         except (OSError, subprocess.TimeoutExpired):
             continue
@@ -220,6 +230,8 @@ def ensure_script_env(state_dir: Path) -> Path:
         [candidates[0], "-m", "venv", str(venv_dir)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=_VENV_TIMEOUT,
     )
     for interpreter in candidates[1:]:
@@ -229,6 +241,8 @@ def ensure_script_env(state_dir: Path) -> Path:
             [interpreter, "-m", "venv", str(venv_dir)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_VENV_TIMEOUT,
         )
     if result.returncode != 0:
@@ -244,6 +258,8 @@ def ensure_script_env(state_dir: Path) -> Path:
         [str(venv_python(venv_dir)), "-m", "pip", "install", *_BASELINE_PACKAGES],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=_SETUP_TIMEOUT,
     )
     if seed_result.returncode != 0:
@@ -263,6 +279,8 @@ def list_packages(state_dir: Path) -> list[dict[str, str]]:
         [str(venv_python(venv_dir)), "-m", "pip", "list", "--format=json"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=_VENV_TIMEOUT,
     )
     if result.returncode != 0:
@@ -289,6 +307,8 @@ def install_package(
             [str(venv_python(venv_dir)), "-m", "pip", "install", package],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -307,6 +327,8 @@ def uninstall_package(
             [str(venv_python(venv_dir)), "-m", "pip", "uninstall", "--yes", package],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:

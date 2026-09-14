@@ -30,7 +30,7 @@ def load_custom_providers(config_path: Path) -> dict[str, dict[str, str]]:
     check `.is_file()`."""
     if not config_path.is_file():
         return {}
-    raw = json.loads(config_path.read_text())
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
     providers = raw.get("providers")
     if not isinstance(providers, dict):
         raise ValueError(f'{config_path}: expected a top-level "providers" object')

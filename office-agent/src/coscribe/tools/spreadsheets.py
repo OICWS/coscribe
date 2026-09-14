@@ -249,7 +249,7 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
                 "status": "skipped",
                 "skipped_reason": "LibreOffice did not create a usable profile",
             }
-        (macro_dir / "Module1.xba").write_text(_XLSX_RECALC_MACRO)
+        (macro_dir / "Module1.xba").write_text(_XLSX_RECALC_MACRO, encoding="utf-8")
 
         try:
             subprocess.run(

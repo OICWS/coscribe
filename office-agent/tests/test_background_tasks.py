@@ -248,6 +248,28 @@ async def test_run_background_script_does_not_pollute_the_workspace_with_the_scr
     assert list(tools.workspace.iterdir()) == []
 
 
+async def test_run_background_script_handles_chinese_text_in_the_script_and_its_output(
+    tools: BgTools,
+) -> None:
+    """Regression test for the same real Windows charmap bug fixed in
+    tools/scripts.py's run_python_script (see test_scripts_tool.py's
+    identical test docstring) -- run_background_script has its own,
+    independent copy of the write_text(script) call and its own subprocess
+    environment, so it needed its own fix (explicit encoding="utf-8" on
+    the write, PYTHONIOENCODING/PYTHONUTF8 forced for the python child)
+    and its own regression test."""
+    started = await tools.run_background_script(
+        language="python",
+        script="# 这是一个中文注释\nprint('你好，世界')",
+        description="print a Chinese greeting",
+    )
+    finished = await _wait_until_finished(tools, started["task_id"])
+
+    assert finished["status"] == "succeeded"
+    assert finished["exit_code"] == 0
+    assert "你好，世界" in finished["output"]
+
+
 async def test_run_background_script_venv_is_isolated_from_the_coscribe_process(
     tools: BgTools,
 ) -> None:

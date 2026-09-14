@@ -72,6 +72,8 @@ def run_hook(
             input=json.dumps(payload),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -88,5 +90,5 @@ def load_hooks_config(path: str | Path) -> dict[str, list[str]]:
     """Parse {"PreToolUse": [...], "PostToolUse": [...], ...} (see
     HOOK_EVENTS for the full set) -- missing events default to an empty
     list, unknown keys are ignored."""
-    raw = json.loads(Path(path).read_text())
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
     return {event: list(raw.get(event, [])) for event in HOOK_EVENTS}

@@ -317,14 +317,23 @@ def build_background_task_tools(
             interpreter = str(venv_python(venv_dir))
             scratch_dir = Path(tempfile.mkdtemp(prefix="coscribe_bg_script_"))
             script_path = scratch_dir / "script.py"
-            env = None
+            # PYTHONIOENCODING/PYTHONUTF8 forced for the same reason
+            # tools/scripts.py's _run_python_script does -- without them, a
+            # background script's own print() of non-Latin1 text (Chinese,
+            # routine for this codebase's users) can crash inside the child
+            # itself on a Windows machine with a non-UTF-8 locale, the
+            # 'charmap' codec can't encode characters bug documented in
+            # PPTX_DESIGN.md §23.
+            env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
         else:
             node_env_dir = await asyncio.to_thread(ensure_node_env, state)
             interpreter = shutil.which("node") or "node"
             scratch_dir = Path(tempfile.mkdtemp(prefix="coscribe_bg_node_script_"))
             script_path = scratch_dir / "script.js"
             env = {**os.environ, "NODE_PATH": str(node_env_dir / "node_modules")}
-        script_path.write_text(script)
+        # encoding="utf-8" for the same reason as the write above's own
+        # comment: Path.write_text has no UTF-8 default on Windows.
+        script_path.write_text(script, encoding="utf-8")
 
         proc = await asyncio.create_subprocess_exec(
             interpreter,
