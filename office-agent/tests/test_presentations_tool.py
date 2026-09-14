@@ -2516,6 +2516,218 @@ def test_add_pptx_animation_survives_libreoffice_conversion(tmp_path: Path) -> N
     assert (tmp_path / "deck.pdf").is_file()
 
 
+def test_add_pptx_animation_is_schema_valid_for_every_registered_animation(
+    tmp_path: Path,
+) -> None:
+    """Every single one of the 203 vendored presets + 6 legacy aliases
+    actually produces schema-valid, read-back-verified OOXML (via the
+    real assert_ooxml_valid/_verify_animation_readback calls
+    add_pptx_animation itself makes) -- not just the few spot-checked
+    above. A real, cheap way to catch a bad id-renumbering/spid-retarget/
+    duration-scaling edge case across the whole catalog at once, the same
+    role test_set_pptx_transition_is_schema_valid_for_every_registered_
+    transition plays for the 56-entry transition registry."""
+    from coscribe.tools.presentations import _ANIMATIONS
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+
+    for animation in _ANIMATIONS:
+        tools["add_pptx_animation"](
+            path="deck.pptx", slide=1, shape_index=0, animation=animation, trigger="with-previous"
+        )
+
+
+def test_list_pptx_animation_types_matches_the_real_registry(tmp_path: Path) -> None:
+    from coscribe.tools.presentations import _ANIMATION_ALIASES, _load_animation_presets
+
+    tools = _tools_by_name(tmp_path)
+
+    result = tools["list_pptx_animation_types"]()
+
+    assert result == sorted({*_load_animation_presets(), *_ANIMATION_ALIASES})
+    assert len(result) == 203 + 6
+
+
+def test_add_pptx_animation_new_catalog_preset_is_structurally_present(
+    tmp_path: Path,
+) -> None:
+    """A preset from the full 203-entry catalog that was never one of the
+    original 6 short-named presets -- proves the general parse/renumber/
+    retarget path works for a name that never had hand-written XML, not
+    just the 6 that used to."""
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+    tools["add_pptx_animation"](path="deck.pptx", slide=1, shape_index=0, animation="path_circle")
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    title_id = prs.slides[0].shapes.title.shape_id
+    timing = prs.slides[0].element.find(f"{{{_P_NS}}}timing")
+    matches = [
+        cTn
+        for cTn in timing.iter(f"{{{_P_NS}}}cTn")
+        if cTn.get("presetID") == "1" and cTn.get("presetClass") == "path"
+    ]
+    assert len(matches) == 1
+    sp_tgt = matches[0].find(f".//{{{_P_NS}}}spTgt")
+    assert sp_tgt.get("spid") == str(title_id)
+    assert matches[0].find(f".//{{{_P_NS}}}animMotion") is not None
+
+
+def test_add_pptx_animation_scales_duration_from_the_presets_own_default(
+    tmp_path: Path,
+) -> None:
+    """entrance_fly's two <p:anim> nodes are each authored at dur=500 (its
+    real default_duration_ms) -- requesting duration=2.0 (2000ms) must
+    scale both by the same 4x ratio, not just plug 2000 into one of them."""
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+    result = tools["add_pptx_animation"](
+        path="deck.pptx", slide=1, shape_index=0, animation="entrance_fly", duration=2.0
+    )
+    assert result["duration_ms"] == 2000
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    timing = prs.slides[0].element.find(f"{{{_P_NS}}}timing")
+    anim_durations = {
+        cTn.get("dur")
+        for cTn in timing.iter(f"{{{_P_NS}}}cTn")
+        if cTn.getparent().tag == f"{{{_P_NS}}}cBhvr"
+        and cTn.getparent().getparent().tag == f"{{{_P_NS}}}anim"
+    }
+    assert anim_durations == {"2000"}
+
+
+def test_add_pptx_animation_non_scalable_preset_ignores_requested_duration(
+    tmp_path: Path,
+) -> None:
+    """entrance_appear isn't duration-adjustable in real PowerPoint either
+    (it's an instant toggle) -- a requested duration must be silently
+    ignored rather than corrupting its authored 1ms timing, and the
+    result must report the real duration actually used, not a value that
+    implies the request took effect."""
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+
+    result = tools["add_pptx_animation"](
+        path="deck.pptx", slide=1, shape_index=0, animation="entrance_appear", duration=5.0
+    )
+
+    assert result["duration_ms"] == 1
+
+
+def test_add_pptx_animation_legacy_alias_and_full_name_produce_identical_xml(
+    tmp_path: Path,
+) -> None:
+    """"fade" (the pre-203-catalog short name) and "entrance_fade" (the
+    real preset key it was always secretly implementing, per
+    _ANIMATION_ALIASES) must resolve to the exact same preset -- not two
+    presets that happen to look similar."""
+    import re
+
+    from lxml import etree
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
+    tools["add_pptx_animation"](path="deck.pptx", slide=1, shape_index=0, animation="fade")
+    tools["add_pptx_animation"](
+        path="deck.pptx", slide=1, shape_index=1, animation="entrance_fade"
+    )
+
+    prs = Presentation(tmp_path / "deck.pptx")
+    timing = prs.slides[0].element.find(f"{{{_P_NS}}}timing")
+    rows = [
+        cTn
+        for cTn in timing.iter(f"{{{_P_NS}}}cTn")
+        if cTn.get("presetID") == "10" and cTn.get("presetClass") == "entr"
+    ]
+    assert len(rows) == 2
+    # id (per-row running counter) and spid (the two calls deliberately
+    # target different shapes) are both expected to differ -- strip both
+    # before comparing everything else.
+    normalized = [
+        re.sub(r' (id|spid)="\d+"', "", etree.tostring(row).decode()) for row in rows
+    ]
+    assert normalized[0] == normalized[1]
+
+
+def test_list_pptx_animation_types_is_read_and_no_approval(tmp_path: Path) -> None:
+    from coscribe.runtime.types import get_tool_metadata
+
+    tools = _tools_by_name(tmp_path)
+    metadata = get_tool_metadata(tools["list_pptx_animation_types"])
+    assert metadata.risk_category == "READ"
+    assert metadata.requires_approval is False
+
+
+@pytest.mark.real_libreoffice
+@pytest.mark.skipif(
+    not _libreoffice_actually_works(),
+    reason="LibreOffice not installed or not functional in this environment",
+)
+def test_add_pptx_animation_all_four_categories_survive_libreoffice_conversion(
+    tmp_path: Path,
+) -> None:
+    """One preset from each of the 4 categories (entrance/emphasis/exit/
+    path), mixed triggers, plus by_paragraph, on one real deck -- can't
+    verify the animation *plays back* correctly in a static test (that
+    needs a human watching real PowerPoint/LibreOffice), but a real
+    subprocess conversion succeeding, plus a warnings-as-errors
+    python-pptx round-trip, is the strongest automated check available."""
+    import subprocess
+    import warnings
+
+    from pptx import Presentation
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- alpha\n- beta\n- gamma")
+    tools["add_pptx_animation"](
+        path="deck.pptx", slide=1, shape_index=0, animation="entrance_bounce", trigger="on-click"
+    )
+    tools["add_pptx_animation"](
+        path="deck.pptx", slide=1, shape_index=1, animation="emphasis_teeter",
+        trigger="with-previous",
+    )
+    tools["add_pptx_animation"](
+        path="deck.pptx", slide=1, shape_index=1, animation="path_bean",
+        trigger="after-previous", delay=0.2,
+    )
+    tools["add_pptx_animation"](
+        path="deck.pptx", slide=1, shape_index=0, animation="exit_bounce", trigger="after-previous"
+    )
+    tools["add_pptx_animation"](
+        path="deck.pptx", slide=1, shape_index=1, animation="entrance_fly",
+        by_paragraph=True, trigger="on-click",
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        prs = Presentation(tmp_path / "deck.pptx")
+        assert len(prs.slides) == 1
+
+    result = subprocess.run(
+        [
+            "soffice",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(tmp_path),
+            str(tmp_path / "deck.pptx"),
+        ],
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    assert result.returncode == 0
+    assert (tmp_path / "deck.pdf").is_file()
+
+
 def test_add_pptx_hyperlink_whole_shape(tmp_path: Path) -> None:
     from pptx import Presentation
 

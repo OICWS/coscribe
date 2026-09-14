@@ -722,31 +722,41 @@ documented scope limits, not oversights.
 trigger="on-click", delay=0.0, by_paragraph=False)` adds an animation to
 one shape, `shape_index` 0-based the same way as `list_pptx_shapes`/
 `edit_pptx_shape` (title first, then body/table, then anything added
-later by `add_pptx_image`/`add_pptx_chart`). Six effects across three categories:
-entrance (`"fade"`, `"fly-in"` -- shape starts hidden, then reveals), exit
-(`"exit-fade"`, `"exit-fly"` -- shape is visible, then hides), emphasis
-(`"emphasis-grow"`, `"emphasis-spin"` -- shape stays visible throughout,
-scales up 50%-then-back or does one full rotation). Every effect's
-`presetID`/`presetClass`/`presetSubtype`/motion-element shape is taken
-from real PowerPoint-authored XML (cross-checked against
-[hugohe3/ppt-master](https://github.com/hugohe3/ppt-master)'s own preset
-manifest), not guessed -- entrance and exit variants of the same visual
-effect share identical `presetID`/`presetSubtype` in real PowerPoint
-files (`presetClass` is what actually distinguishes them), which the
-read-back verification checks for explicitly. `trigger` is PowerPoint's
-own Animation Pane Start mode: `"on-click"` (default) starts a new,
-independently click-triggered group; `"with-previous"`/`"after-previous"`
-instead chain onto the last animation added to that slide -- playing at
-the same time, or automatically once it finishes -- with `delay` adding
-any extra gap in seconds. The very first animation on a slide still plays
-even if given `"after-previous"`, same as real PowerPoint: it just starts
-on slide entry instead of needing a click. `by_paragraph=True` animates
-each of the shape's non-empty paragraphs as its own step instead of the
-whole shape at once -- the standard way to reveal a bulleted list one
-bullet at a time (pair with `trigger="on-click"` for one click per
-bullet, or `"after-previous"` with a small `delay` for an automatic
-cascade). Unlike everything else in this section, this is hand-written
-OOXML timing XML -- `python-pptx` has no animation API at all.
+later by `add_pptx_image`/`add_pptx_chart`). `animation` is any of
+PowerPoint's own 203 real native animation presets -- `list_pptx_
+animation_types()` returns the full list, grouped by an `entrance_`/
+`emphasis_`/`exit_`/`path_` prefix (shape starts hidden then reveals /
+stays visible throughout / is visible then hides / moves along a motion
+path). Every preset's exact XML -- `presetID`/`presetClass`/
+`presetSubtype`/motion-element shape -- is a real, PowerPoint-authored
+`<p:cTn>` row vendored unmodified from
+[hugohe3/ppt-master](https://github.com/hugohe3/ppt-master) (see
+`PPTX_DESIGN.md` §29), parsed and adapted (ids renumbered, shape
+retargeted, duration scaled) at call time rather than hand-rebuilt from
+scratch -- entrance and exit variants of the same visual effect share
+identical `presetID`/`presetSubtype` in real PowerPoint files
+(`presetClass` is what actually distinguishes them), which the read-back
+verification checks for explicitly. The six original short names
+(`"fade"`, `"fly-in"`, `"exit-fade"`, `"exit-fly"`, `"emphasis-grow"`,
+`"emphasis-spin"`) still work as aliases onto their real preset key. Most
+presets scale their whole timing proportionally to `duration`; a handful
+(instant appear/disappear toggles, discrete state changes like changing a
+shape's font) aren't duration-adjustable in real PowerPoint either, so
+`duration` is ignored for those and the result's own `duration_ms` field
+reports what was actually used. `trigger` is PowerPoint's own Animation
+Pane Start mode: `"on-click"` (default) starts a new, independently
+click-triggered group; `"with-previous"`/`"after-previous"` instead chain
+onto the last animation added to that slide -- playing at the same time,
+or automatically once it finishes -- with `delay` adding any extra gap in
+seconds. The very first animation on a slide still plays even if given
+`"after-previous"`, same as real PowerPoint: it just starts on slide
+entry instead of needing a click. `by_paragraph=True` animates each of
+the shape's non-empty paragraphs as its own step instead of the whole
+shape at once -- the standard way to reveal a bulleted list one bullet at
+a time (pair with `trigger="on-click"` for one click per bullet, or
+`"after-previous"` with a small `delay` for an automatic cascade). Unlike
+everything else in this section, this is hand-built OOXML timing XML --
+`python-pptx` has no animation API at all.
 It's checked two ways before it ever reaches you: the generated XML is
 validated against ECMA-376's real element ordering (verified empirically
 by round-tripping through `python-pptx` with warnings treated as errors),

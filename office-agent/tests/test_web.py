@@ -2399,7 +2399,8 @@ def test_reviewer_tools_are_exactly_the_read_only_documents_tools(
     the tools with category=="documents" and requires_approval==False --
     read_docx/read_pdf/search_pdf/read_xlsx/read_pptx/render_pptx_preview/
     list_pptx_shapes/list_pptx_shape_types/list_pptx_transition_types/
-    list_pptx_icons/read_pptx_theme_colors today. This is the contract that
+    list_pptx_animation_types/list_pptx_icons/read_pptx_theme_colors today.
+    This is the contract that
     filter depends on: if a future "documents" tool is added without
     requires_approval=True, it would silently become reviewer-callable
     too (fine if read-only, a real bug if not) -- and if one of these
@@ -2425,6 +2426,7 @@ def test_reviewer_tools_are_exactly_the_read_only_documents_tools(
     ]
     names = sorted(t.__name__ if hasattr(t, "__name__") else t.name for t in reviewer_tools)
     assert names == [
+        "list_pptx_animation_types",
         "list_pptx_icons",
         "list_pptx_shape_types",
         "list_pptx_shapes",
