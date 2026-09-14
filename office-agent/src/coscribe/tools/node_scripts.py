@@ -47,7 +47,13 @@ def _run_node_script(
 
     scratch_dir = Path(tempfile.mkdtemp(prefix="coscribe_node_script_"))
     script_path = scratch_dir / "script.js"
-    script_path.write_text(script)
+    script_path.write_text(script, encoding="utf-8")
+    # Same Windows charmap bug as tools/scripts.py's _run_python_script --
+    # see that function's comment for the full explanation. Node itself
+    # always writes UTF-8 to a piped (non-TTY) stdout/stderr regardless of
+    # the console codepage, so only the host-side write_text above (this
+    # process writing script.js to disk) needs the explicit encoding here;
+    # the subprocess.run encoding below still has to match on the read side.
     env = {**os.environ, "NODE_PATH": str(node_env_dir / "node_modules")}
     try:
         try:
@@ -62,6 +68,8 @@ def _run_node_script(
                 env=env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:

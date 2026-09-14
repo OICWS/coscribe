@@ -2018,3 +2018,55 @@ tool.py`/`test_ooxml_validate.py` suite (291 tests) passes, `ruff check`/
 **Not fixed in this pass, noted for later**: the Windows `charmap`
 subprocess-encoding bug (§22.2) -- real, but lives in `tools/scripts.py`/
 `tools/node_scripts.py`, a different subsystem than this file covers.
+
+## 23. §22.2's deferred bug, fixed: the Windows `charmap` encoding failure
+in `run_python_script`/`run_node_script`
+
+`'charmap' codec can't encode characters in position N-M: character maps
+to <undefined>` is Python's generic name for a single-byte Windows locale
+codec (commonly cp1252 on an English-locale install, cp936 for a Chinese
+one -- either way, one with no slot for most CJK text) being asked to
+encode text it can't represent. Unlike macOS/Linux, Windows has no UTF-8
+default for either side of this: `Path.write_text()` and a child
+process's own stdio both fall back to `locale.getpreferredencoding(False)`
+unless told otherwise (Python's PEP 540 UTF-8 mode is opt-in via
+`PYTHONUTF8`/`-X utf8`, not a Windows default the way it effectively is on
+modern Linux). Two independent failure points existed in
+`tools/scripts.py`'s `_run_python_script` (and the identical pattern in
+`tools/node_scripts.py`'s `_run_node_script`), both unencoded:
+
+1. `script_path.write_text(script)` -- writing the model's own script
+   source to a temp file. Any Chinese comment or string literal in the
+   script (routine for this codebase's Chinese-speaking users) fails
+   right here, before the script ever runs.
+2. `subprocess.run(..., text=True, ...)` with no `encoding=` -- capturing
+   the child's stdout/stderr. For `run_python_script` specifically, a
+   *second*, independent trigger: the child Python process's own
+   `print()` of Chinese text hits the same non-UTF-8 console codepage
+   inside the child itself, before the parent even gets to decode
+   anything.
+
+**Fix**: explicit `encoding="utf-8"` on both the `write_text()` call and
+the `subprocess.run()` call (with `errors="replace"` on the latter so a
+genuinely undecodable byte from a misbehaving script degrades to a
+replacement character instead of raising and losing the rest of the
+output). For `run_python_script` specifically, also force the *child*
+Python's own stdio to UTF-8 via `PYTHONIOENCODING=utf-8`/`PYTHONUTF8=1` in
+the subprocess's environment -- this is what actually fixes trigger #2
+above, since the parent's `encoding=` only controls how the parent reads
+the bytes the child already wrote, not what encoding the child chose when
+writing them. `run_node_script` only needed the `write_text()` fix (a
+comment) plus matching the parent's `subprocess.run(encoding="utf-8")` on
+principle -- Node's own stdout is UTF-8 by default when piped to a
+non-TTY (this subprocess call), regardless of Windows console codepage,
+so there was no child-side environment variable to set.
+
+**Verified**: 2 new regression tests (one per tool) that write a script
+containing a Chinese comment and a Chinese `print`/`console.log` call,
+asserting the exact string round-trips through stdout unmangled. This
+sandbox's own locale is already UTF-8, so it can't reproduce the original
+crash directly -- the tests instead confirm the fix's actual code path
+(the explicit `encoding="utf-8"` everywhere) behaves correctly, which is
+the strongest verification available without real Windows hardware.
+`test_scripts_tool.py`/`test_node_scripts_tool.py` (17 tests) pass,
+`ruff check`/`mypy` clean.

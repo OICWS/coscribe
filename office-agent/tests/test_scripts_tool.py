@@ -121,6 +121,27 @@ def test_run_python_script_venv_is_isolated_from_the_coscribe_process(
     assert "script-env" in result["stdout"]
 
 
+def test_run_python_script_handles_chinese_text_in_the_script_and_its_output(
+    tools: ScriptTools,
+) -> None:
+    """Regression test for a real Windows bug: a script containing (or
+    printing) Chinese text raised `'charmap' codec can't encode characters
+    ...` -- either writing script.py to disk or capturing the child's own
+    stdout defaulted to a non-UTF-8 locale encoding (cp1252/cp936) with no
+    slot for CJK characters. This sandbox's own locale is already UTF-8, so
+    it can't reproduce the failure directly, but it does confirm the fix's
+    actual code path (explicit encoding="utf-8" everywhere) round-trips
+    Chinese text correctly rather than mangling or dropping it."""
+    result = tools.run_python_script(
+        script="# 这是一个中文注释\nprint('你好，世界')",
+        description="print a Chinese greeting",
+    )
+
+    assert result["exit_code"] == 0
+    assert result["stdout"] == "你好，世界\n"
+    assert result["stderr"] == ""
+
+
 def test_run_python_script_can_use_baseline_packages(tools: ScriptTools) -> None:
     result = tools.run_python_script(
         script="import pandas, openpyxl\nprint('ok')",

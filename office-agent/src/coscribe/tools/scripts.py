@@ -27,6 +27,7 @@ docstring.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -55,14 +56,27 @@ def _run_python_script(
 
     scratch_dir = Path(tempfile.mkdtemp(prefix="coscribe_script_"))
     script_path = scratch_dir / "script.py"
-    script_path.write_text(script)
+    script_path.write_text(script, encoding="utf-8")
+    # Windows has no UTF-8-by-default here: neither Path.write_text nor a
+    # child process's own stdio pick it up automatically the way they do on
+    # macOS/Linux (PEP 538/540's UTF-8 mode is opt-in via PYTHONUTF8, not a
+    # Windows default). Without both of these, a script containing (or
+    # printing) non-Latin1 text -- e.g. a Chinese comment or print() --
+    # fails with `'charmap' codec can't encode characters ...`: cp1252/
+    # cp936 (the console codepage) has no slot for most CJK text, so either
+    # the write above or the child's own stdout write raises. This was a
+    # real, live-reported failure on the user's Windows test machine.
+    child_env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     try:
         try:
             result = subprocess.run(
                 [str(python), str(script_path)],
                 cwd=str(workspace_root),
+                env=child_env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:

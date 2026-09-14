@@ -111,6 +111,24 @@ def test_run_node_script_is_exec_and_requires_approval(tools: NodeScriptTools) -
     assert metadata.category == "scripts"
 
 
+def test_run_node_script_handles_chinese_text_in_the_script_and_its_output(
+    tools: NodeScriptTools,
+) -> None:
+    """Regression test for the same real Windows charmap bug covered in
+    test_scripts_tool.py's Python counterpart -- see that test's docstring.
+    Node's own stdout is UTF-8 by default when piped (not a TTY), so the
+    part of this bug specific to run_node_script was purely the host-side
+    write_text(script) call; this confirms the round-trip still works."""
+    result = tools.run_node_script(
+        script="// 这是一个中文注释\nconsole.log('你好，世界')",
+        description="print a Chinese greeting",
+    )
+
+    assert result["exit_code"] == 0
+    assert result["stdout"] == "你好，世界\n"
+    assert result["stderr"] == ""
+
+
 def test_run_node_script_can_use_pptxgenjs(tools: NodeScriptTools) -> None:
     """Regression test for the whole reason this tool exists -- confirms
     require("pptxgenjs") actually resolves via NODE_PATH despite the
