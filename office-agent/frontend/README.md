@@ -81,6 +81,8 @@ what Phase A intentionally does not cover)
 | Approval cards (Approve/Deny → `approval_response`) | ✅ `ChatLog` + `App.tsx` |
 | Composer: Enter to send, Shift+Enter newline, Ctrl/Cmd+Enter insert-newline, IME composition guard | ✅ `Composer.tsx` |
 | Auto-grow textarea | ✅ `Composer.tsx` |
+| Drag-and-drop file attach (any file, not just via the picker) | ✅ `Composer.tsx` -- real dragenter/dragover/drop wiring on the whole composer, `onFileChosen` reused so a dropped file goes through the exact same image-vs-upload branch a picked one does |
+| Large paste collapses into a removable "Pasted (N chars)" pill instead of filling the textarea (mirrors claude.ai) | ✅ `Composer.tsx` -- threshold-gated (`PASTE_CARD_MIN_CHARS`/`PASTE_CARD_MIN_LINES`), full text still reaches the model via `outgoingText`, only the composer/chat-bubble stay uncluttered |
 | Send/Stop button swap | ✅ `Composer.tsx` |
 | `/stop` special-cased as a dedicated `stop` message (not queued) | ✅ `App.tsx` |
 | Instant commands (`/plan`, `/clear`, ...) don't set turnInFlight | ✅ `reducer.ts` |

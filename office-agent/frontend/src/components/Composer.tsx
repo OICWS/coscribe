@@ -47,6 +47,20 @@ interface PendingFile {
   path: string;
 }
 
+interface PendingPaste {
+  text: string;
+  charCount: number;
+}
+
+// A paste under this size just lands in the textarea as normal typed text --
+// only a paste big enough to actually clutter the box (a whole doc, a long
+// log) gets collapsed into a removable pill, mirroring claude.ai's own
+// "Pasted content" card. No single official threshold to match here, so
+// this is a deliberately chosen, documented cutover point rather than a
+// guess at an exact upstream number.
+const PASTE_CARD_MIN_CHARS = 1000;
+const PASTE_CARD_MIN_LINES = 12;
+
 interface ComposerProps {
   turnInFlight: boolean;
   totalTokens: number;
@@ -92,10 +106,17 @@ export function Composer({
   const [value, setValue] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
   const [autocompleteMatches, setAutocompleteMatches] = useState<CommandInfo[]>([]);
   const [autocompleteIndex, setAutocompleteIndex] = useState(-1);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Counts nested dragenter/dragleave pairs (they fire once per child
+  // element the pointer crosses, not just once for the whole drop zone) --
+  // a plain boolean flickers off every time the pointer passes over a
+  // child during the drag, which reads as the highlight randomly blinking.
+  const dragCounterRef = useRef(0);
 
   const autocompleteOpen = autocompleteMatches.length > 0;
 
@@ -153,7 +174,13 @@ export function Composer({
 
   const submit = () => {
     const text = value;
-    if (!text.trim() && pendingImages.length === 0 && pendingFiles.length === 0) return;
+    if (
+      !text.trim() &&
+      pendingImages.length === 0 &&
+      pendingFiles.length === 0 &&
+      pendingPastes.length === 0
+    )
+      return;
     // Real, user-reported bug: nothing gated a new message while a turn
     // was already in flight -- the Send button visually swaps to Stop in
     // that state (see the turnInFlight ? ... below), but Enter still ran
@@ -177,6 +204,17 @@ export function Composer({
     if (pendingFiles.length > 0) {
       const note = `(Attached files, now in the workspace: ${pendingFiles.map((f) => f.path).join(", ")})`;
       outgoingText = text ? `${text}\n\n${note}` : note;
+    }
+    // Unlike pendingFiles above, a paste has no workspace path to point
+    // at -- it's inline text that never left the browser -- so its full
+    // content goes straight into outgoingText verbatim (what the model
+    // sees is identical to what a normal, uncollapsed paste would have
+    // produced). displayText below is left untouched, same as the file
+    // note above: the chat bubble stays short, the model still gets
+    // everything.
+    if (pendingPastes.length > 0) {
+      const pasted = pendingPastes.map((p) => p.text).join("\n\n");
+      outgoingText = outgoingText ? `${outgoingText}\n\n${pasted}` : pasted;
     }
     // Browser-panel "Select an element" captures include the element's
     // own extracted text alongside the screenshot -- previously read
@@ -211,6 +249,7 @@ export function Composer({
     setValue("");
     setPendingImages([]);
     setPendingFiles([]);
+    setPendingPastes([]);
     requestAnimationFrame(resize);
   };
 
@@ -268,6 +307,44 @@ export function Composer({
     }
   };
 
+  const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = event.clipboardData.getData("text/plain");
+    if (!text) return; // non-text clipboard content (e.g. a copied file) -- let it behave natively
+    const lineCount = text.split("\n").length;
+    if (text.length < PASTE_CARD_MIN_CHARS && lineCount < PASTE_CARD_MIN_LINES) return;
+    event.preventDefault();
+    setPendingPastes((prev) => [...prev, { text, charCount: text.length }]);
+  };
+
+  const onDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (!event.dataTransfer.types.includes("Files")) return;
+    dragCounterRef.current += 1;
+    setIsDraggingOver(true);
+  };
+
+  const onDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) setIsDraggingOver(false);
+  };
+
+  const onDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    // Required for onDrop to fire at all -- a plain drag target rejects
+    // the drop by default unless dragover is explicitly prevented.
+    event.preventDefault();
+  };
+
+  const onDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragCounterRef.current = 0;
+    setIsDraggingOver(false);
+    const files = Array.from(event.dataTransfer.files);
+    for (const file of files) {
+      void onFileChosen(file);
+    }
+  };
+
   const onFileChosen = async (file: File) => {
     if (file.type.startsWith("image/")) {
       const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -287,11 +364,22 @@ export function Composer({
     setPendingFiles((prev) => [...prev, { name: file.name, path: result.path }]);
   };
 
-  const canSend = value.trim().length > 0 || pendingImages.length > 0 || pendingFiles.length > 0;
+  const canSend =
+    value.trim().length > 0 ||
+    pendingImages.length > 0 ||
+    pendingFiles.length > 0 ||
+    pendingPastes.length > 0;
 
   return (
-    <div className="mx-auto w-full max-w-[760px] px-4 pb-4">
-      {(pendingImages.length > 0 || pendingFiles.length > 0) && (
+    <div
+      data-testid="composer"
+      className="mx-auto w-full max-w-[760px] px-4 pb-4"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {(pendingImages.length > 0 || pendingFiles.length > 0 || pendingPastes.length > 0) && (
         <div className="mb-2 flex flex-wrap gap-2">
           {pendingImages.map((img, i) => (
             <span
@@ -325,10 +413,37 @@ export function Composer({
               </button>
             </span>
           ))}
+          {pendingPastes.map((p, i) => (
+            <span
+              key={`paste-${i}`}
+              className="flex max-w-[220px] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card-bg)] py-1.5 pl-3 pr-1.5 text-xs"
+            >
+              <span className="truncate">Pasted ({p.charCount.toLocaleString()} chars)</span>
+              <button
+                type="button"
+                aria-label="Remove pasted content"
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--muted)] hover:bg-[var(--border)]"
+                onClick={() => setPendingPastes((prev) => prev.filter((_, idx) => idx !== i))}
+              >
+                ×
+              </button>
+            </span>
+          ))}
         </div>
       )}
 
-      <div className="relative rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-3 shadow-sm">
+      <div
+        className={`relative rounded-2xl border p-3 shadow-sm transition-colors ${
+          isDraggingOver
+            ? "border-[var(--accent)] bg-[var(--card-bg)]"
+            : "border-[var(--border)] bg-[var(--bg)]"
+        }`}
+      >
+        {isDraggingOver && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl text-sm text-[var(--accent)]">
+            Drop to attach
+          </div>
+        )}
         {autocompleteOpen && (
           <div className="absolute bottom-full left-3 right-3 mb-1 max-h-60 overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--bg)] shadow-[var(--shadow)]">
             {autocompleteMatches.map((cmd, i) => (
@@ -359,6 +474,7 @@ export function Composer({
             resize();
           }}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
         />
 
         {/* Send/Stop lives inside the input box itself, bottom-right --
