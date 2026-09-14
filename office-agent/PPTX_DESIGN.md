@@ -3024,3 +3024,82 @@ duplicate-part-corrupted file is both detected at the raw-zip level *and*
 triggers the graceful fallback rather than crashing. 8 new tests
 including the fallback bug as an explicit regression. Full suite,
 `ruff check`/`mypy` clean.
+
+## 33. Dependency risk: `python-pptx`'s maintenance has genuinely
+stalled -- assessed with real data, not dismissed or over-reacted to
+
+User raised a direct concern: is `python-pptx` effectively unmaintained,
+and is that a risk worth confronting rather than assuming away? Checked
+rather than guessed from training-data priors, since the real answer
+matters for how much weight to keep putting on this dependency.
+
+**Confirmed real, via PyPI's own release history and the live GitHub
+issue tracker**: `python-pptx`'s last release is `1.0.2`, August 7,
+2024 -- over two years stale as of this writing (September 2026). The
+repo currently carries 439 open issues and 77 open, unmerged PRs, with
+no PR activity in the past month. Not without precedent -- the same
+single maintainer (scanny) had an earlier ~2 year 3 month gap (May 2021
+-> August 2023) before returning with the whole `1.0.x` series in a
+tight three-release burst -- but the *current* gap has already run
+longer than that one did, so "will resume eventually" isn't something
+to plan around.
+
+**Not a hypothetical either -- this session already paid a real cost
+for it.** §30's `add_pptx_audio` work found `PartFactory.part_type_for`
+(a real, documented extension point per the library's own docstring)
+shipping with *no* content-type registered for any media part, audio or
+video -- reopening a `.pptx` with an existing audio part crashed
+`Package.get_or_add_media_part`'s own dedup lookup on a second call. A
+bug this straightforward, in a library actually being maintained, would
+plausibly already be fixed or have an open PR; here, coscribe had to
+register the missing mapping itself (`_register_audio_media_part_class`)
+rather than lean on an upstream fix.
+
+**The "have Claude Cowork/Codex simply moved past library-driven
+assembly to an agent-plans-then-draws pipeline instead" framing raised
+alongside this turned out not to hold up, checked against real sources
+rather than assumed either way.** Anthropic's own `claude-office-skills`
+runs two paths, and *both* still finish through `python-pptx`: a
+template/inventory-replace path (native placeholders, still
+`python-pptx`'s own object model) and an HTML/CSS-to-PPTX path (Claude
+writes HTML, Puppeteer screenshots it, and -- the source's own words --
+"since the output is a PNG image, the editability of the text is lost,"
+with `python-pptx` still the thing packaging that PNG into a `.pptx`).
+OpenAI's own Codex slide-deck docs don't disclose implementation, but
+community reports describe the unassisted default as "writes a
+python-pptx or PptxGenJS script from scratch." The real pattern across
+all of these -- including coscribe's own coordinator ->
+`write_pptx`/`add_pptx_*` -> `review_work`/`render_pptx_preview` loop --
+is "plan, then build, then verify by rendering," not "replace the
+OOXML-writing library with an image model." The image/screenshot route
+is a real, different product choice some of these tools also offer, but
+its actual tradeoff is native text editability for layout freedom, not
+freedom from needing an OOXML-writing library at the final step --
+directly in tension with coscribe's own reason for existing (produce a
+real, further-editable native deck, not a flattened image one), so not
+something this assessment is recommending adopting.
+
+**Net assessment, not a false-alarm dismissal and not a migration
+trigger either**: the risk is real and should be tracked, but coscribe's
+actual exposure is already narrower than a naive "everything goes
+through `python-pptx`'s high-level API" architecture would be. Across
+§19/§25/§27/§29/§30/§31/§32, a large and growing share of this file's
+own real feature surface (transitions, animations, audio, OMML formulas,
+the slide-jump hyperlink fix, `check_pptx_delivery`) is built by writing
+lxml directly and validating against the *real, vendored ECMA-376
+schema* (`_ooxml_schemas/`), reaching into `python-pptx`'s own internals
+(`parse_xml`, `PartFactory`, raw relationship/part APIs) only where
+useful, not depending on its high-level object model staying correct or
+growing new features. If `python-pptx` stayed frozen at `1.0.2`
+permanently, the practical loss is convenience for the common CRUD
+cases (shapes/text/tables/basic charts) and the OPC packaging plumbing
+(zip/relationships/content-types) it still handles reliably today --
+not the ability to produce valid `.pptx` files, which this project has
+already demonstrated it can do independently when it needs to.
+
+**Watch item, not yet acted on**: `python-pptx-extended`, a PyPI-
+published fork pinned to upstream `1.0.2` that keeps the `import pptx`
+namespace unchanged and adds real formatting gaps (shadows, bullets,
+table borders, line caps/joins, custom XML) -- worth checking against
+coscribe's own known gaps next time one of those specific features is
+needed, not adopted preemptively without a concrete need driving it.
