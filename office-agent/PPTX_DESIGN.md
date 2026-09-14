@@ -3103,3 +3103,77 @@ namespace unchanged and adds real formatting gaps (shadows, bullets,
 table borders, line caps/joins, custom XML) -- worth checking against
 coscribe's own known gaps next time one of those specific features is
 needed, not adopted preemptively without a concrete need driving it.
+
+## 34. `add_pptx_shape_effect` -- shadow/glow/soft edge, closing §33's own
+"shadows" gap natively instead of reaching for the fork
+
+Directly following §33's own steer: keep prioritizing capabilities that
+genuinely need hand-written OOXML, not ones (like §31's hyperlink fix)
+that turn out to have public API support after all. Shape effects are
+squarely that case -- `python-pptx`'s own `ShadowFormat` can only
+*suppress* an inherited theme shadow (`shape.shadow.inherit = False`,
+already used by `add_pptx_scrim`, §16-era) -- there is no public API to
+*create* or customize a shadow, glow, or any other `CT_EffectList`
+member at all. Confirmed empty before starting:
+`grep -n "outerShdw\|effectLst\|shadow\|glow\b" presentations.py`
+returned only that one suppression call.
+
+**Schema verified directly, not guessed**: `CT_EffectList` (a `<p:spPr>`
+child shared by every shape kind -- autoshape/picture/connector --
+`_ooxml_schemas/transitional/dml-main.xsd`) has a *fixed* child order
+(`blur, fillOverlay, glow, innerShdw, outerShdw, prstShdw, reflection,
+softEdge`), each optional and capped at one. `pptx_to_svg/effect_to_svg.py`
+(ppt-master, parsing direction -- pptx to svg, not a builder) was read as
+a prompt, not a source: its own docstring flags "one classifiable outer
+shadow or one glow" as the practically-important subset even for a
+reverse-engineering effort, which is what narrowed this tool's own scope
+to shadow/glow/soft_edge (the one color-free effect real slide design
+also reaches for) and left blur/fillOverlay/innerShdw/prstShdw/reflection
+out -- same "deliberately narrower than the full schema" precedent as
+§27's transitions/§29's animations.
+
+**A genuinely free win, verified live**: python-pptx's own oxml class for
+`<p:spPr>` (`pptx.oxml.shapes.shared.CT_ShapeProperties`) already
+declares `effectLst = ZeroOrOne("a:effectLst", successors=...)` --
+`shape._element.spPr.get_or_add_effectLst()` alone, no hand-XML, already
+inserts `<a:effectLst>` at the schema-correct position within `<p:spPr>`,
+confirmed for both autoshapes and pictures in a REPL before writing any
+of the effect-content code. Only the *content* of `effectLst` (the actual
+`<a:outerShdw>`/`<a:glow>`/`<a:softEdge>` elements) needed hand-lxml --
+the outer positioning problem python-pptx already solves.
+
+**Design decisions made explicit, not left implicit**: effects *compose*
+across separate calls rather than one call replacing the whole
+`effectLst` -- applying `glow` after `shadow` leaves both (a real
+PowerPoint deck commonly layers shadow + soft edge on a photo, for
+example), tracked by finding-and-removing only this call's own target tag
+before reinserting it (the schema's `maxOccurs="1"` per child means a
+second call with the *same* `effect` must replace in place, not stack an
+invalid duplicate). `_apply_shape_effect` computes each new element's
+insertion index from `CT_EffectList`'s own real child-order table against
+whichever of the three supported effects are already present, rather than
+assuming an empty-or-single-child `effectLst`, so shadow-then-glow and
+glow-then-shadow both land in the schema's own `glow` before `outerShdw`
+before `softEdge` order regardless of call order (tested explicitly:
+`test_add_pptx_shape_effect_composes_across_calls_in_schema_order`).
+`effect="none"` clears every effect this tool manages, matching
+`set_pptx_transition`'s own "none clears it" precedent, rather than
+requiring three separate single-purpose "remove" calls.
+
+**Verified real, not just structurally**: a rectangle, an oval, and an
+`add_pptx_icon`-placed picture each rendered through real headless
+LibreOffice with a visible drop shadow, a visible colored glow halo, and
+a visibly softened/feathered edge respectively -- confirmed by actually
+looking at the rendered PNGs, not just checking the XML round-tripped.
+One real, non-bug finding from that pass, worth recording rather than
+silently discarding: a large `soft_edge` `size_pt` (10pt) applied to a
+thin-stroked icon can feather it down to near-invisible at typical render
+resolution -- genuine `CT_SoftEdgesEffect` behavior (the radius blurs
+past the stroke width), not a defect in this tool, but worth keeping
+`size_pt` modest on fine linework. `assert_ooxml_valid` runs before every
+save, same guarantee every other hand-XML write tool in this file already
+gives. 14 new tests (structural per-effect-type checks, cross-call
+ordering, same-type replace-in-place, `none` clearing, picture-shape
+coverage, the full validation error path, tool-metadata risk category,
+and a real LibreOffice round-trip), full suite green, `ruff check`/`mypy`
+clean.

@@ -3158,6 +3158,129 @@ def _adjust_template_content_slides(
     return slide_roles
 
 
+# DrawingML shape effects (drop shadow / glow / soft edge) -- CT_EffectList,
+# a <p:spPr> child shared by every shape kind (autoshape/picture/connector),
+# real schema in _ooxml_schemas/transitional/dml-main.xsd. python-pptx has
+# zero public API for this (its own ShadowFormat can only *suppress* an
+# *inherited* theme shadow -- shape.shadow.inherit = False, used by
+# add_pptx_scrim above -- never create/customize one), so every effect
+# element below is hand-built. CT_EffectList's real child order is fixed
+# (blur, fillOverlay, glow, innerShdw, outerShdw, prstShdw, reflection,
+# softEdge), each optional and maxOccurs=1 -- _apply_shape_effect below
+# always inserts a new effect at the correct position relative to whichever
+# other supported effects (if any) are already present, rather than
+# assuming effectLst is either empty or already holds only this tool's own
+# children. Verified live in a REPL: python-pptx's own oxml class for
+# <p:spPr> (pptx.oxml.shapes.shared.CT_ShapeProperties) already declares
+# effectLst = ZeroOrOne("a:effectLst", successors=...), so
+# spPr.get_or_add_effectLst() alone (no hand-XML needed) already inserts
+# <a:effectLst> at the schema-correct position within <p:spPr> -- confirmed
+# for both autoshapes and pictures.
+_EFFECT_LIST_CHILD_LOCALNAMES = (
+    "blur",
+    "fillOverlay",
+    "glow",
+    "innerShdw",
+    "outerShdw",
+    "prstShdw",
+    "reflection",
+    "softEdge",
+)
+_SHAPE_EFFECT_LOCALNAMES = {"glow": "glow", "shadow": "outerShdw", "soft_edge": "softEdge"}
+_SHAPE_EFFECT_TYPES = frozenset({"shadow", "glow", "soft_edge", "none"})
+
+
+def _shape_effect_color_element(color: str, opacity: float) -> Any:
+    """<a:srgbClr val="RRGGBB"><a:alpha val="NNNNN"/></a:srgbClr> -- the same
+    EG_ColorChoice pattern add_pptx_scrim already hand-builds for its own
+    <a:solidFill>, reused here for <a:glow>/<a:outerShdw>."""
+    from pptx.oxml.xmlchemy import OxmlElement
+
+    srgb_clr = OxmlElement("a:srgbClr")
+    srgb_clr.set("val", color)
+    alpha = OxmlElement("a:alpha")
+    alpha.set("val", str(round(opacity * 100000)))
+    srgb_clr.append(alpha)
+    return srgb_clr
+
+
+def _build_shape_effect_element(
+    effect: str, color: str, opacity: float, size_pt: float, distance_pt: float, direction: float
+) -> Any:
+    from pptx.oxml.xmlchemy import OxmlElement
+    from pptx.util import Pt
+
+    if effect == "glow":
+        glow = OxmlElement("a:glow")
+        glow.set("rad", str(Pt(size_pt)))
+        glow.append(_shape_effect_color_element(color, opacity))
+        return glow
+    if effect == "soft_edge":
+        soft_edge = OxmlElement("a:softEdge")
+        soft_edge.set("rad", str(Pt(size_pt)))
+        return soft_edge
+    # "shadow" -- CT_OuterShadowEffect. dir is in 60,000ths of a degree,
+    # clockwise from 3 o'clock -- the same OOXML angle convention shape
+    # rotation (xfrm@rot) and every other DrawingML angle attribute use.
+    outer_shdw = OxmlElement("a:outerShdw")
+    outer_shdw.set("blurRad", str(Pt(size_pt)))
+    outer_shdw.set("dist", str(Pt(distance_pt)))
+    outer_shdw.set("dir", str(round(direction * 60000) % 21600000))
+    outer_shdw.set("rotWithShape", "0")
+    outer_shdw.append(_shape_effect_color_element(color, opacity))
+    return outer_shdw
+
+
+def _apply_shape_effect(
+    shape: Any,
+    effect: str,
+    color: str,
+    opacity: float,
+    size_pt: float,
+    distance_pt: float,
+    direction: float,
+) -> None:
+    """Inserts (or, for effect="none", removes) one effect element inside
+    this shape's <a:effectLst>, at the position CT_EffectList's own fixed
+    child order requires relative to whichever other supported effect
+    type(s) (if any) are already present. Re-applying the same `effect`
+    replaces its own existing element in place (find-and-remove first --
+    the schema caps each child tag at one), rather than raising or
+    stacking an invalid duplicate; applying a *different* `effect` leaves
+    any other effect type already on this shape untouched, so effects
+    compose across separate calls (e.g. shadow, then soft_edge, leaves
+    both)."""
+    from pptx.oxml.ns import qn
+
+    effect_lst = shape._element.spPr.get_or_add_effectLst()  # noqa: SLF001
+
+    if effect == "none":
+        for local_name in _SHAPE_EFFECT_LOCALNAMES.values():
+            existing = effect_lst.find(qn(f"a:{local_name}"))
+            if existing is not None:
+                effect_lst.remove(existing)
+        return
+
+    target_local = _SHAPE_EFFECT_LOCALNAMES[effect]
+    target_rank = _EFFECT_LIST_CHILD_LOCALNAMES.index(target_local)
+    existing = effect_lst.find(qn(f"a:{target_local}"))
+    if existing is not None:
+        effect_lst.remove(existing)
+
+    local_by_tag = {qn(f"a:{name}"): name for name in _EFFECT_LIST_CHILD_LOCALNAMES}
+    insert_at = 0
+    for child in effect_lst:
+        child_local = local_by_tag.get(child.tag)
+        if child_local is None or _EFFECT_LIST_CHILD_LOCALNAMES.index(child_local) >= target_rank:
+            break
+        insert_at += 1
+
+    new_element = _build_shape_effect_element(
+        effect, color, opacity, size_pt, distance_pt, direction
+    )
+    effect_lst.insert(insert_at, new_element)
+
+
 class PresentationToolkit:
     def __init__(
         self,
@@ -4686,6 +4809,65 @@ class PresentationToolkit:
         }
 
     @locked_by_path
+    def add_pptx_shape_effect(
+        self,
+        path: str,
+        slide: int,
+        shape_index: int,
+        effect: str,
+        color: str = "000000",
+        opacity: float = 0.4,
+        size_pt: float = 8.0,
+        distance_pt: float = 4.0,
+        direction: float = 45.0,
+    ) -> dict[str, object]:
+        """Apply a drop shadow, glow, or soft edge to one shape -- any
+        kind (autoshape, picture, connector), since CT_EffectList (the
+        `<p:spPr>` child that carries these) is shared by all of them.
+        python-pptx has no public API for this at all -- its own
+        ShadowFormat can only suppress an inherited theme shadow
+        (`shape.shadow.inherit = False`, used by add_pptx_scrim above),
+        never create or customize one -- so every effect element this
+        writes is hand-built against the real ECMA-376 schema
+        (`_ooxml_schemas/transitional/dml-main.xsd`'s CT_EffectList/
+        CT_GlowEffect/CT_OuterShadowEffect/CT_SoftEdgesEffect).
+
+        Deliberately narrower than the full schema, matching
+        set_pptx_transition/add_pptx_animation's own precedent -- only
+        the two color-bearing effects real slide design actually reaches
+        for (shadow, glow) and one color-free effect (soft_edge) are
+        supported; blur/fillOverlay/innerShdw/prstShdw/reflection are
+        not."""
+        if effect not in _SHAPE_EFFECT_TYPES:
+            raise ValueError(f"effect {effect!r} must be one of {sorted(_SHAPE_EFFECT_TYPES)}.")
+        if effect != "none":
+            if not _THEME_HEX_RE.match(color):
+                raise ValueError(f"color {color!r} must be a 6-hex-digit color (no '#').")
+            if not 0.0 <= opacity <= 1.0:
+                raise ValueError(f"opacity {opacity} must be between 0.0 and 1.0.")
+            if size_pt <= 0:
+                raise ValueError(f"size_pt {size_pt} must be positive.")
+            if effect == "shadow" and distance_pt < 0:
+                raise ValueError(f"distance_pt {distance_pt} must be non-negative.")
+
+        prs, file_path, target_slide = self._open_slide(path, slide)
+        shape = _get_shape_at_index(target_slide, slide, shape_index)
+        _apply_shape_effect(shape, effect, color.upper(), opacity, size_pt, distance_pt, direction)
+        assert_ooxml_valid(target_slide.element, "add_pptx_shape_effect")
+        prs.save(str(file_path))
+
+        state_dir = Path(self._state_dir) if self._state_dir is not None else None
+        preview_path, preview_skipped_reason = render_thumbnail(file_path, state_dir)
+        return {
+            "path": self._scope.relative(file_path),
+            "slide": slide,
+            "shape_index": shape_index,
+            "effect": effect,
+            "preview_path": preview_path,
+            "preview_skipped_reason": preview_skipped_reason,
+        }
+
+    @locked_by_path
     def set_pptx_notes(self, path: str, slide: int, notes: str) -> dict[str, object]:
         prs, file_path, target_slide = self._open_slide(path, slide)
         target_slide.notes_slide.notes_text_frame.text = notes
@@ -6071,6 +6253,59 @@ def build_presentation_tools(
         """
         return toolkit.add_pptx_scrim(path=path, slide=slide, opacity=opacity, color=color)
 
+    def add_pptx_shape_effect(
+        path: str,
+        slide: int,
+        shape_index: int,
+        effect: str,
+        color: str = "000000",
+        opacity: float = 0.4,
+        size_pt: float = 8.0,
+        distance_pt: float = 4.0,
+        direction: float = 45.0,
+    ) -> dict[str, object]:
+        """Apply a drop shadow, glow, or soft edge to one shape (any kind --
+        autoshape, picture, connector) on a slide in a PowerPoint (.pptx)
+        file.
+
+        Calling this again with a *different* `effect` on the same shape
+        adds that effect alongside whatever it already has (e.g. shadow,
+        then soft_edge, leaves both). Calling it again with the *same*
+        `effect` replaces that effect's own settings in place.
+        `effect="none"` removes every effect this tool manages from the
+        shape (color/opacity/size_pt/distance_pt/direction are ignored in
+        that case).
+
+        Args:
+            path: presentation file to modify, relative to the workspace root
+            slide: 1-based slide number the shape is on
+            shape_index: which shape on that slide -- call list_pptx_shapes
+                first to find it
+            effect: "shadow", "glow", "soft_edge", or "none" to clear
+            color: hex RGB color, no leading "#" -- shadow/glow only,
+                ignored for soft_edge/none
+            opacity: 0.0 (fully transparent) to 1.0 (fully opaque) --
+                shadow/glow only
+            size_pt: blur radius in points (shadow), glow radius (glow), or
+                softening radius (soft_edge)
+            distance_pt: how far the shadow is offset from the shape --
+                shadow only, ignored otherwise
+            direction: shadow offset direction in degrees, 0 = right,
+                90 = down, increasing clockwise (PowerPoint's own angle
+                convention) -- shadow only, ignored otherwise
+        """
+        return toolkit.add_pptx_shape_effect(
+            path=path,
+            slide=slide,
+            shape_index=shape_index,
+            effect=effect,
+            color=color,
+            opacity=opacity,
+            size_pt=size_pt,
+            distance_pt=distance_pt,
+            direction=direction,
+        )
+
     def set_pptx_notes(path: str, slide: int, notes: str) -> dict[str, object]:
         """Set the speaker notes for one slide in a PowerPoint (.pptx) file.
 
@@ -6454,6 +6689,7 @@ def build_presentation_tools(
             set_pptx_background_image, risk_category="WRITE_LOCAL", category="documents"
         ),
         tool_metadata(add_pptx_scrim, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(add_pptx_shape_effect, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(set_pptx_notes, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(set_pptx_transition, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(

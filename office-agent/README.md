@@ -870,6 +870,20 @@ it, not as a default on every background image -- `review_work` (see
 [Subagent delegation and review](#subagent-delegation-and-review) below)
 is a good way to find out whether it's actually needed.
 
+`add_pptx_shape_effect(path, slide, shape_index, effect, color="000000",
+opacity=0.4, size_pt=8.0, distance_pt=4.0, direction=45.0)` applies a drop
+shadow, glow, or soft edge to any shape (autoshape, picture, connector --
+`shape_index` from `list_pptx_shapes`). `python-pptx` has no public API for
+this at all -- its own `ShadowFormat` can only suppress an *inherited* theme
+shadow, never create or customize one -- so this is hand-built against the
+real ECMA-376 schema (`CT_EffectList`/`CT_GlowEffect`/
+`CT_OuterShadowEffect`/`CT_SoftEdgesEffect`). Effects compose across calls:
+adding `"glow"` after `"shadow"` leaves both on the shape, while calling the
+same `effect` again replaces its own settings in place; `effect="none"`
+clears every effect this tool manages. Deliberately narrower than the full
+schema -- only shadow/glow/soft_edge, not blur/fillOverlay/innerShdw/
+prstShdw/reflection.
+
 **Optional: install LibreOffice for overflow warnings and preview thumbnails.**
 If `soffice` is on `PATH`, `write_pptx` renders the deck to PDF in the
 background and flags any text that overflows its slide bounds in the
