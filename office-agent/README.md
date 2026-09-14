@@ -770,6 +770,31 @@ stricter validation. Treat `add_pptx_animation` as best-effort, and open
 the result in real PowerPoint before relying on it for anything that
 matters.
 
+`add_pptx_audio(path, slide, audio_path, left_in=0.3, top_in=0.3,
+trigger="auto", start_delay=0.0, hidden=False)` embeds an mp3/m4a/wav
+file on a slide as a real media shape with a speaker icon -- background
+music, a voiceover/narration track, or a sound effect, not just an
+attached file. `trigger="auto"` (default) plays automatically once the
+slide begins, `start_delay` seconds later; `trigger="on-click"` instead
+waits for the speaker icon itself to be clicked, matching PowerPoint's
+own "Start: On Click" option (`start_delay` is ignored for this
+trigger). `hidden=True` moves the icon off the visible canvas instead of
+placing it at `(left_in, top_in)` -- for background narration nobody
+should see or accidentally click, while still keeping `trigger="auto"`.
+Real PowerPoint audio XML needs two relationships to the same media
+part (a legacy `<a:audioFile>` reference plus a PowerPoint-2010
+`<p14:media>` extension) -- `python-pptx`'s own `add_movie` builds the
+video equivalent the identical way for the identical documented reason,
+but only supports video, so this is hand-built OOXML rather than a
+reuse of that method (which would leave the wrong element name and
+relationship type on the shape). Schema-validated before saving, same
+two-check discipline as `add_pptx_animation` above (real ECMA-376
+validation plus a python-pptx warnings-as-errors round-trip); has only
+been tested against LibreOffice in this environment, so treat it as
+best-effort and confirm playback sounds right in real PowerPoint before
+relying on it. Calling this and `add_pptx_animation` on the same slide,
+in either order, is safe -- they share one `<p:timing>` tree.
+
 `search_images(query, max_results=5)` searches the live web for images
 (via `ddgs`, the same library `web_search` uses) and returns candidate
 URLs -- nothing is downloaded yet. `download_image(url, path,

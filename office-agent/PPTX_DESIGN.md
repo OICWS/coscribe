@@ -2695,3 +2695,169 @@ tests pass unchanged. Full suite, `ruff check`/`mypy` clean.
 
 **Still not checked, honestly**: `svg_quality/checker.py`,
 `narration_sync.py`/TTS -- unchanged from §27/§28's own open list.
+
+## 30. `add_pptx_audio` -- closing the last item on §27/§28/§29's own
+open list, in scoped-down form
+
+Checked both remaining items directly by reading source before deciding,
+not assuming either from the file names alone.
+
+**`svg_quality/checker.py` (9834 lines): confirmed genuinely out of
+scope, not just "probably too coupled."** Its own imports
+(`pptx_workspace`, `slide_roster.discover_slide_svgs`,
+`svg_authoring_contract`, `svg_to_pptx.canvas_contract`,
+`project_management.project_specs`) and its sibling `svg_contracts.py`'s
+own docstring ("Validates the SVG property surface shared with the
+native DrawingML exporter") confirm it validates that ppt-master's *own
+SVG-authoring intermediate representation* only uses properties their
+SVG-to-DrawingML converter can translate -- a real, useful check, but
+only for a pipeline shape coscribe deliberately doesn't have (no SVG
+intermediate stage; DrawingML is written directly). Matches the original
+plan's own "not adopting the SVG pipeline" exclusion exactly -- confirmed
+by reading, not re-asserted from that old decision alone.
+
+**`narration_sync.py` (2253 lines): also out of scope as a whole** --
+depends on `ffprobe`/`ffmpeg`, ppt-master's own `project_path` structure,
+and does something much bigger than "embed one audio file" (deriving
+click-free narration timing from an animation config, merging SRT
+subtitles against a rendered video's timeline). Not worth porting for a
+capability coscribe never had at all. But its *sibling* module,
+`svg_to_pptx/pptx_package/narration.py` (696 lines, imports only stdlib +
+this session's own already-ported `pptx_transitions.py` constants), turned
+out to be the real, standalone, genuinely useful piece: the actual OOXML
+mechanics for embedding audio and setting up auto-play timing -- narrower
+than the whole narration_sync workflow, but a real, closeable gap (§16
+originally named "no image sourcing" as a gap; audio embedding was never
+even on that list, since coscribe had *zero* audio capability before this
+-- a new capability, not an upgrade to an existing one like §27/§29).
+
+**Adapted, not reused wholesale, and not vendored** -- same "retyped and
+credited" tier as §27/§29 (not §25's "vendor whole files unmodified"):
+`_build_audio_pic_element`/`_build_audio_timing_node` in
+`presentations.py` are adapted from `narration.py`'s own
+`_create_audio_pic_element`/`_create_audio_timing_element` (commit
+`6e3ce9c5a3b994a0e223a14a0f7edd42fd0b9f5`, credited in each function's
+own docstring), ported from `xml.etree.ElementTree` to this file's own
+`lxml`, with real PowerPoint audio XML's two-relationship pattern kept
+exactly (`<a:audioFile r:link=...>` legacy reference + PowerPoint-2010
+`<p14:media r:embed=...>` extension, both pointing at the same media
+part) -- confirmed against python-pptx's own `add_movie`, which builds
+the video equivalent (`<a:videoFile>`) the identical way for the
+identical documented reason ("two relationships to the same part... for
+legacy support for an earlier pre-Office 2010 PowerPoint media embedding
+strategy"). Checked against the real vendored schema before assuming no
+`mc:Ignorable` was needed for `p14:media` here (unlike `p14:dur`/`a14:m`
+elsewhere in this file): `<p:ext>` (`CT_Extension`/
+`CT_OfficeArtExtension`) already declares an `xsd:any
+processContents="lax"` wildcard, so foreign-namespaced content inside an
+extLst is schema-legitimate on its own -- confirmed by reading the real
+schema, not assumed from the `p14:dur` precedent transferring cleanly.
+
+**The poster/speaker icon is python-pptx's own bundled asset, not
+ppt-master's.** `add_movie`'s own docstring says "If no poster frame is
+provided, the default 'media loudspeaker' image will be used" --
+`pptx.media.SPEAKER_IMAGE_BYTES` is a real, valid PNG already shipped
+with the `pptx` dependency coscribe already has. Reusing it directly
+(rather than vendoring ppt-master's own separate base64 icon) is simpler
+sourcing with no new provenance to track.
+
+**Three real bugs found by testing, not assumed correct from reading the
+adapted code alone** -- the "verify against reality" discipline every
+prior ppt-master-alignment feature this session has followed, applied
+here too:
+1. **Wrong python-pptx element class on append.** A `<p:pic>` built with
+   plain `lxml.etree.Element`/`SubElement` (this file's own established
+   style for every other hand-XML feature) and appended directly into
+   `target_slide.shapes._spTree` crashed the moment `target_slide.shapes`
+   was iterated (`AttributeError: 'lxml.etree._Element' object has no
+   attribute 'has_ph_elm'`) -- python-pptx keys its own shape factory off
+   a custom `CT_Picture` subclass, not a bare lxml element, even when the
+   XML content is identical. Fixed by round-tripping the built element
+   through `parse_xml(etree.tostring(pic))` before appending -- confirmed
+   empirically this yields the real `CT_Picture` class regardless of the
+   (arbitrary, auto-generated) namespace prefixes `etree.tostring` emits
+   for Clark-notation tags. Every earlier hand-XML feature in this file
+   (transitions, animations, formulas) only ever built elements that live
+   *inside* `<p:timing>`/a run's own paragraph -- never independently
+   re-iterated via python-pptx's shape factory -- so this class-identity
+   requirement never surfaced before audio's own `<p:pic>` shape.
+2. **An empty mainSeq is itself schema-invalid.** The first design
+   eagerly built a *full* timing skeleton (via the existing
+   `_new_timing_tree`, mainSeq included) whenever audio needed a fresh
+   `<p:timing>` tree, reasoning that guaranteeing mainSeq always exists
+   would keep `add_pptx_animation`'s own mainSeq lookup simple for a
+   later call. Real schema validation caught the actual defect first:
+   `CT_TimeNodeList` (mainSeq's own childTnLst type) requires
+   `minOccurs="1"` -- an empty `<p:seq>` (no animation added yet) is
+   invalid on its own, not just an inefficiency. Fixed by extracting the
+   shared "build mainSeq" logic into `_append_main_seq` and making both
+   `add_pptx_audio`'s timing-tree creation (`_timing_root_child_list`,
+   now minimal -- tmRoot/childTnLst only, no seq) and
+   `add_pptx_animation`'s own `_add_animation_step` lazy: the latter now
+   handles "a `<p:timing>` tree exists but has no mainSeq yet" (because
+   audio created it first) by *adding* a mainSeq to the existing tree via
+   `_append_main_seq`, rather than assuming a missing mainSeq means a
+   missing `<p:timing>` entirely and reconstructing from scratch -- which
+   would have silently discarded whatever audio/video nodes were already
+   there. Both call orders (audio-then-animation, animation-then-audio)
+   are covered by regression tests.
+3. **python-pptx's own `PartFactory` has no content-type registered for
+   *any* media part**, audio or video -- confirmed by reading
+   `PartFactory.part_type_for` (a real, documented extension point per
+   its own docstring: "Client code can register a subclass of |Part|...
+   based on its content type") and finding it's populated nowhere in the
+   library. Reopening a `.pptx` that already has one audio part loads it
+   back as a plain `Part` (no `.sha1`), and `Package.get_or_add_
+   media_part`'s own dedup-by-sha1 lookup crashed with `AttributeError:
+   'Part' object has no attribute 'sha1'` on every second `add_pptx_audio`
+   call in the same process -- hit for real, not hypothetical. Fixed by
+   registering `MediaPart` for the three audio content types this tool
+   uses via that same sanctioned extension point
+   (`_register_audio_media_part_class`, called idempotently at the start
+   of every `add_pptx_audio` call) -- the correct fix, not a workaround,
+   since `MediaPart` itself already says "containing an audio or video
+   resource" and only needed to actually be wired up.
+
+**Two relationship types, not one, confirmed rather than assumed
+identical to `add_movie`'s.** `add_movie`'s own higher-level
+`get_or_add_video_media_part` hardcodes `RT.VIDEO` for the legacy
+relationship -- semantically wrong for audio and mismatched against this
+tool's own `<a:audioFile>` element (which real PowerPoint pairs with
+`RT.AUDIO`, confirmed to exist in python-pptx's own `RELATIONSHIP_TYPE`
+constants). Built the two relationships directly (`RT.AUDIO` + `RT.MEDIA`)
+rather than reusing `get_or_add_video_media_part` and trying to patch the
+result, using the same `Video`/`get_or_add_media_part`/`relate_to`/
+`get_or_add_image_part` primitives `add_movie` itself is built from.
+
+**Deliberately narrower than real PowerPoint's own audio options**:
+`trigger` is `"auto"` (start after a delay, no click) or `"on-click"`
+(the shape's own `ppaction://media` hyperlink) -- PowerPoint's fuller
+per-object `effect_options`-style customization (fade in/out, loop,
+stop-after-N-slides, volume other than the fixed 80%) is scoped out,
+matching §27's own "one sensible default variant" precedent for
+transitions. One track per call, mp3/m4a/wav only (ppt-master's own real
+`AUDIO_CONTENT_TYPES`, not independently guessed).
+
+**Verified real, not just unit-tested**: a real, valid WAV (stdlib
+`wave`, no external tooling) embedded and read back structurally
+(relationship types, `<a:audioFile>`/`<p14:media>`/`<a:blip>` all
+present); auto vs. on-click timing XML shape; hidden vs. visible shape
+placement; both cross-feature orderings (audio-then-animation and
+animation-then-audio) confirmed to share one `<p:timing>` tree without
+data loss; a 2-slide deck mixing both orderings, both triggers, and
+`hidden=True` round-tripped cleanly through python-pptx with warnings
+treated as errors and converted through the real LibreOffice
+`soffice --convert-to pdf` pipeline with no error -- the same honest
+ceiling as every other hand-XML feature this session: confirming
+playback actually *sounds* right still needs a human with real
+PowerPoint, not a static test. 16 new tests, including the three real
+bugs above as explicit regression tests. Full suite, `ruff check`/`mypy`
+clean.
+
+**Deliberately not done**: this closes the "no audio capability at all"
+gap with straight embedding + basic auto-play/click timing, not
+ppt-master's fuller narration workflow (animation-timing-aware sync,
+subtitle generation/merging, TTS generation itself) -- none of that
+applies without the surrounding project structure it's built for, and
+none of it was a pre-existing coscribe capability being upgraded the way
+§27/§29 upgraded transitions/animations.

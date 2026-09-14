@@ -219,6 +219,11 @@ _MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 # validate side), reused unmodified rather than duplicated.
 _A14_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
 _M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+# DrawingML's base namespace -- add_pptx_audio's own <a:audioFile>/
+# <a:blip>/<a:xfrm> below, none of which needed a dedicated constant
+# until now (every earlier hand-XML feature only ever needed the "p"/
+# "p14"/"a14"/"m" namespaces above).
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 # PowerPoint 2012/2015 extension namespaces -- set_pptx_transition's own
 # pair beyond _P14_NS above, needed for the newer transition effects below
@@ -547,6 +552,40 @@ _TRIGGER_NODE_TYPES = {
 }
 _TRIGGERS = frozenset(_TRIGGER_NODE_TYPES)
 
+# add_pptx_audio's own, deliberately small format set -- the three real
+# content types hugohe3/ppt-master's own narration tooling supports
+# (`AUDIO_CONTENT_TYPES` in `svg_to_pptx/pptx_package/narration.py`),
+# not independently guessed.
+_AUDIO_CONTENT_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav"}
+_AUDIO_TRIGGERS = frozenset({"auto", "on-click"})
+# 457200 EMU = 0.5in -- the real size PowerPoint itself uses for an
+# inserted-audio icon (matches hugohe3/ppt-master's own
+# AUDIO_MARKER_SIZE_EMU), not independently chosen.
+_AUDIO_MARKER_SIZE_EMU = 457200
+
+
+def _register_audio_media_part_class() -> None:
+    """Register `MediaPart` for every audio content type add_pptx_audio
+    uses -- python-pptx's own `PartFactory.part_type_for` dict is a real,
+    documented extension point ("Client code can register a subclass of
+    |Part| to be used for a package blob based on its content type," per
+    its own docstring), but ships with nothing registered for *any*
+    media content type, audio or video. Without this, reopening a .pptx
+    that already has one audio/video part loads it back as a plain
+    |Part| (no `.sha1`), and `Package.get_or_add_media_part`'s own
+    dedup-by-sha1 lookup crashes with `AttributeError: 'Part' object has
+    no attribute 'sha1'` on every subsequent add_pptx_audio call in the
+    same process -- confirmed by hitting exactly that crash on a second
+    call before adding this registration, not assumed. A one-time,
+    idempotent process-wide side effect, matching how the module-level
+    docstring already documents this file lazily importing `pptx`/`lxml`
+    inside functions rather than at module scope."""
+    from pptx.opc.package import PartFactory
+    from pptx.parts.media import MediaPart
+
+    for content_type in _AUDIO_CONTENT_TYPES.values():
+        PartFactory.part_type_for[content_type] = MediaPart
+
 
 def _ctn_numeric_delay(ctn: Any) -> int:
     """Largest direct numeric start delay on one <p:cTn>'s own
@@ -698,10 +737,35 @@ def _instantiate_animation_preset_row(
     return next_id
 
 
+def _append_main_seq(root_child: Any, main_seq_id: int) -> Any:
+    """Append a fresh, empty <p:seq> (mainSeq) to `root_child` (tmRoot's
+    own <p:childTnLst>), returning mainSeq's own (also empty) childTnLst
+    for the caller to append its first <p:par> step into -- the shared
+    "add animation support to a slide" step, whether that slide has no
+    timing tree at all yet (`_new_timing_tree`) or already has one
+    without a mainSeq because `add_pptx_audio` created it first
+    (`_add_animation_step`'s own mainSeq-missing branch)."""
+    from lxml import etree
+
+    seq = etree.SubElement(root_child, f"{{{_P_NS}}}seq", concurrent="1", nextAc="seek")
+    main_ctn = etree.SubElement(
+        seq, f"{{{_P_NS}}}cTn", id=str(main_seq_id), dur="indefinite", nodeType="mainSeq"
+    )
+    main_child = etree.SubElement(main_ctn, f"{{{_P_NS}}}childTnLst")
+    prev_cond_lst = etree.SubElement(seq, f"{{{_P_NS}}}prevCondLst")
+    prev_cond = etree.SubElement(prev_cond_lst, f"{{{_P_NS}}}cond", evt="onPrev", delay="0")
+    etree.SubElement(etree.SubElement(prev_cond, f"{{{_P_NS}}}tgtEl"), f"{{{_P_NS}}}sldTgt")
+    next_cond_lst = etree.SubElement(seq, f"{{{_P_NS}}}nextCondLst")
+    next_cond = etree.SubElement(next_cond_lst, f"{{{_P_NS}}}cond", evt="onNext", delay="0")
+    etree.SubElement(etree.SubElement(next_cond, f"{{{_P_NS}}}tgtEl"), f"{{{_P_NS}}}sldTgt")
+    return main_child
+
+
 def _new_timing_tree(slide_element: Any) -> tuple[Any, Any]:
-    """Create `slide_element`'s (a <p:sld>) very first <p:timing> tree --
-    the tmRoot/seq/mainSeq skeleton every animation, regardless of
-    trigger, lives under. Returns (timing, mainSeq's own childTnLst)."""
+    """Create `slide_element`'s (a <p:sld>) very first <p:timing> tree,
+    including its mainSeq -- the tmRoot/seq/mainSeq skeleton every
+    animation, regardless of trigger, lives under. Returns (timing,
+    mainSeq's own childTnLst)."""
     from lxml import etree
 
     timing = etree.SubElement(slide_element, f"{{{_P_NS}}}timing")
@@ -711,17 +775,7 @@ def _new_timing_tree(slide_element: Any) -> tuple[Any, Any]:
         root_par, f"{{{_P_NS}}}cTn", id="1", dur="indefinite", restart="never", nodeType="tmRoot"
     )
     root_child = etree.SubElement(root_ctn, f"{{{_P_NS}}}childTnLst")
-    seq = etree.SubElement(root_child, f"{{{_P_NS}}}seq", concurrent="1", nextAc="seek")
-    main_ctn = etree.SubElement(
-        seq, f"{{{_P_NS}}}cTn", id="2", dur="indefinite", nodeType="mainSeq"
-    )
-    main_child = etree.SubElement(main_ctn, f"{{{_P_NS}}}childTnLst")
-    prev_cond_lst = etree.SubElement(seq, f"{{{_P_NS}}}prevCondLst")
-    prev_cond = etree.SubElement(prev_cond_lst, f"{{{_P_NS}}}cond", evt="onPrev", delay="0")
-    etree.SubElement(etree.SubElement(prev_cond, f"{{{_P_NS}}}tgtEl"), f"{{{_P_NS}}}sldTgt")
-    next_cond_lst = etree.SubElement(seq, f"{{{_P_NS}}}nextCondLst")
-    next_cond = etree.SubElement(next_cond_lst, f"{{{_P_NS}}}cond", evt="onNext", delay="0")
-    etree.SubElement(etree.SubElement(next_cond, f"{{{_P_NS}}}tgtEl"), f"{{{_P_NS}}}sldTgt")
+    main_child = _append_main_seq(root_child, 2)
     return timing, main_child
 
 
@@ -732,6 +786,126 @@ def _next_timing_id(timing: Any) -> int:
         if element.get("id") is not None
     ]
     return max(existing_ids, default=2) + 1
+
+
+def _timing_root_child_list(slide_element: Any) -> Any:
+    """Return-or-create the <p:timing>'s tmRoot <p:cTn>'s own
+    <p:childTnLst> -- where <p:seq> (add_pptx_animation's mainSeq) and
+    <p:audio>/<p:video> (auto-playing media, add_pptx_audio's own node)
+    live as siblings. Creates only the minimal tmRoot/childTnLst skeleton
+    if the slide has no <p:timing> yet -- deliberately *not* an empty
+    mainSeq: `CT_TimeNodeList` (mainSeq's own childTnLst type) requires
+    at least one child, so an empty <p:seq> is schema-invalid on its own,
+    confirmed by hitting exactly that real validation error before fixing
+    this. mainSeq is only ever added once an actual animation needs it
+    (see _add_animation_step's own mainSeq-missing branch)."""
+    from lxml import etree
+
+    timing = slide_element.find(f"{{{_P_NS}}}timing")
+    if timing is None:
+        timing = etree.SubElement(slide_element, f"{{{_P_NS}}}timing")
+        tn_lst = etree.SubElement(timing, f"{{{_P_NS}}}tnLst")
+        root_par = etree.SubElement(tn_lst, f"{{{_P_NS}}}par")
+        root_ctn = etree.SubElement(
+            root_par,
+            f"{{{_P_NS}}}cTn",
+            id="1",
+            dur="indefinite",
+            restart="never",
+            nodeType="tmRoot",
+        )
+        return etree.SubElement(root_ctn, f"{{{_P_NS}}}childTnLst")
+    return timing.find(f".//{{{_P_NS}}}cTn[@nodeType='tmRoot']/{{{_P_NS}}}childTnLst")
+
+
+_AUDIO_EXT_URI = "{DAA4B4D4-6D71-4841-9C94-3DE7FCFB9230}"
+
+
+def _build_audio_pic_element(
+    shape_id: int,
+    shape_name: str,
+    audio_rid: str,
+    media_rid: str,
+    poster_rid: str,
+    x_emu: int,
+    y_emu: int,
+    size_emu: int,
+) -> Any:
+    """<p:pic> shape carrying embedded narration/background audio --
+    adapted from hugohe3/ppt-master's own `svg_to_pptx/pptx_package/
+    narration.py`'s `_create_audio_pic_element` (commit
+    `6e3ce9c5a3b994a0e223a14a0f7edd42fd0b9f5`): real PowerPoint audio XML
+    needs BOTH a legacy `<a:audioFile r:link=...>` reference (`EG_Media`,
+    the pre-2010 mechanism) and a PowerPoint-2010 `<p14:media
+    r:embed=...>` extension (inside `<p:nvPr>`'s own `<p:extLst>`)
+    pointing at the SAME media part via two different relationship types
+    -- confirmed against python-pptx's own `add_movie`, which builds the
+    video equivalent (`<a:videoFile>`) the identical way for the
+    identical documented reason ("two relationships to the same part...
+    for legacy support for an earlier pre-Office 2010 PowerPoint media
+    embedding strategy"). No `mc:Ignorable` needed for `p14:media` here,
+    unlike `p14:dur`/`a14:m` elsewhere in this file -- confirmed against
+    the real vendored schema: `<p:ext>` (`CT_Extension`/
+    `CT_OfficeArtExtension`) already declares an `xsd:any
+    processContents="lax"` wildcard, so foreign-namespaced content inside
+    an extLst is schema-legitimate on its own, unlike a bare foreign
+    attribute/element with no such wildcard slot."""
+    from lxml import etree
+
+    pic = etree.Element(f"{{{_P_NS}}}pic")
+    nv_pic_pr = etree.SubElement(pic, f"{{{_P_NS}}}nvPicPr")
+    c_nv_pr = etree.SubElement(
+        nv_pic_pr, f"{{{_P_NS}}}cNvPr", id=str(shape_id), name=shape_name
+    )
+    etree.SubElement(
+        c_nv_pr,
+        f"{{{_A_NS}}}hlinkClick",
+        {f"{{{_R_NS}}}id": "", "action": "ppaction://media"},
+    )
+    c_nv_pic_pr = etree.SubElement(nv_pic_pr, f"{{{_P_NS}}}cNvPicPr")
+    etree.SubElement(c_nv_pic_pr, f"{{{_A_NS}}}picLocks", noChangeAspect="1")
+    nv_pr = etree.SubElement(nv_pic_pr, f"{{{_P_NS}}}nvPr")
+    etree.SubElement(nv_pr, f"{{{_A_NS}}}audioFile", {f"{{{_R_NS}}}link": audio_rid})
+    ext_lst = etree.SubElement(nv_pr, f"{{{_P_NS}}}extLst")
+    ext = etree.SubElement(ext_lst, f"{{{_P_NS}}}ext", uri=_AUDIO_EXT_URI)
+    etree.SubElement(ext, f"{{{_P14_NS}}}media", {f"{{{_R_NS}}}embed": media_rid})
+
+    blip_fill = etree.SubElement(pic, f"{{{_P_NS}}}blipFill")
+    etree.SubElement(blip_fill, f"{{{_A_NS}}}blip", {f"{{{_R_NS}}}embed": poster_rid})
+    stretch = etree.SubElement(blip_fill, f"{{{_A_NS}}}stretch")
+    etree.SubElement(stretch, f"{{{_A_NS}}}fillRect")
+
+    sp_pr = etree.SubElement(pic, f"{{{_P_NS}}}spPr")
+    xfrm = etree.SubElement(sp_pr, f"{{{_A_NS}}}xfrm")
+    etree.SubElement(xfrm, f"{{{_A_NS}}}off", x=str(x_emu), y=str(y_emu))
+    etree.SubElement(xfrm, f"{{{_A_NS}}}ext", cx=str(size_emu), cy=str(size_emu))
+    prst_geom = etree.SubElement(sp_pr, f"{{{_A_NS}}}prstGeom", prst="rect")
+    etree.SubElement(prst_geom, f"{{{_A_NS}}}avLst")
+    return pic
+
+
+def _build_audio_timing_node(shape_id: int, ctn_id: int, start_delay_ms: int | None) -> Any:
+    """<p:audio> media-playback timing node -- auto-plays `start_delay_ms`
+    after the slide begins, or (when `start_delay_ms` is None) waits for
+    the shape's own `ppaction://media` click hyperlink instead
+    (`delay="indefinite"`, matching python-pptx's own `add_movie`/
+    `_add_video_timing` for the click-triggered case). Adapted from
+    hugohe3/ppt-master's own `svg_to_pptx/pptx_package/narration.py`'s
+    `_create_audio_timing_element` (commit
+    `6e3ce9c5a3b994a0e223a14a0f7edd42fd0b9f5`)."""
+    from lxml import etree
+
+    audio = etree.Element(f"{{{_P_NS}}}audio")
+    media_node = etree.SubElement(audio, f"{{{_P_NS}}}cMediaNode", vol="80000")
+    time_node = etree.SubElement(
+        media_node, f"{{{_P_NS}}}cTn", id=str(ctn_id), fill="hold", display="0"
+    )
+    delay = "indefinite" if start_delay_ms is None else str(start_delay_ms)
+    st_cond_lst = etree.SubElement(time_node, f"{{{_P_NS}}}stCondLst")
+    etree.SubElement(st_cond_lst, f"{{{_P_NS}}}cond", delay=delay)
+    target = etree.SubElement(media_node, f"{{{_P_NS}}}tgtEl")
+    etree.SubElement(target, f"{{{_P_NS}}}spTgt", spid=str(shape_id))
+    return audio
 
 
 def _append_step(
@@ -820,7 +994,19 @@ def _add_animation_step(
         group = None
     else:
         main_child = timing.find(f".//{{{_P_NS}}}cTn[@nodeType='mainSeq']/{{{_P_NS}}}childTnLst")
-        group = main_child[-1] if len(main_child) else None
+        if main_child is None:
+            # add_pptx_audio already created this slide's <p:timing> tree
+            # without a mainSeq (an empty <p:seq> is itself schema-
+            # invalid, so it's only ever added once an animation needs
+            # it) -- add one now, alongside whatever audio/video nodes
+            # are already there, rather than discarding the tree.
+            root_child = timing.find(
+                f".//{{{_P_NS}}}cTn[@nodeType='tmRoot']/{{{_P_NS}}}childTnLst"
+            )
+            main_child = _append_main_seq(root_child, _next_timing_id(timing))
+            group = None
+        else:
+            group = main_child[-1] if len(main_child) else None
 
     next_id = _next_timing_id(timing)
 
@@ -4436,6 +4622,111 @@ class PresentationToolkit:
         }
 
     @locked_by_path
+    def add_pptx_audio(
+        self,
+        path: str,
+        slide: int,
+        audio_path: str,
+        left_in: float = 0.3,
+        top_in: float = 0.3,
+        trigger: str = "auto",
+        start_delay: float = 0.0,
+        hidden: bool = False,
+    ) -> dict[str, object]:
+        if trigger not in _AUDIO_TRIGGERS:
+            raise ValueError(
+                f"Unknown trigger {trigger!r}. Use one of: {', '.join(sorted(_AUDIO_TRIGGERS))}"
+            )
+        audio_file = self._check_readable(audio_path)
+        ext = audio_file.suffix.lower()
+        if ext not in _AUDIO_CONTENT_TYPES:
+            raise ValueError(
+                f"add_pptx_audio: unsupported audio format {ext!r} on {audio_path!r} -- "
+                f"use one of: {', '.join(sorted(_AUDIO_CONTENT_TYPES))}"
+            )
+        prs, file_path, target_slide = self._open_slide(path, slide)
+
+        import io
+
+        from lxml import etree
+        from pptx.media import SPEAKER_IMAGE_BYTES, Video
+        from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+        from pptx.oxml import parse_xml
+        from pptx.util import Inches
+
+        # `Video` is python-pptx's own generic media-blob wrapper (used
+        # internally by `add_movie`) -- nothing in it is video-specific,
+        # confirmed by reading its source before reusing it here. Its own
+        # `get_or_add_media_part`/`relate_to`/`get_or_add_image_part` are
+        # the same real relationship-writing plumbing `add_movie` uses,
+        # reused directly rather than hand-rolled, EXCEPT for the actual
+        # audio relationship type: `add_movie`'s own higher-level
+        # `get_or_add_video_media_part` hardcodes `RT.VIDEO` for the
+        # legacy relationship, which would be semantically wrong for
+        # audio (and mismatched against this method's own `<a:audioFile>`
+        # element) -- built directly with the real `RT.AUDIO` type
+        # instead, confirmed to exist in python-pptx's own constants.
+        _register_audio_media_part_class()
+        video = Video.from_path_or_file_like(str(audio_file), _AUDIO_CONTENT_TYPES[ext])
+        slide_part = target_slide.part
+        media_part = slide_part.package.get_or_add_media_part(video)
+        audio_rid = slide_part.relate_to(media_part, RT.AUDIO)
+        media_rid = slide_part.relate_to(media_part, RT.MEDIA)
+        # The default "media loudspeaker" icon python-pptx already bundles
+        # for `add_movie`'s own poster-frame fallback -- reused as-is
+        # rather than vendoring hugohe3/ppt-master's own separate icon,
+        # since coscribe already ships python-pptx as a real dependency.
+        _, poster_rid = slide_part.get_or_add_image_part(io.BytesIO(SPEAKER_IMAGE_BYTES))
+
+        shape_id = target_slide.shapes._next_shape_id
+        shape_name = audio_file.name
+        if hidden:
+            x_emu = y_emu = -_AUDIO_MARKER_SIZE_EMU
+        else:
+            x_emu, y_emu = int(Inches(left_in)), int(Inches(top_in))
+
+        pic = _build_audio_pic_element(
+            shape_id,
+            shape_name,
+            audio_rid,
+            media_rid,
+            poster_rid,
+            x_emu,
+            y_emu,
+            _AUDIO_MARKER_SIZE_EMU,
+        )
+        # `_build_audio_pic_element` returns a plain lxml element -- python-
+        # pptx's own shape factory (invoked whenever `target_slide.shapes`
+        # is iterated, which `render_pptx_preview`/`list_pptx_shapes` and
+        # this method's own shape_index computation below all do) expects
+        # its custom `CT_Picture` subclass instead, keyed off a parser
+        # python-pptx registers globally -- round-tripping through
+        # `parse_xml(etree.tostring(...))` re-parses with that same
+        # parser, confirmed empirically to yield the real `CT_Picture`
+        # class regardless of the (arbitrary, auto-generated) namespace
+        # prefixes `etree.tostring` emits for Clark-notation tags.
+        target_slide.shapes._spTree.append(parse_xml(etree.tostring(pic)))
+        shape_index = len(list(target_slide.shapes)) - 1
+
+        root_child = _timing_root_child_list(target_slide.element)
+        timing = target_slide.element.find(f"{{{_P_NS}}}timing")
+        next_id = _next_timing_id(timing)
+        start_delay_ms = None if trigger == "on-click" else max(0, round(start_delay * 1000))
+        root_child.append(_build_audio_timing_node(shape_id, next_id, start_delay_ms))
+
+        assert_ooxml_valid(target_slide.element, "add_pptx_audio")
+        prs.save(str(file_path))
+
+        return {
+            "path": self._scope.relative(file_path),
+            "slide": slide,
+            "shape_index": shape_index,
+            "trigger": trigger,
+            "start_delay": (None if start_delay_ms is None else round(start_delay_ms / 1000, 3)),
+            "hidden": hidden,
+        }
+
+    @locked_by_path
     def add_pptx_hyperlink(
         self,
         path: str,
@@ -5638,6 +5929,71 @@ def build_presentation_tools(
             by_paragraph=by_paragraph,
         )
 
+    def add_pptx_audio(
+        path: str,
+        slide: int,
+        audio_path: str,
+        left_in: float = 0.3,
+        top_in: float = 0.3,
+        trigger: str = "auto",
+        start_delay: float = 0.0,
+        hidden: bool = False,
+    ) -> dict[str, object]:
+        """Embed an audio file (mp3/m4a/wav) on a slide -- background
+        music, a voiceover/narration track, or a sound effect -- as a
+        real PowerPoint media shape with a speaker icon, not just an
+        attached file.
+
+        `trigger="auto"` (default) starts playback automatically once the
+        slide begins, `start_delay` seconds later (0 by default -- no
+        wait). `trigger="on-click"` instead waits for the shape's own
+        speaker icon to be clicked during the slideshow, matching
+        PowerPoint's own "Start: On Click" option; `start_delay` is
+        ignored for this trigger. Only one audio track's timing is set up
+        per call -- call this again for a second track on the same or a
+        different slide.
+
+        `hidden=True` moves the speaker icon off the visible slide canvas
+        instead of placing it at `(left_in, top_in)` -- use this for
+        background music/narration nobody should see or accidentally
+        click, keeping `trigger="auto"` so it still plays. Leave it
+        `False` (the default) for a sound effect or narration the
+        presenter might want to see and re-trigger manually.
+
+        This writes hand-built OOXML (python-pptx's own `add_movie` only
+        supports video, and reusing it as-is for audio would leave the
+        wrong element name and relationship type on the shape) and is
+        schema-validated before saving, but has only been tested against
+        LibreOffice in this environment, not real PowerPoint -- treat it
+        as best-effort, and have the user confirm playback sounds right
+        in PowerPoint before relying on it for anything important.
+
+        Args:
+            path: file to modify, relative to the workspace root
+            slide: 1-based slide number to add the audio to
+            audio_path: the audio file to embed, relative to the
+                workspace root -- .mp3, .m4a, or .wav
+            left_in: horizontal position of the speaker icon, in inches
+                (ignored if hidden=True)
+            top_in: vertical position of the speaker icon, in inches
+                (ignored if hidden=True)
+            trigger: "auto" or "on-click"
+            start_delay: seconds after slide entry before playback starts
+                (only used when trigger="auto")
+            hidden: move the speaker icon off-canvas instead of placing
+                it on the visible slide
+        """
+        return toolkit.add_pptx_audio(
+            path=path,
+            slide=slide,
+            audio_path=audio_path,
+            left_in=left_in,
+            top_in=top_in,
+            trigger=trigger,
+            start_delay=start_delay,
+            hidden=hidden,
+        )
+
     def add_pptx_hyperlink(
         path: str, slide: int, shape_index: int, url: str, text: Optional[str] = None  # noqa: UP045
     ) -> dict[str, object]:
@@ -5772,6 +6128,7 @@ def build_presentation_tools(
         tool_metadata(
             list_pptx_animation_types, risk_category="READ", category="documents"
         ),
+        tool_metadata(add_pptx_audio, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(add_pptx_hyperlink, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(read_pptx_theme_colors, risk_category="READ", category="documents"),
         tool_metadata(edit_pptx_theme_colors, risk_category="WRITE_LOCAL", category="documents"),
