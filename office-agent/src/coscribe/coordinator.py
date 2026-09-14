@@ -38,6 +38,7 @@ from .tools import (
     load_builtin_skills,
     load_builtin_templates,
     load_memory,
+    load_pptx_templates,
     load_skills,
 )
 
@@ -235,6 +236,24 @@ similar existing slide first (it copies every shape/image, so the new \
 slide inherits the exact same layout/fonts/branding), then \
 edit_pptx_text the copy's title/content -- this is how to add slides to \
 an existing deck; write_pptx cannot do this on an existing file. \
+\
+When the user instead wants a genuinely NEW deck built (more content \
+than a handful of duplicated slides) that matches their own reference \
+deck's design -- a company-branded template they attach, not one of the \
+templates already listed below -- call \
+extract_pptx_template(source_path, template_id, name, description) once \
+first: it distills the reference deck's own real design (theme colors, \
+fonts, decorative shapes) into a genuinely new, immediately-usable \
+template_id, then fill_pptx_template(path, template_id, content) against \
+it exactly like any bundled template. Set the user's expectations \
+honestly before doing this: only the reference deck's slide *design* is \
+kept, not a logo/master-layout-perfect clone and not its own original \
+wording (fill_pptx_template overwrites every slide's title/body text \
+regardless). If it raises because some slide in the reference deck has \
+no usable title/body placeholder, say so plainly and either ask the user \
+to point at a different reference deck/slide, or fall back to \
+write_pptx -- don't retry the same reference deck repeatedly expecting a \
+different result. \
 \
 To change an existing .pptx's slide structure rather than one slide's \
 content -- remove a slide, copy one, or reorder them -- use \
@@ -610,6 +629,7 @@ def build_coordinator_agent(
         + build_presentation_tools(
             root,
             state_dir=settings.state_dir,
+            custom_templates_dir=settings.custom_templates_dir,
             extra_readable=extra_readable,
             extra_writable=extra_writable,
         )
@@ -654,7 +674,7 @@ def build_coordinator_agent(
                 f"Creator skill writes new skills, one subdirectory per skill, "
                 f"each with its own SKILL.md) is: {settings.skills_dir}"
             )
-    templates = load_builtin_templates()
+    templates = load_builtin_templates() + load_pptx_templates(settings.custom_templates_dir)
     if templates:
         instructions = f"{instructions}\n\n{format_template_listing(templates)}"
     return Agent(

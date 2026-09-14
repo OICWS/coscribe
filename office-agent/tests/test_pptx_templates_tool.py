@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from coscribe.tools.pptx_templates import format_template_listing, load_builtin_templates
+from coscribe.tools.pptx_templates import (
+    format_template_listing,
+    load_builtin_templates,
+    load_pptx_templates,
+)
 
 
 def _write_manifest(template_dir: Path, **fields: object) -> None:
@@ -98,6 +102,53 @@ def test_load_builtin_templates_malformed_manifest_is_skipped_but_siblings_still
     templates = load_builtin_templates()
 
     assert [t.id for t in templates] == ["good"]
+
+
+def test_load_pptx_templates_finds_templates_in_the_given_directory(tmp_path: Path) -> None:
+    root = tmp_path / "custom_templates"
+    _write_manifest(
+        root / "acme",
+        id="acme",
+        name="Acme",
+        description="a custom template",
+        accent="112233",
+        slide_count=1,
+        slide_roles=["content"],
+    )
+    _write_real_pptx(root / "acme", slide_count=1)
+
+    templates = load_pptx_templates(root)
+
+    assert [t.id for t in templates] == ["acme"]
+
+
+def test_load_pptx_templates_auto_creates_a_missing_directory(tmp_path: Path) -> None:
+    root = tmp_path / "does-not-exist-yet"
+    assert not root.exists()
+
+    templates = load_pptx_templates(root)
+
+    assert templates == []
+    assert root.is_dir()  # create_if_missing=True, mirroring load_skills
+
+
+def test_load_pptx_templates_is_separate_from_the_bundled_set(tmp_path: Path) -> None:
+    """A custom templates directory never surfaces coscribe's own bundled
+    templates and vice versa -- two genuinely separate sources, merged
+    only by presentations.py's fill_pptx_template, not conflated here."""
+    root = tmp_path / "custom_templates"
+    _write_manifest(
+        root / "acme", id="acme", name="Acme", description="x", accent="112233",
+        slide_count=1, slide_roles=["content"],
+    )
+    _write_real_pptx(root / "acme", slide_count=1)
+
+    custom_ids = {t.id for t in load_pptx_templates(root)}
+    builtin_ids = {t.id for t in load_builtin_templates()}
+
+    assert custom_ids == {"acme"}
+    assert "acme" not in builtin_ids
+    assert custom_ids.isdisjoint(builtin_ids)
 
 
 def test_load_builtin_templates_slide_count_mismatch_is_skipped(

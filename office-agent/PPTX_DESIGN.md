@@ -2238,3 +2238,94 @@ instead of reaching for this tool.
 replacing the workspace-coupled `mirror_template_materialize.py` this
 codebase can't port) -- not started in this pass**, tracked as the next
 piece of the same approved plan.
+
+## 26. `extract_pptx_template`: distilling a reusable template from a
+reference deck -- §25's second workstream, coscribe-native rather than
+ported
+
+§25's plan named this directly: a real, PPTAgent-inspired template-
+distillation capability (deriving a reusable template from a reference
+deck the user provides -- their own company-branded deck, the scenario
+that visibly tripped up claude.ai's own PPT flow, discussed earlier this
+session), built against coscribe's own architecture since ppt-master's
+own version (`mirror_template_materialize.py`) is too workspace-coupled
+to port (§25's own finding).
+
+**Turned out much smaller than first scoped, confirmed by reading the
+existing code before writing any new code, not assumed**:
+`fill_pptx_template` only needs a template slide to have a *real* title
+and/or body placeholder -- it unconditionally overwrites whatever text
+is already there (`_set_title`/`_fill_content_placeholder`), so
+"distilling a template" doesn't need to strip/replace the reference
+deck's own text at all, just classify its slides and confirm each has a
+usable placeholder. And template *discovery* already had an exact
+pattern to mirror: `tools/skills.py`'s `load_skills(settings.skills_dir)`
+(user-local) + `load_builtin_skills()` (bundled), both funneling through
+one shared scanner -- `tools/pptx_templates.py`'s own docstring already
+named this as "future work, not this v1" before this session. Refactored
+`load_builtin_templates()`'s scanning logic into a shared
+`_scan_templates_dir(root, *, create_if_missing)` (zero behavior change,
+verified by the full existing template test suite staying green
+unmodified) and added `load_pptx_templates(templates_dir)` as its
+user-local sibling, `create_if_missing=True` exactly like `load_skills`.
+New `Settings.custom_templates_dir` (default `./templates`,
+auto-created, gitignored) mirrors `skills_dir` field-for-field; both
+`build_coordinator_agent`'s tool wiring (`build_presentation_tools(...,
+custom_templates_dir=settings.custom_templates_dir)`) and its system-
+prompt template listing (`load_builtin_templates() +
+load_pptx_templates(settings.custom_templates_dir)`) needed exactly one
+new line each -- `build_coordinator_agent` turned out to be the single
+call site building every tool *and* the whole system prompt at once, so
+no wiring through web/session.py, cli.py, or anywhere else was needed.
+
+**`extract_pptx_template(source_path, template_id, name, description,
+overwrite=False)`**: classifies the reference deck's real slides into
+the exact same three roles every bundled template already uses --
+first slide `title`, last slide `closing` (only when the deck has more
+than one slide), everything between `content` (the only repeatable
+role) -- which also automatically satisfies `_parse_template`'s existing
+"content entries must be contiguous" requirement, since a
+first/middle/last split can never produce a non-contiguous middle
+block. Every slide must already have a real title and/or body
+placeholder (`slide.shapes.title`/`_find_body_placeholder`, the same
+lookups `fill_pptx_template` itself uses) or the whole call raises,
+naming the specific slide -- a real, surfaced limitation, not a silent
+skip or a promotion heuristic that might mis-handle an atypical
+placeholder type. `accent` is read from the reference deck's own real
+theme (`clrScheme`'s `accent1`, the same slot `read_pptx_theme_colors`
+exposes), not guessed or left blank. `template_id` is validated against
+the same lowercase-letters/digits/hyphens shape the bundled ids already
+use. `overwrite` defaults to `False` -- a different risk profile than
+overwriting one file, since a named template other calls may already
+reference it.
+
+**Verified real, not just unit-tested**: extracted from one of
+coscribe's own bundled templates (`bold-statement`) used as a stand-in
+reference deck specifically because its own real `template.yaml` is
+independently-known ground truth -- the extracted `slide_roles` matched
+`[title, content, content, closing]` exactly. Immediately called
+`fill_pptx_template` against the freshly-extracted template with new
+content (no separate registration step needed, confirming §25's plan's
+"immediately usable in the same turn" design), rendered through the
+real LibreOffice pipeline, and visually confirmed the output keeps the
+original design (dark gradient background, colored accent spine, title/
+bullet typography) with the new text substituted in -- indistinguishable
+in design from a real `fill_pptx_template` call against the original
+bundled template. Separately built a deliberately "messy" reference deck
+(a blank-layout slide with only a plain text box, no real placeholder at
+all) and confirmed the rejection path fires with a clear, specific error
+naming that exact slide. 7 new tests in `test_presentations_tool.py` (role
+classification against real ground truth, immediate usability by
+`fill_pptx_template`, the messy-deck rejection, duplicate-id rejection +
+`overwrite=True` escape hatch, bad template_id, missing
+`custom_templates_dir`, EXEC/approval metadata) plus 3 in
+`test_pptx_templates_tool.py` for `load_pptx_templates` itself (finds
+templates, auto-creates a missing directory, stays genuinely separate
+from the bundled set), full suite (300+ tests across both files) passes,
+`ruff check`/`mypy` clean. `coordinator.py` updated with guidance on when
+to reach for this versus `edit_pptx_text`/`duplicate_pptx_slide`
+(extending an existing deck) versus `write_pptx` (the reference deck has
+an unusable slide), plus an explicit instruction to set the user's
+expectations honestly: only the design is kept, not a pixel-perfect
+clone and not the reference deck's own original wording. `README.md`
+updated alongside the existing bundled-templates paragraph.

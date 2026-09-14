@@ -1,14 +1,18 @@
-"""Built-in PowerPoint template discovery: manifest loading for
-``fill_pptx_template``'s small, fixed set of coscribe-owned, hand-designed
-``.pptx`` template files.
+"""PowerPoint template discovery: manifest loading for
+``fill_pptx_template``'s template library -- coscribe's own bundled set
+plus a user/deployment-local one.
 
-Same convention as ``tools/skills.py``'s builtin skills: a template is a
-directory under ``src/coscribe/builtin_templates/pptx/`` with a
-``template.pptx`` and a ``template.yaml`` manifest (id/name/description/
-accent/slide_count/slide_roles). Unlike skills, there is currently no user-local
-equivalent of ``load_skills(settings.skills_dir)`` -- every template is
-version-controlled in this repo; a user-supplied template directory is
-future work, not this v1. Most templates here are coscribe's own
+Same convention as ``tools/skills.py``'s builtin+user-local skills split:
+a template is a directory with a ``template.pptx`` and a
+``template.yaml`` manifest (id/name/description/accent/slide_count/
+slide_roles). ``load_builtin_templates()`` scans
+``src/coscribe/builtin_templates/pptx/`` (version-controlled in this
+repo); ``load_pptx_templates(settings.custom_templates_dir)`` scans a
+user/deployment-local, gitignored directory the same way
+``load_skills(settings.skills_dir)`` does -- populated either by hand or
+by ``presentations.py``'s ``extract_pptx_template`` (distills a reusable
+template from a reference deck the user provides, e.g. their own
+company's branded deck). Most builtin templates here are coscribe's own
 python-pptx-built originals (see ``scripts/build_pptx_templates.py``);
 one (``velis``) is a real third-party design, bundled only because its
 actual upstream license (CC0 1.0, verified against the source repo, not
@@ -16,7 +20,9 @@ just "free to use") clearly permits redistribution inside another
 project -- that bar rules out the vast majority of "free PowerPoint
 template" sources, which is why this remains the exception rather than
 the norm (see that same script's ``_VELIS_LICENSE_TEXT`` and the
-template's own bundled ``LICENSE`` file for the paper trail).
+template's own bundled ``LICENSE`` file for the paper trail). No such
+licensing question applies to a user's own custom templates dir, of
+course -- that's the user's own file, not bundled/redistributed.
 """
 
 from __future__ import annotations
@@ -56,16 +62,35 @@ _VALID_SLIDE_ROLES = frozenset({"title", "content", "closing"})
 
 def load_builtin_templates() -> list[TemplateInfo]:
     """Scan coscribe's own bundled pptx templates
-    (``src/coscribe/builtin_templates/pptx/``). A malformed manifest, a
+    (``src/coscribe/builtin_templates/pptx/``)."""
+    return _scan_templates_dir(_BUILTIN_TEMPLATES_DIR, create_if_missing=False)
+
+
+def load_pptx_templates(templates_dir: str | Path) -> list[TemplateInfo]:
+    """Scan a user/deployment-local templates directory -- same shape as
+    ``load_builtin_templates``, but for templates ``extract_pptx_template``
+    (``presentations.py``) creates from a user's own reference deck (a
+    company's branded deck, say), distinct from coscribe's own bundled
+    four. Mirrors ``skills.py``'s ``load_skills(settings.skills_dir)`` /
+    ``load_builtin_skills()`` split exactly -- same two-source pattern,
+    same ``create_if_missing=True`` (an empty/not-yet-existing directory
+    just means no custom templates yet, not an error)."""
+    return _scan_templates_dir(Path(templates_dir), create_if_missing=True)
+
+
+def _scan_templates_dir(root: Path, *, create_if_missing: bool) -> list[TemplateInfo]:
+    """Shared scan behind both loaders above. A malformed manifest, a
     missing ``template.pptx``, or a ``slide_count`` that doesn't match the
     real file's actual slide count (a cheap, catchable authoring mistake
     if the ``.pptx`` is hand-edited without updating the manifest) is
     logged and skipped -- not fatal to startup, same policy as
     ``load_builtin_skills``."""
-    if not _BUILTIN_TEMPLATES_DIR.is_dir():
+    if create_if_missing:
+        root.mkdir(parents=True, exist_ok=True)
+    elif not root.is_dir():
         return []
     templates = []
-    for entry in sorted(_BUILTIN_TEMPLATES_DIR.iterdir()):
+    for entry in sorted(root.iterdir()):
         manifest_path = entry / "template.yaml"
         if not entry.is_dir() or not manifest_path.is_file():
             continue

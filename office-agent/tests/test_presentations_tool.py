@@ -2934,6 +2934,165 @@ def test_fill_pptx_template_real_bundled_template_grows_and_shrinks(tmp_path: Pa
     assert len(prs_shrink.slides) == 3
 
 
+def _tools_with_custom_templates_dir(root: Path, templates_dir: Path) -> dict[str, object]:
+    return {
+        tool.__name__: tool
+        for tool in build_presentation_tools(root, custom_templates_dir=templates_dir)  # type: ignore[attr-defined]
+    }
+
+
+def test_extract_pptx_template_classifies_roles_matching_the_real_manifest(
+    tmp_path: Path,
+) -> None:
+    """Extracts from one of coscribe's own bundled templates (used here
+    purely as a stand-in "reference deck") -- its own real template.yaml
+    is independently-known ground truth to check the role-classification
+    heuristic (first=title, last=closing, middle=content) against."""
+    import shutil
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    templates_dir = tmp_path / "custom_templates"
+    bundled = (
+        Path(__file__).parent.parent
+        / "src/coscribe/builtin_templates/pptx/bold-statement/template.pptx"
+    )
+    shutil.copy(bundled, workspace / "reference.pptx")
+    tools = _tools_with_custom_templates_dir(workspace, templates_dir)
+
+    result = tools["extract_pptx_template"](
+        source_path="reference.pptx",
+        template_id="test-extracted",
+        name="Test Extracted",
+        description="A distilled copy of bold-statement, for testing",
+    )
+
+    import re
+
+    assert result["slide_roles"] == ["title", "content", "content", "closing"]
+    assert result["slide_count"] == 4
+    assert re.match(r"^[0-9A-Fa-f]{6}$", result["accent"])
+    assert (templates_dir / "test-extracted" / "template.pptx").is_file()
+    assert (templates_dir / "test-extracted" / "template.yaml").is_file()
+
+
+def test_extract_pptx_template_is_immediately_usable_by_fill_pptx_template(
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    from pptx import Presentation
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    templates_dir = tmp_path / "custom_templates"
+    bundled = (
+        Path(__file__).parent.parent
+        / "src/coscribe/builtin_templates/pptx/bold-statement/template.pptx"
+    )
+    shutil.copy(bundled, workspace / "reference.pptx")
+    tools = _tools_with_custom_templates_dir(workspace, templates_dir)
+    tools["extract_pptx_template"](
+        source_path="reference.pptx",
+        template_id="my-brand",
+        name="My Brand",
+        description="test",
+    )
+
+    result = tools["fill_pptx_template"](
+        path="out.pptx",
+        template_id="my-brand",
+        content="# Real Title\n- point one\n---\n# Closing\nThanks",
+    )
+
+    assert result["template_id"] == "my-brand"
+    prs = Presentation(str(workspace / "out.pptx"))
+    assert prs.slides[0].shapes.title.text == "Real Title"
+
+
+def test_extract_pptx_template_rejects_slide_with_no_usable_placeholder(
+    tmp_path: Path,
+) -> None:
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    templates_dir = tmp_path / "custom_templates"
+
+    prs = Presentation()
+    s1 = prs.slides.add_slide(prs.slide_layouts[0])
+    s1.shapes.title.text = "A Title"
+    s2 = prs.slides.add_slide(prs.slide_layouts[6])  # blank -- no placeholders at all
+    s2.shapes.add_textbox(Inches(1), Inches(1), Inches(2), Inches(1)).text_frame.text = "plain text"
+    prs.save(str(workspace / "messy.pptx"))
+    tools = _tools_with_custom_templates_dir(workspace, templates_dir)
+
+    with pytest.raises(ValueError, match="Slide 2 of 'messy.pptx' has no usable"):
+        tools["extract_pptx_template"](
+            source_path="messy.pptx", template_id="messy", name="Messy", description="test"
+        )
+
+
+def test_extract_pptx_template_rejects_duplicate_id_without_overwrite(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    templates_dir = tmp_path / "custom_templates"
+    tools = _tools_with_custom_templates_dir(workspace, templates_dir)
+    tools["write_pptx"](path="ref.pptx", content="# Title\n- bullet")
+    tools["extract_pptx_template"](
+        source_path="ref.pptx", template_id="dup", name="Dup", description="test"
+    )
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        tools["extract_pptx_template"](
+            source_path="ref.pptx", template_id="dup", name="Dup Again", description="test"
+        )
+
+    # overwrite=True is the escape hatch
+    tools["extract_pptx_template"](
+        source_path="ref.pptx",
+        template_id="dup",
+        name="Dup Replaced",
+        description="test",
+        overwrite=True,
+    )
+
+
+def test_extract_pptx_template_rejects_bad_template_id(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    templates_dir = tmp_path / "custom_templates"
+    tools = _tools_with_custom_templates_dir(workspace, templates_dir)
+    tools["write_pptx"](path="ref.pptx", content="# Title\n- bullet")
+
+    with pytest.raises(ValueError, match="lowercase letters/digits/hyphens"):
+        tools["extract_pptx_template"](
+            source_path="ref.pptx", template_id="Not Valid!", name="X", description="test"
+        )
+
+
+def test_extract_pptx_template_requires_custom_templates_dir_configured(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)  # no custom_templates_dir passed
+    tools["write_pptx"](path="ref.pptx", content="# Title\n- bullet")
+
+    with pytest.raises(ValueError, match="No custom templates directory"):
+        tools["extract_pptx_template"](
+            source_path="ref.pptx", template_id="x", name="X", description="test"
+        )
+
+
+def test_extract_pptx_template_is_write_local_and_gated(tmp_path: Path) -> None:
+    from coscribe.runtime.types import get_tool_metadata
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tools = _tools_with_custom_templates_dir(workspace, tmp_path / "custom_templates")
+    metadata = get_tool_metadata(tools["extract_pptx_template"])
+    assert metadata.risk_category == "WRITE_LOCAL"
+    assert metadata.requires_approval is True
+
+
 def test_fill_pptx_template_chunk_with_heading_but_no_title_placeholder_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

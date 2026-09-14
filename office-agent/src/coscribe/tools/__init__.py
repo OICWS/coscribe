@@ -6,7 +6,12 @@ from .interaction import QUESTION_TOOL_NAMES, build_interaction_tools
 from .mcp import load_mcp_server_configs
 from .memory import build_memory_tools, format_memory_section, load_memory
 from .node_scripts import build_node_script_tools
-from .pptx_templates import TemplateInfo, format_template_listing, load_builtin_templates
+from .pptx_templates import (
+    TemplateInfo,
+    format_template_listing,
+    load_builtin_templates,
+    load_pptx_templates,
+)
 from .presentations import build_presentation_tools
 from .scheduled_tasks import (
     ScheduledTrigger,
@@ -79,6 +84,7 @@ __all__ = [
     "load_builtin_templates",
     "load_mcp_server_configs",
     "load_memory",
+    "load_pptx_templates",
     "load_skills",
     "reconcile_interrupted_runs",
     "slugify_skill_name",

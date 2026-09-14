@@ -527,6 +527,25 @@ user feedback: `velis`'s own A4-landscape proportions got picked for a
 plain deck request with no stated preference, which surprised the
 user, since 16:9 is the expected default for a PowerPoint deck.
 
+`extract_pptx_template(source_path, template_id, name, description,
+overwrite=False)` distills a *new*, immediately-usable
+`fill_pptx_template` template from an arbitrary reference `.pptx` -- a
+user's own company-branded deck, say -- instead of coscribe's own
+bundled four. It classifies the reference deck's real slides into the
+same title/content/closing roles the bundled templates use (first
+slide = title, last = closing, everything between = content) and
+requires every slide already have a real title and/or body placeholder
+`fill_pptx_template` can write into; a slide that doesn't raises,
+naming which one, rather than silently producing a broken template. The
+result is saved under `COSCRIBE_CUSTOM_TEMPLATES_DIR` (default
+`./templates`, auto-created, gitignored -- same convention as
+`COSCRIBE_SKILLS_DIR` above) alongside coscribe's own bundled set, so it
+shows up in the model's own template listing on future runs too, not
+just the turn it was created in. Only the reference deck's *design* is
+kept -- its own original wording is always overwritten by
+`fill_pptx_template`'s next call, and no logo/master-layout-perfect
+clone is attempted, just what python-pptx can read/write directly.
+
 `edit_pptx_text(path, slide, title, content, placeholder_index)` edits one
 existing slide's title and/or one content placeholder's text in place, in
 any `.pptx` already in the workspace -- not just coscribe's own bundled

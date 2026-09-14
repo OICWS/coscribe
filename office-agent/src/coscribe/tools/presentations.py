@@ -94,6 +94,7 @@ from ._thumbnail import render_all_page_previews, render_thumbnail
 from ._workspace import WorkspaceScope
 from .documents import Block, _is_separator_row, _split_table_row, parse_blocks, parse_inline_runs
 from .pptx_templates import load_builtin_templates as _load_builtin_templates
+from .pptx_templates import load_pptx_templates as _load_pptx_templates
 
 if TYPE_CHECKING:
     from pptx.presentation import Presentation as PresentationType
@@ -155,6 +156,11 @@ _STAT_CALLOUT_MAX_ITEMS = 4
 _THEME_COLOR_KEYS = frozenset({"bg", "surface", "text", "accent"})
 _THEME_FONT_KEYS = frozenset({"heading_font", "body_font"})
 _THEME_HEX_RE = re.compile(r"^[0-9A-Fa-f]{6}$")
+# extract_pptx_template's own id validation -- same shape as the bundled
+# templates' own ids ("bold-statement", "minimal-light", ...), enforced
+# here rather than left to whatever a directory name happens to be, since
+# this id becomes fill_pptx_template's own template_id argument afterward.
+_TEMPLATE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$")
 _THEME_SCHEME_COLOR_TAGS = {
     "bg": "lt1",
     "text": "dk1",
@@ -2609,6 +2615,7 @@ class PresentationToolkit:
         root: str | Path,
         *,
         state_dir: str | Path | None = None,
+        custom_templates_dir: str | Path | None = None,
         extra_readable: Sequence[str | Path] = (),
         extra_writable: Sequence[str | Path] = (),
     ) -> None:
@@ -2616,6 +2623,7 @@ class PresentationToolkit:
             root, extra_readable=extra_readable, extra_writable=extra_writable
         )
         self._state_dir = state_dir
+        self._custom_templates_dir = custom_templates_dir
 
     def _check_readable(self, path: str) -> Path:
         file_path = self._scope.resolve(path)
@@ -2800,7 +2808,10 @@ class PresentationToolkit:
         """
         from pptx import Presentation
 
-        templates_by_id = {t.id: t for t in _load_builtin_templates()}
+        all_templates = _load_builtin_templates()
+        if self._custom_templates_dir is not None:
+            all_templates += _load_pptx_templates(self._custom_templates_dir)
+        templates_by_id = {t.id: t for t in all_templates}
         template = templates_by_id.get(template_id)
         if template is None:
             raise ValueError(
@@ -2882,6 +2893,135 @@ class PresentationToolkit:
             "qa_skipped_reason": qa_skipped_reason,
             "preview_path": preview_path,
             "preview_skipped_reason": preview_skipped_reason,
+        }
+
+    def extract_pptx_template(
+        self,
+        source_path: str,
+        template_id: str,
+        name: str,
+        description: str,
+        overwrite: bool = False,
+    ) -> dict[str, object]:
+        """Distill a reusable template from an existing reference deck
+        (e.g. one the user just attached -- their own company's branded
+        .pptx) so fill_pptx_template can reuse its exact design (theme
+        colors, fonts, decorative shapes, master/layout structure) for
+        new content afterward, instead of hand-rebuilding that design
+        shape by shape or guessing at colors.
+
+        Classifies the reference deck's own real slides into the same
+        three roles every bundled template already uses: the first slide
+        is "title", the last slide is "closing" (only if the deck has
+        more than one slide), everything in between is "content" (the
+        only repeatable role -- fill_pptx_template duplicates/trims it to
+        fit however much content you actually give later). Every slide
+        must already have a real, usable title and/or body placeholder
+        (the same kind fill_pptx_template writes into) -- a slide that
+        doesn't is a real limitation this reports as an error, not a
+        silent skip: redesign or remove that slide in the reference deck
+        first, or use write_pptx instead of a template for this deck.
+
+        Once this returns, template_id is immediately usable as
+        fill_pptx_template's own template_id argument -- no separate
+        registration step.
+
+        Args:
+            source_path: path to the reference .pptx already in the workspace
+            template_id: a short id for the new template (lowercase
+                letters/digits/hyphens, e.g. "acme-corp") -- what
+                fill_pptx_template's template_id argument refers to
+                afterward
+            name: a short human-readable name (e.g. "Acme Corp")
+            description: one sentence describing the template's look
+                (colors, mood) -- shown alongside the bundled templates'
+                own descriptions wherever a template is picked
+            overwrite: if a template with this id already exists, replace
+                it (default False -- raises instead, since silently
+                replacing a named template other calls may already
+                reference is a different risk than overwriting one file)
+        """
+        import yaml
+        from pptx import Presentation
+        from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+
+        if self._custom_templates_dir is None:
+            raise ValueError(
+                "No custom templates directory is configured -- extract_pptx_template "
+                "has nowhere to save the new template."
+            )
+        if not _TEMPLATE_ID_RE.match(template_id):
+            raise ValueError(
+                f"template_id {template_id!r} must be lowercase letters/digits/hyphens "
+                f"only (e.g. 'acme-corp')."
+            )
+        templates_dir = Path(self._custom_templates_dir)
+        template_dir = templates_dir / template_id
+        if template_dir.exists() and not overwrite:
+            raise FileExistsError(
+                f"A template with id {template_id!r} already exists at {template_dir} -- "
+                f"pass overwrite=True to replace it, or pick a different template_id."
+            )
+
+        file_path = self._check_readable(source_path)
+        prs = Presentation(str(file_path))
+        slide_count = len(prs.slides)
+        if slide_count == 0:
+            raise ValueError(f"{source_path!r} has no slides -- nothing to extract.")
+
+        slide_roles: list[str] = []
+        for index, slide in enumerate(prs.slides):
+            if index == 0:
+                role = "title"
+            elif slide_count > 1 and index == slide_count - 1:
+                role = "closing"
+            else:
+                role = "content"
+            has_title = slide.shapes.title is not None
+            has_body = _find_body_placeholder(slide) is not None
+            if not has_title and not has_body:
+                raise ValueError(
+                    f"Slide {index + 1} of {source_path!r} has no usable title or "
+                    f"body placeholder for fill_pptx_template to write into later -- "
+                    f"extract_pptx_template needs every slide in the reference deck "
+                    f"to have at least one. Redesign or remove that slide in the "
+                    f"reference deck, or use write_pptx instead of a template for "
+                    f"this deck."
+                )
+            slide_roles.append(role)
+
+        accent = "6366F1"  # a reasonable default if the theme has no accent1 at all
+        if prs.slide_masters:
+            theme_part = prs.slide_masters[0].part.part_related_by(RT.THEME)
+            from lxml import etree
+            from pptx.oxml.ns import qn
+
+            root = etree.fromstring(theme_part.blob)
+            clr_scheme = root.find(f".//{qn('a:clrScheme')}")
+            if clr_scheme is not None:
+                accent = _read_scheme_color(clr_scheme, "accent1") or accent
+
+        template_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(str(file_path), str(template_dir / "template.pptx"))
+        manifest = {
+            "id": template_id,
+            "name": name,
+            "description": description,
+            "accent": accent,
+            "slide_count": slide_count,
+            "slide_roles": slide_roles,
+        }
+        (template_dir / "template.yaml").write_text(
+            yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"
+        )
+
+        return {
+            "template_id": template_id,
+            "name": name,
+            "slide_count": slide_count,
+            "slide_roles": slide_roles,
+            "accent": accent,
+            "saved_to": str(template_dir),
         }
 
     @locked_by_path
@@ -4237,13 +4377,18 @@ def build_presentation_tools(
     root: str | Path,
     *,
     state_dir: str | Path | None = None,
+    custom_templates_dir: str | Path | None = None,
     extra_readable: Sequence[str | Path] = (),
     extra_writable: Sequence[str | Path] = (),
 ) -> list[Callable[..., Any]]:
     """Return the tool callables the Coordinator agent can call, bound to `root`
     (plus any user-configured extra_readable/extra_writable directories)."""
     toolkit = PresentationToolkit(
-        root, state_dir=state_dir, extra_readable=extra_readable, extra_writable=extra_writable
+        root,
+        state_dir=state_dir,
+        custom_templates_dir=custom_templates_dir,
+        extra_readable=extra_readable,
+        extra_writable=extra_writable,
     )
 
     # `Optional[int]`, not `int | None`: aisuite's Tools.__infer_from_signature
@@ -4435,6 +4580,54 @@ def build_presentation_tools(
         """
         return toolkit.fill_pptx_template(
             path=path, template_id=template_id, content=content, overwrite=overwrite
+        )
+
+    def extract_pptx_template(
+        source_path: str,
+        template_id: str,
+        name: str,
+        description: str,
+        overwrite: bool = False,
+    ) -> dict[str, object]:
+        """Distill a reusable template from an existing reference deck --
+        e.g. one the user just attached (their own company's branded
+        .pptx) -- so fill_pptx_template can reuse its exact design (theme
+        colors, fonts, decorative shapes, master/layout structure) for
+        new content afterward, instead of hand-rebuilding that design
+        shape by shape or guessing at colors from a description.
+
+        Classifies the reference deck's own real slides into the same
+        three roles every bundled template already uses: the first slide
+        is "title", the last slide is "closing" (only if the deck has
+        more than one slide), everything in between is "content" (the
+        only repeatable role). Every slide must already have a real,
+        usable title and/or body placeholder -- a slide that doesn't
+        raises a clear error naming which slide, rather than silently
+        skipping it; redesign or remove that slide in the reference
+        deck, or use write_pptx instead of a template for this deck.
+
+        Once this returns, template_id is immediately usable as
+        fill_pptx_template's own template_id argument in the same turn --
+        no separate registration step, and it persists across future
+        conversations too (it's saved alongside the bundled templates,
+        just in your own local templates directory).
+
+        Args:
+            source_path: path to the reference .pptx already in the workspace
+            template_id: a short id for the new template (lowercase
+                letters/digits/hyphens, e.g. "acme-corp")
+            name: a short human-readable name (e.g. "Acme Corp")
+            description: one sentence describing the template's look
+                (colors, mood)
+            overwrite: if a template with this id already exists, replace
+                it. Defaults to False -- raises instead.
+        """
+        return toolkit.extract_pptx_template(
+            source_path=source_path,
+            template_id=template_id,
+            name=name,
+            description=description,
+            overwrite=overwrite,
         )
 
     def edit_pptx_text(
@@ -5303,6 +5496,9 @@ def build_presentation_tools(
         tool_metadata(render_pptx_preview, risk_category="READ", category="documents"),
         tool_metadata(write_pptx, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(fill_pptx_template, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(
+            extract_pptx_template, risk_category="WRITE_LOCAL", category="documents"
+        ),
         tool_metadata(edit_pptx_text, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(delete_pptx_slide, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(duplicate_pptx_slide, risk_category="WRITE_LOCAL", category="documents"),

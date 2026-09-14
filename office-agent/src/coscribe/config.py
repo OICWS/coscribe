@@ -89,6 +89,15 @@ class Settings(BaseSettings):
     Code's skills). Auto-created like workspace_root; empty/missing = no skills.
     """
 
+    custom_templates_dir: Path = Path("./templates")
+    """Directory of user/deployment-local PowerPoint templates -- same shape
+    as coscribe's own bundled ones (a subdirectory per template, each with
+    template.pptx + template.yaml), populated either by hand or by
+    extract_pptx_template distilling one from a reference deck the user
+    provides. Auto-created like workspace_root/skills_dir; empty/missing =
+    no custom templates, just the bundled four.
+    """
+
     memory_path: Path = Path("./MEMORY.md")
     """File of durable facts the Coordinator remembers across sessions (distinct
     from a thread's own conversation history). Auto-created like workspace_root/skills_dir;

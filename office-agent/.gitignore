@@ -18,6 +18,7 @@ dist/
 .office-agent/
 /workspace/
 /skills/
+/templates/
 /MEMORY.md
 /mcp.json
 /providers.json
