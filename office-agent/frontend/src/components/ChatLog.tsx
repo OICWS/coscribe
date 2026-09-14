@@ -180,10 +180,24 @@ function ToolRunGroupView({
           {header.more > 0 && `, and ${header.more} more`}
         </span>
       </button>
+      {/* Sub-items nest under a thin left rule (the same "connected list"
+       * treatment Claude Code's own expanded tool-run uses) rather than a
+       * repeat of ToolCallRow's own bordered-card look -- one bordered
+       * card *per step* inside an already-bordered-implying disclosure
+       * read as a wall of boxes with dead space between them, a real
+       * complaint from a real user testing this. `compact` on ToolCallRow
+       * strips that card down to a plain text row; this is the only
+       * place that prop is ever passed. */}
       {open && (
-        <div className="mt-1.5 flex flex-col gap-1">
+        <div className="mt-1 ml-[7px] flex flex-col border-l border-[var(--border)] pl-3">
           {group.items.map((item) => (
-            <ToolCallRow key={item.id} item={item} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
+            <ToolCallRow
+              key={item.id}
+              item={item}
+              compact
+              onApprove={onApprove}
+              onPptxShapePicked={onPptxShapePicked}
+            />
           ))}
         </div>
       )}
@@ -198,17 +212,26 @@ function ToolRunGroupView({
  * (Approve/Deny buttons visible with no click needed); everything else
  * starts collapsed. Expanded content is the exact same markup this
  * rendered inline before grouping existed -- relocated, not rewritten.
- * Styled as its own light rounded card (bg-card-bg, hover-panel-bg) --
- * the plain "text row" look these used before made a run of several tool
- * calls read as an undifferentiated wall of gray text; a distinct card
- * per step is what makes "expand to see what happened" a real disclosure
- * instead of just more inline text. */
+ *
+ * Two visual treatments, chosen by `compact`: standalone (the default --
+ * a lone tool call, or any item inside a still-pending-approval group)
+ * gets its own light rounded card (bg-card-bg, hover-panel-bg), since
+ * without a card the plain "text row" look these used before made a run
+ * of several tool calls read as an undifferentiated wall of gray text.
+ * `compact` (set only by ToolRunGroupView's *resolved*-and-expanded list)
+ * drops that card down to a plain, tightly-spaced text row instead --
+ * stacking one bordered card per step *inside* a disclosure that's
+ * already visually announcing "these go together" duplicated the
+ * boundary and read as a wall of boxes with dead space between them, a
+ * real complaint from a real user testing this build. */
 function ToolCallRow({
   item,
+  compact = false,
   onApprove,
   onPptxShapePicked,
 }: {
   item: ToolOrApprovalItem;
+  compact?: boolean;
   onApprove: (id: string, approved: boolean) => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
@@ -225,17 +248,25 @@ function ToolCallRow({
   return (
     <div
       className={
-        isPendingApproval
-          ? "self-start max-w-[85%] rounded-xl border border-[var(--accent)] bg-[var(--card-bg)] px-3.5 py-2.5 text-sm"
-          : "self-start max-w-[85%] rounded-xl border border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm hover:bg-[var(--panel-bg)]"
+        compact
+          ? "self-start w-full py-1 text-sm"
+          : isPendingApproval
+            ? "self-start max-w-[85%] rounded-xl border border-[var(--accent)] bg-[var(--card-bg)] px-3.5 py-2.5 text-sm"
+            : "self-start max-w-[85%] rounded-xl border border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm hover:bg-[var(--panel-bg)]"
       }
     >
       <button
         type="button"
-        className="flex w-full items-center gap-1.5 text-left text-[var(--fg)]"
+        className={
+          compact
+            ? "flex w-full items-center gap-1.5 text-left text-[var(--muted)] hover:text-[var(--fg)]"
+            : "flex w-full items-center gap-1.5 text-left text-[var(--fg)]"
+        }
         onClick={() => setOpen((v) => !v)}
       >
-        <ChevronDownIcon className={`h-3.5 w-3.5 shrink-0 text-[var(--muted)] transition-transform ${open ? "" : "-rotate-90"}`} />
+        <ChevronDownIcon
+          className={`shrink-0 ${compact ? "h-3 w-3" : "h-3.5 w-3.5 text-[var(--muted)]"} transition-transform ${open ? "" : "-rotate-90"}`}
+        />
         <span className="truncate">
           <SummaryLabel parts={summarizeItemParts(item)} />
         </span>
