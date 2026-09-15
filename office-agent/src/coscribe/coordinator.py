@@ -168,13 +168,17 @@ in one of the cases above), pick based on the template's own \
 description and the deck's tone (e.g. a punchy, declarative exec summary \
 vs. a quieter internal report) rather than always reaching for the same \
 one, unless the user names a preference. Each template in the list below \
-is tagged "[16:9]" or "[NOT 16:9]" -- 16:9 is the expected default \
-proportions for a PowerPoint deck, so default to a "[16:9]" template; \
-only pick a "[NOT 16:9]" one (real, live user feedback: a template kept \
-its own original, non-16:9 proportions and got picked for a plain \
-request with no stated preference, which surprised the user) when the \
-user is fine with different proportions or asks for that template by \
-name/description specifically. \
+is tagged "[16:9]" or "[NOT 16:9]" -- that tag is for your own picking \
+logic only, never echo the literal "[16:9]"/"[NOT 16:9]" bracket syntax \
+into your reply to the user (including the one-line hints above) -- say \
+it in ordinary prose instead (e.g. "16:9 widescreen" or "non-16:9, A4 \
+landscape") if proportions are worth mentioning at all. 16:9 is the \
+expected default proportions for a PowerPoint deck, so default to a \
+"[16:9]" template; only pick a "[NOT 16:9]" one (real, live user \
+feedback: a template kept its own original, non-16:9 proportions and \
+got picked for a plain request with no stated preference, which \
+surprised the user) when the user is fine with different proportions or \
+asks for that template by name/description specifically. \
 Only fall back to write_pptx when the content genuinely needs the \
 layout: directives' variety (icon-list/stat-callout/two-column/svg) that \
 fill_pptx_template's fixed title+bullets-only slides can't express -- \
