@@ -3326,3 +3326,97 @@ Anthropic doesn't publish a rolling `-latest` alias the way `gemini`'s
 own catalog entry does (`"gemini-flash-latest"`, immune to this same
 drift by construction), and emptying it would degrade the single most
 common Add-provider path in the whole catalog.
+
+## Tool-loading context cost -- measured real, a real fix identified, deliberately not built yet
+
+User observation, live: a plain "你好" (hello) burns 40k+ tokens of
+context before any real conversation content. Investigated rather than
+guessed at.
+
+**Measured, not estimated**: `build_coordinator_agent`'s full tool set
+(`build_file_tools`/`build_document_tools`/`build_spreadsheet_tools`/
+`build_presentation_tools`/`build_image_tools`/`build_task_tools`/
+`build_interaction_tools`/`build_memory_tools`/`build_workflow_tools`/
+`build_selfwake_tools`/`build_scheduled_task_tools`/
+`build_websearch_tools`/`build_script_tools`/`build_node_script_tools`/
+`build_background_task_tools`) is **90 tools**. Converting every one
+through `langchain_core.utils.function_calling.convert_to_openai_tool`
+and counting with `tiktoken`'s `cl100k_base` (a real proxy, not
+Claude's own tokenizer, but the right order of magnitude): **~27,000
+tokens** of tool JSON schema alone, plus `coordinator.py`'s own
+`INSTRUCTIONS` string at **~7,400 tokens** -- **~34,600 tokens** as the
+floor for every single turn, before skills/templates/memory/history.
+`presentations.py` alone contributes 37 of the 90 tools; its docstrings
+alone are ~13k of the ~27k tool-schema total (verbose-but-precise
+docstrings, this project's own deliberate style throughout this
+session, are a real, measurable cost here, not a free choice).
+
+**A real, working fix exists, identified and verified (not just
+theorized)**: Anthropic's Tool Search Tool
+(`tool_search_tool_regex_20251119`/`tool_search_tool_bm25_20251119`,
+[docs](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool))
+is a real, documented Claude API feature -- mark a tool `defer_loading:
+true`, the API excludes it from the model's context/cached prefix
+entirely until Claude searches for it, then expands the matched
+`tool_reference` into the full definition inline. This is confirmed to
+be the actual mechanism behind this very session's own "deferred
+tools"/`ToolSearch` behavior (Claude Code's own docs describe the
+identical on-by-default behavior). Real numbers from Anthropic's own
+docs: an 90-tool multiserver MCP setup at ~46-55k tokens drops over 85%
+with this on -- the same scale as coscribe's own 27k tool-schema
+number above. LangChain already ships this as a ready middleware,
+`langchain.agents.middleware.ProviderToolSearchMiddleware` -- confirmed
+importable in this project's own currently-installed `langchain`
+(1.3.16), no dependency bump needed, and it plugs into `create_agent`
+the exact same way `AnthropicPromptCachingMiddleware` already does in
+`agent.py`. It also correctly preserves prompt caching (Anthropic's own
+docs: "the prefix is untouched, so prompt caching is preserved") --
+the caching-interaction risk raised when this was first discussed
+turned out to be a non-issue, already solved server-side.
+
+**The real gap, found by reading the middleware's own source, not
+assumed**: `ProviderToolSearchMiddleware._get_model_provider` infers
+the provider from the bound model's Python **class name** only
+(`ChatAnthropic` -> `"anthropic"`, `ChatOpenAI` -> `"openai"`) --
+`_provider_from_class_name` never inspects `base_url`. Every one of
+this project's own custom OpenAI-compatible providers (DeepSeek/Kimi/
+GLM/Ollama, see `web/session.py`'s `resolve_chat_model`) is a
+`ChatOpenAI` instance with `base_url` overridden -- the middleware
+would misdetect these as genuine OpenAI and inject OpenAI's own
+`{"type": "tool_search"}` server tool into a request actually bound
+for a different vendor's API, which has no idea what that tool type
+means. This is not a detectable-and-fixable bug in coscribe's own
+code: server-side deferred-tool expansion is a capability the
+*provider's own infrastructure* has to implement, and there's no
+public indication any of DeepSeek/Kimi/GLM/Ollama have built an
+equivalent. Gemini is unsupported by this middleware entirely, for the
+same reason (not in Anthropic/OpenAI's two-provider list at all).
+
+**Decision, recorded per explicit user request, not yet implemented**:
+build coscribe's own provider-agnostic tool-search middleware instead
+of (or as a universal fallback under) the official one -- same
+`wrap_model_call` hook shape `ProviderToolSearchMiddleware` itself
+uses, but doing the "index now, expand on demand" dance in plain
+Python: most tools unbound by default, a plain `search_tools(query)`
+tool (an ordinary function tool, no provider-specific wire format)
+lets the model discover by keyword, and the middleware dynamically
+adds the discovered tools' real definitions to `request.tools` for the
+next model call. Works identically on anthropic/gemini/openai/any
+custom provider, since it never depends on a vendor implementing
+server-side expansion -- the real tradeoff against the official
+middleware is losing the "excluded from the *cached* prefix" server-
+side saving on genuine Anthropic/OpenAI specifically (an extra round
+trip on first discovery either way, unavoidable regardless of which
+mechanism is used). Two designs were on the table --
+(A) build only the universal client-side version, one code path,
+identical behavior on every provider, no provider-detection risk at
+all; (B) hybrid, using the official middleware when the real
+`provider_key` is genuinely `anthropic` or non-custom `openai` (known
+already, from the same string `switch_model` already parses, not
+trusted to `ProviderToolSearchMiddleware`'s own fragile class-name
+guess) and the custom one otherwise, trading one extra code path for
+the caching win on the two most-used providers. User explicitly
+leaning towards **(A)** -- deliberately not started yet, this section
+exists purely to preserve the research (real measured numbers, the
+verified official mechanism, and the exact gap found in its source) so
+the next round doesn't have to re-derive any of it.
