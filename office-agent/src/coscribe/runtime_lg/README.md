@@ -3265,3 +3265,64 @@ end-to-end claim across a real process restart is not yet.
 - Nothing in `runtime/`/`providers/gemini_provider.py` deleted.
 - MCP tool integration (`tools/mcp.py`) not exercised here.
 - Persistent checkpointer (only `InMemorySaver` used).
+
+## `switch_model` used a stale custom-providers snapshot -- a real bug, live-reported ("目前不能使用deepseek吗？")
+
+A user tried switching a thread's model to a newly-added custom provider
+(DeepSeek) and got `resolve_chat_model`'s own "Unsupported provider
+'deepseek'" -- despite having just added it via the Providers tab with a
+real, working API key.
+
+Root cause, found by reading the actual call path rather than assuming
+`resolve_chat_model` itself was broken: `web/app.py`'s `_get_session`
+only calls `load_custom_providers` once, the first time a given
+`thread_id`'s `ChatSessionLG` is created (`if thread_id not in sessions:`),
+and caches the result on `self._custom_providers` for that session
+object's entire lifetime -- documented there as a deliberate
+simplification ("the cheapest way to get 'a provider added after startup
+is usable in the *next new thread*'"). Adding a provider in an
+*already-open* thread and then immediately trying to switch to it in
+that same thread hits exactly the gap that comment calls out: the
+session object genuinely never re-reads `providers.json`, so
+`resolve_chat_model(model, self._custom_providers)` never sees it and
+falls through to the "Unsupported provider" branch -- which reads as
+"this provider type isn't supported at all," not "this session just
+hasn't refreshed its own config yet," a confusing failure mode from the
+user's side.
+
+Fixed directly rather than just documented: `switch_model`
+(`web/session.py`) now reloads `providers.json` fresh
+(`load_custom_providers(self.settings.providers_config_path)`) right
+before calling `resolve_chat_model`, inside the same try/except that
+already reverts all other session state on failure. `add_provider`
+(`web/app.py`) mutates the *same* `settings` object every already-open
+session holds a reference to (`settings.providers_config_path = path`),
+so this pickup is immediate, no new thread/reconnect/restart needed.
+Cheap enough (a small JSON read) to redo on every switch rather than add
+a second cache to keep in sync with `_get_session`'s per-thread one.
+Regression test:
+`test_switch_model_picks_up_a_provider_added_after_the_session_was_created`
+(`tests/test_web.py`) -- adds a provider mid-session, over the same
+already-open WebSocket, and asserts the very next `switch_model` call
+actually receives it.
+
+A second, smaller issue surfaced by the same report: `web/app.py`'s
+`PROVIDER_CATALOG` pre-fills a guessed `default_model` for each
+third-party entry (DeepSeek/Kimi/GLM/Ollama) into the Providers tab's
+Add-provider form -- and DeepSeek's own guess (`deepseek-v4-flash`) was
+already wrong (the user's own current account showed `deepseek-flash`/
+`deepseek-v4-pro`). A vendor's model lineup is outside this project's
+control and turns over on its own schedule; a wrong guess silently
+pre-filled into a form reads as authoritative when it isn't, which is a
+worse failure mode than an empty field the user has to fill in
+themselves. Removed the four third-party `default_model` guesses
+entirely (now `""`, matching the existing `openai` builtin entry's own
+already-empty default) -- `base_url` guesses are kept, since a vendor's
+API host is genuinely stable, unlike its model catalog. The one
+*builtin* provider whose `default_model` was also caught stale in the
+same pass, `anthropic`'s `"claude-opus-4-6"` (no such model -- current
+family is Opus 5/Sonnet 5/Haiku 4.5), was corrected rather than emptied:
+Anthropic doesn't publish a rolling `-latest` alias the way `gemini`'s
+own catalog entry does (`"gemini-flash-latest"`, immune to this same
+drift by construction), and emptying it would degrade the single most
+common Add-provider path in the whole catalog.

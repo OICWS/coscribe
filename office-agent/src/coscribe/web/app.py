@@ -323,26 +323,39 @@ MCP_CATALOG: list[dict[str, Any]] = [
 # Convenience pre-fills for a few well-known OpenAI-compatible providers --
 # not an exhaustive list. Any OpenAI-compatible endpoint works via the
 # "Add custom provider" form below; these just save typing the base_url.
-# Verified against each vendor's docs; treat as a starting point a user can
-# edit, same trust level as MCP_CATALOG's pre-filled commands.
+# Deliberately NO "default_model" guess here (unlike the builtin anthropic/
+# gemini entries in get_providers_catalog below, whose model IDs this
+# project's own release cadence controls) -- a third-party vendor's model
+# lineup is entirely outside this project's control and turns over on its
+# own schedule (real example: this catalog previously hardcoded DeepSeek's
+# default_model as "deepseek-v4-flash", which was already wrong -- live
+# user report named the real current models as "deepseek-flash"/
+# "deepseek-v4-pro"). A wrong guessed model name silently pre-filled into
+# the Providers tab's form is worse than an empty field the user has to
+# fill in themselves from the vendor's own current docs: it looks
+# authoritative but isn't, and a user who doesn't second-guess it gets a
+# confusing "model not found"-shaped failure instead of an obviously-
+# blank field asking for input. base_url is different -- an API host
+# essentially never changes, so that part of each entry below is still a
+# real, low-risk time-saver, verified against each vendor's docs.
 PROVIDER_CATALOG = [
     {
         "name": "deepseek",
         "description": "DeepSeek's OpenAI-compatible API.",
         "base_url": "https://api.deepseek.com/v1",
-        "default_model": "deepseek-v4-flash",
+        "default_model": "",
     },
     {
         "name": "kimi",
         "description": "Moonshot AI's Kimi, OpenAI-compatible API.",
         "base_url": "https://api.moonshot.ai/v1",
-        "default_model": "kimi-k2.5",
+        "default_model": "",
     },
     {
         "name": "glm",
         "description": "Zhipu's GLM, OpenAI-compatible API.",
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "default_model": "glm-4-flash",
+        "default_model": "",
     },
     {
         "name": "ollama",
@@ -355,12 +368,13 @@ PROVIDER_CATALOG = [
         "description": (
             "Ollama's local OpenAI-compatible API -- fully offline, no cloud "
             "account. API key can be any placeholder text (e.g. \"ollama\"), "
-            "it isn't actually checked. default_model below is only an "
-            "example -- swap it for whatever you've already pulled via "
-            "`ollama pull <model>`; coscribe can't see what's installed."
+            "it isn't actually checked. Fill in Default Model yourself with "
+            "whatever you've already pulled via `ollama pull <model>` -- "
+            "coscribe can't see what's installed, so there's no safe guess "
+            "to pre-fill here."
         ),
         "base_url": "http://localhost:11434/v1",
-        "default_model": "qwen2.5",
+        "default_model": "",
     },
 ]
 
@@ -1705,7 +1719,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 continue
             if key in PROVIDER_DEFAULT_MODEL_ENV_VARS and ":" in value:
                 rejected[key] = (
-                    'must be a bare model id, e.g. "claude-opus-4-6" -- no "provider:" prefix'
+                    'must be a bare model id, e.g. "claude-opus-5" -- no "provider:" prefix'
                 )
                 continue
             if key in PROVIDER_KEY_ENV_VARS:
@@ -1944,7 +1958,18 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 "name": "anthropic",
                 "description": "Anthropic's Claude models.",
                 "base_url": "",
-                "default_model": "claude-opus-4-6",
+                # Unlike the third-party PROVIDER_CATALOG below, this one
+                # is worth pinning to a real model ID -- Anthropic doesn't
+                # publish a rolling "-latest" alias the way gemini's own
+                # "gemini-flash-latest" entry below does, so an empty
+                # default would leave the single most common Add-provider
+                # path with the worst experience of any entry here.
+                # Still real drift, caught live: this was "claude-opus-4-6"
+                # until an unrelated bug report exposed it as already
+                # stale (no such model -- the current family is Opus 5/
+                # Sonnet 5/Haiku 4.5). Whoever bumps coscribe's own
+                # supported-model docs should bump this alongside them.
+                "default_model": "claude-opus-5",
                 "builtin": True,
             },
             {

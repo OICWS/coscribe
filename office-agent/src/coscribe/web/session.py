@@ -80,6 +80,7 @@ from ..runtime import (
     run_hook,
     tool_metadata,
 )
+from ..runtime.provider_config import load_custom_providers
 from ..runtime_lg import (
     SkillSaveProposal,
     build_langgraph_agent,
@@ -653,7 +654,20 @@ class ChatSessionLG:
         SDK validates eagerly) is caught by resolve_chat_model/
         get_context_window below, both of which can raise -- reverted on
         that failure rather than leaving the thread pinned to a model that
-        can never actually be used."""
+        can never actually be used.
+
+        self._custom_providers is refreshed from disk right here, not
+        trusted as-is -- it's otherwise only a startup-time snapshot
+        (_get_session in web/app.py loads it once, when a thread's session
+        object is first created, and never again for that thread's
+        lifetime). Without this, adding a custom provider via the
+        Providers tab in an *already-open* thread and then immediately
+        trying to switch to it here would raise resolve_chat_model's own
+        "Unsupported provider" -- a real, live-reported confusion (the
+        provider genuinely is configured; this session object just hadn't
+        heard about it yet), not a sign DeepSeek/Kimi/GLM/etc. don't work.
+        A plain small JSON read, cheap enough to redo on every switch
+        rather than add a second cache to keep in sync."""
         if ":" not in model:
             await websocket.send_json(
                 {
@@ -668,6 +682,8 @@ class ChatSessionLG:
         previous_lg_tools = self._lg_tools
         self._context_window = None
         try:
+            if self.settings.providers_config_path is not None:
+                self._custom_providers = load_custom_providers(self.settings.providers_config_path)
             new_model = resolve_chat_model(model, self._custom_providers)
             lg_tools = self._build_lg_tools(new_model)
             new_lg_agent = self._build_lg_agent(new_model, model, lg_tools)

@@ -1639,6 +1639,61 @@ def test_switch_model_rejects_a_string_without_a_provider_prefix(
     assert "provider:model" in error["message"]
 
 
+def test_switch_model_picks_up_a_provider_added_after_the_session_was_created(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real, live-reported bug: self._custom_providers used to only ever be
+    loaded once, when a thread's ChatSessionLG was first created (see
+    _get_session in web/app.py) -- adding a custom provider via the
+    Providers tab while that thread was already open was invisible to it,
+    so switch_model would raise resolve_chat_model's own "Unsupported
+    provider" even though the provider genuinely was just configured.
+    switch_model now reloads providers.json fresh on every switch instead
+    of trusting that startup-time snapshot."""
+    # chdir first -- add_provider's fallback path (no providers_config_path
+    # configured yet) is a bare relative "./providers.json", resolved
+    # against cwd (see test_post_provider_persists_an_absolute_path_not_a_
+    # cwd_relative_one's own docstring for why this matters: skipping it
+    # writes a real file into the repo root instead of tmp_path).
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    seen_custom_providers: list[dict[str, dict[str, str]] | None] = []
+
+    def _fake_resolve(model: str, custom_providers: dict[str, dict[str, str]] | None = None) -> Any:
+        seen_custom_providers.append(custom_providers)
+        return fake_model
+
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        # Must be set *after* entering _client_lg -- see the identical
+        # gotcha noted on test_switch_model_rebuilds_the_graph above.
+        monkeypatch.setattr("coscribe.web.session.resolve_chat_model", _fake_resolve)
+        with client.websocket_connect("/ws/t_switch_new_provider") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history -- session object created here, no custom providers yet
+
+            response = client.post(
+                "/api/providers",
+                json={
+                    "name": "deepseek",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "sk-test",
+                },
+            )
+            assert response.status_code == 200
+
+            ws.send_json({"type": "switch_model", "model": "deepseek:deepseek-flash"})
+            switched_state = ws.receive_json()
+            assert switched_state["type"] == "state"
+            assert switched_state["model"] == "deepseek:deepseek-flash"
+
+    assert seen_custom_providers[-1] is not None
+    assert seen_custom_providers[-1].get("deepseek") == {
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "sk-test",
+    }
+
+
 def test_plan_mode_toggle_updates_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="unused")])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
