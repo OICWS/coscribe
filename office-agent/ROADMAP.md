@@ -4188,6 +4188,171 @@ Mirrors the Browser panel's own "Select an element, add to chat" interaction exa
 
 ---
 
+## Phase 8am -- Frontend redesign direction: attachments, nav rail, Settings restructure, approval-dialog cleanup, copy/rewind placement -- discussed and recorded, not yet implemented
+
+PPTX/ppt-master alignment work is paused here (per explicit user call,
+"没有就告一段落" -- if there's nothing left, wrap that chapter up), not
+because it's finished for all time but because the user's own live test
+("用 deepseek flash 效果就挺好") confirmed deck quality now tracks the
+model choice more than any remaining coscribe-side gap. Attention shifts
+to frontend/architecture. Everything below was deliberately **discussed
+and recorded only** -- explicit instruction: "先不用做，先理解和记录一
+下" (don't build it yet, just understand and record it first). Each item
+is grounded in the real current code (read live, not assumed) so a
+future implementation round doesn't have to re-derive any of it.
+
+### 1. Attachment paste/preview -- three real, confirmed gaps
+
+- **Copy-a-file-then-paste-into-the-composer does nothing.**
+  `Composer.tsx`'s own `onPaste` handler reads only
+  `clipboardData.getData("text/plain")` and, in its own words, lets
+  anything else "behave natively" -- for a plain `<textarea>`, pasted
+  file clipboard data has no native behavior at all, so it's silently
+  dropped. Drag-and-drop (`onDrop` -> `onFileChosen`) already works;
+  paste needs the equivalent path wired from `event.clipboardData.files`.
+- **Pasted/attached images render as a bare text pill, not a
+  thumbnail, even though the actual image bytes are already sitting in
+  memory.** `onFileChosen` already reads an image `File` into a full
+  data URL (`pendingImages` holds `{name, dataUrl}`) before ever
+  rendering anything -- the composer's own pending-attachment row just
+  renders `{img.name}` as text (same generic pill component every
+  non-image file also uses) instead of `<img src={img.dataUrl}>`. This
+  is a real, low-effort fix: the data is already there, nothing needs
+  fetching.
+- **No click-to-open/preview for an attached image, before or after
+  sending** -- wanted: a small thumbnail in the pending-attachment row,
+  click it to open an enlarged preview (a lightbox); after sending, the
+  same should apply to the persisted message (`ChatLog.tsx`'s
+  `UserMessageView` currently folds every attachment into the plain-
+  text message body via a "(attachment sent)" note -- there's no
+  separate attachment element in the sent-message view at all to click,
+  for images or otherwise).
+- **Non-image files staying as a plain card (no preview) is correct
+  as-is** -- explicit user call, matches current behavior for
+  `pendingFiles`, nothing to change there.
+
+### 2. Sidebar nav rail -- restructure toward the target screenshot
+
+Target (screenshot 1): hover-to-expand, a pin-to-keep-open click; two
+small icons top-right of the collapsed rail that toggle between a
+"chat" view and a "workflow" view; below that, a flat list -- New,
+Projects, Artifacts, Scheduled, Customize. Explicit scope call: **build
+New + Scheduled; skip Projects, Artifacts, and Customize as a sidebar
+nav item** (Customize's *content* -- Skills/Connectors/Plugins -- is
+wanted, just inside Settings, not as its own rail entry; see item 3).
+
+Current reality (`NavRail.tsx`): hover-to-expand already exists
+(`onMouseEnter`/`onMouseLeave` on the rail's own wrapper div) but there
+is **no click-to-pin** -- moving the mouse away always collapses it,
+no persisted-open state today. The "chat vs workflow" split already
+exists too, but as a **Create/Run pill-button toggle inside the
+expanded panel** (`mode: "create" | "run"`), not as a pair of icon
+buttons on the always-visible collapsed rail the way the target
+screenshot shows it. "Scheduled" already exists, but nested as one of
+three sub-tabs under Run mode (`RunTab: "workflows" | "scheduled" |
+"history"`, reading `getScheduledTasks()`) rather than as its own
+top-level flat-list item alongside New -- the target's flatter
+structure decouples "which view" (the top icon toggle) from "which
+nav item" (the flat list), which is a real structural change from
+today's nested-tabs shape, not just a re-skin.
+
+### 3. Settings modal -- restructure toward the target screenshot
+
+Target (screenshot 2): a search bar at the top, sections grouped under
+labeled headers (a general "Settings" group, then a distinct
+"Customize" group, then "Platform"), skip Billing/Privacy-equivalent
+items. The explicit ask: mirror this shape for coscribe's own
+categories, with **Skills/Connectors/Plugins specifically pulled out
+as the "Customize" group** -- called out as the main thing to align on
+here.
+
+Current reality (`SettingsModal.tsx`): a single flat, ungrouped
+vertical list (General/Workspace/Providers/Tools/Skills/Connectors/
+Workflows/Environment) in a small fixed-size modal (760x640), no
+search, no grouping, no visual distinction between "core settings" and
+"customize" categories. Skills/Connectors already exist as tabs
+(`SkillsTab.tsx`/`ConnectorsTab.tsx`) -- they'd move under a new
+"Customize" grouping rather than being new work themselves. **Plugins
+has no coscribe equivalent today at all** -- the user didn't send the
+plugins reference screenshot yet either ("plugin界面先不发你"), so
+scope for that specific piece is still open.
+
+### 4. Skills settings page -- target shape
+
+Target (screenshot 3): "Your skills"/"Discover" tabs; within "Your
+skills," a "Created by you" section and a separate "From Anthropic &
+Partners" section (coscribe's equivalent: user-authored skills under
+`settings.skills_dir` vs the bundled built-in four); an "Add" button
+top-right; each row a card (icon, name, author/source line, one-line
+description, last-edited date).
+
+Current reality (`SkillsTab.tsx`): a flat list, no grouping by
+source, no cards -- just a name/description row with a plain
+`ToggleSwitch` (the same shared toggle component `RunPanel.tsx` uses
+for scheduled-task enable/disable; this component itself is not the
+"ugly slider" from item 6 below, confirmed by reading its source --
+that's a separate element, see that item). No "Add"/create-new-skill
+entry point in the UI today (skill creation currently happens by the
+agent itself via the bundled Skill Creator skill, not a UI form).
+
+### 5. Connectors settings page -- target shape
+
+Target (screenshot 4): a table-ish list (Connector / Type / Status
+columns, a checkmark or a "Connect" button per row), plus a "Popular
+for [category ▾]" suggestion row beneath it. Coscribe's own MCP-server
+catalog+configured-list concept (`ConnectorsTab.tsx`,
+`getMcpCatalog`/`getMcpServers`) is conceptually the same idea already
+-- this is a visual-layout alignment more than new functionality,
+unlike Skills/nav rail above which need real structural additions.
+
+### 6. Approval-dialog cleanup
+
+Target: clean up the tool-approval card's visuals -- specifically,
+whatever element currently reads as a horizontal-AND-vertical-sliding
+box should become vertical-motion-only (no left-right movement), and
+overall should read closer to Claude.ai's own thinner, tighter styling
+for this kind of card. **Not yet precisely identified in the current
+code** -- `ToolCallRow`/`ApprovalDetail` (`ChatLog.tsx`) were read and
+contain no `<input type="range">`/slider/progress-bar element; the
+element the screenshot shows is most likely the collapsible-disclosure
+chevron/summary row rendering in a way that visually reads as a
+slider, but this needs confirming against the actual reference
+screenshot side-by-side with the live UI at implementation time rather
+than guessed further here.
+
+### 7. Copy button -- move from per-message to per-turn
+
+Current: every agent reply gets its own `CopyButton`
+(`ChatLog.tsx`'s agent branch, `hover:opacity-100`-revealed, copies
+just that one message's text). Wanted: remove the per-message copy
+entirely -- one copy button per *complete conversation turn* instead,
+placed bottom-left of the turn (paired with the new rewind button,
+item 8). "Turn" here isn't yet a concept `ChatLog.tsx`'s own data
+model (`LogItem[]`, flat) has a ready grouping for -- `groupToolRuns`
+groups consecutive tool/approval items, but a "turn" (one full
+user-message-to-next-user-message span, including every tool call and
+the final agent reply) is a coarser grouping that doesn't exist yet
+and would need to be introduced for this to have a natural place to
+render.
+
+### 8. Rewind -- new feature, placed next to the relocated copy button
+
+Wanted: a "rewind" affordance at the bottom of a turn, next to the new
+per-turn copy button (item 7) -- matches Claude.ai's own rewind
+(revert the conversation to an earlier point). Coscribe already has a
+related-but-distinct feature: `UserMessageView`'s hover-revealed pencil
+icon (`onEditMessage`) lets you edit an earlier *user* message and
+resubmit, which truncates/replaces history similarly in effect --
+but it's attached to the user message itself (mid-conversation,
+hover-only), not a bottom-of-turn control next to copy the way this
+request describes. Worth deciding, when this is actually built,
+whether "rewind" is a thin UI relocation of the existing edit-and-
+resubmit mechanism or a genuinely separate capability (e.g. revert
+without necessarily editing text) -- not resolved here, left open for
+the implementation round.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
