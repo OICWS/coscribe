@@ -1,0 +1,12 @@
+id: investor-pitch
+name: Investor Pitch
+description: >-
+  A dark, high-energy 4-slide deck: near-black background on every
+  slide (not just the title, unlike Bold Statement), one bright cyan
+  accent reserved for the thin rule under each title, confident bold
+  type. For fundraising/traction decks and any pitch where the numbers
+  should stand out against a serious, modern field. Slide order:
+  (1) title, (2) content, (3) content, (4) closing.
+accent: "22D3EE"
+slide_count: 4
+slide_roles: [title, content, content, closing]

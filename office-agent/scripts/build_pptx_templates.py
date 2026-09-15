@@ -483,11 +483,120 @@ def build_bold_statement() -> Any:
     return prs
 
 
+def build_investor_pitch() -> Any:
+    """Dark throughout (not just the title, unlike bold-statement's dark-
+    cover/white-content split) with exactly one accent color, reserved --
+    a real style tendency, not guessed: hugohe3/ppt-master's own
+    `investor-pitch` design spec (commit `6e3ce9c5a3b994a0e223a14a0f7edd42fd0b9f5`,
+    `templates/styles/investor-pitch/templates/design_spec.md`) describes
+    its "dark-tech" visual default as "[c]ommit to a small range with one
+    accent reserved for evidence -- the traction curve, the decisive
+    number, the ask. Keep that accent rare". That spec is pure
+    methodology/copy guidance (page-role vocabulary, evidence discipline)
+    with no SVG or concrete palette of its own to port -- only the
+    tendency (dark field, one rare accent, confident scale) is real,
+    reusable design direction; the palette and every slide built here are
+    coscribe-original, through this script's own python-pptx pipeline,
+    not ppt-master's SVG/workspace one."""
+    accent = "22D3EE"
+    accent_deep = "0E7490"
+    dark = "0B0F14"
+    dark_deep = "000000"
+    prs = _new_presentation()
+    _title_slide(
+        prs, bg=dark, bg_end=dark_deep, title_color="FFFFFF", subtitle_color=accent,
+        rule_color=accent, rule_color_end=accent_deep,
+    )
+    for _ in range(2):
+        slide = _content_slide(
+            prs, title_color="FFFFFF", body_color="CBD5E1",
+            title_rule_color=accent, title_rule_end=accent_deep,
+        )
+        _set_background(slide, dark)
+    _title_slide(
+        prs, bg=dark, bg_end=dark_deep, title_color="FFFFFF", subtitle_color=accent,
+        rule_color=accent, rule_color_end=accent_deep,
+    )
+    return prs
+
+
+def build_academic_research() -> Any:
+    """Even more restrained than minimal-light: a single flat hairline
+    (no gradient fade) a third as tall, and a muted slate accent instead
+    of a saturated one -- hugohe3/ppt-master's own `academic-research`
+    design spec (same commit/provenance as investor-pitch above,
+    `templates/styles/academic-research/templates/design_spec.md`)
+    describes its "swiss-minimal" visual default as "[e]ffectively none"
+    decoration: "[h]airline rules, restrained emphasis... [a]void
+    gradient backgrounds... and any device that adds visual weight
+    without adding information" and a "plain, highly legible sans-serif".
+    Same "tendency only, coscribe-original build" relationship to the
+    source as investor-pitch."""
+    slate = "475569"
+    prs = _new_presentation()
+    _title_slide(
+        prs, bg=None, title_color="0F172A", subtitle_color=slate,
+        rule_color=slate,
+    )
+    for _ in range(2):
+        _content_slide(
+            prs, title_color="0F172A", body_color="1E293B",
+            title_rule_color=slate,
+        )
+    _title_slide(
+        prs, bg=None, title_color="0F172A", subtitle_color=slate,
+        rule_color=slate,
+    )
+    return prs
+
+
+def build_product_launch() -> Any:
+    """Near-black field, one vivid accent used only for the thin rule (not
+    a color block), a much larger statement scale than any other bundled
+    template's title -- hugohe3/ppt-master's own `product-launch` design
+    spec (same commit/provenance as investor-pitch above,
+    `templates/styles/product-launch/templates/design_spec.md`) describes
+    its "photo-editorial" visual default as "[c]onfident sans-serif
+    hierarchy with a large, well-spaced statement scale for reveals...
+    [l]et scale contrast -- not ornament -- signal what matters" and
+    "reserve one accent for the reveal... [d]o not use a semantic status
+    color decoratively". Same "tendency only, coscribe-original build"
+    relationship to the source as investor-pitch; no product photography
+    is bundled or implied -- fill_pptx_template only ever fills text."""
+    accent = "FB3A5D"
+    accent_deep = "9F1239"
+    dark = "0A0A0A"
+    prs = _new_presentation()
+    slide = _title_slide(
+        prs, bg=None, title_color="FFFFFF", subtitle_color="A3A3A3",
+        rule_color=accent, rule_color_end=accent_deep,
+    )
+    _set_background(slide, dark)
+    _set_default_style(slide.shapes.title, size=4800, bold=True, color="FFFFFF")
+    for _ in range(2):
+        slide = _content_slide(
+            prs, title_color="FFFFFF", body_color="D4D4D4",
+            title_rule_color=accent, title_rule_end=accent_deep,
+        )
+        _set_background(slide, dark)
+        _set_default_style(slide.shapes.title, size=3600, bold=True, color="FFFFFF")
+    slide = _title_slide(
+        prs, bg=None, title_color="FFFFFF", subtitle_color="A3A3A3",
+        rule_color=accent, rule_color_end=accent_deep,
+    )
+    _set_background(slide, dark)
+    _set_default_style(slide.shapes.title, size=4800, bold=True, color="FFFFFF")
+    return prs
+
+
 _BUILDERS = {
     "modern-block": build_modern_block,
     "minimal-light": build_minimal_light,
     "bold-statement": build_bold_statement,
     "velis": build_velis,
+    "investor-pitch": build_investor_pitch,
+    "academic-research": build_academic_research,
+    "product-launch": build_product_launch,
 }
 
 

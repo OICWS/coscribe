@@ -1,0 +1,12 @@
+id: academic-research
+name: Academic Research
+description: >-
+  An even quieter 4-slide deck than Minimal Light: white background, a
+  single flat slate-gray hairline under each title (no gradient fade,
+  no color blocks), muted charcoal body text. For research talks,
+  papers-as-slides, and any formal deck where the content should carry
+  all the weight and nothing should compete with it. Slide order:
+  (1) title, (2) content, (3) content, (4) closing.
+accent: "475569"
+slide_count: 4
+slide_roles: [title, content, content, closing]

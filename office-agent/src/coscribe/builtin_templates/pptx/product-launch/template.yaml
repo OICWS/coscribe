@@ -1,0 +1,12 @@
+id: product-launch
+name: Product Launch
+description: >-
+  A near-black 4-slide deck built around scale contrast instead of
+  color: an oversized bold title, quiet small body text, and one vivid
+  coral accent used only for the thin rule under each title -- never
+  as a color block. For reveal/announcement decks where the message
+  itself, not decoration, should read instantly. Slide order:
+  (1) title, (2) content, (3) content, (4) closing.
+accent: "FB3A5D"
+slide_count: 4
+slide_roles: [title, content, content, closing]

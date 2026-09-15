@@ -36,6 +36,9 @@ def test_load_builtin_templates_finds_the_shipped_templates() -> None:
         "minimal-light",
         "bold-statement",
         "velis",
+        "investor-pitch",
+        "academic-research",
+        "product-launch",
     }
 
 
@@ -192,6 +195,9 @@ def test_load_builtin_templates_flags_real_aspect_ratio_from_the_file_itself() -
     assert templates["modern-block"].is_widescreen is True
     assert templates["minimal-light"].is_widescreen is True
     assert templates["bold-statement"].is_widescreen is True
+    assert templates["investor-pitch"].is_widescreen is True
+    assert templates["academic-research"].is_widescreen is True
+    assert templates["product-launch"].is_widescreen is True
     assert templates["velis"].is_widescreen is False
 
 

@@ -3177,3 +3177,78 @@ ordering, same-type replace-in-place, `none` clearing, picture-shape
 coverage, the full validation error path, tool-metadata risk category,
 and a real LibreOffice round-trip), full suite green, `ruff check`/`mypy`
 clean.
+
+## 35. Three new bundled templates -- `investor-pitch`/`academic-research`/
+`product-launch`, aligning the template *library* with ppt-master, not
+just individual tool capabilities
+
+Direct follow-up to a live UI bug report: the user asked how many
+templates coscribe ships and, on hearing "four," asked to align the
+template library with ppt-master too -- ppt-master ships 14 generic
+"style" design specs, 6 SVG "layout" rosters, 13 real-company "brand"
+identities, and 2 real-deck-derived "decks" under
+`skills/ppt-master/templates/` (commit
+`6e3ce9c5a3b994a0e223a14a0f7edd42fd0b9f5`).
+
+**What was and wasn't portable, checked directly rather than assumed**:
+the 6 "layouts" are SVG page rosters (16 SVGs per layout, e.g.
+`presentation_core_43`) meant for ppt-master's own SVG-to-DrawingML
+"workspace" pipeline -- the same deep coupling already ruled out for
+literal porting when this session first surveyed ppt-master (the
+gemini-3-1-flash-lite-sorted-reef.md plan's own "explicitly not doing"
+section). The 14 "styles" turned out to be almost entirely narrative/
+copy methodology (argument flow, page-role vocabulary, evidence
+discipline for what an AI ghostwriter should *say*) with only a short
+"Visual System Defaults" subsection carrying real, portable design
+*tendency* -- a preferred visual register (e.g. "dark-tech,"
+"swiss-minimal," "photo-editorial"), a decoration level, and a color/
+type-scale philosophy, no concrete palette or SVG of their own.
+
+**The 13 "brands" were deliberately excluded, not overlooked**: each is
+named after a real company (McKinsey, Google, Microsoft, IBM, Deloitte,
+PwC, Accenture, BCG, AWS, Huawei, Xiaomi, Alibaba, 中国电建) and its own
+`design_spec.md` states the colors are "approx," sourced from "public
+third-party brand-color compilations," and explicitly "may not be
+represented to a client as the firm's specification" -- ppt-master's own
+authors already flag these as not-for-official-use approximations.
+Presenting one as a coscribe *built-in template option*, picked by name
+in an `ask_user_question` choice, would read as coscribe asserting an
+affiliation or endorsement none of these companies gave -- a real
+trademark/impersonation concern this project hasn't taken on anywhere
+else, so it wasn't taken on here either. Same reasoning for the 2
+"decks" (real company names again). None of this material was vendored.
+
+**What was actually built**: 3 new coscribe-original templates, using
+`scripts/build_pptx_templates.py`'s existing generator (the same
+`_title_slide`/`_content_slide`/lstStyle-`defRPr` machinery
+`bold-statement`/`minimal-light`/`modern-block` already use -- no new
+authoring mechanism), each grounded in one real, non-brand ppt-master
+style's "Visual System Defaults" tendency but with an entirely
+coscribe-original palette and every slide built through coscribe's own
+python-pptx pipeline, never ppt-master's SVG one:
+- `investor-pitch` -- "dark-tech... one accent reserved for evidence...
+  kept rare" (the source spec's own words): dark field on *every* slide
+  (not just the title, unlike `bold-statement`'s dark-cover/white-content
+  split), one cyan accent used only for the thin title rule.
+- `academic-research` -- "swiss-minimal... [e]ffectively none"
+  decoration: a single flat slate hairline (no gradient fade, unlike
+  every other bundled template's rule), muted charcoal text, quieter
+  than `minimal-light` on purpose.
+- `product-launch` -- "confident sans-serif hierarchy with a large...
+  statement scale... [l]et scale contrast, not ornament, signal what
+  matters": near-black field, one coral accent reserved for the rule,
+  and a title size (`sz=4800`) larger than any other bundled template's.
+
+**Verified real, not just structurally**: `fill_pptx_template` against
+all 3 with realistic content, real LibreOffice PDF render, visually
+inspected PNGs at both title and content slides for each -- confirmed
+genuinely distinct from each other and from the existing 4 (dark-vs-dark
+in particular: `investor-pitch` and `product-launch` are both
+near-black, but read as clearly different templates via accent hue and
+the title-scale contrast). `_check_text_overlaps`/
+`_check_missing_visual_elements`/`_check_low_contrast` (the existing
+exhaustive per-bundled-template QA test) and a `warnings.simplefilter
+("error")` python-pptx round-trip both pass on all 3 with zero findings,
+same bar every other bundled template already clears. `template.yaml`
+manifests follow the exact existing schema (`_REQUIRED_MANIFEST_FIELDS`),
+`load_builtin_templates()`'s own id-set test updated to expect 7.

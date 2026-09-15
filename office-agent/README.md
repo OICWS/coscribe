@@ -517,14 +517,23 @@ source, not just "free to use") -- most "free PowerPoint template" sites
 turn out to be personal-use-only or attribution-required in ways that
 don't clearly permit shipping the file inside a third-party open-source
 tool, so this bar has only been cleared once so far. As of this writing
-there are four, all 4 slides (title/content/content/closing):
+there are seven, all 4 slides (title/content/content/closing):
 `modern-block` (solid color blocks, navy accent), `minimal-light` (white
 background, one thin accent rule per title, no color blocks),
 `bold-statement` (full-bleed dark title/closing slides, a colored accent
-spine on content slides), and `velis` (a real third-party design by
+spine on content slides), `investor-pitch` (dark throughout, one bright
+cyan accent reserved for the rule), `academic-research` (even quieter
+than minimal-light -- a flat slate hairline, no gradient, no color),
+`product-launch` (near-black, one vivid coral accent, oversized
+statement-scale title), and `velis` (a real third-party design by
 Laurens R. Krol, CC0 1.0 -- teal/sage/magenta palette, stage-curtain
 motif, the design's own A4-landscape proportions rather than 16:9; see
-`src/coscribe/builtin_templates/pptx/velis/LICENSE`). The model picks
+`src/coscribe/builtin_templates/pptx/velis/LICENSE`). The three newest
+were prompted by hugohe3/ppt-master's own non-brand style specs
+(`investor-pitch`/`academic-research`/`product-launch` design tendencies,
+not any SVG or palette of theirs) -- see `PPTX_DESIGN.md` §35 for why its
+`brands/` templates (McKinsey, Google, IBM, ...) were deliberately left
+out. The model picks
 among them by tone/fit when asked to build a deck -- `GET
 /api/templates`-style discovery isn't needed since the full list is
 already in its system instructions. Each listed template is tagged
