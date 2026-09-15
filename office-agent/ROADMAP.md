@@ -4201,6 +4201,16 @@ and recorded only** -- explicit instruction: "先不用做，先理解和记录�
 is grounded in the real current code (read live, not assumed) so a
 future implementation round doesn't have to re-derive any of it.
 
+**The five reference screenshots this section describes are saved as
+real files, not just described in prose** -- `docs/ui-references/
+{nav-rail,settings-modal,skills-tab,connectors-tab,approval-dialog}.png`
+(private repo only, not synced to the public `coscribe` mirror, per
+explicit user call). Written prose is lossy for pixel-level UI
+reference; a future session (compacted or brand new) should open these
+files directly (a plain `Read` on the path) before touching any of
+items 2-6 below, rather than trusting this section's own textual
+description alone.
+
 ### 1. Attachment paste/preview -- three real, confirmed gaps
 
 - **Copy-a-file-then-paste-into-the-composer does nothing.**
@@ -4311,14 +4321,28 @@ Target: clean up the tool-approval card's visuals -- specifically,
 whatever element currently reads as a horizontal-AND-vertical-sliding
 box should become vertical-motion-only (no left-right movement), and
 overall should read closer to Claude.ai's own thinner, tighter styling
-for this kind of card. **Not yet precisely identified in the current
-code** -- `ToolCallRow`/`ApprovalDetail` (`ChatLog.tsx`) were read and
-contain no `<input type="range">`/slider/progress-bar element; the
-element the screenshot shows is most likely the collapsible-disclosure
-chevron/summary row rendering in a way that visually reads as a
-slider, but this needs confirming against the actual reference
-screenshot side-by-side with the live UI at implementation time rather
-than guessed further here.
+for this kind of card. Now that `approval-dialog.png` is a real saved
+file (see the note at the top of this phase), the element in question
+is clearly visible: a thick, full-width, rounded gray pill-shaped bar
+sitting directly under the "Ran a command" disclosure header, above
+the body text -- reads visually like a horizontal slider track/
+progress bar. **Still not identified in the current code**:
+`ToolCallRow`/`ApprovalDetail` (`ChatLog.tsx`) contain no
+`<input type="range">`/progress-bar/pill element at all, and the one
+component in this codebase with matching styling
+(`h-1.5 rounded-full bg-[var(--border)]`, `ContextRing.tsx`'s
+context-window usage popover) is unrelated -- it renders in the
+composer's model-picker row, never inside a tool-call/approval card.
+Two live possibilities worth checking at implementation time rather
+than guessing further: (a) this bar is a loading/in-progress
+placeholder specific to the moment a long-running tool call is
+executing (captured mid-state in this screenshot, not a permanent
+element of the completed card), not something visible in today's
+`ToolCallRow` code because that code path only handles the
+already-resolved state; (b) the screenshot is from a build genuinely
+older than the current `ChatLog.tsx`. Reproduce a real in-flight
+approval (a slow tool call, e.g. `run_python_script`) against the live
+running app before assuming which.
 
 ### 7. Copy button -- move from per-message to per-turn
 
