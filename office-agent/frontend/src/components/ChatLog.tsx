@@ -548,15 +548,14 @@ function LogItemView({
     const text = item.streaming ? `${item.text} ▍` : item.text;
     return (
       <div className="group/msg max-w-[85%]">
-        {/* A plain border-l, not a filled bubble like the user's own
-         * message -- the agent's reply is by far the longest, most
-         * frequent content on screen, so a full tinted background would
-         * be the loudest thing on the page for the item that least needs
-         * to shout. Still a real anchor though (unlike the old fully
-         * transparent --agent-bubble with zero visual container): it no
-         * longer reads as a continuation of the muted tool-call summary
-         * line directly above it. */}
-        <div className="rounded-2xl bg-[var(--agent-bubble)] border-l-2 border-[var(--border)] py-1 pl-4 pr-2 text-[var(--agent-bubble-fg)]">
+        {/* No border/bubble at all, like claude.ai's own assistant replies
+         * -- the earlier border-l-2 "anchor" (dc76b88) was real, live
+         * user feedback at the time, but became its own live complaint
+         * later ("那条竖线不好看"). The muted tool-call summary line
+         * directly above already reads as visually distinct from this
+         * full-contrast prose without needing a line to separate them --
+         * verified via screenshot, not just reasoned about. */}
+        <div className="py-1 text-[var(--agent-bubble-fg)]">
           <Suspense fallback={<div className="whitespace-pre-wrap">{text}</div>}>
             <Markdown text={text} />
           </Suspense>
