@@ -2,9 +2,14 @@
 
 [![coscribe CI](https://github.com/OICWS/project/actions/workflows/office-agent-ci.yml/badge.svg)](https://github.com/OICWS/project/actions/workflows/office-agent-ci.yml)
 
-Local, user-friendly agentic system for office work. Built on top of
-[`aisuite`](https://github.com/andrewyng/aisuite) for LLM access and agent
-runtime primitives. See `../ARCHITECTURE.md` for the full design.
+Local, user-friendly agentic system for office work. Agent runtime and
+model access go through [LangGraph](https://github.com/langchain-ai/langgraph)/
+[LangChain](https://github.com/langchain-ai/langchain) (`runtime_lg/`) --
+[`aisuite`](https://github.com/andrewyng/aisuite), this project's original
+foundation, is still a dependency but only for two narrow, unrelated
+things now (a context-window-size lookup and an MCP tool-wrapper
+compatibility fix), not for talking to a model. See `../ARCHITECTURE.md`
+for the full design and `runtime_lg/README.md` for why/how that changed.
 
 A single Coordinator agent with built-in file, document/spreadsheet/
 presentation, task-tracking, Skill, and subagent-delegation tools, plus
@@ -38,6 +43,18 @@ cd frontend && npm install && npm run build && cd ..
 # gitignored (a build artifact, not source) so a fresh checkout has none
 # yet. Needed for coscribe-web; not needed for the CLI-only `coscribe`.
 ```
+
+**In plain terms:** coscribe talks to three model makers directly --
+Anthropic (Claude), Google (Gemini), and OpenAI (GPT). Beyond those
+three, it can also connect to any other service that offers an
+"OpenAI-compatible" API -- a specific, common interface format that
+vendors like DeepSeek, Kimi, and Zhipu GLM (and local model runners like
+Ollama) choose to support, precisely so tools built for OpenAI work with
+them with no changes. This is *not* "compatible with any one of the
+three" -- it specifically means speaking OpenAI's own format; there's no
+equivalent "Anthropic-compatible" or "Gemini-compatible" API that other
+vendors offer today, so that's not a path into coscribe the way
+OpenAI-compatible is.
 
 Supported model prefixes: `anthropic:`, `openai:`, `gemini:` (Gemini Developer
 API — a plain API key from https://aistudio.google.com/apikey, not Vertex AI).
@@ -1387,20 +1404,29 @@ OpenAI-compatible API can be registered as its own model prefix by setting
 ```
 
 Once registered, use it like any other model, e.g.
-`COSCRIBE_DEFAULT_MODEL=deepseek:deepseek-v4-flash`. No provider-specific
-code is needed: `LLMClient._resolve_provider` hands the `base_url`/`api_key`
-straight to aisuite's own `OpenaiProvider`, which forwards them to the real
-`openai` SDK's client constructor -- that's all an OpenAI-compatible
-endpoint needs. `default_model` in the file is just a UI convenience for
-pre-filling the "add custom provider" form; it isn't read by the backend.
+`COSCRIBE_DEFAULT_MODEL=deepseek:<a real current model id from DeepSeek's
+own docs>` -- deliberately not a specific example model id here: a
+vendor's own model lineup is outside this project's control and turns
+over on its own schedule, so a hardcoded example goes stale (a real,
+live-hit case: this doc used to say `deepseek-v4-flash`, which was
+already wrong by the time a user tried it -- see
+`runtime_lg/README.md`'s matching note). No provider-specific code is
+needed: `resolve_chat_model` (`runtime_lg/providers.py`) hands the
+`base_url`/`api_key` straight to `langchain_openai.ChatOpenAI`'s
+constructor -- that's all an OpenAI-compatible endpoint needs.
+`default_model` in the file is just a UI convenience for pre-filling the
+"add custom provider" form (left blank for third-party vendors in the
+catalog itself, for the same staleness reason -- fill in your own
+current model id there); it isn't read by anything else.
 
 The web UI's **Settings → Providers** tab (see the Web UI section) edits
-this same file for you, with DeepSeek, Kimi (Moonshot), and Zhipu GLM as
-one-click catalog entries plus a form for any other OpenAI-compatible API
--- those three are convenient examples, not an exhaustive list. Adding or
-removing a provider here is saved immediately, no restart needed -- but,
-same as connecting an MCP server (see above), it only takes effect for the
-next new conversation, not already-open ones. Anthropic,
+this same file for you, with DeepSeek, Kimi (Moonshot), Zhipu GLM, and a
+local Ollama runtime as one-click catalog entries plus a form for any
+other OpenAI-compatible API -- those four are convenient examples, not
+an exhaustive list; none of them pre-fill a guessed "default model" (see
+above) since that goes stale, fill in your own. Adding or removing a
+provider here is saved immediately, no restart needed, and takes effect
+in already-open conversations too, not just new ones. Anthropic,
 OpenAI, and Gemini (the three built-in providers, configured by API key
 rather than base URL) also appear in this tab once their key is set in
 **Settings → API Keys**, alongside an optional "default model" field per
@@ -1596,13 +1622,15 @@ doesn't work for it.
 Binds to `127.0.0.1` by default; this is a local single-user tool, not
 meant to be exposed beyond your own machine.
 
-Replies stream token-by-token (both here and in the CLI) rather than
-appearing all at once, for providers whose SDK supports it -- currently the
-vendored Gemini provider. Providers without a native streaming method
-(Anthropic/OpenAI via the published aisuite package, as of writing) fall
-back to their normal single response, delivered as one chunk; nothing
-breaks, replies just appear all at once for those providers until
-streaming support is vendored for them too.
+Replies stream token-by-token (both here and in the CLI) for every
+provider uniformly -- anthropic/gemini/openai and any OpenAI-compatible
+custom one -- via one shared LangGraph `agent.astream(..., stream_mode=
+["messages"])` call (`web/session.py`'s `_stream_turn`), not
+per-provider vendored code. This wasn't always true: an earlier runtime
+had per-provider streaming code that only covered the vendored Gemini
+provider, with Anthropic/OpenAI falling back to a single non-streamed
+chunk -- see `runtime_lg/README.md` for the full history of the
+migration that replaced that runtime with the current one.
 
 ## Desktop app
 
