@@ -4399,19 +4399,22 @@ Deliberately un-numbered per your call: backend/foundation (Phases 2-6
 above) comes first; these get picked back up once that's done and there's
 a concrete reason to prioritize a new surface.
 
-- **PPTX quality: a real reference-slide-template library, replacing
-  generate-colors-from-scratch** -- not started; see Phase 8al above for
-  the full research (borrows PPTAgent's own approach) and the agreed
-  sequencing (track 2 of 3, after the click-to-target-a-shape feature
-  that already shipped). Merges with a theme-picker idea (`ask_user_
-  question`, four options before generating) discussed in the same
-  round -- each "theme" would be a real, curated reference deck to
-  adapt content into, not just a `bg=/accent=` color-token string the
-  model invents live. Concrete open sub-question worth resolving before
-  starting: `ask_user_question`'s own `options` are plain text labels,
-  no per-option preview image support today -- a v1 picking by name/
-  description alone, or a real investment in rendering a small preview
-  thumbnail per option first, is a real scope decision, not a detail.
+- [x] **PPTX quality: a real reference-slide-template library, replacing
+  generate-colors-from-scratch** -- shipped, stale "not started" note
+  corrected. Found already done (commits predate this file's own catch-
+  up) while about to start it as this session's "next phase": real OMML
+  equations (`add_pptx_formula`, vendored LaTeX compiler) and
+  `extract_pptx_template` (distills a reusable template from any
+  reference deck, PPTAgent-inspired) are both live, tested, and visually
+  verified through the real LibreOffice pipeline -- see `PPTX_DESIGN.md`
+  §25/§26 for the full design and verification record. §27 went further
+  still, expanding `set_pptx_transition` from 4 to 48 real PowerPoint
+  transitions. The `ask_user_question` per-option-preview-image
+  sub-question this bullet used to raise was superseded by
+  `extract_pptx_template` itself being immediately usable in the same
+  turn, no picker needed. `image_search.py` (zero-API-key Openverse/
+  Wikimedia sourcing, flagged in §27 as "not yet acted on") is the one
+  genuinely still-open thread from that same round of research.
 - **PPTX quality/completeness: a generic pptx-internal-XML read/edit
   tool** -- not started; see Phase 8al above (track 3 of 3). Inspired by
   ppt-master's SVG/XML-manipulation approach and this codebase's own
