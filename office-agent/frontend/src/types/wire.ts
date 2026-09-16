@@ -44,7 +44,17 @@ export interface StateEvent {
 export type HistoryEntry =
   | { kind: "user"; text: string }
   | { kind: "agent"; text: string }
-  | { kind: "tool"; tool_name: string; arguments: Record<string, unknown>; result: unknown };
+  | {
+      kind: "tool";
+      tool_name: string;
+      arguments: Record<string, unknown>;
+      result: unknown;
+      /** Off the checkpointed ToolMessage's own `.status` -- true iff the
+       * tool's Python body raised (see agent.py's
+       * _CatchToolErrorsMiddleware). Same field ToolResultEvent carries
+       * for a live call, below. */
+      is_error: boolean;
+    };
 
 export interface HistoryEvent {
   type: "history";
@@ -66,6 +76,12 @@ export interface ToolResultEvent {
    * instead of always falling back to generic phrasing ("a file"). */
   arguments: Record<string, unknown>;
   result: unknown;
+  /** True iff the tool's Python body raised (LangChain's ToolMessage.status
+   * == "error", set by agent.py's _CatchToolErrorsMiddleware) -- the one
+   * generic, works-for-every-tool failure signal, not inferred from
+   * `result`'s own shape. Drives the transcript's red failure styling and
+   * "(N failed)" counts (see transcriptGrouping.ts). */
+  is_error: boolean;
 }
 
 export interface ApprovalRequiredEvent {

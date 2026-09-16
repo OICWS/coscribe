@@ -1130,6 +1130,7 @@ class ChatSessionLG:
                                 "tool_name": name,
                                 "arguments": args,
                                 "result": result_value,
+                                "is_error": message.status == "error",
                             }
                         )
                 elif isinstance(message, AIMessage):

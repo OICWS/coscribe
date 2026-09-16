@@ -144,6 +144,14 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
     "tool_result" WS event already uses, so a replayed entry's result has
     the exact same decoded shape a live one does.
 
+    Each entry also carries `is_error`, straight off the checkpointed
+    ToolMessage's own `.status` field ("success"/"error", set by
+    agent.py's _CatchToolErrorsMiddleware whenever the tool's Python body
+    raised) -- the one place a genuinely generic, works-for-every-tool
+    failure signal already exists server-side. Same field the live
+    "tool_result" WS event now sends (see session.py's _stream_turn), so a
+    replayed entry's failure indicator matches a live one's exactly.
+
     A "user" entry has its mode_note prefix (see strip_mode_note above)
     stripped back off -- the live bubble the user actually saw when they
     hit Send never had it, so a history replay shouldn't show it either.
@@ -155,10 +163,11 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
     unpacked. Same trade-off render_transcript_lg's own callers (the
     workflow curator prompt) already accept for that message; not solved
     here either."""
-    results_by_id: dict[str, Any] = {}
+    results_by_id: dict[str, tuple[Any, bool]] = {}
     for message in messages:
         if message.type == "tool" and getattr(message, "tool_call_id", None):
-            results_by_id[message.tool_call_id] = tool_result_value(message.content)
+            is_error = getattr(message, "status", "success") == "error"
+            results_by_id[message.tool_call_id] = (tool_result_value(message.content), is_error)
     entries: list[dict[str, Any]] = []
     for message in messages:
         tool_calls = getattr(message, "tool_calls", None)
@@ -169,12 +178,14 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
             for call in tool_calls:
                 if call["id"] not in results_by_id:
                     continue
+                result, is_error = results_by_id[call["id"]]
                 entries.append(
                     {
                         "kind": "tool",
                         "tool_name": call["name"],
                         "arguments": dict(call["args"]),
-                        "result": results_by_id[call["id"]],
+                        "result": result,
+                        "is_error": is_error,
                     }
                 )
             continue

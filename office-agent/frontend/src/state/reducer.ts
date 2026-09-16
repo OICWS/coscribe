@@ -9,7 +9,18 @@ export type LogItem =
   // at render time, so it stays stable even as later items are appended.
   | { id: string; kind: "user"; text: string; turnIndex: number; images?: string[] }
   | { id: string; kind: "agent"; text: string; streaming: boolean }
-  | { id: string; kind: "tool"; toolName: string; arguments: Record<string, unknown>; result?: unknown }
+  | {
+      id: string;
+      kind: "tool";
+      toolName: string;
+      arguments: Record<string, unknown>;
+      result?: unknown;
+      /** True iff the call errored (ToolMessage.status == "error" --
+       * see wire.ts's ToolResultEvent/HistoryEntry). Absent, not false,
+       * until a result actually arrives -- same "no data yet" convention
+       * `result` itself uses. */
+      isError?: boolean;
+    }
   | {
       id: string;
       kind: "approval";
@@ -27,6 +38,9 @@ export type LogItem =
        * than pushing a separate "tool" one (see that case's own
        * comment). Never set for a denied call, which never runs. */
       result?: unknown;
+      /** Same is_error signal as the "tool" variant's own, set alongside
+       * `result` once the approved call actually executes. */
+      isError?: boolean;
     }
   | {
       id: string;
@@ -278,6 +292,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             toolName: entry.tool_name,
             arguments: entry.arguments,
             result: entry.result,
+            isError: entry.is_error,
           } as const;
         }),
       };
@@ -313,7 +328,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       for (let i = items.length - 1; i >= 0; i -= 1) {
         const item = items[i];
         if (item.kind === "tool" && item.toolName === action.tool_name && item.result === undefined) {
-          items[i] = { ...item, arguments: action.arguments, result: action.result };
+          items[i] = {
+            ...item,
+            arguments: action.arguments,
+            result: action.result,
+            isError: action.is_error,
+          };
           return { ...state, items };
         }
         // A gated call only ever produced an "approval" LogItem live --
@@ -332,7 +352,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         // collapsed tool-run group summarized both -- "Wrote notes.txt,
         // Wrote notes.txt" for one write_file call.
         if (item.kind === "approval" && item.toolName === action.tool_name && item.status === "approved") {
-          items[i] = { ...item, arguments: action.arguments, result: action.result };
+          items[i] = {
+            ...item,
+            arguments: action.arguments,
+            result: action.result,
+            isError: action.is_error,
+          };
           return { ...state, items };
         }
       }
@@ -342,6 +367,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         toolName: action.tool_name,
         arguments: action.arguments,
         result: action.result,
+        isError: action.is_error,
       });
       return { ...state, items };
     }

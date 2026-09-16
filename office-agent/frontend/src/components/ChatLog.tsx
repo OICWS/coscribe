@@ -180,9 +180,15 @@ function TurnView({
  * filename, query, task name, ...) gets its own light monospaced chip so
  * it visually pops out of the plain-text verb, the same "emphasized
  * keyword" treatment Claude Code's own transcript rows use for a path or
- * identifier inside an action description. */
+ * identifier inside an action description. `parts.failed` (one call that
+ * itself errored) renders the whole label in --danger red; `parts.
+ * failedCount` (an aggregated "Ran N commands" clause -- see
+ * summarizeGroupParts) instead appends a red "(M failed)" suffix while
+ * the verb itself stays the normal muted color, matching the reference
+ * UI's "Ran 3 commands (1 failed)" -- only the failure count is red, not
+ * the whole clause. */
 function SummaryLabel({ parts }: { parts: SummaryParts }) {
-  return (
+  const label = (
     <>
       {parts.verb}
       {parts.object && (
@@ -192,8 +198,12 @@ function SummaryLabel({ parts }: { parts: SummaryParts }) {
         </>
       )}
       {parts.diffStat && <DiffStat added={parts.diffStat.added} removed={parts.diffStat.removed} />}
+      {parts.failedCount !== undefined && (
+        <span className="ml-1 text-[var(--danger)]">({parts.failedCount} failed)</span>
+      )}
     </>
   );
+  return parts.failed ? <span className="text-[var(--danger)]">{label}</span> : label;
 }
 
 /** "+N -M" line-count badge, green/red -- the one deliberate exception to

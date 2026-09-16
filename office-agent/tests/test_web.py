@@ -4852,6 +4852,10 @@ def test_tool_raising_a_plain_exception_is_reported_to_the_model_not_a_crashed_t
     tool_result = next(m for m in messages if m["type"] == "tool_result")
     assert tool_result["tool_name"] == "read_file"
     assert "File does not exist" in str(tool_result["result"])
+    # This same ToolMessage.status the middleware sets to "error" (see this
+    # test's own docstring) is also what the transcript's failure styling
+    # keys off -- see wire.ts's ToolResultEvent.is_error.
+    assert tool_result["is_error"] is True
     agent_message = next(m for m in messages if m["type"] == "agent_message")
     assert agent_message["text"] == "sorry, that file doesn't exist"
 
@@ -5330,6 +5334,7 @@ def test_reconnect_replays_conversation_history_lg(
                 "tool_name": "read_file",
                 "arguments": {"path": "note.txt"},
                 "result": "File does not exist: note.txt",
+                "is_error": True,
             },
             {"kind": "agent", "text": "the file says hello"},
         ],
@@ -5406,3 +5411,4 @@ def test_history_replay_includes_an_approved_calls_real_result_lg(
         "lines_added": 1,
         "lines_removed": 0,
     }
+    assert tool_entry["is_error"] is False

@@ -147,7 +147,37 @@ export interface SummaryParts {
   object: string | null;
   glue?: string;
   diffStat?: { added: number; removed: number };
+  /** This label represents one call that itself errored (see `isFailure`
+   * below) -- rendered as red text for the whole label, not just a
+   * marker. */
+  failed?: boolean;
+  /** This label represents an *aggregated* run of several calls (see
+   * summarizeGroupParts' command-run collapsing) -- how many of them
+   * errored, rendered as a red "(N failed)" suffix. Mutually exclusive
+   * with `failed` in practice: an aggregated clause is never also a
+   * single failed item. */
+  failedCount?: number;
 }
+
+/** The one generic, works-for-every-tool failure signal this app has --
+ * straight off the checkpointed ToolMessage's own `.status` field (see
+ * wire.ts's ToolResultEvent/HistoryEntry, set server-side by agent.py's
+ * _CatchToolErrorsMiddleware whenever the tool's Python body raised).
+ * Deliberately NOT inferred by sniffing each tool's own result shape
+ * (e.g. a command's exit_code) -- that would only cover the tools this
+ * file happens to special-case, where this covers all of them, including
+ * a failed write_file/edit_file/read_file. `undefined` (not yet resolved,
+ * or a denied approval that never ran) reads as "not a failure", same as
+ * a still-pending item never showing a diff stat either. */
+export function isFailure(item: ToolOrApprovalItem): boolean {
+  return item.isError === true;
+}
+
+/** run_python_script/run_node_script are the two tools a user would call
+ * "running a command" in the Claude-Code-web sense the reference UI this
+ * matches uses -- run_background_script/check_background_task have their
+ * own distinct "started"/"checked" semantics and aren't folded in here. */
+const COMMAND_TOOL_NAMES = new Set(["run_python_script", "run_node_script"]);
 
 /** Pulls `{lines_added, lines_removed}` off a tool result if present --
  * only write_file/edit_file/edit_file_batch's results carry these fields
@@ -174,6 +204,7 @@ function diffStatOf(result: unknown): { added: number; removed: number } | null 
  * generic prefix table below, not a hardcoded entry for all ~35+ tools. */
 const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   run_python_script: () => ({ verb: "Ran a command", object: null }),
+  run_node_script: () => ({ verb: "Ran a command", object: null }),
   run_background_script: (a) => ({
     verb: "Started a background script",
     object: str(a, "description") ?? null,
@@ -259,11 +290,24 @@ function summarizeToolNameParts(toolName: string, args: ArgRecord): SummaryParts
 function partsFor(item: ToolOrApprovalItem): SummaryParts {
   const base = TOOL_SUMMARIES[item.toolName]?.(item.arguments) ?? summarizeToolNameParts(item.toolName, item.arguments);
   const diffStat = diffStatOf(item.result);
-  const withDiff = diffStat ? { ...base, diffStat } : base;
-  if (item.kind === "approval" && item.status === "pending") {
-    return { ...withDiff, verb: `Approve: ${withDiff.verb}` };
+  let parts = diffStat ? { ...base, diffStat } : base;
+  if (isFailure(item)) {
+    // "Failed to run" specifically for the command tools, matching the
+    // reference UI's own wording exactly -- every other tool keeps its
+    // normal verb ("Wrote ROADMAP.md", "Read a file", ...), just rendered
+    // in red (`failed: true` below) rather than rewritten per tool, since
+    // a bespoke failure verb for all ~35+ built-ins isn't worth it for a
+    // case the reference doesn't actually show.
+    parts = {
+      ...parts,
+      verb: COMMAND_TOOL_NAMES.has(item.toolName) ? "Failed to run" : parts.verb,
+      failed: true,
+    };
   }
-  return withDiff;
+  if (item.kind === "approval" && item.status === "pending") {
+    return { ...parts, verb: `Approve: ${parts.verb}` };
+  }
+  return parts;
 }
 
 /** Structured form -- verb plus an optional emphasized object -- for a
@@ -294,11 +338,44 @@ export interface GroupHeaderParts {
 /** Structured headline for a ToolRunGroup's collapsed header -- the same
  * per-item verb/object split ToolCallRow uses, so the header can also
  * emphasize each object inline ("Wrote `deck.pptx`, searched `images`"),
- * capped past a few items ("and 2 more"). No line-count/diff-stat badges
- * -- no tool response in this codebase returns that data, so none is
- * shown. */
+ * each with its own diff-stat/failure styling, capped past a few clauses
+ * ("and 2 more"). A run of two or more consecutive command calls
+ * (run_python_script/run_node_script -- see COMMAND_TOOL_NAMES) collapses
+ * into one "Ran N commands" clause with a "(M failed)" suffix if any of
+ * them errored, matching the reference UI's own "Ran 3 commands (1
+ * failed)" convention -- a single command among non-command items still
+ * gets its own normal "Ran a command"/"Failed to run" clause, same as
+ * before. The *expanded* per-step list (ToolRunGroupView) is unaffected
+ * -- it always renders every individual item, never this aggregation. */
 export function summarizeGroupParts(items: ToolOrApprovalItem[]): GroupHeaderParts {
-  const parts = items.map(partsFor);
-  if (parts.length <= SUMMARY_CAP) return { shown: parts, more: 0 };
-  return { shown: parts.slice(0, SUMMARY_CAP), more: parts.length - SUMMARY_CAP };
+  const clauses: SummaryParts[] = [];
+  let run: ToolOrApprovalItem[] = [];
+
+  const flushRun = () => {
+    if (run.length === 0) return;
+    if (run.length === 1) {
+      clauses.push(partsFor(run[0]));
+    } else {
+      const failedCount = run.filter(isFailure).length;
+      clauses.push({
+        verb: `Ran ${run.length} commands`,
+        object: null,
+        failedCount: failedCount > 0 ? failedCount : undefined,
+      });
+    }
+    run = [];
+  };
+
+  for (const item of items) {
+    if (COMMAND_TOOL_NAMES.has(item.toolName)) {
+      run.push(item);
+    } else {
+      flushRun();
+      clauses.push(partsFor(item));
+    }
+  }
+  flushRun();
+
+  if (clauses.length <= SUMMARY_CAP) return { shown: clauses, more: 0 };
+  return { shown: clauses.slice(0, SUMMARY_CAP), more: clauses.length - SUMMARY_CAP };
 }
