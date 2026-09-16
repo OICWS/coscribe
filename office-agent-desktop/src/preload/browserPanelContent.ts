@@ -31,6 +31,7 @@ import { ipcRenderer } from "electron";
 
 const SET_PICK_MODE_CHANNEL = "browser-panel-content:set-pick-mode";
 const PICKED_CHANNEL = "browser-panel-content:picked";
+const WHEEL_ZOOM_CHANNEL = "browser-panel-content:wheel-zoom";
 
 const HIGHLIGHT_ID = "__coscribe_browser_panel_highlight__";
 const LABEL_ID = "__coscribe_browser_panel_label__";
@@ -136,8 +137,30 @@ function onClick(e: MouseEvent): void {
   if (info) ipcRenderer.send(PICKED_CHANNEL, info);
 }
 
+/** Real, confirmed gap (ROADMAP.md's own "Later" backlog, now fixed): a
+ * bare `WebContentsView` has no browser-chrome zoom keybindings the way
+ * a full Chrome window does (ctrl+scroll-to-zoom is Chrome's own `//chrome`
+ * UI layer, not a core Blink/renderer behavior Electron ships) -- so
+ * ctrl+wheel over the embedded page silently did nothing instead of
+ * zooming. Electron's main-process `webContents` has no wheel event at
+ * all (only `before-input-event`, keyboard-only -- see browserPanel.ts's
+ * own before-input-event handler for the ctrl+plus/minus/0 half of this
+ * fix), so this half has to go through the same DOM-listener-plus-IPC
+ * relay element-picking above already established: intercept the page's
+ * own `wheel` event here (capture phase, same as onClick above, so a
+ * page that itself listens for wheel never sees a ctrl-held one),
+ * preventDefault (stops the page's own scroll/pinch-zoom handling from
+ * also firing), and hand `deltaY` to the main process, which owns the
+ * actual `setZoomFactor` call (this preload has no zoom API of its own). */
+function onWheel(e: WheelEvent): void {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  ipcRenderer.send(WHEEL_ZOOM_CHANNEL, e.deltaY);
+}
+
 window.addEventListener("mousemove", onMouseMove, true);
 window.addEventListener("click", onClick, true);
+window.addEventListener("wheel", onWheel, { capture: true, passive: false });
 
 ipcRenderer.on(SET_PICK_MODE_CHANNEL, (_event, enabled: boolean) => {
   pickModeActive = enabled;

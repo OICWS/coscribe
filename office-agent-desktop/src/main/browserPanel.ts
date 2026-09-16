@@ -59,6 +59,37 @@ export const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
 // copies in sync if these ever change.
 const CONTENT_SET_PICK_MODE_CHANNEL = "browser-panel-content:set-pick-mode";
 const CONTENT_PICKED_CHANNEL = "browser-panel-content:picked";
+const CONTENT_WHEEL_ZOOM_CHANNEL = "browser-panel-content:wheel-zoom";
+
+// Chromium's own practical zoom range (roughly what Chrome's UI itself
+// steps through, 25%-500%) -- setZoomFactor has no built-in clamp of its
+// own, so an unbounded ctrl+wheel fling would otherwise zoom the page
+// into either an unreadable sliver or a many-thousand-percent blowout.
+const MIN_ZOOM_FACTOR = 0.25;
+const MAX_ZOOM_FACTOR = 5;
+// Per ctrl+plus/minus keypress, or per ~100-120-delta mouse-wheel notch
+// (see applyWheelZoom below) -- matches the ~10% granularity Chrome's
+// own zoom steps use around 100%, close enough without replicating its
+// full non-uniform step table (25/33/50/67/75/80/90/100/110/125/...).
+const ZOOM_STEP_FACTOR = 1.1;
+
+function clampZoomFactor(factor: number): number {
+  return Math.min(MAX_ZOOM_FACTOR, Math.max(MIN_ZOOM_FACTOR, factor));
+}
+
+/** `deltaY` drives a *continuous* zoom (not a fixed per-notch step) so a
+ * trackpad's pinch-to-zoom gesture (which browsers report as a ctrl-held
+ * wheel event with small, smooth delta values, not one big notch) feels
+ * analog rather than jumping in discrete 10% chunks -- a real mouse
+ * wheel's much larger per-notch delta (~100-120) still lands close to
+ * one ZOOM_STEP_FACTOR-sized step this way, so both input devices get a
+ * reasonable feel from the same formula. Negative deltaY (scroll up) is
+ * "zoom in", matching every browser's own ctrl+scroll convention. */
+function applyWheelZoom(view: WebContentsView, deltaY: number): void {
+  const current = view.webContents.getZoomFactor();
+  const next = clampZoomFactor(current * (1 - deltaY * 0.001));
+  view.webContents.setZoomFactor(next);
+}
 
 export interface PanelRect {
   x: number;
@@ -145,6 +176,27 @@ function ensurePanelView(): WebContentsView {
   ipcMain.on(CONTENT_PICKED_CHANNEL, (event, info: PickedElementInfo) => {
     if (event.sender !== view.webContents) return;
     void handlePicked(view, info);
+  });
+  // Ctrl+wheel half of the zoom fix -- see browserPanelContent.ts's own
+  // onWheel for why this can't be caught directly here (webContents has
+  // no wheel event at all in the main process).
+  ipcMain.on(CONTENT_WHEEL_ZOOM_CHANNEL, (event, deltaY: number) => {
+    if (event.sender !== view.webContents) return;
+    applyWheelZoom(view, deltaY);
+  });
+  // Ctrl+plus/minus/0 half -- this one *is* directly catchable here,
+  // before-input-event fires for every keydown/keyup regardless of
+  // whether the page's own JS would otherwise swallow it (a page that
+  // calls preventDefault on its own keydown listener doesn't stop this).
+  view.webContents.on("before-input-event", (_event, input) => {
+    if (input.type !== "keyDown" || (!input.control && !input.meta)) return;
+    if (input.key === "+" || input.key === "=") {
+      view.webContents.setZoomFactor(clampZoomFactor(view.webContents.getZoomFactor() * ZOOM_STEP_FACTOR));
+    } else if (input.key === "-") {
+      view.webContents.setZoomFactor(clampZoomFactor(view.webContents.getZoomFactor() / ZOOM_STEP_FACTOR));
+    } else if (input.key === "0") {
+      view.webContents.setZoomFactor(1);
+    }
   });
   panelView = view;
   return view;
