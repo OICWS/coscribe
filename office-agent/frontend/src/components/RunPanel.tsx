@@ -321,11 +321,13 @@ export function RunPanel({ runTab, onRunWorkflow, refreshKey }: RunPanelProps) {
             </div>
           )}
           {status && <span className={`text-sm ${status.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>{status.text}</span>}
-        </div>
-      )}
 
-      {runTab === "history" && (
-        <div className="flex flex-col">
+          {/* "History" folded into "Scheduled" -- see NavRail.tsx's own
+           * RunTab comment; both are "things that ran without you typing
+           * a message right now." */}
+          <div className="mt-2 border-t border-[var(--border)] pt-4 text-sm font-medium uppercase tracking-wide text-[var(--muted)]">
+            Recent runs
+          </div>
           {runs.length === 0 && <div className="py-2 text-sm text-[var(--muted)]">No runs yet.</div>}
           {runs.map((run) => (
             <div key={run.run_id} className="flex items-start justify-between gap-3 border-b border-[var(--border)] py-3">

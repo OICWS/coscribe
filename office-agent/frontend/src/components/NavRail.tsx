@@ -6,10 +6,23 @@ import type { ThreadSummary } from "../types/session";
 import type { Workflow } from "../types/settings";
 import type { WorkflowRun } from "../types/wire";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { CalendarIcon, ClockIcon, MoreIcon, PencilIcon, PlusIcon, SidebarIcon, TrashIcon, ZapIcon } from "./icons";
+import {
+  CalendarIcon,
+  ClockIcon,
+  MessageCircleIcon,
+  MoreIcon,
+  PencilIcon,
+  PlusIcon,
+  SidebarIcon,
+  TrashIcon,
+  ZapIcon,
+} from "./icons";
 
 export type NavMode = "create" | "run";
-export type RunTab = "workflows" | "scheduled" | "history";
+// "history" folded into "scheduled" -- both are "things that ran without
+// you typing a message right now," and the flat New/Scheduled nav shape
+// (see NavRail's own docstring below) has no third slot for it.
+export type RunTab = "workflows" | "scheduled";
 
 /** Full-page reload, same as SessionMenu.tsx's identical helper -- there is
  * no in-page thread-switching machinery, deliberately not ported. */
@@ -147,20 +160,23 @@ interface NavRailProps {
 
 /** Replaces the old top-bar "Sessions" dropdown -- a narrow icon-only
  * rail that expands into a full nav panel on hover (matching the "Nav
- * rail, Create/Run split" design pass), rather than a click-to-open
- * dropdown. Collapsed, it shows nothing but the toggle icon; expanded, it
- * shows the Create/Run mode switch and, depending on which mode is
- * active, either the session list (Create, ported from SessionMenu.tsx)
- * or the Workflows/Scheduled/History sub-tabs (Run, ported from
- * SessionMenu.tsx's own Workflows/Recent Runs sections plus
- * settings/ScheduledTasksTab.tsx). Settings itself is reachable from the
+ * rail" reference screenshot, docs/ui-references/nav-rail.png), rather
+ * than a click-to-open dropdown or the old Create/Run pill-button-inside-
+ * the-panel shape. Collapsed, it shows the pin toggle plus two always-
+ * visible mode icons (chat/workflow -- switches `mode` directly, no need
+ * to expand first); expanded, it adds a flat nav-item list below them:
+ * just "New" in chat mode (ported from SessionMenu.tsx's session list),
+ * or "New" + "Scheduled" in workflow mode (ported from
+ * SessionMenu.tsx's Workflows/Recent Runs sections plus
+ * settings/ScheduledTasksTab.tsx -- "history" folded into "Scheduled",
+ * see RunTab's own comment). Each flat item is its own little accordion
+ * within the rail: click to expand/collapse its list in place, which
+ * also drives RunPanel's own main-content view via onRunTabChange (today
+ * that's the *only* way to switch RunPanel's section -- RunPanel itself
+ * renders no tab UI of its own). Settings itself is reachable from the
  * header row (App.tsx), not from here -- it used to live at the bottom of
  * this rail, but the user pointed out that put it out of the same visual
- * row as the sidebar toggle it's paired with. RunPanel (the main content
- * area for Run mode) fetches this same data independently for its own
- * full detail view, same "each surface fetches its own slice on
- * mount/open" pattern already used by the Settings tabs -- this rail's
- * copy is a compact quick-list, not the source of truth. */
+ * row as the sidebar toggle it's paired with. */
 export function NavRail({
   threadId,
   mode,
@@ -171,7 +187,11 @@ export function NavRail({
   onRunWorkflow,
   onStop,
 }: NavRailProps) {
-  const [expanded, setExpanded] = useState(false);
+  // Not persisted (no localStorage) -- explicit call: pin is a per-page-
+  // load convenience, not a remembered setting.
+  const [pinned, setPinned] = useState(false);
+  const [hovering, setHovering] = useState(false);
+  const expanded = pinned || hovering;
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
@@ -213,40 +233,53 @@ export function NavRail({
           expanded ? "h-full border-r border-[var(--border)] bg-[var(--panel-bg)]" : "h-12"
         }`}
         style={{ width: expanded ? 272 : 48 }}
-        onMouseEnter={() => setExpanded(true)}
-        onMouseLeave={() => setExpanded(false)}
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
       >
-        <button
-          type="button"
-          title="Toggle navigation"
-          className="flex h-12 w-12 shrink-0 items-center justify-center text-[var(--muted)] hover:text-[var(--fg)]"
-        >
-          <SidebarIcon className="h-[18px] w-[18px]" />
-        </button>
-  
-        {expanded && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2">
-            <div className="mb-2 flex gap-1 rounded-lg bg-[var(--card-bg)] p-1">
+        {/* Collapsed (48px), this row is just the pin toggle, centered like
+         * the old lone toggle button. Expanded, the mode-icon pair joins it
+         * on the same row -- they only need to be reachable once the panel
+         * is already open (hover or pinned), not squeezed into the 48px
+         * sliver too. */}
+        <div className={`flex h-12 shrink-0 items-center px-1.5 ${expanded ? "justify-between" : "justify-center"}`}>
+          <button
+            type="button"
+            title={pinned ? "Unpin navigation" : "Pin navigation open"}
+            className={`flex h-9 w-9 items-center justify-center rounded-md hover:bg-[var(--card-bg)] ${
+              pinned ? "text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
+            }`}
+            onClick={() => setPinned((v) => !v)}
+          >
+            <SidebarIcon className="h-[18px] w-[18px]" />
+          </button>
+          {expanded && (
+            <div className="flex gap-0.5">
               <button
                 type="button"
-                className={`flex-1 rounded-md py-1 text-sm font-medium ${
-                  mode === "create" ? "bg-[var(--accent)] text-[var(--accent-fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
+                title="Chat"
+                className={`flex h-8 w-8 items-center justify-center rounded-md ${
+                  mode === "create" ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
                 }`}
                 onClick={() => onModeChange("create")}
               >
-                Create
+                <MessageCircleIcon className="h-[16px] w-[16px]" />
               </button>
               <button
                 type="button"
-                className={`flex-1 rounded-md py-1 text-sm font-medium ${
-                  mode === "run" ? "bg-[var(--accent)] text-[var(--accent-fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
+                title="Workflow"
+                className={`flex h-8 w-8 items-center justify-center rounded-md ${
+                  mode === "run" ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
                 }`}
                 onClick={() => onModeChange("run")}
               >
-                Run
+                <ZapIcon className="h-[16px] w-[16px]" />
               </button>
             </div>
-  
+          )}
+        </div>
+
+        {expanded && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2">
             {mode === "create" && (
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                 {currentRun && (
@@ -282,76 +315,94 @@ export function NavRail({
   
             {mode === "run" && (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="mb-1 flex gap-3 border-b border-[var(--border)] px-1 text-sm">
-                  {(["workflows", "scheduled", "history"] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      type="button"
-                      className={`-mb-px border-b-2 py-1.5 capitalize ${
-                        runTab === tab ? "border-[var(--accent)] font-medium text-[var(--accent)]" : "border-transparent text-[var(--muted)] hover:text-[var(--fg)]"
-                      }`}
-                      onClick={() => onRunTabChange(tab)}
-                    >
-                      {tab}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                  {runTab === "workflows" && (
-                    <>
-                      {workflows.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No workflows saved yet.</div>}
-                      {workflows.map((wf) => (
-                        <button
-                          key={wf.name}
-                          type="button"
-                          className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
-                          onClick={() => onRunWorkflow(wf.name)}
-                        >
-                          <ZapIcon className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
-                          <span className="min-w-0 truncate">{wf.name}</span>
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  {runTab === "scheduled" && (
-                    <>
-                      {scheduledTasks.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No scheduled tasks yet.</div>}
-                      {scheduledTasks.map((task) => (
-                        <div key={task.trigger_id} className="flex items-start gap-1.5 rounded-md px-2 py-1.5 text-sm">
-                          <CalendarIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
-                          <div className="min-w-0">
-                            <div className="truncate">{task.name}</div>
-                            <div className="truncate text-xs text-[var(--muted)]">{task.enabled ? "enabled" : "paused"}</div>
-                          </div>
+                {currentRun && (
+                  <div className="mb-2 rounded-md border border-[var(--border)] p-2">
+                    <div className="flex min-w-0 items-center justify-between text-sm">
+                      <span className="min-w-0 truncate font-medium">{currentRun.workflow_name} running...</span>
+                      <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-xs" onClick={onStop}>
+                        Stop
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* Flat New/Scheduled nav items, each its own accordion --
+                 * clicking one both expands its list here and (via
+                 * onRunTabChange) switches which section RunPanel's main
+                 * view shows, since RunPanel has no tab UI of its own. */}
+                <button
+                  type="button"
+                  className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)] ${
+                    runTab === "workflows" ? "text-[var(--accent)]" : ""
+                  }`}
+                  onClick={() => onRunTabChange("workflows")}
+                >
+                  <PlusIcon className="h-3.5 w-3.5" /> New
+                </button>
+                {runTab === "workflows" && (
+                  <div className="mb-1 flex-1 overflow-y-auto">
+                    {workflows.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No workflows saved yet.</div>}
+                    {workflows.map((wf) => (
+                      <button
+                        key={wf.name}
+                        type="button"
+                        className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
+                        onClick={() => onRunWorkflow(wf.name)}
+                      >
+                        <ZapIcon className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
+                        <span className="min-w-0 truncate">{wf.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)] ${
+                    runTab === "scheduled" ? "text-[var(--accent)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
+                  }`}
+                  onClick={() => onRunTabChange("scheduled")}
+                >
+                  <CalendarIcon className="h-3.5 w-3.5" /> Scheduled
+                </button>
+                {runTab === "scheduled" && (
+                  <div className="flex-1 overflow-y-auto">
+                    {scheduledTasks.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No scheduled tasks yet.</div>}
+                    {scheduledTasks.map((task) => (
+                      <div key={task.trigger_id} className="flex items-start gap-1.5 rounded-md px-2 py-1.5 text-sm">
+                        <CalendarIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
+                        <div className="min-w-0">
+                          <div className="truncate">{task.name}</div>
+                          <div className="truncate text-xs text-[var(--muted)]">{task.enabled ? "enabled" : "paused"}</div>
                         </div>
-                      ))}
-                    </>
-                  )}
-                  {runTab === "history" && (
-                    <>
-                      {recentRuns.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No runs yet.</div>}
-                      {recentRuns.map((run) => (
-                        <div key={run.run_id} className="group flex items-center justify-between gap-1 rounded-md px-2 py-1.5 text-sm">
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            <ClockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
-                            <span className="truncate">{run.workflow_name}</span>
-                            <span className="shrink-0 text-xs text-[var(--muted)]">({run.status})</span>
-                          </div>
-                          {run.status !== "running" && (
-                            <button
-                              type="button"
-                              aria-label="Delete run record"
-                              className="shrink-0 rounded-md px-1 text-[var(--muted)] opacity-0 hover:bg-[var(--border)] group-hover:opacity-100"
-                              onClick={() => setRunDeleteTarget(run.run_id)}
-                            >
-                              &times;
-                            </button>
-                          )}
+                      </div>
+                    ))}
+                    {/* "History" (recent runs) has no flat-nav slot of its
+                     * own -- folded in here under Scheduled, per explicit
+                     * call: both are "ran without you typing a message
+                     * right now." */}
+                    {recentRuns.length > 0 && (
+                      <div className="mb-1 mt-2 px-2 text-xs font-medium tracking-wide text-[var(--muted)]">RECENT RUNS</div>
+                    )}
+                    {recentRuns.map((run) => (
+                      <div key={run.run_id} className="group flex items-center justify-between gap-1 rounded-md px-2 py-1.5 text-sm">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <ClockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
+                          <span className="truncate">{run.workflow_name}</span>
+                          <span className="shrink-0 text-xs text-[var(--muted)]">({run.status})</span>
                         </div>
-                      ))}
-                    </>
-                  )}
-                </div>
+                        {run.status !== "running" && (
+                          <button
+                            type="button"
+                            aria-label="Delete run record"
+                            className="shrink-0 rounded-md px-1 text-[var(--muted)] opacity-0 hover:bg-[var(--border)] group-hover:opacity-100"
+                            onClick={() => setRunDeleteTarget(run.run_id)}
+                          >
+                            &times;
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
