@@ -11,6 +11,7 @@ import type { LogItem } from "../state/reducer";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
 import { ChevronDownIcon, PencilIcon } from "./icons";
+import { ImageLightbox } from "./ImageLightbox";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { QuestionCard } from "./QuestionCard";
 
@@ -463,6 +464,7 @@ function UserMessageView({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const cancel = () => {
     setDraft(item.text);
@@ -515,20 +517,40 @@ function UserMessageView({
   }
 
   return (
-    <div className="group/msg ml-auto flex max-w-[75%] items-center gap-1">
-      {onEditMessage && (
-        <button
-          type="button"
-          title="Edit message"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--muted)] opacity-0 transition-opacity hover:bg-[var(--card-bg)] hover:text-[var(--fg)] group-hover/msg:opacity-100"
-          onClick={() => setEditing(true)}
-        >
-          <PencilIcon className="h-3.5 w-3.5" />
-        </button>
+    <div className="ml-auto flex max-w-[75%] flex-col items-end gap-1.5">
+      {item.images && item.images.length > 0 && (
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {item.images.map((src, i) => (
+            <button
+              key={i}
+              type="button"
+              title="Preview image"
+              className="h-16 w-16 cursor-zoom-in overflow-hidden rounded-lg border border-[var(--border)]"
+              onClick={() => setLightboxSrc(src)}
+            >
+              <img src={src} alt={`Attachment ${i + 1}`} className="h-full w-full object-cover" />
+            </button>
+          ))}
+        </div>
       )}
-      <div className="rounded-2xl rounded-br-[4px] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] whitespace-pre-wrap">
-        {item.text}
+      <div className="group/msg flex items-center gap-1">
+        {onEditMessage && (
+          <button
+            type="button"
+            title="Edit message"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--muted)] opacity-0 transition-opacity hover:bg-[var(--card-bg)] hover:text-[var(--fg)] group-hover/msg:opacity-100"
+            onClick={() => setEditing(true)}
+          >
+            <PencilIcon className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <div className="rounded-2xl rounded-br-[4px] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] whitespace-pre-wrap">
+          {item.text}
+        </div>
       </div>
+      {lightboxSrc && (
+        <ImageLightbox src={lightboxSrc} alt="Attachment preview" onClose={() => setLightboxSrc(null)} />
+      )}
     </div>
   );
 }

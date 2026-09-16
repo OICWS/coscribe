@@ -133,7 +133,12 @@ function App() {
       return;
     }
     runOrQueueSend(() => {
-      dispatch({ type: "local_user_message", text: payload.displayText, instant: payload.isInstant });
+      dispatch({
+        type: "local_user_message",
+        text: payload.displayText,
+        instant: payload.isInstant,
+        images: payload.images,
+      });
       socketRef.current?.send({ type: "user_message", text: payload.outgoingText, images: payload.images });
     });
   };

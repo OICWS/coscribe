@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { uploadFile } from "../lib/rest";
 import type { CommandInfo } from "../types/session";
 import type { BrowserCapture } from "./BrowserPanel";
+import { ImageLightbox } from "./ImageLightbox";
 import { PlusIcon, ReturnIcon, StopIcon } from "./icons";
 import type { PptxShapeCapture } from "./PptxShapeOverlay";
 import { RunStatus } from "./RunStatus";
@@ -107,6 +108,7 @@ export function Composer({
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
+  const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string } | null>(null);
   const [autocompleteMatches, setAutocompleteMatches] = useState<CommandInfo[]>([]);
   const [autocompleteIndex, setAutocompleteIndex] = useState(-1);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -308,8 +310,19 @@ export function Composer({
   };
 
   const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // A copied *file* (e.g. from Finder/Explorer, or a screenshot tool
+    // that puts image bytes straight on the clipboard) shows up in
+    // clipboardData.files, not as text -- previously fell through to
+    // "let it behave natively," which for a plain <textarea> means
+    // nothing happens at all. Route it through the same onFileChosen
+    // path drag-and-drop already uses.
+    if (event.clipboardData.files.length > 0) {
+      event.preventDefault();
+      for (const file of Array.from(event.clipboardData.files)) void onFileChosen(file);
+      return;
+    }
     const text = event.clipboardData.getData("text/plain");
-    if (!text) return; // non-text clipboard content (e.g. a copied file) -- let it behave natively
+    if (!text) return;
     const lineCount = text.split("\n").length;
     if (text.length < PASTE_CARD_MIN_CHARS && lineCount < PASTE_CARD_MIN_LINES) return;
     event.preventDefault();
@@ -371,6 +384,7 @@ export function Composer({
     pendingPastes.length > 0;
 
   return (
+    <>
     <div
       data-testid="composer"
       className="mx-auto w-full max-w-[760px] px-4 pb-4"
@@ -384,13 +398,20 @@ export function Composer({
           {pendingImages.map((img, i) => (
             <span
               key={`img-${i}`}
-              className="flex max-w-[220px] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card-bg)] py-1.5 pl-3 pr-1.5 text-xs"
+              className="group relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--border)]"
             >
-              <span className="truncate">{img.name}</span>
+              <button
+                type="button"
+                title={`Preview ${img.name}`}
+                className="h-full w-full cursor-zoom-in"
+                onClick={() => setLightboxSrc({ src: img.dataUrl, alt: img.name })}
+              >
+                <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
+              </button>
               <button
                 type="button"
                 aria-label={`Remove ${img.name}`}
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--muted)] hover:bg-[var(--border)]"
+                className="absolute right-0.5 top-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-black/60 text-xs text-white opacity-0 hover:bg-black/80 group-hover:opacity-100"
                 onClick={() => setPendingImages((prev) => prev.filter((_, idx) => idx !== i))}
               >
                 ×
@@ -541,5 +562,9 @@ export function Composer({
         </div>
       </div>
     </div>
+    {lightboxSrc && (
+      <ImageLightbox src={lightboxSrc.src} alt={lightboxSrc.alt} onClose={() => setLightboxSrc(null)} />
+    )}
+    </>
   );
 }

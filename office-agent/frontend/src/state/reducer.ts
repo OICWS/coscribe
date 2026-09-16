@@ -7,7 +7,7 @@ export type LogItem =
   // way over its own checkpointed HumanMessages (see web/session.py's
   // handle_edit_message). Assigned once at creation (below), not derived
   // at render time, so it stays stable even as later items are appended.
-  | { id: string; kind: "user"; text: string; turnIndex: number }
+  | { id: string; kind: "user"; text: string; turnIndex: number; images?: string[] }
   | { id: string; kind: "agent"; text: string; streaming: boolean }
   | { id: string; kind: "tool"; toolName: string; arguments: Record<string, unknown>; result?: unknown }
   | {
@@ -126,7 +126,7 @@ export const initialChatState: ChatState = {
  * (optimistic user bubble on send, approval-button feedback before the
  * server round-trip completes). */
 export type LocalAction =
-  | { type: "local_user_message"; text: string; instant: boolean }
+  | { type: "local_user_message"; text: string; instant: boolean; images?: string[] }
   | { type: "local_edit_message"; turnIndex: number; text: string }
   | { type: "local_approval_resolved"; id: string; approved: boolean }
   | { type: "local_question_answered"; id: string; answer: string }
@@ -186,7 +186,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         error: null,
         items: [
           ...state.items,
-          { id: genId(), kind: "user", text: action.text, turnIndex: countUserItems(state.items) },
+          {
+            id: genId(),
+            kind: "user",
+            text: action.text,
+            turnIndex: countUserItems(state.items),
+            images: action.images,
+          },
         ],
       };
 
@@ -254,6 +260,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         historyReceived: true,
         items: action.entries.map((entry) => {
           if (entry.kind === "user") {
+            // No `images` here -- the backend's own history entries don't
+            // carry them back out yet (see web/session.py's
+            // serialize_history_for_ws_lg), so a sent image's thumbnail
+            // only survives for the rest of *this* live session, not a
+            // page reload. `local_user_message` below is the only path
+            // that currently populates `images`, from the composer's own
+            // still-in-memory data URLs.
             return { id: genId(), kind: "user", text: entry.text, turnIndex: userTurnIndex++ } as const;
           }
           if (entry.kind === "agent") {
