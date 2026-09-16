@@ -237,46 +237,47 @@ def _save_uploaded_skill_archive(root: Path, content: bytes) -> SkillInfo:
     import zipfile
 
     try:
-        zf = zipfile.ZipFile(io.BytesIO(content))
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            # SKILL.md at the top level or exactly one folder down (the
+            # shape you get zipping a folder) -- prefer the shallowest
+            # match.
+            names = zf.namelist()
+            candidates = [n for n in names if Path(n).name == "SKILL.md" and n.count("/") <= 1]
+            if not candidates:
+                raise SkillUploadError(
+                    "Archive must contain a SKILL.md at its top level or one folder down"
+                )
+            skill_md_name = min(candidates, key=lambda n: n.count("/"))
+            prefix = skill_md_name.rsplit("/", 1)[0] + "/" if "/" in skill_md_name else ""
+
+            try:
+                text = zf.read(skill_md_name).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise SkillUploadError("SKILL.md must be UTF-8 text") from exc
+            try:
+                name, _, _ = parse_skill_frontmatter(text)
+            except ValueError as exc:
+                raise SkillUploadError(str(exc)) from exc
+            target = root / slugify_skill_name(name)
+            if target.exists():
+                raise SkillUploadError(f"A skill named {name!r} already exists")
+            resolved_target = target.resolve()
+
+            for member in zf.namelist():
+                if not member.startswith(prefix) or member == prefix:
+                    continue
+                relative = member[len(prefix) :]
+                dest = (target / relative).resolve()
+                if not dest.is_relative_to(resolved_target):
+                    raise SkillUploadError("Archive contains an entry outside its own folder")
+                if member.endswith("/"):
+                    dest.mkdir(parents=True, exist_ok=True)
+                else:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(zf.read(member))
+            return _parse_skill(target, target / "SKILL.md")
     except zipfile.BadZipFile as exc:
         raise SkillUploadError("Not a valid zip archive") from exc
-
-    # SKILL.md at the top level or exactly one folder down (the shape you
-    # get zipping a folder) -- prefer the shallowest match.
-    candidates = [n for n in zf.namelist() if Path(n).name == "SKILL.md" and n.count("/") <= 1]
-    if not candidates:
-        raise SkillUploadError(
-            "Archive must contain a SKILL.md at its top level or one folder down"
-        )
-    skill_md_name = min(candidates, key=lambda n: n.count("/"))
-    prefix = skill_md_name.rsplit("/", 1)[0] + "/" if "/" in skill_md_name else ""
-
-    try:
-        text = zf.read(skill_md_name).decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise SkillUploadError("SKILL.md must be UTF-8 text") from exc
-    try:
-        name, _, _ = parse_skill_frontmatter(text)
-    except ValueError as exc:
-        raise SkillUploadError(str(exc)) from exc
-    target = root / slugify_skill_name(name)
-    if target.exists():
-        raise SkillUploadError(f"A skill named {name!r} already exists")
-    resolved_target = target.resolve()
-
-    for member in zf.namelist():
-        if not member.startswith(prefix) or member == prefix:
-            continue
-        relative = member[len(prefix) :]
-        dest = (target / relative).resolve()
-        if not dest.is_relative_to(resolved_target):
-            raise SkillUploadError("Archive contains an entry outside its own folder")
-        if member.endswith("/"):
-            dest.mkdir(parents=True, exist_ok=True)
-        else:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(zf.read(member))
-    return _parse_skill(target, target / "SKILL.md")
 
 
 def format_skill_listing(skills: list[SkillInfo]) -> str:
