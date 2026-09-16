@@ -5400,4 +5400,9 @@ def test_history_replay_includes_an_approved_calls_real_result_lg(
             history = ws.receive_json()
 
     tool_entry = next(e for e in history["entries"] if e["kind"] == "tool")
-    assert tool_entry["result"] == {"path": "note.txt", "bytes_written": 2}
+    assert tool_entry["result"] == {
+        "path": "note.txt",
+        "bytes_written": 2,
+        "lines_added": 1,
+        "lines_removed": 0,
+    }

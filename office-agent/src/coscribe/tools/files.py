@@ -8,6 +8,7 @@ ARCHITECTURE.md.
 
 from __future__ import annotations
 
+import difflib
 import re
 import shutil
 from collections.abc import Callable, Sequence
@@ -19,6 +20,28 @@ from ..runtime.types import tool_metadata
 from ._workspace import WorkspaceScope
 
 DEFAULT_IGNORES = {".git", "__pycache__", ".venv", "node_modules"}
+
+
+def _line_diff_stat(old_text: str, new_text: str) -> tuple[int, int]:
+    """Line-level (added, removed) counts between two text blobs, via
+    SequenceMatcher opcodes -- not a full unified diff, just the two totals
+    the transcript's own "+N -M" badge needs (see transcriptGrouping.ts's
+    diffStatOf). A `replace` opcode counts as removing its old span and
+    adding its new one, same as `git diff --stat`'s own line-counting
+    convention (a changed line is one removed + one added, not a wash)."""
+    old_lines = old_text.splitlines()
+    new_lines = new_text.splitlines()
+    matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+    added = removed = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "replace":
+            removed += i2 - i1
+            added += j2 - j1
+        elif tag == "delete":
+            removed += i2 - i1
+        elif tag == "insert":
+            added += j2 - j1
+    return added, removed
 
 
 class FileToolkit:
@@ -150,9 +173,27 @@ class FileToolkit:
             raise ValueError(f"Path is a directory: {path}")
         if file_path.exists() and not overwrite:
             raise FileExistsError(f"File already exists: {path}")
+        old_content = ""
+        if file_path.exists():
+            try:
+                old_content = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                # The file being replaced isn't UTF-8 text (e.g. a stray
+                # binary at this path) -- write_file itself only ever
+                # produces UTF-8 text, so there's no meaningful line diff
+                # against it; treat the whole new content as added rather
+                # than failing a write that would have succeeded before
+                # this diff-stat feature existed.
+                pass
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-        return {"path": self._relative(file_path), "bytes_written": len(content.encode("utf-8"))}
+        added, removed = _line_diff_stat(old_content, content)
+        return {
+            "path": self._relative(file_path),
+            "bytes_written": len(content.encode("utf-8")),
+            "lines_added": added,
+            "lines_removed": removed,
+        }
 
     def edit_file(
         self, path: str, old_text: str, new_text: str, replace_all: bool = False
@@ -180,9 +221,12 @@ class FileToolkit:
             )
         new_content = content.replace(old_text, new_text)
         file_path.write_text(new_content, encoding="utf-8")
+        added, removed = _line_diff_stat(content, new_content)
         return {
             "path": self._relative(file_path),
             "replacements": occurrences if replace_all else 1,
+            "lines_added": added,
+            "lines_removed": removed,
         }
 
     def edit_file_batch(self, path: str, edits: str) -> dict[str, object]:
@@ -231,7 +275,8 @@ class FileToolkit:
             raise ValueError(f"File does not exist: {path}")
         if not file_path.is_file():
             raise ValueError(f"Path is not a file: {path}")
-        content = file_path.read_text(encoding="utf-8")
+        original_content = file_path.read_text(encoding="utf-8")
+        content = original_content
 
         pairs = list(zip(chunks[0::2], chunks[1::2], strict=True))
         for index, (old_text, new_text) in enumerate(pairs):
@@ -255,7 +300,13 @@ class FileToolkit:
             content = content.replace(old_text, new_text)
 
         file_path.write_text(content, encoding="utf-8")
-        return {"path": self._relative(file_path), "edits_applied": len(pairs)}
+        added, removed = _line_diff_stat(original_content, content)
+        return {
+            "path": self._relative(file_path),
+            "edits_applied": len(pairs),
+            "lines_added": added,
+            "lines_removed": removed,
+        }
 
     def delete_file(self, path: str) -> dict[str, object]:
         """Permanently delete one file under the workspace. Directories are

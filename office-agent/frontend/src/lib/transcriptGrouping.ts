@@ -138,11 +138,32 @@ function fileArg(args: ArgRecord): string | undefined {
  * "what it happened to" the way Claude Code's own transcript rows do.
  * `glue` is the text between them when both are present -- a space for
  * the common "Verb object" phrasing ("Wrote deck.pptx"), ": " for the
- * handful that read better as "Verb: object" (a query or question). */
+ * handful that read better as "Verb: object" (a query or question).
+ * `diffStat`, when present, is a real line-count from the tool's own
+ * result (write_file/edit_file/edit_file_batch -- see files.py's
+ * _line_diff_stat) -- never estimated client-side. */
 export interface SummaryParts {
   verb: string;
   object: string | null;
   glue?: string;
+  diffStat?: { added: number; removed: number };
+}
+
+/** Pulls `{lines_added, lines_removed}` off a tool result if present --
+ * only write_file/edit_file/edit_file_batch's results carry these fields
+ * today (see files.py), so this doubles as the "does this call have a
+ * diff stat to show" check; no allowlist of tool names needed, any tool
+ * whose result happens to carry both fields gets a badge for free. Null
+ * when both counts are 0 (nothing actually changed -- e.g. write_file
+ * writing back identical content) since a "+0-0" badge would just be
+ * noise. */
+function diffStatOf(result: unknown): { added: number; removed: number } | null {
+  if (!result || typeof result !== "object") return null;
+  const added = (result as Record<string, unknown>).lines_added;
+  const removed = (result as Record<string, unknown>).lines_removed;
+  if (typeof added !== "number" || typeof removed !== "number") return null;
+  if (added === 0 && removed === 0) return null;
+  return { added, removed };
 }
 
 /** Exact-name handlers for the common built-in tools -- gives Claude-Code-
@@ -170,6 +191,8 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   write_xlsx: (a) => ({ verb: "Wrote", object: fileArg(a) ?? "a spreadsheet" }),
   write_pptx: (a) => ({ verb: "Wrote", object: fileArg(a) ?? "a deck" }),
   write_file: (a) => ({ verb: "Wrote", object: fileArg(a) ?? "a file" }),
+  edit_file: (a) => ({ verb: "Edited", object: fileArg(a) ?? "a file" }),
+  edit_file_batch: (a) => ({ verb: "Edited", object: fileArg(a) ?? "a file" }),
   read_docx: (a) => ({ verb: "Read", object: fileArg(a) ?? "a document" }),
   read_pdf: (a) => ({ verb: "Read", object: fileArg(a) ?? "a PDF" }),
   read_xlsx: (a) => ({ verb: "Read", object: fileArg(a) ?? "a spreadsheet" }),
@@ -235,10 +258,12 @@ function summarizeToolNameParts(toolName: string, args: ArgRecord): SummaryParts
 
 function partsFor(item: ToolOrApprovalItem): SummaryParts {
   const base = TOOL_SUMMARIES[item.toolName]?.(item.arguments) ?? summarizeToolNameParts(item.toolName, item.arguments);
+  const diffStat = diffStatOf(item.result);
+  const withDiff = diffStat ? { ...base, diffStat } : base;
   if (item.kind === "approval" && item.status === "pending") {
-    return { ...base, verb: `Approve: ${base.verb}` };
+    return { ...withDiff, verb: `Approve: ${withDiff.verb}` };
   }
-  return base;
+  return withDiff;
 }
 
 /** Structured form -- verb plus an optional emphasized object -- for a

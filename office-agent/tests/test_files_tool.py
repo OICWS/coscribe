@@ -21,6 +21,25 @@ def test_write_then_list_then_read(tmp_path: Path) -> None:
     assert content == "buy milk"
 
 
+def test_write_file_on_a_new_file_reports_all_lines_added(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+
+    result = tools["write_file"](path="a.txt", content="one\ntwo\nthree\n")
+
+    assert result["lines_added"] == 3
+    assert result["lines_removed"] == 0
+
+
+def test_write_file_overwriting_reports_a_real_line_diff(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_file"](path="a.txt", content="one\ntwo\nthree\n")
+
+    result = tools["write_file"](path="a.txt", content="one\nTWO\nthree\nfour\n")
+
+    assert result["lines_added"] == 2
+    assert result["lines_removed"] == 1
+
+
 def test_read_file_head_returns_only_the_first_n_lines(tmp_path: Path) -> None:
     tools = _tools_by_name(tmp_path)
     tools["write_file"](path="a.txt", content="one\ntwo\nthree\nfour\n")
@@ -192,7 +211,7 @@ def test_edit_file_replaces_a_unique_substring(tmp_path: Path) -> None:
 
     result = tools["edit_file"](path="a.txt", old_text="world", new_text="there")
 
-    assert result == {"path": "a.txt", "replacements": 1}
+    assert result == {"path": "a.txt", "replacements": 1, "lines_added": 1, "lines_removed": 1}
     assert tools["read_file"](path="a.txt") == "hello there\nsecond line\n"
 
 
@@ -223,7 +242,7 @@ def test_edit_file_replace_all_replaces_every_occurrence(tmp_path: Path) -> None
         path="a.txt", old_text="foo", new_text="bar", replace_all=True
     )
 
-    assert result == {"path": "a.txt", "replacements": 3}
+    assert result == {"path": "a.txt", "replacements": 3, "lines_added": 3, "lines_removed": 3}
     assert tools["read_file"](path="a.txt") == "bar\nbar\nbar\n"
 
 
@@ -275,7 +294,12 @@ def test_edit_file_batch_applies_all_edits_in_order(tmp_path: Path) -> None:
         edits="world\n---\nthere\n---\nsecond line\n---\nSECOND LINE",
     )
 
-    assert result == {"path": "a.txt", "edits_applied": 2}
+    assert result == {
+        "path": "a.txt",
+        "edits_applied": 2,
+        "lines_added": 2,
+        "lines_removed": 2,
+    }
     assert tools["read_file"](path="a.txt") == "hello there\nSECOND LINE\n"
 
 
@@ -287,7 +311,12 @@ def test_edit_file_batch_later_edit_can_match_text_an_earlier_edit_introduced(
 
     result = tools["edit_file_batch"](path="a.txt", edits="foo\n---\nbar\n---\nbar\n---\nbaz")
 
-    assert result == {"path": "a.txt", "edits_applied": 2}
+    assert result == {
+        "path": "a.txt",
+        "edits_applied": 2,
+        "lines_added": 1,
+        "lines_removed": 1,
+    }
     assert tools["read_file"](path="a.txt") == "baz\n"
 
 

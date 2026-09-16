@@ -191,7 +191,24 @@ function SummaryLabel({ parts }: { parts: SummaryParts }) {
           <code className="rounded bg-[var(--panel-bg)] px-1 py-0.5 font-mono text-[0.85em]">{parts.object}</code>
         </>
       )}
+      {parts.diffStat && <DiffStat added={parts.diffStat.added} removed={parts.diffStat.removed} />}
     </>
+  );
+}
+
+/** "+N -M" line-count badge, green/red -- the one deliberate exception to
+ * this app's own mono-red palette (see index.css's "there is no separate
+ * success color" note): a diff stat is a near-universal convention (git
+ * --stat, GitHub, Claude Code's own transcript) readers already recognize
+ * by color, distinct from a generic app-chrome "success" state. Either
+ * half is omitted when 0 (an edit that's pure addition or pure removal
+ * shouldn't show a "-0"/"+0" no-op). */
+function DiffStat({ added, removed }: { added: number; removed: number }) {
+  return (
+    <span className="ml-1.5 font-mono text-[0.85em] tabular-nums">
+      {added > 0 && <span className="text-emerald-600 dark:text-emerald-400">+{added}</span>}
+      {removed > 0 && <span className="text-[var(--danger)]">-{removed}</span>}
+    </span>
   );
 }
 
