@@ -1660,6 +1660,58 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             for s in _skills_by_name().values()
         ]
 
+    @app.get("/api/skills/{name}/files")
+    async def get_skill_files(name: str) -> JSONResponse:
+        # Backs the Skills settings tab's own file-tree browser (a skill
+        # is a real directory -- SKILL.md plus whatever reference docs/
+        # scripts it needs -- so "click a skill to see its folder" is a
+        # real filesystem listing, not a database query). Flat list of
+        # relative posix paths, same shape files.py's own list_files tool
+        # already returns -- the frontend folds path segments into a tree
+        # client-side rather than this endpoint building nested JSON.
+        skill = _skills_by_name().get(name)
+        if skill is None:
+            return JSONResponse({"error": f"No skill named {name!r}."}, status_code=404)
+        scope = WorkspaceScope(skill.dir)
+        files = sorted(
+            scope.relative(path) for path in skill.dir.rglob("*") if path.is_file()
+        )
+        return JSONResponse({"files": files})
+
+    # A skill's own files are typically short prose/scripts meant to be
+    # read whole, not paginated -- this cap exists only to stop a genuinely
+    # huge file (an accidentally-included data dump) from being sent whole
+    # to the browser, matching search_files/list_files' own "bounded, not
+    # unlimited" caps elsewhere in this codebase.
+    _SKILL_FILE_PREVIEW_MAX_BYTES = 500_000
+
+    @app.get("/api/skills/{name}/files/{path:path}")
+    async def get_skill_file_content(name: str, path: str) -> JSONResponse:
+        skill = _skills_by_name().get(name)
+        if skill is None:
+            return JSONResponse({"error": f"No skill named {name!r}."}, status_code=404)
+        scope = WorkspaceScope(skill.dir)
+        try:
+            file_path = scope.resolve(path)
+        except PermissionError:
+            return JSONResponse(
+                {"error": "Path is outside this skill's own directory."}, status_code=400
+            )
+        if not file_path.is_file():
+            return JSONResponse({"error": f"No such file: {path!r}."}, status_code=404)
+        size = file_path.stat().st_size
+        if size > _SKILL_FILE_PREVIEW_MAX_BYTES:
+            return JSONResponse(
+                {"error": f"File is {size:,} bytes -- too large to preview here."}, status_code=413
+            )
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return JSONResponse(
+                {"error": "This file isn't UTF-8 text -- can't preview it here."}, status_code=415
+            )
+        return JSONResponse({"path": path, "content": content})
+
     @app.post("/api/skills/upload")
     async def upload_skill(file: UploadFile) -> JSONResponse:
         # The real half of Settings > Skills > Add > Upload skill (see

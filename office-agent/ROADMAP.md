@@ -4305,6 +4305,33 @@ that's a separate element, see that item). No "Add"/create-new-skill
 entry point in the UI today (skill creation currently happens by the
 agent itself via the bundled Skill Creator skill, not a UI form).
 
+- [x] **Click-through to a file browser -- shipped.** Live-reported gap:
+  ("为什么不像仓库的截图一样，每个skill可以点开，可以看到文件夹") -- the
+  reference screenshots' own "Contents" tab (`docs/ui-references/skills-
+  discover-contents.png`) is claude.ai's *remote plugin marketplace*
+  detail page (Overview/Skills/Connectors tabs, categories, "try it"
+  prompts, version/sync metadata), none of which applies to coscribe's
+  local-folder skill model -- discussed and scoped down with the user to
+  just the applicable part: a real file-tree browser (folders expand,
+  files select) plus a content-preview pane, for one skill's own real
+  directory (`SkillInfo.dir`). New `GET /api/skills/{name}/files` (flat
+  relative-path list) + `GET /api/skills/{name}/files/{path}` (one
+  file's raw text, reusing `WorkspaceScope` for the same path-traversal
+  guard every other file-serving endpoint already has -- confirmed live,
+  not just tested: `curl .../files/../../../../etc/passwd` 404s).
+  Clicking a `SkillRow` now opens `SkillDetailView` instead of only
+  toggling it. One addition beyond a plain browser, also discussed
+  first: "Tools mentioned in this skill" -- a real string match of every
+  registered tool's own name (`GET /api/tools`) against that skill's own
+  file contents (all files fetched up front, not just the selected one),
+  not a guess. Connectors were explicitly left out of that same scan --
+  there's no fixed name list to match against (an MCP connector's tool
+  names are dynamic per server), and no existing skill convention for
+  declaring one either; skipped for this pass rather than faked. 7 new
+  backend tests, full suite green, `ruff`/`mypy`/`tsc`/`oxlint` clean,
+  verified live end-to-end (real backend + real Playwright click-through
+  of the actual Settings UI, not a synthetic harness).
+
 ### 5. Connectors settings page -- target shape
 
 Target (screenshot 4): a table-ish list (Connector / Type / Status

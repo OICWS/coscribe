@@ -3720,6 +3720,110 @@ def test_get_skills_tags_builtin_vs_custom_source(
     assert by_name["mine"] == "custom"
 
 
+def test_get_skill_files_lists_a_builtin_skills_real_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from urllib.parse import quote
+
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get(f"/api/skills/{quote('PPTX Slides')}/files")
+
+    assert response.status_code == 200
+    assert "SKILL.md" in response.json()["files"]
+
+
+def test_get_skill_files_lists_nested_paths_for_a_custom_skill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = tmp_path / "skills" / "mine"
+    (skill_dir / "reference").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: mine\ndescription: my own skill\n---\nbody", encoding="utf-8"
+    )
+    (skill_dir / "reference" / "notes.md").write_text("some notes", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/skills/mine/files")
+
+    assert response.status_code == 200
+    assert sorted(response.json()["files"]) == ["SKILL.md", "reference/notes.md"]
+
+
+def test_get_skill_files_unknown_skill_name_404s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/skills/no-such-skill/files")
+
+    assert response.status_code == 404
+
+
+def test_get_skill_file_content_returns_the_real_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = tmp_path / "skills" / "mine"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: mine\ndescription: my own skill\n---\nreal body text", encoding="utf-8"
+    )
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/skills/mine/files/SKILL.md")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["path"] == "SKILL.md"
+    assert "real body text" in body["content"]
+
+
+def test_get_skill_file_content_rejects_a_path_traversal_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = tmp_path / "skills" / "mine"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: mine\ndescription: my own skill\n---\nbody", encoding="utf-8"
+    )
+    # A real secret file the traversal attempt tries to escape the skill's
+    # own directory to reach -- state_dir is a sibling of skills_dir, both
+    # directly under tmp_path (see _client_lg's own settings construction).
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state" / "secret.txt").write_text("do not leak this", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/skills/mine/files/../../state/secret.txt")
+
+    assert response.status_code in (400, 404)
+    assert "do not leak this" not in response.text
+
+
+def test_get_skill_file_content_missing_file_404s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_dir = tmp_path / "skills" / "mine"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: mine\ndescription: my own skill\n---\nbody", encoding="utf-8"
+    )
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/skills/mine/files/no-such-file.md")
+
+    assert response.status_code == 404
+
+
+def test_get_skill_file_content_unknown_skill_name_404s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/skills/no-such-skill/files/SKILL.md")
+
+    assert response.status_code == 404
+
+
 def test_upload_skill_md_appears_in_get_skills_without_a_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

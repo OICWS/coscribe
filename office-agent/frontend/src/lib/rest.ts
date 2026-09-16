@@ -21,6 +21,8 @@ import type {
   ScriptEnvInstallResult,
   ScriptEnvInterpreterInfo,
   ScriptEnvPackage,
+  SkillFileContentResult,
+  SkillFilesResponse,
   SkillsResponse,
   ToolsResponse,
   UploadSkillResult,
@@ -109,6 +111,24 @@ export async function uploadSkill(file: File): Promise<UploadSkillResult> {
   form.append("file", file);
   const res = await fetch("/api/skills/upload", { method: "POST", body: form });
   return res.json() as Promise<UploadSkillResult>;
+}
+
+export const getSkillFiles = (name: string) =>
+  getJson<SkillFilesResponse>(`/api/skills/${encodeURIComponent(name)}/files`);
+
+/** A missing/too-large/binary/path-traversal-rejected file is a real,
+ * expected outcome the preview pane renders inline -- same "read the
+ * body regardless of status" pattern uploadSkill above already uses,
+ * not `getJson`'s throw-on-non-2xx (that's for failures a tab has no
+ * sane in-UI response to, see checkOk's own comment). `path` already
+ * contains "/" for a nested file -- encodeURIComponent would escape
+ * those slashes into "%2F", which the backend's `{path:path}` route
+ * matcher wouldn't split back into its own segments, so only each
+ * path *segment* is encoded, joined back with real "/"s. */
+export async function getSkillFileContent(name: string, path: string): Promise<SkillFileContentResult> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const res = await fetch(`/api/skills/${encodeURIComponent(name)}/files/${encodedPath}`);
+  return res.json() as Promise<SkillFileContentResult>;
 }
 
 // -- Connectors (MCP) -----------------------------------------------------

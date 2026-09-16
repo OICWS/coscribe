@@ -93,6 +93,21 @@ export type SkillsResponse = SkillInfo[];
 
 export type UploadSkillResult = SkillInfo | { error: string };
 
+/** GET /api/skills/{name}/files -- flat, relative posix paths under that
+ * skill's own real directory (a skill is a folder: SKILL.md plus
+ * whatever reference docs/scripts it needs). The frontend folds this
+ * into a tree client-side, see SkillsTab.tsx's buildFileTree. */
+export interface SkillFilesResponse {
+  files: string[];
+}
+
+/** GET /api/skills/{name}/files/{path} -- one file's raw text content
+ * for the Skills tab's own preview pane. `error` covers every rejection
+ * shape that endpoint can return (missing file, path traversal, binary
+ * content, too large) -- one discriminated field, not a different HTTP
+ * status per case the frontend has to branch on separately. */
+export type SkillFileContentResult = { path: string; content: string } | { error: string };
+
 // ---------------------------------------------------------------------
 // Connectors tab (MCP)
 // ---------------------------------------------------------------------
