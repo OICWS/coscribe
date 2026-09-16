@@ -300,6 +300,16 @@ export function CloseIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** ChatLog's per-turn rewind control (feather-icons "rotate-ccw"). */
+export function RewindIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </Icon>
+  );
+}
+
 export function BrowserIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

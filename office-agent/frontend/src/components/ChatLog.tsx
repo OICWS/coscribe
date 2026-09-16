@@ -2,15 +2,17 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   groupHasPendingApproval,
   groupToolRuns,
+  groupTurns,
   summarizeGroupParts,
   summarizeItemParts,
   type SummaryParts,
   type ToolRunGroup,
+  type Turn,
 } from "../lib/transcriptGrouping";
 import type { LogItem } from "../state/reducer";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
-import { ChevronDownIcon, PencilIcon } from "./icons";
+import { ChevronDownIcon, PencilIcon, RewindIcon } from "./icons";
 import { ImageLightbox } from "./ImageLightbox";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { QuestionCard } from "./QuestionCard";
@@ -74,7 +76,7 @@ export function ChatLog({
   onPptxShapePicked,
 }: ChatLogProps) {
   const endRef = useRef<HTMLDivElement>(null);
-  const entries = groupToolRuns(items);
+  const turns = groupTurns(items);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -91,24 +93,85 @@ export function ChatLog({
   return (
     <div data-testid="chat-log" className="flex-1 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-4 py-4">
-        {entries.map((entry) =>
-          entry.kind === "tool_run" ? (
-            <ToolRunGroupView
-              key={entry.id}
-              group={entry}
-              onApprove={onApprove}
-              onPptxShapePicked={onPptxShapePicked}
-            />
-          ) : entry.kind === "tool" || entry.kind === "approval" ? (
-            <ToolCallRow key={entry.id} item={entry} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
-          ) : entry.kind === "question" ? (
-            <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
-          ) : (
-            <LogItemView key={entry.id} item={entry} onEditMessage={onEditMessage} />
-          ),
-        )}
+        {turns.map((turn) => (
+          <TurnView
+            key={turn.id}
+            turn={turn}
+            onApprove={onApprove}
+            onAnswerQuestion={onAnswerQuestion}
+            onEditMessage={onEditMessage}
+            onPptxShapePicked={onPptxShapePicked}
+          />
+        ))}
         <div ref={endRef} />
       </div>
+    </div>
+  );
+}
+
+/** Renders one turn's items (via the same groupToolRuns pass the whole
+ * thread used to go through directly) plus, once the turn is actually
+ * done, a bottom-left copy+rewind footer -- replaces the old one-
+ * CopyButton-per-agent-message placement (see ROADMAP.md's Phase 8am
+ * items 7-8). "Done" means: has a final agent reply that isn't still
+ * streaming, and no approval in this turn is still waiting on the user
+ * -- the same real backend rule handle_edit_message itself enforces
+ * ("Resolve the pending approval before editing"), so rewind is never
+ * offered somewhere it would just come back as a WS error. Rewind reuses
+ * onEditMessage verbatim with the turn's own original, unedited text --
+ * a real backend call (truncate-then-resubmit), not a new mechanism; see
+ * that prop's own doc on ChatLogProps for why it can be undefined. */
+function TurnView({
+  turn,
+  onApprove,
+  onAnswerQuestion,
+  onEditMessage,
+  onPptxShapePicked,
+}: {
+  turn: Turn;
+  onApprove: (id: string, approved: boolean) => void;
+  onAnswerQuestion: (id: string, answer: string) => void;
+  onEditMessage?: (turnIndex: number, text: string) => void;
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
+}) {
+  const entries = groupToolRuns(turn.items);
+  const finalAgentItem = turn.finalAgentItem;
+  const userItem = turn.userItem;
+  const canFooter =
+    finalAgentItem !== null && userItem !== null && !finalAgentItem.streaming && !turn.hasPendingApproval;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {entries.map((entry) =>
+        entry.kind === "tool_run" ? (
+          <ToolRunGroupView key={entry.id} group={entry} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
+        ) : entry.kind === "tool" || entry.kind === "approval" ? (
+          <ToolCallRow key={entry.id} item={entry} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
+        ) : entry.kind === "question" ? (
+          <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
+        ) : (
+          <LogItemView key={entry.id} item={entry} onEditMessage={onEditMessage} />
+        ),
+      )}
+      {canFooter && (
+        <div className="-mt-2 flex items-center gap-0.5 self-start">
+          <CopyButton
+            getText={() => finalAgentItem.text}
+            title="Copy reply"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+          />
+          {onEditMessage && (
+            <button
+              type="button"
+              title="Rewind to here"
+              className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+              onClick={() => onEditMessage(userItem.turnIndex, userItem.text)}
+            >
+              <RewindIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -252,7 +315,7 @@ function ToolCallRow({
         compact
           ? "self-start w-full py-1 text-sm"
           : isPendingApproval
-            ? "self-start max-w-[85%] rounded-xl border border-[var(--accent)] bg-[var(--card-bg)] px-3.5 py-2.5 text-sm"
+            ? "self-start max-w-[85%] rounded-xl border border-[var(--accent)] bg-[var(--card-bg)] px-3 py-2 text-sm"
             : "self-start max-w-[85%] rounded-xl border border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm hover:bg-[var(--panel-bg)]"
       }
     >
@@ -405,7 +468,7 @@ function ApprovalDetail({
           {typeof scriptArgs.description === "string" && scriptArgs.description && (
             <div className="text-xs text-[var(--muted)]">{scriptArgs.description}</div>
           )}
-          <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-all rounded-md bg-black/20 p-2 font-mono text-xs leading-relaxed">
+          <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-all rounded-md bg-black/20 px-2 py-1.5 font-mono text-xs leading-normal">
             {typeof scriptArgs.script === "string" ? scriptArgs.script : JSON.stringify(scriptArgs.script)}
           </pre>
           <div className="text-xs text-[var(--muted)]">
@@ -569,26 +632,21 @@ function LogItemView({
   if (item.kind === "agent") {
     const text = item.streaming ? `${item.text} ▍` : item.text;
     return (
-      <div className="group/msg max-w-[85%]">
+      <div className="max-w-[85%]">
         {/* No border/bubble at all, like claude.ai's own assistant replies
          * -- the earlier border-l-2 "anchor" (dc76b88) was real, live
          * user feedback at the time, but became its own live complaint
          * later ("那条竖线不好看"). The muted tool-call summary line
          * directly above already reads as visually distinct from this
          * full-contrast prose without needing a line to separate them --
-         * verified via screenshot, not just reasoned about. */}
+         * verified via screenshot, not just reasoned about. Copy used to
+         * live here too (hover-revealed, per message) -- now one copy
+         * button per turn instead, see TurnView's own footer. */}
         <div className="py-1 text-[var(--agent-bubble-fg)]">
           <Suspense fallback={<div className="whitespace-pre-wrap">{text}</div>}>
             <Markdown text={text} />
           </Suspense>
         </div>
-        {!item.streaming && (
-          <CopyButton
-            getText={() => item.text}
-            title="Copy message"
-            className="mt-1 flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted)] opacity-0 transition-opacity hover:bg-[var(--card-bg)] hover:text-[var(--fg)] group-hover/msg:opacity-100"
-          />
-        )}
       </div>
     );
   }

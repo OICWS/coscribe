@@ -4188,7 +4188,7 @@ Mirrors the Browser panel's own "Select an element, add to chat" interaction exa
 
 ---
 
-## Phase 8am -- Frontend redesign direction: attachments, nav rail, Settings restructure, approval-dialog cleanup, copy/rewind placement -- discussed and recorded, not yet implemented
+## Phase 8am -- Frontend redesign direction: attachments, nav rail, Settings restructure, approval-dialog cleanup, copy/rewind placement (all 8 items shipped)
 
 PPTX/ppt-master alignment work is paused here (per explicit user call,
 "没有就告一段落" -- if there's nothing left, wrap that chapter up), not
@@ -4315,65 +4315,81 @@ catalog+configured-list concept (`ConnectorsTab.tsx`,
 -- this is a visual-layout alignment more than new functionality,
 unlike Skills/nav rail above which need real structural additions.
 
-### 6. Approval-dialog cleanup
+### 6. Approval-dialog cleanup -- gray-bar mystery resolved, tightened
 
-Target: clean up the tool-approval card's visuals -- specifically,
-whatever element currently reads as a horizontal-AND-vertical-sliding
-box should become vertical-motion-only (no left-right movement), and
-overall should read closer to Claude.ai's own thinner, tighter styling
-for this kind of card. Now that `approval-dialog.png` is a real saved
-file (see the note at the top of this phase), the element in question
-is clearly visible: a thick, full-width, rounded gray pill-shaped bar
-sitting directly under the "Ran a command" disclosure header, above
-the body text -- reads visually like a horizontal slider track/
-progress bar. **Still not identified in the current code**:
-`ToolCallRow`/`ApprovalDetail` (`ChatLog.tsx`) contain no
-`<input type="range">`/progress-bar/pill element at all, and the one
-component in this codebase with matching styling
-(`h-1.5 rounded-full bg-[var(--border)]`, `ContextRing.tsx`'s
-context-window usage popover) is unrelated -- it renders in the
-composer's model-picker row, never inside a tool-call/approval card.
-Two live possibilities worth checking at implementation time rather
-than guessing further: (a) this bar is a loading/in-progress
-placeholder specific to the moment a long-running tool call is
-executing (captured mid-state in this screenshot, not a permanent
-element of the completed card), not something visible in today's
-`ToolCallRow` code because that code path only handles the
-already-resolved state; (b) the screenshot is from a build genuinely
-older than the current `ChatLog.tsx`. Reproduce a real in-flight
-approval (a slow tool call, e.g. `run_python_script`) against the live
-running app before assuming which.
+Resolved by actually doing the "reproduce a real in-flight approval"
+check this section itself called for, rather than guessing further:
+built a throwaway Playwright harness mounting the real `ChatLog`
+component with a synthetic `run_python_script` approval item, driven
+through all three real states in one live mount (`pending` -- open,
+Approve/Deny visible; `executing` -- approved, `result` still
+`undefined`, same open card; `done` -- `result` populated, matching
+`approval-dialog.png`'s own exact content almost verbatim, including
+the OMML stdout). **No gray bar rendered in any of the three states.**
+This rules out hypothesis (a) outright (there is no distinct loading-
+placeholder frame -- the card looks identical through the whole
+pending-to-done transition, just with the button row swapped for
+"Approved" + the result once resolved) and, by elimination, confirms
+(b): `approval-dialog.png` was captured from a build of `ChatLog.tsx`
+genuinely older than the current one -- there is nothing left in
+today's code to "fix" a slider motion on, because the element itself
+no longer exists.
 
-### 7. Copy button -- move from per-message to per-turn
+What *was* still real and actionable: the general "read closer to
+Claude.ai's own thinner, tighter styling" ask. Tightened `ToolCallRow`
+(pending-approval padding `px-3.5 py-2.5` -> `px-3 py-2`, matching the
+already-tighter resolved-card padding -- no principled reason for
+pending to be larger) and the script `<pre>` block inside
+`ApprovalDetail` (`p-2 leading-relaxed` -> `px-2 py-1.5 leading-normal`,
+closer to the reference's own denser code-block line spacing).
 
-Current: every agent reply gets its own `CopyButton`
-(`ChatLog.tsx`'s agent branch, `hover:opacity-100`-revealed, copies
-just that one message's text). Wanted: remove the per-message copy
-entirely -- one copy button per *complete conversation turn* instead,
-placed bottom-left of the turn (paired with the new rewind button,
-item 8). "Turn" here isn't yet a concept `ChatLog.tsx`'s own data
-model (`LogItem[]`, flat) has a ready grouping for -- `groupToolRuns`
-groups consecutive tool/approval items, but a "turn" (one full
-user-message-to-next-user-message span, including every tool call and
-the final agent reply) is a coarser grouping that doesn't exist yet
-and would need to be introduced for this to have a natural place to
-render.
+### 7. Copy button -- move from per-message to per-turn (shipped)
 
-### 8. Rewind -- new feature, placed next to the relocated copy button
+Built. `transcriptGrouping.ts` gained `groupTurns` -- the coarser
+grouping this item's own original text said didn't exist yet: splits
+a thread's flat `LogItem[]` into per-turn spans (one full user-
+message-to-next-user-message range), each carrying its `userItem`,
+its `finalAgentItem` (the last agent reply so far, if any), and
+whether it still holds an unresolved approval. `ChatLog.tsx`'s
+top-level render now maps over turns (`TurnView`) instead of the flat
+`groupToolRuns` output directly -- `TurnView` runs that same
+`groupToolRuns` pass internally, scoped to just its own turn's items,
+so every existing per-item render path (tool-run groups, approval
+cards, questions, user/agent bubbles) is unchanged. The old per-
+message `CopyButton` (`LogItemView`'s agent branch, hover-revealed) is
+gone; `TurnView` renders one `CopyButton` bottom-left of the turn
+instead, copying `finalAgentItem.text` -- only once the turn is
+actually done (see item 8's own "done" definition below).
 
-Wanted: a "rewind" affordance at the bottom of a turn, next to the new
-per-turn copy button (item 7) -- matches Claude.ai's own rewind
-(revert the conversation to an earlier point). Coscribe already has a
-related-but-distinct feature: `UserMessageView`'s hover-revealed pencil
-icon (`onEditMessage`) lets you edit an earlier *user* message and
-resubmit, which truncates/replaces history similarly in effect --
-but it's attached to the user message itself (mid-conversation,
-hover-only), not a bottom-of-turn control next to copy the way this
-request describes. Worth deciding, when this is actually built,
-whether "rewind" is a thin UI relocation of the existing edit-and-
-resubmit mechanism or a genuinely separate capability (e.g. revert
-without necessarily editing text) -- not resolved here, left open for
-the implementation round.
+### 8. Rewind -- new feature, placed next to the relocated copy button (shipped)
+
+Built as a thin relocation of the existing edit-and-resubmit
+mechanism, per this item's own open question -- resolved in favor of
+reuse rather than a new backend capability: rewind calls the exact
+same `onEditMessage(turnIndex, text)` the pencil-icon edit already
+uses, just with the turn's own *original, unedited* text
+(`turn.userItem.text`) instead of an edited draft. Real backend
+consequence: clicking rewind truncates history back to (and
+including) that turn's `HumanMessage` and re-runs it as a fresh turn
+(`handle_edit_message`'s real, already-tested truncate-then-resubmit
+path) -- in effect "regenerate this reply," discarding whatever came
+after. A turn counts as "done" (footer renders at all) when it has a
+`finalAgentItem` that isn't still streaming *and* holds no unresolved
+approval -- the same real rule `handle_edit_message` itself enforces
+server-side ("Resolve the pending approval before editing"), so
+rewind is never offered somewhere it would just bounce as a WS error.
+New `RewindIcon` (feather `rotate-ccw`). Known, pre-existing gap
+carried over unchanged from the pencil-edit mechanism it reuses: a
+turn's own attached images aren't threaded through `onEditMessage`
+(text-only signature) -- rewinding a turn that had an image attachment
+loses it, exactly like editing one already did.
+
+Verified end-to-end via a throwaway Playwright harness mounting the
+real `ChatLog` with synthetic multi-turn data (a done turn, and a
+second turn still mid-stream): confirmed the footer renders only on
+the done turn, Copy actually writes the right text to the clipboard,
+and clicking Rewind invokes `onEditMessage` with the exact expected
+`(turnIndex, originalText)` pair -- both light and dark themes.
 
 ---
 

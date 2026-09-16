@@ -1,6 +1,72 @@
 import type { LogItem } from "../state/reducer";
 
 type ToolOrApprovalItem = Extract<LogItem, { kind: "tool" | "approval" }>;
+type UserItem = Extract<LogItem, { kind: "user" }>;
+type AgentItem = Extract<LogItem, { kind: "agent" }>;
+
+export interface Turn {
+  kind: "turn";
+  id: string;
+  /** Every item from (and including) the triggering user message up to
+   * but not including the next one -- the full user-message-to-next-
+   * user-message span this app's own "turn" concept refers to (see
+   * ROADMAP.md's Phase 8am item 7). Rendered via the exact same
+   * groupToolRuns pass every item list already went through, just scoped
+   * to one turn instead of the whole thread. */
+  items: LogItem[];
+  /** null only for a leading run of items with no preceding user message
+   * at all -- doesn't happen in practice (every real thread starts with
+   * a user message), handled anyway so this function stays total. */
+  userItem: UserItem | null;
+  /** The last agent reply in this turn, if the turn has produced one yet
+   * -- what the per-turn copy button copies, and what marks the turn as
+   * "done" (present and not still streaming) for the rewind/copy footer
+   * to render at all. */
+  finalAgentItem: AgentItem | null;
+  /** An unresolved approval blocks both editing and (by the same real
+   * backend rule -- see handle_edit_message's own check) rewinding. */
+  hasPendingApproval: boolean;
+}
+
+/** Splits a flat LogItem[] into per-turn spans -- a coarser grouping than
+ * groupToolRuns' consecutive-tool-call runs, used to place one copy
+ * button and one rewind control at the bottom of each complete turn
+ * instead of one copy button per agent message. */
+export function groupTurns(items: LogItem[]): Turn[] {
+  const turns: Turn[] = [];
+  let current: LogItem[] = [];
+  let currentUserItem: UserItem | null = null;
+
+  const flush = () => {
+    if (current.length === 0) return;
+    let finalAgentItem: AgentItem | null = null;
+    let hasPendingApproval = false;
+    for (const item of current) {
+      if (item.kind === "agent") finalAgentItem = item;
+      if (item.kind === "approval" && item.status === "pending") hasPendingApproval = true;
+    }
+    turns.push({
+      kind: "turn",
+      id: currentUserItem ? `turn-${currentUserItem.id}` : `turn-lead-${current[0].id}`,
+      items: current,
+      userItem: currentUserItem,
+      finalAgentItem,
+      hasPendingApproval,
+    });
+    current = [];
+    currentUserItem = null;
+  };
+
+  for (const item of items) {
+    if (item.kind === "user") {
+      flush();
+      currentUserItem = item;
+    }
+    current.push(item);
+  }
+  flush();
+  return turns;
+}
 
 export interface ToolRunGroup {
   kind: "tool_run";
