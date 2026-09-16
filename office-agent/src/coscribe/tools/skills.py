@@ -168,14 +168,115 @@ def _scan_skills_dir(root: Path, *, create_if_missing: bool) -> list[SkillInfo]:
     return skills
 
 
-def _parse_skill(skill_dir: Path, skill_md: Path) -> SkillInfo:
-    text = skill_md.read_text(encoding="utf-8")
-    _, raw_frontmatter, body = text.split("---", 2)
+def parse_skill_frontmatter(text: str) -> tuple[str, str, str]:
+    """Parse a SKILL.md's YAML frontmatter (name, description) and body --
+    shared by disk-scanning (_parse_skill) and upload validation
+    (save_uploaded_skill) below, so both apply the exact same rules."""
+    try:
+        _, raw_frontmatter, body = text.split("---", 2)
+    except ValueError:
+        raise ValueError("SKILL.md must start with a '---' YAML frontmatter block") from None
     frontmatter = yaml.safe_load(raw_frontmatter) or {}
     name, description = frontmatter.get("name"), frontmatter.get("description")
     if not name or not description:
         raise ValueError("SKILL.md frontmatter needs name and description")
-    return SkillInfo(name=str(name), description=str(description), dir=skill_dir, body=body.strip())
+    return str(name), str(description), body.strip()
+
+
+def _parse_skill(skill_dir: Path, skill_md: Path) -> SkillInfo:
+    name, description, body = parse_skill_frontmatter(skill_md.read_text(encoding="utf-8"))
+    return SkillInfo(name=name, description=description, dir=skill_dir, body=body)
+
+
+class SkillUploadError(ValueError):
+    """Raised by save_uploaded_skill on anything the caller should surface
+    to the user as a 400, not a 500 -- bad structure, name collision, a
+    zip entry that escapes its own folder."""
+
+
+def save_uploaded_skill(skills_dir: str | Path, filename: str, content: bytes) -> SkillInfo:
+    """Validate and write an uploaded skill into skills_dir/<slug>/ -- the
+    real half of Settings > Skills > Add > Upload skill
+    (docs/ui-references/skills-add-uploadskills.png). Two accepted shapes,
+    matching that screenshot's own bullet points:
+    - a bare `.md` file: becomes skills_dir/<slug>/SKILL.md directly.
+    - a `.zip`/`.skill` archive: must contain a SKILL.md, either at the
+      archive's top level or one directory level down (the shape you get
+      zipping a folder named after the skill) -- any sibling
+      scripts/references/assets entries are extracted as-is, matching the
+      standard skill folder layout this module's own docstring describes;
+      no per-file validation beyond the zip-slip guard below.
+    No security/malware scanning -- deliberately out of scope, see
+    ROADMAP.md's Phase 8am item 4.
+    """
+    root = Path(skills_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".md":
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise SkillUploadError("SKILL.md must be UTF-8 text") from exc
+        try:
+            name, _, _ = parse_skill_frontmatter(text)
+        except ValueError as exc:
+            raise SkillUploadError(str(exc)) from exc
+        target = root / slugify_skill_name(name)
+        if target.exists():
+            raise SkillUploadError(f"A skill named {name!r} already exists")
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_bytes(content)
+        return _parse_skill(target, target / "SKILL.md")
+    if suffix in (".zip", ".skill"):
+        return _save_uploaded_skill_archive(root, content)
+    raise SkillUploadError(f"Unsupported file type {suffix!r} -- use .md, .zip, or .skill")
+
+
+def _save_uploaded_skill_archive(root: Path, content: bytes) -> SkillInfo:
+    import io
+    import zipfile
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile as exc:
+        raise SkillUploadError("Not a valid zip archive") from exc
+
+    # SKILL.md at the top level or exactly one folder down (the shape you
+    # get zipping a folder) -- prefer the shallowest match.
+    candidates = [n for n in zf.namelist() if Path(n).name == "SKILL.md" and n.count("/") <= 1]
+    if not candidates:
+        raise SkillUploadError(
+            "Archive must contain a SKILL.md at its top level or one folder down"
+        )
+    skill_md_name = min(candidates, key=lambda n: n.count("/"))
+    prefix = skill_md_name.rsplit("/", 1)[0] + "/" if "/" in skill_md_name else ""
+
+    try:
+        text = zf.read(skill_md_name).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SkillUploadError("SKILL.md must be UTF-8 text") from exc
+    try:
+        name, _, _ = parse_skill_frontmatter(text)
+    except ValueError as exc:
+        raise SkillUploadError(str(exc)) from exc
+    target = root / slugify_skill_name(name)
+    if target.exists():
+        raise SkillUploadError(f"A skill named {name!r} already exists")
+    resolved_target = target.resolve()
+
+    for member in zf.namelist():
+        if not member.startswith(prefix) or member == prefix:
+            continue
+        relative = member[len(prefix) :]
+        dest = (target / relative).resolve()
+        if not dest.is_relative_to(resolved_target):
+            raise SkillUploadError("Archive contains an entry outside its own folder")
+        if member.endswith("/"):
+            dest.mkdir(parents=True, exist_ok=True)
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(zf.read(member))
+    return _parse_skill(target, target / "SKILL.md")
 
 
 def format_skill_listing(skills: list[SkillInfo]) -> str:

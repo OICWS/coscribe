@@ -24,10 +24,12 @@ from .scripts import build_script_tools
 from .selfwake import SignalStore, WakeRequest, WakeStore, build_selfwake_tools
 from .skills import (
     SkillInfo,
+    SkillUploadError,
     build_skill_tools,
     format_skill_listing,
     load_builtin_skills,
     load_skills,
+    save_uploaded_skill,
     slugify_skill_name,
 )
 from .spreadsheets import build_spreadsheet_tools
@@ -52,6 +54,7 @@ __all__ = [
     "ScheduledTriggerStore",
     "SignalStore",
     "SkillInfo",
+    "SkillUploadError",
     "TemplateInfo",
     "WakeRequest",
     "WakeStore",
@@ -87,5 +90,6 @@ __all__ = [
     "load_pptx_templates",
     "load_skills",
     "reconcile_interrupted_runs",
+    "save_uploaded_skill",
     "slugify_skill_name",
 ]

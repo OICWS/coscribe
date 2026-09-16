@@ -86,9 +86,12 @@ export interface ToolsResponse {
 export interface SkillInfo {
   name: string;
   description: string;
+  source: "builtin" | "custom";
 }
 
 export type SkillsResponse = SkillInfo[];
+
+export type UploadSkillResult = SkillInfo | { error: string };
 
 // ---------------------------------------------------------------------
 // Connectors tab (MCP)

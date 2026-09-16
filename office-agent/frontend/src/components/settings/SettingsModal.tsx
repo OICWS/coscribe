@@ -96,6 +96,7 @@ interface SettingsModalProps {
   workflowEventTick: number;
   enabledSkills: string[];
   onToggleSkill: (name: string, enabled: boolean) => void;
+  onCreateSkill: () => void;
   onClose: () => void;
 }
 
@@ -105,6 +106,7 @@ export function SettingsModal({
   workflowEventTick,
   enabledSkills,
   onToggleSkill,
+  onCreateSkill,
   onClose,
 }: SettingsModalProps) {
   const [category, setCategory] = useState<SettingsCategory>(initialCategory ?? "general");
@@ -244,6 +246,7 @@ export function SettingsModal({
                 active={category === "skills"}
                 enabledSkills={enabledSkills}
                 onToggle={onToggleSkill}
+                onCreateSkill={onCreateSkill}
               />
             )}
             {category === "connectors" && <ConnectorsTab active={category === "connectors"} />}

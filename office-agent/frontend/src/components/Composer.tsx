@@ -87,6 +87,12 @@ interface ComposerProps {
    * today and each already has its own dedicated App.tsx state slot. */
   externalPptxCapture: PptxShapeCapture | null;
   onExternalPptxCaptureConsumed: () => void;
+  /** Same pattern again, for prefilling the composer's own text -- used
+   * by SkillsTab's "Create a skill" (see App.tsx's onCreateSkill), which
+   * prefills "/skill-creator " without sending it, so the user can
+   * review/edit before hitting Enter themselves. */
+  externalText: string | null;
+  onExternalTextConsumed: () => void;
 }
 
 export function Composer({
@@ -103,6 +109,8 @@ export function Composer({
   onExternalImageConsumed,
   externalPptxCapture,
   onExternalPptxCaptureConsumed,
+  externalText,
+  onExternalTextConsumed,
 }: ComposerProps) {
   const [value, setValue] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
@@ -133,6 +141,17 @@ export function Composer({
     setPendingImages((prev) => [...prev, externalPptxCapture]);
     onExternalPptxCaptureConsumed();
   }, [externalPptxCapture, onExternalPptxCaptureConsumed]);
+
+  useEffect(() => {
+    if (externalText === null) return;
+    setValue(externalText);
+    onExternalTextConsumed();
+    requestAnimationFrame(() => {
+      resize();
+      textareaRef.current?.focus();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalText, onExternalTextConsumed]);
 
   const resize = () => {
     const el = textareaRef.current;

@@ -23,6 +23,7 @@ import type {
   ScriptEnvPackage,
   SkillsResponse,
   ToolsResponse,
+  UploadSkillResult,
   Workflow,
   WorkflowDeleteResult,
   WorkflowRunDeleteResult,
@@ -102,6 +103,13 @@ export const getTools = () => getJson<ToolsResponse>("/api/tools");
 // -- Skills ---------------------------------------------------------------
 
 export const getSkills = () => getJson<SkillsResponse>("/api/skills");
+
+export async function uploadSkill(file: File): Promise<UploadSkillResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/skills/upload", { method: "POST", body: form });
+  return res.json() as Promise<UploadSkillResult>;
+}
 
 // -- Connectors (MCP) -----------------------------------------------------
 

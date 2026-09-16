@@ -3572,6 +3572,80 @@ def test_get_skills_lists_the_builtin_skills(
     assert names == {"PPTX Slides", "Excel Spreadsheets", "Word Documents", "Skill Creator"}
 
 
+def test_get_skills_tags_builtin_vs_custom_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "skills" / "mine").mkdir(parents=True)
+    (tmp_path / "skills" / "mine" / "SKILL.md").write_text(
+        "---\nname: mine\ndescription: my own skill\n---\nbody", encoding="utf-8"
+    )
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.get("/api/skills")
+
+    by_name = {s["name"]: s["source"] for s in response.json()}
+    assert by_name["PPTX Slides"] == "builtin"
+    assert by_name["mine"] == "custom"
+
+
+def test_upload_skill_md_appears_in_get_skills_without_a_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The real regression this guards: skills_by_name used to be a
+    # closure snapshot taken once at startup (same staleness shape as
+    # switch_model's custom-providers bug) -- an uploaded skill wouldn't
+    # show up in GET /api/skills, or be acceptable to select_skills,
+    # until the process restarted.
+    fake_model = FakeToolCallingChatModel(responses=[])
+    md_content = "---\nname: mine\ndescription: my own skill\n---\nbody"
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        upload = client.post(
+            "/api/skills/upload",
+            files={"file": ("mine.md", md_content, "text/markdown")},
+        )
+        assert upload.status_code == 200
+        assert upload.json() == {"name": "mine", "description": "my own skill", "source": "custom"}
+
+        response = client.get("/api/skills")
+        names = {s["name"] for s in response.json()}
+        assert "mine" in names
+
+        with client.websocket_connect("/ws/t_upload_skill") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "select_skills", "skills": ["mine"]})
+            updated_state = ws.receive_json()
+    assert updated_state["enabled_skills"] == ["mine"]
+
+
+def test_upload_skill_rejects_malformed_skill_md(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post(
+            "/api/skills/upload",
+            files={"file": ("bad.md", "not even frontmatter", "text/markdown")},
+        )
+
+    assert response.status_code == 400
+    assert "frontmatter" in response.json()["error"]
+
+
+def test_upload_skill_rejects_unsupported_extension(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post(
+            "/api/skills/upload",
+            files={"file": ("notes.txt", "whatever", "text/plain")},
+        )
+
+    assert response.status_code == 400
+    assert "Unsupported file type" in response.json()["error"]
+
+
 def test_new_thread_defaults_to_the_builtin_skills_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

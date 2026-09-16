@@ -1,13 +1,17 @@
+import io
+import zipfile
 from pathlib import Path
 
 import pytest
 
 from coscribe.runtime.types import get_tool_metadata
 from coscribe.tools.skills import (
+    SkillUploadError,
     build_skill_tools,
     format_skill_listing,
     load_builtin_skills,
     load_skills,
+    save_uploaded_skill,
 )
 
 
@@ -157,3 +161,88 @@ def test_load_builtin_skills_bodies_reference_the_real_tool_names() -> None:
     assert "fill_pptx_template" in by_name["PPTX Slides"].body
     assert "format_xlsx_cells" in by_name["Excel Spreadsheets"].body
     assert "[TOC]" in by_name["Word Documents"].body
+
+
+# ---------------------------------------------------------------------
+# save_uploaded_skill -- Settings > Skills > Add > Upload skill's real
+# backend half (docs/ui-references/skills-add-uploadskills.png).
+# ---------------------------------------------------------------------
+
+
+def _zip_bytes(entries: dict[str, str]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in entries.items():
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+def test_upload_md_file_writes_skill_md_under_its_slug(tmp_path: Path) -> None:
+    skill = save_uploaded_skill(tmp_path, "whatever.md", SIMPLE_SKILL.encode("utf-8"))
+
+    assert skill.name == "demo"
+    assert (tmp_path / "demo" / "SKILL.md").read_text(encoding="utf-8") == SIMPLE_SKILL
+    # A fresh load_skills scan finds it too, not just the return value.
+    assert [s.name for s in load_skills(tmp_path)] == ["demo"]
+
+
+def test_upload_md_file_rejects_malformed_frontmatter(tmp_path: Path) -> None:
+    with pytest.raises(SkillUploadError, match="name and description"):
+        save_uploaded_skill(tmp_path, "bad.md", b"---\nname: bad\n---\nno description")
+
+
+def test_upload_md_file_name_collision_is_rejected(tmp_path: Path) -> None:
+    save_uploaded_skill(tmp_path, "a.md", SIMPLE_SKILL.encode("utf-8"))
+
+    with pytest.raises(SkillUploadError, match="already exists"):
+        save_uploaded_skill(tmp_path, "b.md", SIMPLE_SKILL.encode("utf-8"))
+
+
+def test_upload_zip_with_top_level_skill_md_and_references(tmp_path: Path) -> None:
+    archive = _zip_bytes(
+        {
+            "SKILL.md": SIMPLE_SKILL,
+            "references/notes.md": "extra detail",
+        }
+    )
+
+    skill = save_uploaded_skill(tmp_path, "demo.zip", archive)
+
+    assert skill.name == "demo"
+    notes = tmp_path / "demo" / "references" / "notes.md"
+    assert notes.read_text(encoding="utf-8") == "extra detail"
+
+
+def test_upload_zip_with_skill_md_one_folder_down(tmp_path: Path) -> None:
+    archive = _zip_bytes(
+        {"demo-skill/SKILL.md": SIMPLE_SKILL, "demo-skill/scripts/run.py": "print(1)"}
+    )
+
+    skill = save_uploaded_skill(tmp_path, "bundle.skill", archive)
+
+    assert skill.name == "demo"
+    assert (tmp_path / "demo" / "scripts" / "run.py").read_text(encoding="utf-8") == "print(1)"
+
+
+def test_upload_zip_without_skill_md_is_rejected(tmp_path: Path) -> None:
+    archive = _zip_bytes({"readme.txt": "hi"})
+
+    with pytest.raises(SkillUploadError, match="must contain a SKILL.md"):
+        save_uploaded_skill(tmp_path, "bad.zip", archive)
+
+
+def test_upload_zip_path_traversal_is_rejected(tmp_path: Path) -> None:
+    archive = _zip_bytes({"SKILL.md": SIMPLE_SKILL, "../../escape.txt": "nope"})
+
+    with pytest.raises(SkillUploadError, match="outside its own folder"):
+        save_uploaded_skill(tmp_path, "evil.zip", archive)
+
+
+def test_upload_rejects_unsupported_extension(tmp_path: Path) -> None:
+    with pytest.raises(SkillUploadError, match="Unsupported file type"):
+        save_uploaded_skill(tmp_path, "notes.txt", b"whatever")
+
+
+def test_upload_rejects_bad_zip_bytes(tmp_path: Path) -> None:
+    with pytest.raises(SkillUploadError, match="Not a valid zip"):
+        save_uploaded_skill(tmp_path, "broken.zip", b"not actually a zip")

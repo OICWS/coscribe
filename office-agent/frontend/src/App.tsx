@@ -37,6 +37,9 @@ function App() {
   // Same pattern, for a shape clicked in a pptx preview (ChatLog.tsx's
   // PptxShapeOverlay) instead of an element picked in the Browser panel.
   const [pendingPptxCapture, setPendingPptxCapture] = useState<PptxShapeCapture | null>(null);
+  // Same pattern again, for SkillsTab's "Create a skill" prefilling the
+  // composer's own text (not an image) -- see onCreateSkill below.
+  const [pendingComposerText, setPendingComposerText] = useState<string | null>(null);
   const [navMode, setNavMode] = useState<NavMode>("create");
   const [runTab, setRunTab] = useState<RunTab>("workflows");
   const [commands, setCommands] = useState<CommandInfo[]>([]);
@@ -175,6 +178,18 @@ function App() {
     socketRef.current?.send({ type: "select_skills", skills: [...next] });
   };
 
+  /** Settings > Skills > Add > Create a skill -- closes Settings, switches
+   * to Create mode (same reason onRunWorkflow below does: Composer only
+   * renders there), and prefills "/skill-creator " into the composer via
+   * pendingComposerText/Composer's externalText prop -- not sent, unlike
+   * onRunWorkflow's own /runworkflow, so the user can review or add
+   * context before hitting Enter themselves. */
+  const onCreateSkill = () => {
+    setSettingsOpen(false);
+    setNavMode("create");
+    setPendingComposerText("/skill-creator ");
+  };
+
   const onRunWorkflow = (name: string) => {
     // Switch back to Create so the running turn's messages are actually
     // visible -- ChatLog only renders while navMode === "create".
@@ -287,6 +302,8 @@ function App() {
               onExternalImageConsumed={() => setPendingBrowserCapture(null)}
               externalPptxCapture={pendingPptxCapture}
               onExternalPptxCaptureConsumed={() => setPendingPptxCapture(null)}
+              externalText={pendingComposerText}
+              onExternalTextConsumed={() => setPendingComposerText(null)}
             />
           </>
         ) : (
@@ -297,6 +314,7 @@ function App() {
           workflowEventTick={state.workflowEventTick}
           enabledSkills={state.enabledSkills}
           onToggleSkill={onToggleSkill}
+          onCreateSkill={onCreateSkill}
           onClose={() => setSettingsOpen(false)}
         />
         {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}

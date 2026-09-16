@@ -98,7 +98,13 @@ from ..runtime_lg import (
     poll_due_wakes,
     strip_mode_note,
 )
-from ..tools import load_builtin_skills, load_skills
+from ..tools import (
+    SkillInfo,
+    SkillUploadError,
+    load_builtin_skills,
+    load_skills,
+    save_uploaded_skill,
+)
 from ..tools._workspace import WorkspaceScope
 from ..tools.mcp import load_mcp_server_configs, validate_mcp_config
 from ..tools.memory import load_memory
@@ -1071,13 +1077,29 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             return Path(workspace_param), True
         return settings.workspace_root, False
 
-    # {name: SkillInfo} built once here -- skills are files on disk, not
-    # something that changes mid-process -- used both by GET /api/skills
-    # and to validate a select_skills WS message's names before ever
-    # handing them to ChatSessionLG.
-    skills_by_name = {
-        s.name: s for s in load_builtin_skills() + load_skills(settings.skills_dir)
-    }
+    def _skills_by_name() -> dict[str, SkillInfo]:
+        # Re-scanned on every call, not a closure snapshot -- the same
+        # staleness bug switch_model's custom-providers snapshot had (see
+        # runtime_lg/README.md), just for skills: settings.skills_dir can
+        # gain a new entry mid-process now (POST /api/skills/upload
+        # below), and both GET /api/skills and the select_skills WS
+        # validation need to see it without a server restart. Skill
+        # directories are few and cheap to stat, so re-scanning per call
+        # (rather than invalidating a cache on upload) is the simplest
+        # correct thing.
+        return {s.name: s for s in load_builtin_skills() + load_skills(settings.skills_dir)}
+
+    # load_skills(settings.skills_dir) above creates the directory as a
+    # side effect (see skills.py's _scan_skills_dir) -- that used to
+    # happen for free the moment the old eager `skills_by_name = {...}`
+    # snapshot was built at startup. Now that the scan is lazy (only on
+    # an actual GET/WS call), nothing guarantees it exists yet -- e.g.
+    # /api/browse-dirs listing settings.workspace_root right after
+    # startup, before any skills endpoint has ever been hit, wouldn't
+    # see it. One throwaway call here keeps that startup-time side
+    # effect intact without bringing back the staleness bug.
+    _skills_by_name()
+
     # The 3 shipped skills (pptx/excel/word) default to *enabled* for a
     # brand-new thread -- unlike a user-authored local skill (settings.
     # skills_dir), which stays opt-in, since there's no way to know in
@@ -1109,8 +1131,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         built-ins), not the empty set -- see that variable's comment
         above."""
         sidecar = _skills_sidecar_path(thread_id)
+        known = _skills_by_name().keys()
         if skills_param is not None:
-            names = {n for n in skills_param.split(",") if n} & skills_by_name.keys()
+            names = {n for n in skills_param.split(",") if n} & known
             _write_skills_sidecar(thread_id, names)
             return names
         if sidecar.is_file():
@@ -1118,7 +1141,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 saved = json.loads(sidecar.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 return set(default_enabled_skill_names)
-            return set(saved) & skills_by_name.keys()
+            return set(saved) & known
         return set(default_enabled_skill_names)
 
     def _get_session(
@@ -1616,8 +1639,38 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     async def get_skills() -> list[dict[str, str]]:
         # Built-in + user-local, same combined set build_coordinator_agent
         # itself splices when skill_names=None -- the Skills settings tab
-        # renders one checkbox per entry here.
-        return [{"name": s.name, "description": s.description} for s in skills_by_name.values()]
+        # renders one checkbox per entry here. `source` lets the frontend
+        # split the list into "Your skills" (custom) / "Discover"
+        # (built-in) tabs -- default_enabled_skill_names is exactly the
+        # built-in name set already computed above, reused rather than
+        # scanning builtin_skills/ a second time.
+        return [
+            {
+                "name": s.name,
+                "description": s.description,
+                "source": "builtin" if s.name in default_enabled_skill_names else "custom",
+            }
+            for s in _skills_by_name().values()
+        ]
+
+    @app.post("/api/skills/upload")
+    async def upload_skill(file: UploadFile) -> JSONResponse:
+        # The real half of Settings > Skills > Add > Upload skill (see
+        # tools/skills.py's save_uploaded_skill for the accepted shapes
+        # and docs/ui-references/skills-add-uploadskills.png for the
+        # reference UI). Always writes into settings.skills_dir, i.e.
+        # always a "custom" skill -- there's no UI path to add a builtin
+        # one, those only ever come from the package itself.
+        content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            return JSONResponse({"error": "file too large (max 25MB)"}, status_code=413)
+        try:
+            skill = save_uploaded_skill(settings.skills_dir, file.filename or "", content)
+        except SkillUploadError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(
+            {"name": skill.name, "description": skill.description, "source": "custom"}
+        )
 
     @app.post("/api/upload")
     async def upload_file(file: UploadFile) -> JSONResponse:
@@ -2329,7 +2382,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     # _resolve_enabled_skills gives them at connect time,
                     # rather than erroring the whole toggle over one bad
                     # entry.
-                    requested = {n for n in data.get("skills", []) if n in skills_by_name}
+                    requested = {n for n in data.get("skills", []) if n in _skills_by_name()}
                     await session.set_enabled_skills(requested, websocket)
                     _write_skills_sidecar(thread_id, requested)
                 elif message_type == "select_workspace":
