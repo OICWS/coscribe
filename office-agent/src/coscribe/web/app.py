@@ -859,9 +859,16 @@ class MemoryUpdate(BaseModel):
 
 class MCPServerUpdate(BaseModel):
     name: str
-    command: str
+    # Exactly one of command (local, stdio) or server_url (remote,
+    # streamable_http) -- validate_mcp_config enforces the XOR, this model
+    # just carries both possible shapes. headers is server_url's
+    # equivalent of env, masked/secret-stored the same way on the read/
+    # write paths below.
+    command: str | None = None
     args: list[str] = []
     env: dict[str, str] = {}
+    server_url: str | None = None
+    headers: dict[str, str] = {}
 
 
 class MCPVersionBump(BaseModel):
@@ -1891,6 +1898,16 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             return {}
         result: dict[str, Any] = {}
         for name, config in load_mcp_server_configs(settings.mcp_config_path).items():
+            # `connected` reads the same live mcp_connections registry
+            # every actual tool call goes through (see its own comment
+            # above) -- a real signal, not derived from the static config
+            # this loop is otherwise reading. Configured but not currently
+            # connected covers both "never successfully connected" and
+            # "connected once, then the subprocess/session died" -- this
+            # endpoint doesn't distinguish those, same as the Connectors
+            # tab never has (add/bump already surface a real error message
+            # at the point of failure; this is just current live state).
+            connected = name in mcp_connections
             if "server_url" in config:
                 # Remote (streamable_http) entry -- a hand-configured
                 # Custom-tab remote-server form. Bearer/auth header values
@@ -1901,20 +1918,27 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "masked_headers": {
                         k: _mask(v) for k, v in (config.get("headers") or {}).items()
                     },
+                    "connected": connected,
                 }
             else:
                 result[name] = {
                     "command": config.get("command"),
                     "args": config.get("args", []),
                     "masked_env": {k: _mask(v) for k, v in (config.get("env") or {}).items()},
+                    "connected": connected,
                 }
         return result
 
     @app.post("/api/mcp/servers")
     async def add_mcp_server(payload: MCPServerUpdate) -> dict[str, Any]:
-        entry: dict[str, Any] = {"command": payload.command, "args": payload.args}
-        if payload.env:
-            entry["env"] = payload.env
+        if payload.server_url:
+            entry: dict[str, Any] = {"server_url": payload.server_url}
+            if payload.headers:
+                entry["headers"] = payload.headers
+        else:
+            entry = {"command": payload.command, "args": payload.args}
+            if payload.env:
+                entry["env"] = payload.env
         try:
             config = validate_mcp_config({"type": "mcp", "name": payload.name, **entry})
         except ValueError as exc:
@@ -1925,13 +1949,18 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         path = settings.mcp_config_path or Path("./mcp.json").resolve()
         raw = _read_mcp_servers_raw(path)
         # `config` above (used to actually connect, just below) keeps the
-        # real env values; only what's persisted to disk gets routed
-        # through store_secret per value.
+        # real env/headers values; only what's persisted to disk gets
+        # routed through store_secret per value.
         stored_entry = dict(entry)
         if payload.env:
             stored_entry["env"] = {
                 key: store_secret(f"mcp:{payload.name}:env:{key}", value)
                 for key, value in payload.env.items()
+            }
+        if payload.headers:
+            stored_entry["headers"] = {
+                key: store_secret(f"mcp:{payload.name}:headers:{key}", value)
+                for key, value in payload.headers.items()
             }
         raw["mcpServers"][payload.name] = stored_entry
         path.parent.mkdir(parents=True, exist_ok=True)

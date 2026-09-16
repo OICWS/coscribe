@@ -115,6 +115,10 @@ export interface McpServerInfo {
    * (streamable_http) entry, e.g. a hand-configured Custom-tab server. */
   server_url?: string;
   masked_headers?: Record<string, string>;
+  /** Live signal, not derived from the static config the rest of this
+   * entry comes from -- whether this server is currently connected in
+   * the running coscribe-web process (see web/app.py's mcp_connections). */
+  connected: boolean;
 }
 
 export type McpServersResponse = Record<string, McpServerInfo>;

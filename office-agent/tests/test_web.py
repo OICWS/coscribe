@@ -2919,8 +2919,139 @@ def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(
 
         servers = client.get("/api/mcp/servers").json()
         assert servers == {
-            "fetch": {"command": "uvx", "args": ["mcp-server-fetch"], "masked_env": {}}
+            "fetch": {
+                "command": "uvx",
+                "args": ["mcp-server-fetch"],
+                "masked_env": {},
+                "connected": False,
+            }
         }
+
+
+def test_get_mcp_servers_connected_reflects_a_real_live_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """connected must be a live signal (web/app.py's mcp_connections
+    registry), not just "is it in mcp.json" -- add one server that stubs a
+    successful connect and one that doesn't, and check GET /api/mcp/servers
+    tells them apart."""
+
+    class _FakeConnection:
+        async def close(self) -> None:
+            pass
+
+    async def _fake_connect_returns_a_tool(name: str, config: Any) -> tuple[list[Any], Any]:
+        from coscribe.runtime.types import tool_metadata
+
+        def _tool(x: str = "") -> str:
+            """fake"""
+            return x
+
+        _tool.__name__ = f"{name}__tool"
+        tool_metadata(_tool, risk_category="READ", category=f"mcp:{name}")
+        return [_tool], _FakeConnection()
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        # Stubbed to [] by _client_lg's own default -- never actually connects.
+        client.post("/api/mcp/servers", json={"name": "flaky", "command": "uvx", "args": ["x"]})
+
+        monkeypatch.setattr(
+            "coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", _fake_connect_returns_a_tool
+        )
+        client.post("/api/mcp/servers", json={"name": "healthy", "command": "uvx", "args": ["y"]})
+
+        servers = client.get("/api/mcp/servers").json()
+
+    assert servers["flaky"]["connected"] is False
+    assert servers["healthy"]["connected"] is True
+
+
+def test_post_mcp_server_accepts_a_remote_server_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Settings > Connectors > Add > Add manually > Remote -- the frontend
+    # form this backs was new work, not just a UI reskin: validate_mcp_
+    # config (tools/mcp.py) already handled server_url/headers, but
+    # POST /api/mcp/servers's own MCPServerUpdate model only ever accepted
+    # command/args/env until now.
+    monkeypatch.delenv("COSCRIBE_MCP_CONFIG_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post(
+            "/api/mcp/servers",
+            json={
+                "name": "remote-thing",
+                "server_url": "https://example.com/mcp",
+                "headers": {"Authorization": "Bearer token"},
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["rejected"] == {}
+
+        mcp_config = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))
+        assert mcp_config["mcpServers"]["remote-thing"]["server_url"] == "https://example.com/mcp"
+
+        servers = client.get("/api/mcp/servers").json()
+        assert servers["remote-thing"]["server_url"] == "https://example.com/mcp"
+        assert servers["remote-thing"]["masked_headers"]["Authorization"].endswith("oken")
+
+        client.delete("/api/mcp/servers/remote-thing")
+
+
+def test_post_mcp_server_stores_headers_via_keyring_when_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same guarantee as the identical env-var test above, for a remote
+    # server's headers instead of a local server's env.
+    fake_keyring = _install_fake_keyring(monkeypatch)
+    monkeypatch.delenv("COSCRIBE_MCP_CONFIG_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        client.post(
+            "/api/mcp/servers",
+            json={
+                "name": "remote-secret",
+                "server_url": "https://example.com/mcp",
+                "headers": {"Authorization": "Bearer real-secret"},
+            },
+        )
+
+        raw = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))
+        assert raw["mcpServers"]["remote-secret"]["headers"] == {
+            "Authorization": {"keyring_ref": "mcp:remote-secret:headers:Authorization"}
+        }
+        assert (
+            fake_keyring.store[("coscribe", "mcp:remote-secret:headers:Authorization")]
+            == "Bearer real-secret"
+        )
+        assert "real-secret" not in json.dumps(raw)
+
+        client.delete("/api/mcp/servers/remote-secret")
+
+    assert ("coscribe", "mcp:remote-secret:headers:Authorization") not in fake_keyring.store
+
+
+def test_post_mcp_server_rejects_a_server_url_without_https(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post(
+            "/api/mcp/servers",
+            json={"name": "bad-remote", "server_url": "ftp://example.com"},
+        )
+
+    assert response.status_code == 200
+    assert "bad-remote" in response.json()["rejected"]
 
 
 def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(

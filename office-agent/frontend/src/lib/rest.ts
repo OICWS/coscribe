@@ -115,8 +115,12 @@ export async function uploadSkill(file: File): Promise<UploadSkillResult> {
 
 export const getMcpCatalog = () => getJson<McpCatalogEntry[]>("/api/mcp/catalog");
 export const getMcpServers = () => getJson<McpServersResponse>("/api/mcp/servers");
-export const addMcpServer = (name: string, command: string, args: string[], env: Record<string, string> = {}) =>
-  postJson<McpServerUpdateResult>("/api/mcp/servers", { name, command, args, env });
+export const addMcpServer = (
+  name: string,
+  server:
+    | { command: string; args: string[]; env?: Record<string, string> }
+    | { server_url: string; headers?: Record<string, string> },
+) => postJson<McpServerUpdateResult>("/api/mcp/servers", { name, ...server });
 export const removeMcpServer = (name: string) => del<Record<string, never>>(`/api/mcp/servers/${encodeURIComponent(name)}`);
 export const checkBrowser = () => getJson<BrowserCheckResponse>("/api/mcp/browser-check");
 export const installBrowser = () => postJson<InstallBrowserResponse>("/api/mcp/install-browser", {});
