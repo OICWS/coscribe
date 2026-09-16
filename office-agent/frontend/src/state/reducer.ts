@@ -277,6 +277,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             kind: "tool",
             toolName: entry.tool_name,
             arguments: entry.arguments,
+            result: entry.result,
           } as const;
         }),
       };

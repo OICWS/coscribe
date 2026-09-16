@@ -44,7 +44,7 @@ export interface StateEvent {
 export type HistoryEntry =
   | { kind: "user"; text: string }
   | { kind: "agent"; text: string }
-  | { kind: "tool"; tool_name: string; arguments: Record<string, unknown> };
+  | { kind: "tool"; tool_name: string; arguments: Record<string, unknown>; result: unknown };
 
 export interface HistoryEvent {
   type: "history";

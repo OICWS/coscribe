@@ -414,6 +414,38 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
       .catch(() => {});
   }, [active]);
 
+  // Real, live-reported bug: `connected` is a live signal (web/app.py's
+  // mcp_connections, populated once a server's own connect actually
+  // finishes), but a slow-to-start one -- Playwright launching a real
+  // browser is the documented worst case -- can easily take longer than
+  // the 5s startup window (MCP_STARTUP_TIMEOUT_SECONDS) allows, finishing
+  // in the background afterward (see lifespan's own comment). Nothing
+  // ever pushed that completion to an already-open Connectors tab (chat
+  // sessions get a WS splice for exactly this reason; Settings tabs are
+  // plain REST, no push channel) -- open Settings right after startup and
+  // the connector you're actually using correctly shows "Not connected"
+  // forever, even once it's genuinely connected. Silent background poll,
+  // deliberately not routed through useFetchOnActive's own retry (which
+  // would flip catalogStatus to "error" and blank the whole list behind
+  // a transient failure) -- errors are swallowed and the last-known
+  // `servers` snapshot just stays put, same graceful-degradation posture
+  // as this file's other non-critical background work.
+  const [liveServers, setLiveServers] = useState<McpServersResponse | null>(null);
+  const pollLiveServers = () => {
+    getMcpServers()
+      .then((result) => setLiveServers(result))
+      .catch(() => {});
+  };
+  useEffect(() => {
+    if (!active) return;
+    setLiveServers(null);
+    pollLiveServers();
+    const id = setInterval(pollLiveServers, 4000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+  const effectiveServers = liveServers ?? servers;
+
   const performAdd = async (name: string, server: LocalServerArgs | RemoteServerArgs) => {
     pendingConnectorAdds.add(name);
     notifyPendingChanged();
@@ -433,6 +465,7 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
       pendingConnectorAdds.delete(name);
       notifyPendingChanged();
       refresh();
+      pollLiveServers();
     }
   };
 
@@ -480,6 +513,7 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
   const remove = async (name: string) => {
     await removeMcpServer(name);
     refresh();
+    pollLiveServers();
   };
 
   const checkUpdate = async (name: string, pkg: string) => {
@@ -498,13 +532,14 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
     setUpdateChecks(next);
     setStatus({ text: "Updated.", error: false });
     refresh();
+    pollLiveServers();
   };
 
   if (view === "add") {
     return (
       <AddConnectorView
         catalog={catalog}
-        servers={servers}
+        servers={effectiveServers}
         pendingConnectorAdds={pendingConnectorAdds}
         onBack={() => setView("list")}
         onCatalogAdd={(entry) => {
@@ -518,7 +553,7 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
     );
   }
 
-  let rows = buildRows(catalog, servers);
+  let rows = buildRows(catalog, effectiveServers);
   const q = search.trim().toLowerCase();
   if (q) rows = rows.filter((r) => r.name.toLowerCase().includes(q));
   if (filter === "connected") rows = rows.filter((r) => r.isAdded && r.connected);

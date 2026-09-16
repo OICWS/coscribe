@@ -132,6 +132,18 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
     "approval_required" event for that separately -- showing it here too
     would just be a duplicate.
 
+    Real, live-reported bug this also closes: a "tool" entry's own result
+    used to be silently dropped -- `results_by_id` was already computed
+    just to decide whether to include the entry at all (the skip check
+    above), but the looked-up value itself never made it into the emitted
+    dict. A reloaded/reconnected thread's own past tool calls (and
+    ask_user_question's, whose "result" is the user's chosen answer) were
+    each still individually click-to-expand, but expanding one showed
+    nothing -- ToolCallRow's own `item.result !== undefined` guard always
+    failed on a replayed item. Same tool_result_value(...) call the live
+    "tool_result" WS event already uses, so a replayed entry's result has
+    the exact same decoded shape a live one does.
+
     A "user" entry has its mode_note prefix (see strip_mode_note above)
     stripped back off -- the live bubble the user actually saw when they
     hit Send never had it, so a history replay shouldn't show it either.
@@ -158,7 +170,12 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
                 if call["id"] not in results_by_id:
                     continue
                 entries.append(
-                    {"kind": "tool", "tool_name": call["name"], "arguments": dict(call["args"])}
+                    {
+                        "kind": "tool",
+                        "tool_name": call["name"],
+                        "arguments": dict(call["args"]),
+                        "result": results_by_id[call["id"]],
+                    }
                 )
             continue
         if message.type == "tool":

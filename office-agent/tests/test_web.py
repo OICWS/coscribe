@@ -5325,7 +5325,12 @@ def test_reconnect_replays_conversation_history_lg(
         "type": "history",
         "entries": [
             {"kind": "user", "text": "what does note.txt say?"},
-            {"kind": "tool", "tool_name": "read_file", "arguments": {"path": "note.txt"}},
+            {
+                "kind": "tool",
+                "tool_name": "read_file",
+                "arguments": {"path": "note.txt"},
+                "result": "File does not exist: note.txt",
+            },
             {"kind": "agent", "text": "the file says hello"},
         ],
     }
@@ -5360,3 +5365,39 @@ def test_history_omits_a_call_still_pending_approval_lg(
         "type": "history",
         "entries": [{"kind": "user", "text": "write hi to note.txt"}],
     }
+
+
+def test_history_replay_includes_an_approved_calls_real_result_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for a real, live-reported bug: reconnecting to (or
+    reloading) an existing thread showed every past tool call as click-to-
+    expand, but expanding one showed nothing -- ToolCallRow's own `result
+    !== undefined` guard always failed on a replayed item, because
+    serialize_history_for_ws_lg computed each call's real result (into
+    results_by_id, to decide whether to include the entry at all) and then
+    silently dropped it instead of putting it on the emitted entry. Uses
+    an *approved* call specifically (not the plain read_file case the
+    sibling reconnect test above already covers), since that's the
+    real-world shape reported live -- an approval-gated run_command/
+    write-file call whose result vanished on reload."""
+    call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_hist_approved_result") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "write hi to note.txt"})
+            approval = ws.receive_json()
+            assert approval["type"] == "approval_required"
+            ws.send_json({"type": "approval_response", "id": approval["id"], "approved": True})
+            _receive_until(ws, "tasks_changed")
+
+        with client.websocket_connect("/ws/t_hist_approved_result") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+
+    tool_entry = next(e for e in history["entries"] if e["kind"] == "tool")
+    assert tool_entry["result"] == {"path": "note.txt", "bytes_written": 2}
