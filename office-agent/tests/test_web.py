@@ -2455,7 +2455,7 @@ def test_reviewer_tools_are_exactly_the_read_only_documents_tools(
     read_docx/read_pdf/search_pdf/read_xlsx/read_pptx/render_pptx_preview/
     list_pptx_shapes/list_pptx_shape_types/list_pptx_transition_types/
     list_pptx_animation_types/list_pptx_icons/read_pptx_theme_colors/
-    check_pptx_delivery today. This is the contract that
+    read_pptx_xml/check_pptx_delivery today. This is the contract that
     filter depends on: if a future "documents" tool is added without
     requires_approval=True, it would silently become reviewer-callable
     too (fine if read-only, a real bug if not) -- and if one of these
@@ -2491,6 +2491,7 @@ def test_reviewer_tools_are_exactly_the_read_only_documents_tools(
         "read_pdf",
         "read_pptx",
         "read_pptx_theme_colors",
+        "read_pptx_xml",
         "read_xlsx",
         "render_pptx_preview",
         "search_pdf",

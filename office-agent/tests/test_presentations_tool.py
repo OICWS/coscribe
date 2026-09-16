@@ -5287,6 +5287,258 @@ def test_delete_pptx_shape_removes_smartart_and_survives_round_trip(tmp_path: Pa
     assert list(prs.slides[0].shapes) == []
 
 
+# --- read_pptx_xml / edit_pptx_xml -- the generic OOXML escape hatch ---
+
+
+def test_read_pptx_xml_smartart_auto_returns_the_linked_data_part(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    _write_smartart_fixture(tmp_path / "smartart.pptx")
+
+    result = tools["read_pptx_xml"](path="smartart.pptx", slide=1, shape_index=0)
+
+    assert result["source"] == "smartart_data"
+    assert "Plan" in result["xml"]
+    assert "Build" in result["xml"]
+    assert "Ship" in result["xml"]
+
+
+def test_read_pptx_xml_smartart_part_shape_returns_the_graphicframe_wrapper(
+    tmp_path: Path,
+) -> None:
+    tools = _tools_by_name(tmp_path)
+    _write_smartart_fixture(tmp_path / "smartart.pptx")
+
+    result = tools["read_pptx_xml"](path="smartart.pptx", slide=1, shape_index=0, part="shape")
+
+    assert result["source"] == "shape"
+    assert "graphicFrame" in result["xml"]
+    # The real node text lives in the linked data part, not here.
+    assert "Plan" not in result["xml"]
+
+
+def test_read_pptx_xml_non_smartart_shape_returns_its_own_inline_xml(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+
+    result = tools["read_pptx_xml"](path="deck.pptx", slide=1, shape_index=0)
+
+    assert result["source"] == "shape"
+    assert "Real Title" in result["xml"]
+
+
+def test_read_pptx_xml_smartart_data_part_on_a_non_smartart_shape_raises(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet\n")
+
+    with pytest.raises(ValueError, match="isn't SmartArt"):
+        tools["read_pptx_xml"](path="deck.pptx", slide=1, shape_index=0, part="smartart_data")
+
+
+def test_read_pptx_xml_rejects_an_invalid_part_argument(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet\n")
+
+    with pytest.raises(ValueError, match='"auto", "shape", or "smartart_data"'):
+        tools["read_pptx_xml"](path="deck.pptx", slide=1, shape_index=0, part="bogus")
+
+
+def test_edit_pptx_xml_smartart_node_text_persists_and_round_trips(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    _write_smartart_fixture(tmp_path / "smartart.pptx")
+
+    result = tools["edit_pptx_xml"](
+        path="smartart.pptx",
+        slide=1,
+        shape_index=0,
+        xpath=".//dgm:t[.//a:t='Plan']//a:t",
+        new_text="PLANNED START",
+    )
+    assert result == {
+        "path": "smartart.pptx",
+        "slide": 1,
+        "shape_index": 0,
+        "source": "smartart_data",
+    }
+
+    # Read back through the same path a real conversation would use --
+    # list_pptx_shapes' own smartart_text, not a re-parse of internals.
+    shapes = tools["list_pptx_shapes"](path="smartart.pptx", slide=1)["shapes"]
+    assert shapes[0]["smartart_text"] == ["PLANNED START", "Build phase", "Ship"]
+
+
+def test_edit_pptx_xml_only_touches_the_targeted_shape_not_a_sibling(tmp_path: Path) -> None:
+    """Regression test for a real bug caught before it shipped: `//foo` in
+    XPath means "search the whole document this node belongs to", not
+    "search this node's own descendants" -- calling `.xpath("//a:t")`
+    directly on a live shape element (which lives inside the full
+    <p:sld> tree alongside every other shape) would match a *sibling*
+    shape's text too. Here, shape_index=0's own text is "Real Title" and
+    shape_index=1's is "a bullet" -- each unique across the whole slide.
+    Asking to edit shape_index=0 with an xpath that only matches text
+    actually inside shape_index=1 must find *nothing* (proving the
+    search was correctly scoped to shape 0 alone), not silently succeed
+    against the wrong shape."""
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+
+    with pytest.raises(ValueError, match="matched 0 element"):
+        tools["edit_pptx_xml"](
+            path="deck.pptx",
+            slide=1,
+            shape_index=0,
+            xpath=".//a:t[.='a bullet']",
+            new_text="hijacked",
+        )
+
+    # The sibling shape's real text must be completely untouched.
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    assert shapes[1]["text_preview"] == "a bullet"
+
+
+def test_edit_pptx_xml_shape_text_persists_and_stays_schema_valid(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+
+    result = tools["edit_pptx_xml"](
+        path="deck.pptx", slide=1, shape_index=0, xpath=".//a:t", new_text="Edited Title"
+    )
+    assert result == {"path": "deck.pptx", "slide": 1, "shape_index": 0, "source": "shape"}
+
+    shapes = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    assert shapes[0]["text_preview"] == "Edited Title"
+
+
+def test_edit_pptx_xml_preserves_shape_order(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+    before = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+
+    tools["edit_pptx_xml"](
+        path="deck.pptx", slide=1, shape_index=1, xpath=".//a:t", new_text="Edited bullet"
+    )
+
+    after = tools["list_pptx_shapes"](path="deck.pptx", slide=1)["shapes"]
+    assert len(after) == len(before)
+    assert after[0]["text_preview"] == before[0]["text_preview"]
+    assert after[1]["text_preview"] == "Edited bullet"
+
+
+def test_edit_pptx_xml_set_attributes_persists_a_real_attribute_change(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+
+    tools["edit_pptx_xml"](
+        path="deck.pptx",
+        slide=1,
+        shape_index=1,
+        xpath=".//p:cNvPr",
+        set_attributes="name=My Custom Shape Name",
+    )
+
+    result = tools["read_pptx_xml"](path="deck.pptx", slide=1, shape_index=1)
+    assert 'name="My Custom Shape Name"' in result["xml"]
+
+
+def test_edit_pptx_xml_set_attributes_parses_multiple_lines(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    _write_smartart_fixture(tmp_path / "smartart.pptx")
+
+    tools["edit_pptx_xml"](
+        path="smartart.pptx",
+        slide=1,
+        shape_index=0,
+        xpath=".//dgm:pt[@modelId='4']",
+        set_attributes="type=sibTrans\ncxnId=y",
+    )
+
+    result = tools["read_pptx_xml"](path="smartart.pptx", slide=1, shape_index=0)
+    assert 'type="sibTrans"' in result["xml"]
+    assert 'cxnId="y"' in result["xml"]
+
+
+def test_edit_pptx_xml_set_attributes_rejects_a_line_with_no_equals_sign(
+    tmp_path: Path,
+) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+
+    with pytest.raises(ValueError, match="has no '='"):
+        tools["edit_pptx_xml"](
+            path="deck.pptx",
+            slide=1,
+            shape_index=1,
+            xpath=".//p:cNvPr",
+            set_attributes="not-a-valid-line",
+        )
+
+
+def test_edit_pptx_xml_rejects_invalid_ooxml_without_touching_the_file(tmp_path: Path) -> None:
+    """A real schema-rejected edit -- `bookmarkId` isn't an allowed
+    attribute on `<p:sp>` (confirmed by the real ECMA-376 Transitional
+    schema this file already vendors) -- proves assert_ooxml_valid is
+    genuinely wired into edit_pptx_xml's write path, same guarantee every
+    other hand-XML tool in this module makes: an invalid result means the
+    file was never modified."""
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+    before = tools["read_pptx_xml"](path="deck.pptx", slide=1, shape_index=0)["xml"]
+
+    with pytest.raises(RuntimeError, match="failed schema validation"):
+        tools["edit_pptx_xml"](
+            path="deck.pptx",
+            slide=1,
+            shape_index=0,
+            xpath=".",
+            set_attributes="a:bookmarkId=coscribe-test",
+        )
+
+    after = tools["read_pptx_xml"](path="deck.pptx", slide=1, shape_index=0)["xml"]
+    assert after == before
+
+
+def test_edit_pptx_xml_requires_new_text_or_set_attributes(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+
+    with pytest.raises(ValueError, match="nothing to change"):
+        tools["edit_pptx_xml"](path="deck.pptx", slide=1, shape_index=0, xpath=".//a:t")
+
+
+def test_edit_pptx_xml_rejects_an_ambiguous_match(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    _write_smartart_fixture(tmp_path / "smartart.pptx")
+
+    with pytest.raises(ValueError, match="matched 5 element"):
+        tools["edit_pptx_xml"](
+            path="smartart.pptx", slide=1, shape_index=0, xpath=".//dgm:pt", new_text="x"
+        )
+
+
+def test_edit_pptx_xml_rejects_a_non_element_match(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Real Title\n- a bullet\n")
+
+    with pytest.raises(ValueError, match="not an element"):
+        tools["edit_pptx_xml"](
+            path="deck.pptx", slide=1, shape_index=0, xpath=".//a:t/text()", new_text="x"
+        )
+
+
+def test_edit_pptx_xml_smartart_data_requires_a_smartart_shape(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet\n")
+
+    with pytest.raises(ValueError, match="isn't SmartArt"):
+        tools["edit_pptx_xml"](
+            path="deck.pptx",
+            slide=1,
+            shape_index=0,
+            xpath=".",
+            new_text="x",
+            part="smartart_data",
+        )
+
+
 def test_delete_pptx_shape_removes_only_that_shape(tmp_path: Path) -> None:
     tools = _tools_by_name(tmp_path)
     tools["write_pptx"](path="deck.pptx", content="# Title\n- bullet\n")

@@ -4415,32 +4415,30 @@ a concrete reason to prioritize a new surface.
   turn, no picker needed. `image_search.py` (zero-API-key Openverse/
   Wikimedia sourcing, flagged in §27 as "not yet acted on") is the one
   genuinely still-open thread from that same round of research.
-- **PPTX quality/completeness: a generic pptx-internal-XML read/edit
-  tool** -- not started; see Phase 8al above (track 3 of 3). Inspired by
-  ppt-master's SVG/XML-manipulation approach and this codebase's own
-  `add_pptx_animation` precedent (already manipulates raw `<p:timing>`
-  XML directly, since python-pptx has no animation API either). Real,
-  scoped use case identified: editing text *inside an already-existing*
-  SmartArt diagram (valid layout already present, only the data-model's
-  text nodes need changing) without needing to author new SmartArt
-  layouts from scratch (python-pptx has zero support for that, confirmed
-  -- no `add_smartart` method exists at all). Would generalize past
-  SmartArt to any OOXML feature python-pptx hasn't wrapped a high-level
-  tool around. Needs real design work before starting: how much raw XML
-  surface to expose to the model (a full-file diff/patch tool in the
-  `apply_patch`-for-OOXML shape, versus a narrower "edit this one known
-  data-model node" tool) is an open, consequential choice, not a detail
-  to figure out while coding.
-- **Electron Browser panel: Ctrl+scroll/Ctrl+Plus-Minus zoom on the
-  embedded page doesn't do anything** -- not started; noted here per
-  your request. Confirmed on real hardware (Phase 8af's first round) as
-  a genuine gap, not a regression -- the old screencast implementation
-  never supported page zoom either (it only ever forwarded raw wheel
-  deltas as CDP mouse-wheel scroll events, no ctrl-modifier handling).
-  Would need `browserPanel.ts`'s panel `webContents` to listen for a
-  ctrl-held wheel/key event and call `setZoomLevel()`/`setZoomFactor()`
-  itself, since a bare `WebContentsView` has no built-in browser-chrome
-  zoom keybindings the way a full Chrome window does.
+- [x] **PPTX quality/completeness: a generic pptx-internal-XML read/edit
+  tool** -- shipped as `read_pptx_xml`/`edit_pptx_xml`. Went with the
+  narrower of the two open options this bullet itself named: an
+  element-scoped edit (an `xpath` must match exactly one real element,
+  same discipline `edit_file`'s own `old_text` uses), not a full-file
+  `apply_patch`-for-OOXML tool. Closes the concrete SmartArt-text-editing
+  case this bullet named, plus generalizes to any other OOXML feature
+  python-pptx hasn't wrapped. See `PPTX_DESIGN.md` §36 for the full
+  design and two real bugs found and fixed before shipping (SmartArt's
+  real text lives in a *linked package part*, not the shape's own inline
+  XML; a naive `//xpath` on an attached element silently searches the
+  *whole slide*, not just that shape -- both verified empirically, not
+  assumed, and both have regression tests).
+- [x] **Electron Browser panel: Ctrl+scroll/Ctrl+Plus-Minus zoom on the
+  embedded page doesn't do anything** -- shipped. `browserPanelContent.ts`
+  (the panel's own preload) relays a ctrl-held wheel event's `deltaY` to
+  `browserPanel.ts` via IPC (`webContents` has no wheel event of its own
+  in the main process); Ctrl+Plus/Minus/0 is caught directly there via
+  `before-input-event`. Verified live under xvfb, not just type-checked
+  -- launched the real app, opened the panel via the same contextBridge
+  API the UI itself uses, dispatched a real ctrl-held `WheelEvent` inside
+  the embedded page and sent real synthetic ctrl+0/ctrl+plus key events,
+  confirmed the exact expected zoom factors each time (1.3x, then reset
+  to 1.0x, then 1.1x).
 
 - **Stop can't actually interrupt a Playwright MCP action already in
   progress** -- not started; noted here per your request ("先记录到

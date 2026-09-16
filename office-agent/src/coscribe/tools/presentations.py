@@ -2801,6 +2801,91 @@ def _smartart_text(shape: Any) -> list[str]:
     return texts
 
 
+def _resolve_xml_qname(name: str) -> str:
+    """Resolve an attribute/tag name for edit_pptx_xml's `set_attributes` --
+    "prefix:local" using a prefix from `_GENERIC_XML_NSMAP` becomes real
+    Clark notation ("{uri}local"), lxml's own internal representation, so
+    `element.set(...)` writes it into the right namespace. A plain
+    unprefixed name (the common case -- "modelId", "type") or a prefix
+    this map doesn't know passes through unchanged -- python-pptx/lxml
+    both accept a no-namespace attribute name exactly as given."""
+    if ":" in name:
+        prefix, _, local = name.partition(":")
+        if prefix in _GENERIC_XML_NSMAP:
+            return f"{{{_GENERIC_XML_NSMAP[prefix]}}}{local}"
+    return name
+
+
+def _parse_set_attributes(raw: str | None) -> dict[str, str]:
+    """Parse edit_pptx_xml's own `set_attributes` -- one `name=value` pair
+    per line, not a `dict[str, str]` parameter -- **found the hard way**
+    (see edit_file_batch's own identical note): this codebase's tool
+    schemas have to stay Gemini-compatible, and aisuite's own schema
+    builder (`Tools.__infer_from_signature`) has no handling at all for
+    dict-typed parameters, falling back to a broken literal type string
+    ("dict[str, str]") that Gemini's strict schema validation rejects
+    outright -- confirmed live by `test_all_tool_schemas_are_gemini_
+    compatible` failing the moment a dict-typed parameter was tried here.
+    A plain `str` is the one shape guaranteed to produce a valid JSON
+    Schema "string" type through that builder. Blank lines are skipped; a
+    line with no "=" raises rather than silently dropping a value the
+    caller thought they set."""
+    if not raw:
+        return {}
+    attributes: dict[str, str] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise ValueError(
+                f"set_attributes line {line!r} has no '=' -- each line must be "
+                "'name=value' (one attribute per line)."
+            )
+        name, _, value = line.partition("=")
+        attributes[name.strip()] = value
+    return attributes
+
+
+def _smartart_data_part(shape: Any) -> Any:
+    """The related package part holding a SmartArt shape's real, editable
+    text/structure (`ppt/diagrams/dataN.xml`) -- a SmartArt shape's own
+    inline `<p:graphicFrame>` XML in the slide is just relationship
+    pointers to this and three sibling parts (layout/quickStyle/colors),
+    see `_smartart_text`'s own identical lookup above. Raises rather than
+    returning `None` -- every call site here is already inside a
+    `part in ("auto", "smartart_data")` branch that only runs for a shape
+    `_is_smartart` already confirmed, so a lookup failure past that point
+    means a malformed file, a real error worth surfacing, not a routine
+    "not SmartArt" case (`_smartart_text`'s own `[]`-on-failure is a
+    best-effort *read*; this backs a tool call that should say clearly
+    why it can't proceed)."""
+    from pptx.oxml.ns import qn
+
+    if not _is_smartart(shape):
+        raise ValueError("This shape isn't SmartArt -- it has no separate data part to target.")
+    graphic_data = shape._graphicFrame.graphic.graphicData  # noqa: SLF001
+    rel_ids = graphic_data.find(f"{{{_SMARTART_NS}}}relIds")
+    if rel_ids is None:
+        raise ValueError("This SmartArt shape has no relIds -- its data part can't be resolved.")
+    dm_rId = rel_ids.get(qn("r:dm"))
+    if dm_rId is None:
+        raise ValueError(
+            "This SmartArt shape has no r:dm relationship -- its data part can't be resolved."
+        )
+    try:
+        return shape.part.related_part(dm_rId)
+    except KeyError as exc:
+        raise ValueError(
+            f"This SmartArt shape's data part ({dm_rId}) is missing from the file."
+        ) from exc
+
+
+def _validate_xml_part_arg(part: str) -> None:
+    if part not in ("auto", "shape", "smartart_data"):
+        raise ValueError(f'part must be "auto", "shape", or "smartart_data", got {part!r}.')
+
+
 def _describe_fill_color(color: Any) -> str | None:
     """One `ColorFormat`'s own value as `"#RRGGBB"`/`"theme:ACCENT_1"` --
     the shared per-color logic `_describe_shape_fill` uses for both a
@@ -3025,6 +3110,24 @@ def _recolor_icon(icon_path: Path, color_hex: str) -> Any:
 # one pass rather than enumerating every possible tag (a:blip r:embed,
 # a:hlinkClick r:id, c:chart r:id, a:videoFile r:link, ...).
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+# Prefix -> namespace-URI map for read_pptx_xml/edit_pptx_xml's own `xpath`
+# and `set_attributes` arguments -- lets the model write real, readable
+# XPath ("//dgm:t[.='Plan']") instead of lxml's Clark notation
+# ("//{http://schemas.../diagram}t"). Reuses this file's own existing
+# namespace constants (the exact ones set_pptx_transition/add_pptx_formula
+# already write) rather than re-declaring them, so there's exactly one
+# source of truth for each URI.
+_GENERIC_XML_NSMAP = {
+    "p": _P_NS,
+    "a": _A_NS,
+    "r": _R_NS,
+    "dgm": _SMARTART_NS,
+    "p14": _P14_NS,
+    "a14": _A14_NS,
+    "p15": _P15_NS,
+    "p159": _P159_NS,
+}
 
 
 def _duplicate_slide_part(prs: PresentationType, source_slide: Any) -> str:
@@ -4867,6 +4970,144 @@ class PresentationToolkit:
             "preview_skipped_reason": preview_skipped_reason,
         }
 
+    def read_pptx_xml(
+        self, path: str, slide: int, shape_index: int, part: str = "auto"
+    ) -> dict[str, object]:
+        """Raw OOXML for one shape -- the escape hatch for anything
+        python-pptx has no API for at all beyond what add_pptx_shape_effect/
+        add_pptx_animation/set_pptx_transition already hand-write (see this
+        file's own module docstring): editing SmartArt node text, or
+        inspecting/tweaking any other element this package's own tools
+        don't wrap. Always read before calling edit_pptx_xml -- the real
+        element names/namespaces/nesting are what xpath there has to
+        target, and this is the only way to see them."""
+        from lxml import etree
+
+        _validate_xml_part_arg(part)
+        _prs, _file_path, target_slide = self._open_slide(path, slide)
+        shape = _get_shape_at_index(target_slide, slide, shape_index)
+        use_smartart_data = part == "smartart_data" or (part == "auto" and _is_smartart(shape))
+        if use_smartart_data:
+            root = etree.fromstring(_smartart_data_part(shape).blob)
+            source = "smartart_data"
+        else:
+            root = shape._element  # noqa: SLF001
+            source = "shape"
+        return {
+            "xml": etree.tostring(root, pretty_print=True, encoding="unicode"),
+            "source": source,
+        }
+
+    @locked_by_path
+    def edit_pptx_xml(
+        self,
+        path: str,
+        slide: int,
+        shape_index: int,
+        xpath: str,
+        new_text: Optional[str] = None,  # noqa: UP045
+        set_attributes: Optional[str] = None,  # noqa: UP045
+        part: str = "auto",
+    ) -> dict[str, object]:
+        """Edit one element inside a shape's raw OOXML, found by XPath --
+        the narrow, bounded escape hatch ROADMAP.md's own "Later" backlog
+        named: element-scoped (an xpath must resolve to exactly one real
+        element, same "unique match or raise" discipline edit_file's own
+        old_text uses), not an unrestricted whole-file patch -- there's no
+        way to add/remove/reorder elements here, only change an existing
+        one's text or attributes. Reach for this only when no dedicated
+        tool already covers what's needed; it's real hand-XML, no
+        argument-level guardrails beyond "the result must still be
+        well-formed"."""
+        from lxml import etree
+
+        if new_text is None and not set_attributes:
+            raise ValueError("Provide new_text and/or set_attributes -- nothing to change.")
+        _validate_xml_part_arg(part)
+        parsed_attributes = _parse_set_attributes(set_attributes)
+
+        prs, file_path, target_slide = self._open_slide(path, slide)
+        shape = _get_shape_at_index(target_slide, slide, shape_index)
+        use_smartart_data = part == "smartart_data" or (part == "auto" and _is_smartart(shape))
+
+        # Real gotcha, verified empirically (not assumed): `//foo` in
+        # XPath means "search the whole document this node belongs to",
+        # not "search this node's own descendants" -- calling
+        # `.xpath("//dgm:t")` directly on `shape._element` (which lives
+        # inside the full <p:sld> tree, alongside every *other* shape on
+        # the slide) would silently match content in a sibling shape too,
+        # breaking the "exactly one match" contract in a way that could
+        # edit the wrong shape without ever raising. Parsing a standalone
+        # copy of just this shape's own serialized XML sidesteps the
+        # whole problem -- `//` on a detached tree can only ever reach
+        # that tree's own content, no cross-shape leakage possible. The
+        # SmartArt data part is already parsed this same way below
+        # (a fresh `etree.fromstring(data_part.blob)`, its own document),
+        # so this makes both sources behave identically.
+        data_part = None
+        original_shape_element = None
+        if use_smartart_data:
+            data_part = _smartart_data_part(shape)
+            root = etree.fromstring(data_part.blob)
+            source = "smartart_data"
+        else:
+            original_shape_element = shape._element  # noqa: SLF001
+            root = etree.fromstring(etree.tostring(original_shape_element))
+            source = "shape"
+
+        matches = root.xpath(xpath, namespaces=_GENERIC_XML_NSMAP)
+        if len(matches) != 1:
+            raise ValueError(
+                f"xpath {xpath!r} matched {len(matches)} element(s) inside this {source} "
+                "XML -- must match exactly one. Call read_pptx_xml first to see the real "
+                "structure and narrow the xpath."
+            )
+        element = matches[0]
+        if not isinstance(element, etree._Element):  # noqa: SLF001
+            raise ValueError(
+                f"xpath {xpath!r} matched an attribute or text value, not an element -- "
+                "target the element itself (e.g. '//dgm:t' not '//dgm:t/@type')."
+            )
+
+        if new_text is not None:
+            element.text = new_text
+        for name, value in parsed_attributes.items():
+            element.set(_resolve_xml_qname(name), value)
+
+        # Splice the edited detached copy back into the real, live slide
+        # tree at the shape's own original position (getparent().replace,
+        # not append -- this preserves shape order, since a slide's
+        # z-order is its shapes' own document order). Then validate the
+        # *whole slide* via assert_ooxml_valid, same "never serialize an
+        # unvalidated write" guarantee every other hand-XML tool in this
+        # file makes (the ECMA-376 Transitional/pml.xsd this file already
+        # vendors) -- catches a mistake in this edit even if it's
+        # syntactically well-formed (e.g. a required child now missing).
+        # A SmartArt data part's own <dgm:dataModel> root has no vendored
+        # schema here (a genuinely separate schema this codebase hasn't
+        # needed until now) -- well-formedness (the etree.tostring below
+        # already guarantees that much, or it would have raised) is the
+        # only check available for that source, documented honestly
+        # rather than silently claiming a stronger guarantee than this
+        # tool actually gives.
+        if source == "shape":
+            assert original_shape_element is not None  # narrows for mypy
+            original_shape_element.getparent().replace(original_shape_element, root)
+            assert_ooxml_valid(target_slide.element, "edit_pptx_xml")
+        else:
+            assert data_part is not None  # narrows for mypy -- true whenever source != "shape"
+            data_part.blob = etree.tostring(
+                root, xml_declaration=True, encoding="UTF-8", standalone=True
+            )
+        prs.save(str(file_path))
+
+        return {
+            "path": self._scope.relative(file_path),
+            "slide": slide,
+            "shape_index": shape_index,
+            "source": source,
+        }
+
     @locked_by_path
     def set_pptx_notes(self, path: str, slide: int, notes: str) -> dict[str, object]:
         prs, file_path, target_slide = self._open_slide(path, slide)
@@ -6306,6 +6547,107 @@ def build_presentation_tools(
             direction=direction,
         )
 
+    def read_pptx_xml(
+        path: str, slide: int, shape_index: int, part: str = "auto"
+    ) -> dict[str, object]:
+        """Read one shape's raw underlying OOXML from a PowerPoint (.pptx)
+        file -- the escape hatch for anything not covered by a dedicated
+        tool (list_pptx_shapes/edit_pptx_shape and friends), most notably
+        the real text inside an *existing* SmartArt diagram: python-pptx
+        has no SmartArt API at all, and SmartArt's own real text doesn't
+        even live in the slide's own XML -- it's in a separate linked
+        part this tool resolves automatically (`part="auto"`, the
+        default). Always call this before edit_pptx_xml on a shape you
+        haven't inspected yet -- its own `xpath` argument has to target
+        real element names/namespaces/nesting you can only see here.
+
+        Args:
+            path: presentation file to read, relative to the workspace root
+            slide: 1-based slide number the shape is on
+            shape_index: which shape on that slide -- call list_pptx_shapes
+                first to find it (is_smartart there flags a SmartArt one)
+            part: "auto" (default) reads a SmartArt shape's linked data
+                part (where its real text lives) or a normal shape's own
+                inline XML, whichever applies. "shape" always reads the
+                shape's own inline slide XML, even for SmartArt (its
+                `<p:graphicFrame>` wrapper -- position/size/relationship
+                pointers, not the diagram's own content). "smartart_data"
+                always reads the linked data part, and raises if this
+                shape isn't SmartArt.
+        """
+        return toolkit.read_pptx_xml(path=path, slide=slide, shape_index=shape_index, part=part)
+
+    def edit_pptx_xml(
+        path: str,
+        slide: int,
+        shape_index: int,
+        xpath: str,
+        new_text: Optional[str] = None,  # noqa: UP045
+        set_attributes: Optional[str] = None,  # noqa: UP045
+        part: str = "auto",
+    ) -> dict[str, object]:
+        """Edit one element inside a shape's raw OOXML in a PowerPoint
+        (.pptx) file, found by XPath -- the narrow escape hatch for
+        anything no dedicated tool covers (most notably: changing the
+        text of an *existing* node inside a SmartArt diagram, which
+        python-pptx has no API for at all). Call read_pptx_xml first --
+        `xpath` has to target the real structure it shows you, not a
+        guess.
+
+        Deliberately bounded, not a general patch tool: `xpath` must
+        match exactly one real element (raises otherwise, same "ambiguous
+        match" discipline edit_file's own old_text uses) -- there's no
+        way to add, remove, or reorder elements, only change an existing
+        one's text and/or attributes. `xpath` understands these
+        namespace prefixes: p (presentationml), a (drawingml), r
+        (relationships), dgm (SmartArt diagram), p14/a14/p15/p159
+        (PowerPoint extension namespaces) -- e.g. `//dgm:t` finds every
+        SmartArt text-node element, `//dgm:t[../../@modelId='1']` narrows
+        to the one belonging to a specific node.
+
+        Validated before saving -- a "shape"-part edit is checked against
+        the real ECMA-376 schema (same guarantee every other hand-XML
+        tool in this package already makes: an invalid result means the
+        file was never touched). A "smartart_data" edit only gets a
+        well-formedness check -- this package has no vendored schema for
+        SmartArt's own diagram markup, so a structurally-wrong-but-still-
+        well-formed edit there (e.g. a broken node relationship) won't be
+        caught here; keep such edits to changing existing text content,
+        not restructuring the diagram.
+
+        Args:
+            path: presentation file to modify, relative to the workspace root
+            slide: 1-based slide number the shape is on
+            shape_index: which shape on that slide -- call list_pptx_shapes
+                first to find it
+            xpath: an XPath expression that must match exactly one element
+                inside the target XML (see `part`) -- call read_pptx_xml
+                first to see the real structure
+            new_text: if given, replaces the matched element's own direct
+                text content
+            set_attributes: if given, sets attributes on the matched
+                element -- one "name=value" pair per line (not a
+                structured object: this codebase's tool schemas have to
+                stay Gemini-compatible, and a dict-typed parameter breaks
+                that, same reason edit_file_batch's own `edits` is a
+                delimited string too). `name` is "attr" or "prefix:attr"
+                using the same namespace prefixes `xpath` understands --
+                e.g. "modelId=2\ntype=parTrans" sets two plain attributes,
+                "r:id=rId5" sets one in the relationships namespace
+            part: which XML to search -- see read_pptx_xml's own `part`
+                argument for the exact "auto"/"shape"/"smartart_data"
+                meaning, identical here
+        """
+        return toolkit.edit_pptx_xml(
+            path=path,
+            slide=slide,
+            shape_index=shape_index,
+            xpath=xpath,
+            new_text=new_text,
+            set_attributes=set_attributes,
+            part=part,
+        )
+
     def set_pptx_notes(path: str, slide: int, notes: str) -> dict[str, object]:
         """Set the speaker notes for one slide in a PowerPoint (.pptx) file.
 
@@ -6690,6 +7032,8 @@ def build_presentation_tools(
         ),
         tool_metadata(add_pptx_scrim, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(add_pptx_shape_effect, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(read_pptx_xml, risk_category="READ", category="documents"),
+        tool_metadata(edit_pptx_xml, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(set_pptx_notes, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(set_pptx_transition, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(

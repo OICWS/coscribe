@@ -285,12 +285,19 @@ entirely (any type -- a plain shape, a picture, a table, or real \
 SmartArt), call delete_pptx_shape(path, slide, shape_index) with that \
 same shape_index; this can't be undone. list_pptx_shapes also flags \
 real SmartArt (is_smartart: true) and lists each of its nodes' own \
-text (smartart_text) -- neither this tool nor python-pptx can generate \
-or edit real SmartArt at all (the layout algorithm lives in PowerPoint \
-itself, not the file format), so if the user wants a SmartArt diagram \
-changed, read its text there first, then delete_pptx_shape it and \
-rebuild the same idea using this file's other shape/icon/table tools \
-(e.g. write_pptx's own icon-list layout for a simple step/point list). \
+text (smartart_text). Neither this tool nor python-pptx can generate a \
+*new* SmartArt diagram or change its layout (the layout algorithm lives \
+in PowerPoint itself, not the file format) -- if the user wants a new \
+diagram or a different layout, delete_pptx_shape it and rebuild the \
+same idea using this file's other shape/icon/table tools (e.g. \
+write_pptx's own icon-list layout for a simple step/point list). But \
+changing an *existing* SmartArt node's own text in place is possible: \
+call read_pptx_xml(path, slide, shape_index) first (its `part="auto"` \
+default reaches the real linked data part SmartArt's text actually \
+lives in, not the shape's own inline XML) to see the real <dgm:t> \
+structure, then edit_pptx_xml with an xpath that matches exactly the \
+one text element to change -- don't reach for delete-and-rebuild just \
+to fix a typo or reword one node. \
 \
 To build a specific diagram (a process flow of arrows and boxes, a \
 decision tree, a comparison of callouts) shape by shape at exact \

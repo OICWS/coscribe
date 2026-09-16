@@ -3252,3 +3252,118 @@ exhaustive per-bundled-template QA test) and a `warnings.simplefilter
 same bar every other bundled template already clears. `template.yaml`
 manifests follow the exact existing schema (`_REQUIRED_MANIFEST_FIELDS`),
 `load_builtin_templates()`'s own id-set test updated to expect 7.
+
+## 36. `read_pptx_xml`/`edit_pptx_xml` -- the generic OOXML escape hatch,
+ROADMAP.md's own long-standing "Later" item, closing the SmartArt-editing
+gap specifically
+
+Deliberately narrower than the "full-file diff/patch tool" shape
+ROADMAP.md's own note flagged as one of two options -- element-scoped
+(an `xpath` must resolve to exactly one real element inside the target
+shape, same "unique match or raise" discipline `edit_file`'s own
+`old_text` uses), not an unrestricted whole-file patch. There's no way
+to add/remove/reorder elements, only change an existing one's text
+and/or attributes -- matches this file's own established restraint
+(`add_pptx_shape_effect`/`set_pptx_transition` are narrower than their
+full schemas too, on purpose).
+
+**The concrete motivating case named in ROADMAP.md**: editing text
+*inside an already-existing* SmartArt diagram -- python-pptx has zero
+SmartArt API. Investigating this surfaced a real architectural wrinkle
+`_smartart_text`'s own read path (§-less, predates this numbered log)
+already had to deal with but this tool had to solve for *writing*:
+SmartArt's real text doesn't live in the shape's own inline
+`<p:graphicFrame>` XML in the slide at all -- that's just relationship
+pointers (`r:dm`/`r:lo`/`r:qs`/`r:cs`) to four separate linked package
+parts, and the actual editable text lives in `ppt/diagrams/dataN.xml`
+(the `r:dm` target). `part="auto"` (the default) resolves to that
+linked data part automatically for a SmartArt shape, its own inline XML
+otherwise; `part="shape"`/`part="smartart_data"` force one or the other
+explicitly.
+
+**A second, real technical wrinkle, resolved by testing rather than
+assumed**: `ppt/diagrams/dataN.xml` loads through python-pptx as a
+plain `Part` (binary blob), not `XmlPart` -- confirmed empirically
+(`type(data_part)` is `pptx.opc.package.Part`), because python-pptx has
+never registered a custom part class for this content type. `XmlPart`
+would let an in-place `._element` mutation get picked up automatically
+by its own `.blob` (which reserializes on access) -- `Part` doesn't
+work that way (`.blob` is a plain settable field, "XmlPart cannot set
+its blob" per that class's own docstring). So the write-back for a
+SmartArt-data edit is a different, explicit three-step dance (parse
+`data_part.blob` fresh, mutate the parsed copy, `data_part.blob =
+etree.tostring(...)`) than every other hand-XML tool in this file uses
+(mutate `shape._element`/`target_slide.element` in place, `prs.save()`
+picks it up automatically) -- verified with a real round trip (edited a
+node's text, saved, reopened the saved file's raw zip, confirmed the
+new text was actually there) before trusting it, not assumed from
+reading `python-pptx`'s source alone.
+
+**A third, more dangerous wrinkle, only found by deliberately testing a
+two-sibling-shape scenario, not caught by a single-shape test**:
+`some_element.xpath("//foo")` in lxml/libxml2 means "search the whole
+document this node belongs to," not "search this node's own
+descendants" -- confirmed with a 6-line repro before trusting it
+anywhere near a tool that writes real files. Calling `.xpath()` directly
+on `shape._element` (which lives inside the full `<p:sld>` tree
+alongside every *other* shape on the slide) would let an `xpath` that
+matches content in a *different* shape silently succeed against the
+wrong one, no error at all, as long as the match happened to be unique
+across the whole slide even though it wasn't inside the shape
+`shape_index` actually named. Fixed by never handing `.xpath()` a
+node that's still attached to a larger tree: both sources first parse a
+**detached** copy (`etree.fromstring(etree.tostring(...))` for the
+shape case, the SmartArt data part's own fresh `etree.fromstring(blob)`
+already worked this way) before running `xpath` against it, so `//`
+can only ever reach that one shape's/part's own content. The shape
+case's edited copy is then spliced back into the *real* live tree at
+the original position (`original.getparent().replace(original,
+mutated)`, preserving shape z-order) before `assert_ooxml_valid` runs
+against the whole slide. Regression-tested directly: two shapes with
+each their own unique text, asking to edit shape 0 with an xpath that
+only matches shape 1's text now correctly finds *zero* matches inside
+shape 0's own scope (and leaves shape 1 completely untouched) instead
+of silently editing the wrong shape.
+
+**Validation, documented honestly rather than over-claimed**: a
+`part="shape"` edit is checked against the real ECMA-376 Transitional
+schema (`assert_ooxml_valid`, same guarantee every other hand-XML tool
+in this file already makes -- an invalid result means the file was
+never modified; verified with a real attribute this schema genuinely
+rejects, `a:bookmarkId` on `<p:sp>`). A `part="smartart_data"` edit only
+gets a well-formedness check -- this codebase has no vendored schema
+for SmartArt's own diagram markup (a genuinely different schema than
+`pml.xsd`/`dml-main.xsd`), so a structurally-wrong-but-still-well-formed
+SmartArt edit (e.g. a broken node relationship) won't be caught here;
+both the tool's own docstring and this section say so plainly rather
+than implying a stronger guarantee than it actually gives.
+
+**Verified real**: a shape-XML edit through a real LibreOffice render,
+visually inspected -- the targeted title text changed, the sibling
+bullet shape's own text stayed exactly as it was (the same scoping fix
+above, seen visually, not just asserted). A SmartArt-data edit's own
+round trip was checked structurally (`list_pptx_shapes`' own
+`smartart_text` reflects the edit) rather than visually -- the same
+`_write_smartart_fixture` every existing SmartArt test already uses is
+a minimal data-model-only stub with no real layout part, so LibreOffice
+has nothing to draw regardless of the edit (confirmed: rendering it
+produces a blank slide either way, a known limitation of that synthetic
+fixture, not a defect in this tool). 17 new tests in
+`test_presentations_tool.py` (read/edit for both sources, the two-shape
+scoping regression, ambiguous/zero/non-element match rejection, the
+real schema-rejection case, attribute-name resolution, shape-order
+preservation, invalid `part` argument, `set_attributes`' own parsing),
+full `test_presentations_tool.py` suite passes, `ruff check`/`mypy`
+clean on the touched source file.
+
+**A fourth bug, caught by this codebase's own existing regression test
+before it shipped, not found live**: `set_attributes` started as a
+`dict[str, str]` parameter -- exactly the landmine `edit_file_batch`'s
+own docstring already names (aisuite's `Tools.__infer_from_signature`,
+the schema builder every provider's tool spec comes from, has no
+handling at all for dict-typed parameters, falling back to a broken
+literal type string Gemini's strict schema validation rejects outright)
+-- and `test_all_tool_schemas_are_gemini_compatible` caught it
+immediately. Fixed the same way `edit_file_batch`'s own `edits` param
+already solved this: one `"name=value"` pair per line instead of a
+structured object.
