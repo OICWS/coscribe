@@ -52,10 +52,33 @@ XML python-docx has no schema-checked API for). A failure raises before
 the file is touched, rather than producing a `.docx` that happens to open
 in Word/LibreOffice's own forgiving parsers today but is not actually a
 conformant document.
+
+``insert_docx_tracked_text``/``delete_docx_tracked_text``/
+``replace_docx_tracked_text``/``accept_docx_tracked_changes``/
+``reject_docx_tracked_changes`` edit an *existing* docx in place with real
+``<w:ins>``/``<w:del>`` tracked-changes markup, using
+``_native_docx_tracks.tracks.TracksMixin`` (vendored from
+`SecurityRonin/docx-mcp`, MIT -- see that package's NOTICE.md) for the
+hard part: cascading context-anchored fuzzy text matching, multi-run-
+spanning delete/insert with ``rPr`` inheritance, and word-level diff-
+minimised replace. Unlike that project's own tool surface (which
+addresses a paragraph by its ``w14:paraId``, discovered via a separate
+call), these tools locate the target paragraph themselves from the text
+being edited -- ``_locate_paragraph`` tries every paragraph and requires
+exactly one unambiguous match -- so the caller never needs to know or
+pass a paragraph id. ``_ensure_para_ids`` assigns a ``w14:paraId`` (a
+Word 2010+ extension the vendored mixin's own paragraph lookup is keyed
+on) to every paragraph that doesn't already have one -- real Word always
+sets this, ``python-docx`` never does -- and marks the namespace
+``mc:Ignorable`` on the document root the same way real Word-authored
+files do, so the new attribute validates against ``wml.xsd`` the same
+way any other Word 2010+ extension already does (see
+``_ooxml_validate.py``'s ``_strip_mce_ignorable``).
 """
 
 from __future__ import annotations
 
+import random
 import re
 import zipfile
 from collections.abc import Callable, Sequence
@@ -66,10 +89,14 @@ from typing import Any
 from xml.sax.saxutils import escape as _xml_escape
 
 from ..runtime.types import tool_metadata
+from ._native_docx_tracks import _constants as _tracks_constants
+from ._native_docx_tracks.tracks import TracksMixin, _resolve
 from ._ooxml_validate import assert_wml_valid
 from ._thumbnail import render_thumbnail
 from ._workspace import WorkspaceScope
 from .files import DEFAULT_IGNORES
+
+_MC_IGNORABLE = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Ignorable"
 
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
 _BULLET_RE = re.compile(r"^[-*]\s+(.*)$")
@@ -555,6 +582,121 @@ def _write_comments_part(file_path: Path, comments_xml: bytes) -> None:
             zout.writestr(name, payload)
 
 
+def _ensure_para_ids(document_element: Any) -> None:
+    """Assign a ``w14:paraId`` to every ``<w:p>`` that doesn't already have
+    one. ``_native_docx_tracks.tracks.TracksMixin``'s whole paragraph-lookup
+    contract is keyed on this attribute -- real Word always sets it, but
+    ``python-docx`` never does, so a freshly-written or freshly-edited
+    document needs it backfilled before any tracked-change tool can address
+    a paragraph. ``w14`` is a Word 2010+ extension namespace, not part of
+    the base ``wml.xsd``, so this also adds it to the document root's
+    ``mc:Ignorable`` list when missing -- the same declaration real
+    Word-authored files carry, and the one ``_strip_mce_ignorable`` already
+    knows how to treat as extension content rather than a schema defect."""
+    existing: set[str] = set()
+    missing: list[Any] = []
+    for paragraph in document_element.iter(f"{_tracks_constants.W}p"):
+        para_id = paragraph.get(f"{_tracks_constants.W14}paraId")
+        if para_id:
+            existing.add(para_id.upper())
+        else:
+            missing.append(paragraph)
+    if not missing:
+        return
+
+    ignorable_tokens = (document_element.get(_MC_IGNORABLE) or "").split()
+    if "w14" not in ignorable_tokens:
+        ignorable_tokens.append("w14")
+        document_element.set(_MC_IGNORABLE, " ".join(ignorable_tokens))
+
+    for paragraph in missing:
+        while True:
+            candidate = f"{random.randint(1, 0x7FFFFFFF):08X}"
+            if candidate not in existing:
+                existing.add(candidate)
+                break
+        paragraph.set(f"{_tracks_constants.W14}paraId", candidate)
+
+
+def _locate_paragraph(
+    document_element: Any,
+    find: str,
+    context_before: str,
+    context_after: str,
+    *,
+    ignore_case: bool,
+) -> str:
+    """Return the ``w14:paraId`` of the single paragraph where
+    ``tracks.py``'s own per-paragraph ``_resolve`` would unambiguously
+    locate ``find`` (respecting ``context_before``/``context_after``) --
+    tried against every paragraph in the document, since coscribe's own
+    tools address text by its content, not by a paragraph id the caller has
+    no way to already know. Raises ``ValueError`` if no paragraph matches,
+    or if more than one does."""
+    if not find:
+        raise ValueError("find text is empty")
+    matches: list[str] = []
+    ambiguous_within: list[str] = []
+    for paragraph in document_element.iter(f"{_tracks_constants.W}p"):
+        para_id = paragraph.get(f"{_tracks_constants.W14}paraId", "")
+        try:
+            _resolve(
+                document_element,
+                paragraph,
+                find,
+                context_before,
+                context_after,
+                ignore_case=ignore_case,
+            )
+        except ValueError as exc:
+            if "Ambiguous" in str(exc):
+                ambiguous_within.append(f"paragraph {para_id}: {exc}")
+            continue
+        matches.append(para_id)
+
+    if not matches:
+        if ambiguous_within:
+            raise ValueError(
+                f"Text {find!r} is ambiguous within a paragraph; provide "
+                f"context_before/context_after. " + "; ".join(ambiguous_within)
+            )
+        raise ValueError(f"Text {find!r} not found in the document")
+    if len(matches) > 1:
+        raise ValueError(
+            f"Text {find!r} found in {len(matches)} different paragraphs; "
+            "provide context_before or context_after to disambiguate"
+        )
+    return matches[0]
+
+
+class _TrackedDocxHost(TracksMixin):
+    """Adapts ``TracksMixin``'s small host contract to an already-open
+    python-docx ``Document`` -- coscribe already has the tree in memory via
+    ``Document(path)``/``document.save()``, so it doesn't need docx-mcp's
+    own unzip/parse/repack lifecycle (see ``_native_docx_tracks/NOTICE.md``).
+    Only ``_require`` and ``_mark`` are adapter-specific; ``_find_para``/
+    ``_next_markup_id``/``_make_run`` are the same plain functions
+    ``tracks.py`` itself was extracted alongside (see ``_constants.py``),
+    bound here via ``staticmethod`` since ``tracks.py`` calls them as
+    ``self.<name>(...)``."""
+
+    _find_para = staticmethod(_tracks_constants._find_para)
+    _next_markup_id = staticmethod(_tracks_constants._next_markup_id)
+    _make_run = staticmethod(_tracks_constants._make_run)
+
+    def __init__(self, document: Any) -> None:
+        self._document_element = document.element
+        _ensure_para_ids(self._document_element)
+
+    def _require(self, rel_path: str) -> Any:
+        if rel_path != "word/document.xml":
+            raise RuntimeError(f"{rel_path} not supported by tracked-change edits")
+        return self._document_element
+
+    def _mark(self, rel_path: str) -> None:
+        pass  # python-docx re-serializes the whole tree on save() regardless
+
+
 class DocumentToolkit:
     def __init__(
         self,
@@ -584,6 +726,19 @@ class DocumentToolkit:
         if file_path.exists() and not overwrite:
             raise FileExistsError(f"File already exists: {path}")
         file_path.parent.mkdir(parents=True, exist_ok=True)
+        return file_path
+
+    def _check_editable(self, path: str) -> Path:
+        """Like `_check_readable`, but resolved through the write-permitted
+        scope -- the tracked-change tools edit an existing file in place, so
+        they need both: the file must already exist (unlike `write_docx`,
+        these tools have nothing to write if it doesn't), and the location
+        must be one the caller is allowed to write back to."""
+        file_path = self._scope.resolve(path, write=True)
+        if not file_path.exists():
+            raise ValueError(f"File does not exist: {path}")
+        if not file_path.is_file():
+            raise ValueError(f"Path is not a file: {path}")
         return file_path
 
     def read_docx(self, path: str) -> str:
@@ -687,6 +842,115 @@ class DocumentToolkit:
             "comments_added": len(pending_comments),
             "tracked_changes": track_changes,
         }
+
+    def _open_for_tracked_edit(self, path: str) -> tuple[Path, Any, _TrackedDocxHost]:
+        from docx import Document
+
+        file_path = self._check_editable(path)
+        document = Document(str(file_path))
+        return file_path, document, _TrackedDocxHost(document)
+
+    def _save_tracked_edit(self, file_path: Path, document: Any) -> dict[str, object]:
+        assert_wml_valid(document.element, "tracked_docx_edit")
+        document.save(str(file_path))
+        preview_path, preview_skipped_reason = render_thumbnail(file_path, self._state_dir)
+        return {
+            "path": self._scope.relative(file_path),
+            "bytes_written": file_path.stat().st_size,
+            "preview_path": preview_path,
+            "preview_skipped_reason": preview_skipped_reason,
+        }
+
+    def insert_docx_tracked_text(
+        self,
+        path: str,
+        text: str,
+        context_before: str,
+        context_after: str = "",
+        author: str = "Coscribe",
+        ignore_case: bool = False,
+    ) -> dict[str, object]:
+        if not context_before:
+            raise ValueError(
+                "context_before is required -- it names the existing text to "
+                "insert after; context_after alone cannot locate an insertion point"
+            )
+        file_path, document, host = self._open_for_tracked_edit(path)
+        para_id = _locate_paragraph(
+            host._document_element, context_before, "", context_after, ignore_case=ignore_case
+        )
+        result = host.insert_text(
+            para_id,
+            text,
+            author=author,
+            context_before=context_before,
+            context_after=context_after,
+            ignore_case=ignore_case,
+        )
+        result.update(self._save_tracked_edit(file_path, document))
+        return result
+
+    def delete_docx_tracked_text(
+        self,
+        path: str,
+        text: str,
+        context_before: str = "",
+        context_after: str = "",
+        author: str = "Coscribe",
+        ignore_case: bool = False,
+    ) -> dict[str, object]:
+        file_path, document, host = self._open_for_tracked_edit(path)
+        para_id = _locate_paragraph(
+            host._document_element, text, context_before, context_after, ignore_case=ignore_case
+        )
+        result = host.delete_text(
+            para_id,
+            text,
+            author=author,
+            context_before=context_before,
+            context_after=context_after,
+            ignore_case=ignore_case,
+        )
+        result.update(self._save_tracked_edit(file_path, document))
+        return result
+
+    def replace_docx_tracked_text(
+        self,
+        path: str,
+        find: str,
+        replace: str,
+        context_before: str = "",
+        context_after: str = "",
+        author: str = "Coscribe",
+        ignore_case: bool = False,
+    ) -> dict[str, object]:
+        file_path, document, host = self._open_for_tracked_edit(path)
+        para_id = _locate_paragraph(
+            host._document_element, find, context_before, context_after, ignore_case=ignore_case
+        )
+        result = host.replace_text(
+            para_id,
+            find=find,
+            replace=replace,
+            author=author,
+            context_before=context_before,
+            context_after=context_after,
+            ignore_case=ignore_case,
+        )
+        result.update(self._save_tracked_edit(file_path, document))
+        return result
+
+    def accept_docx_tracked_changes(self, path: str, author: str = "") -> dict[str, object]:
+        file_path, document, host = self._open_for_tracked_edit(path)
+        result = host.accept_changes(author=author or None)
+        result.update(self._save_tracked_edit(file_path, document))
+        return result
+
+    def reject_docx_tracked_changes(self, path: str, author: str = "") -> dict[str, object]:
+        file_path, document, host = self._open_for_tracked_edit(path)
+        result = host.reject_changes(author=author or None)
+        result.update(self._save_tracked_edit(file_path, document))
+        return result
 
     def read_pdf(self, path: str) -> str:
         import pdfplumber
@@ -895,6 +1159,145 @@ def build_document_tools(
             comment_author=comment_author,
         )
 
+    def insert_docx_tracked_text(
+        path: str,
+        text: str,
+        context_before: str,
+        context_after: str = "",
+        author: str = "Coscribe",
+        ignore_case: bool = False,
+    ) -> dict[str, object]:
+        """Insert text into an existing Word (.docx) file as a tracked change.
+
+        Wraps the inserted text in a `<w:ins>` tracked-changes markup Word
+        shows in its Review pane, rather than editing the document silently.
+        The target location is found from `context_before` -- the existing
+        text to insert immediately after -- not a paragraph number or id;
+        this must be unique in the document, or use `context_after` (text
+        immediately following the insertion point) to disambiguate.
+
+        Args:
+            path: existing .docx file to edit, relative to the workspace root
+            text: the text to insert
+            context_before: existing document text to insert immediately
+                after -- required, and must be unique (with context_after
+                to disambiguate if it appears more than once)
+            context_after: existing text immediately following the
+                insertion point, to disambiguate when context_before alone
+                is not unique
+            author: author name recorded on the tracked-change markup
+            ignore_case: match context_before/context_after case-insensitively
+        """
+        return toolkit.insert_docx_tracked_text(
+            path=path,
+            text=text,
+            context_before=context_before,
+            context_after=context_after,
+            author=author,
+            ignore_case=ignore_case,
+        )
+
+    def delete_docx_tracked_text(
+        path: str,
+        text: str,
+        context_before: str = "",
+        context_after: str = "",
+        author: str = "Coscribe",
+        ignore_case: bool = False,
+    ) -> dict[str, object]:
+        """Mark text in an existing Word (.docx) file as deleted, as a tracked change.
+
+        Wraps the text in `<w:del>` tracked-changes markup Word shows in its
+        Review pane (strikethrough), rather than removing it silently.
+        `text` must be unique in the document; use `context_before`/
+        `context_after` (surrounding text) to disambiguate if it appears
+        more than once.
+
+        Args:
+            path: existing .docx file to edit, relative to the workspace root
+            text: the exact text to mark as deleted
+            context_before: text immediately before `text`, to disambiguate
+                if it appears more than once
+            context_after: text immediately after `text`, to disambiguate
+                if it appears more than once
+            author: author name recorded on the tracked-change markup
+            ignore_case: match text/context case-insensitively
+        """
+        return toolkit.delete_docx_tracked_text(
+            path=path,
+            text=text,
+            context_before=context_before,
+            context_after=context_after,
+            author=author,
+            ignore_case=ignore_case,
+        )
+
+    def replace_docx_tracked_text(
+        path: str,
+        find: str,
+        replace: str,
+        context_before: str = "",
+        context_after: str = "",
+        author: str = "Coscribe",
+        ignore_case: bool = False,
+    ) -> dict[str, object]:
+        """Replace text in an existing Word (.docx) file as a tracked change.
+
+        Marks only the actually-changed portion of `find` as a tracked
+        deletion+insertion (e.g. replacing "red" with "blue" in "the red
+        car" tracks just "red" -> "blue", not the whole sentence). `find`
+        must be unique in the document; use `context_before`/
+        `context_after` to disambiguate if it appears more than once.
+
+        Args:
+            path: existing .docx file to edit, relative to the workspace root
+            find: the exact existing text to replace
+            replace: the new text
+            context_before: text immediately before `find`, to disambiguate
+                if it appears more than once
+            context_after: text immediately after `find`, to disambiguate
+                if it appears more than once
+            author: author name recorded on the tracked-change markup
+            ignore_case: match find/context case-insensitively
+        """
+        return toolkit.replace_docx_tracked_text(
+            path=path,
+            find=find,
+            replace=replace,
+            context_before=context_before,
+            context_after=context_after,
+            author=author,
+            ignore_case=ignore_case,
+        )
+
+    def accept_docx_tracked_changes(path: str, author: str = "") -> dict[str, object]:
+        """Accept tracked changes in an existing Word (.docx) file.
+
+        Insertions become permanent text; deletions are permanently
+        removed. Leave `author` empty to accept every tracked change in the
+        document, or name one author to accept only that author's changes
+        and leave everyone else's still pending review.
+
+        Args:
+            path: existing .docx file to edit, relative to the workspace root
+            author: accept only this author's changes, or empty for all
+        """
+        return toolkit.accept_docx_tracked_changes(path=path, author=author)
+
+    def reject_docx_tracked_changes(path: str, author: str = "") -> dict[str, object]:
+        """Reject tracked changes in an existing Word (.docx) file.
+
+        Insertions are discarded; deletions are restored. Leave `author`
+        empty to reject every tracked change in the document, or name one
+        author to reject only that author's changes and leave everyone
+        else's still pending review.
+
+        Args:
+            path: existing .docx file to edit, relative to the workspace root
+            author: reject only this author's changes, or empty for all
+        """
+        return toolkit.reject_docx_tracked_changes(path=path, author=author)
+
     def read_pdf(path: str) -> str:
         """Extract the text contents of a PDF file under the workspace, page by page.
 
@@ -938,6 +1341,15 @@ def build_document_tools(
     return [
         tool_metadata(read_docx, risk_category="READ", category="documents"),
         tool_metadata(write_docx, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(insert_docx_tracked_text, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(delete_docx_tracked_text, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(replace_docx_tracked_text, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(
+            accept_docx_tracked_changes, risk_category="WRITE_LOCAL", category="documents"
+        ),
+        tool_metadata(
+            reject_docx_tracked_changes, risk_category="WRITE_LOCAL", category="documents"
+        ),
         tool_metadata(read_pdf, risk_category="READ", category="documents"),
         tool_metadata(write_pdf, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(search_pdf, risk_category="READ", category="documents"),

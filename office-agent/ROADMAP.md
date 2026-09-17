@@ -5025,6 +5025,150 @@ full suite, all green; `ruff`/`mypy` clean.
 
 ---
 
+## Phase 8ar -- DOCX quality track, Workstream A+B: real ECMA-376 validation gate, real track-changes editing (vendored from docx-mcp)
+
+Grounded in two rounds of research this session (external OSS survey,
+then source-level deep-dives of `iOfficeAI/OfficeCLI` and, hunting
+specifically for a DOCX/XLSX analogue to `ppt-master`'s directly-
+vendorable OMML compiler, `kklimuk/docx-cli`, `dealfluence/adeu`,
+`SecurityRonin/docx-mcp`, and the Python xlsx-formula-engine landscape).
+Conclusion: coscribe's XLSX tooling was already mature (cross-checked
+against Anthropic's own xlsx skill in an earlier phase); DOCX was thin
+and risky -- `write_docx`'s only "edit" path was read -> regenerate the
+whole document from a markdown subset -> overwrite, silently destroying
+anything the subset can't represent. No project offered a ppt-master-
+style "vendor it whole" win, but `SecurityRonin/docx-mcp`'s track-
+changes engine (`tracks.py`, MIT, `lxml`-only) was a real, clean
+exception -- everything else found (docx-cli is actually TypeScript,
+not Python; `adeu`'s engine is real but a ~14,500-line entangled system;
+`formulas`/`pycel`/`xlcalculator` all real but EUPL/GPLv3/stale
+respectively) was "read for ideas, not vendorable." User-approved
+resolution for the remaining OfficeCLI-shaped gaps (its formula engine,
+its revision-by-selector UX): an external, scoped MCP integration later
+(Workstream F), not a Python dependency and not a port -- not done in
+this phase.
+
+### Workstream A -- wire up the DOCX validation gate
+
+`_ooxml_schemas/transitional/wml.xsd` was already vendored (pulled in
+transitively by `pml.xsd`'s own import closure) and `_ooxml_validate.py`
+already existed, but neither was ever wired into `documents.py`. Mirrored
+PPTX's already-established discipline exactly: `assert_wml_valid` (new,
+alongside the now-parametrized `assert_ooxml_valid`/`ooxml_errors`,
+which take a `schema_path` defaulting to `pml.xsd` so every existing
+`presentations.py` call site is unchanged) validates `write_docx`'s
+finished in-memory tree before `document.save()`.
+
+**A real, previously-unexercised gap found and fixed getting there**:
+`wml.xsd`'s own `<xsd:import namespace=".../XML/1998/namespace"/>` (for
+`xml:space="preserve"`, which every `<w:t>`/`<w:instrText>` this codebase
+writes sets) ships with **no `schemaLocation`** in Ecma's own published
+file -- confirmed by reading it, not assumed. `pml.xsd` never exercised
+this since PPTX has no `xml:space` usage, so it never surfaced before.
+Fixed by vendoring the real W3C `xml.xsd` (fetched directly from
+`https://www.w3.org/2001/xml.xsd`) alongside it in `_ooxml_schemas/
+transitional/`, and patching the missing `schemaLocation` onto an
+in-memory copy of the parsed schema tree only -- `_compiled_schema`'s
+cache key -- never the file on disk, which stays byte-identical to
+Ecma's own download (see `_ooxml_schemas/NOTICE.md`'s new section).
+
+**Verified against real output**: headings/bullets/numbers/tables/TOC/
+comment-anchors, tracked-changes insertions (`_mark_paragraph_inserted`),
+and template-based tracked deletions (`_mark_body_deleted`) all validate
+clean once `_strip_mce_ignorable` (already generic, unchanged) strips the
+`w14`/`wp14` extension content python-docx's own blank template already
+marks `mc:Ignorable`. A deliberately corrupted document (a `<w:sectPr>`
+inside a run, schema-illegal) is correctly rejected. 5 new tests in
+`test_ooxml_validate.py`.
+
+### Workstream B -- vendor docx-mcp's track-changes engine
+
+Vendored `tracks.py` from `SecurityRonin/docx-mcp` (MIT, pinned commit
+`9c0c0b7694d8123e82fe6b7c480899890dca0695`) into new package
+`_native_docx_tracks/`, changing only its one `from .base import ...`
+line. Deliberately did **not** vendor docx-mcp's own 519-line
+`BaseMixin` (its whole unzip/parse/repack document lifecycle, zip-bomb/
+zip-slip protection, auto-repair, versioned backups) -- coscribe already
+has the document open in memory via `python-docx`'s own
+`Document(path)`/`document.save()`, so running a second parallel
+document-lifecycle system alongside it was out of scope. Extracted the
+three names `tracks.py` actually imports from `base.py` at module level
+(`W`, `_now_iso`, `_preserve`) plus three more methods it calls on `self`
+that never actually read `self` in the original (`_find_para`,
+`_next_markup_id`, `_make_run`) into `_constants.py`, copied verbatim,
+turned from bound methods into plain functions with identical bodies.
+Full provenance in `_native_docx_tracks/NOTICE.md`; `LICENSE.docx-mcp`
+carries the upstream license text unmodified.
+
+**Real, unresolved-by-upstream gap found and closed with a coscribe-side
+adapter, not a fork of the vendored file**: docx-mcp's whole paragraph-
+addressing model is keyed on `w14:paraId`, a Word 2010+ extension real
+Word always writes but `python-docx` never does -- confirmed empirically
+(docx-mcp's own test fixtures hardcode pre-existing paraIds; no lazy-
+assignment path exists anywhere in its source for a document that has
+none at all). `documents.py`'s new `_ensure_para_ids` backfills a
+collision-free `w14:paraId` onto every paragraph missing one, and adds
+`w14` to the document root's `mc:Ignorable` list when needed -- the same
+declaration real Word-authored files already carry, so the new attribute
+validates against `wml.xsd` via Workstream A's own `_strip_mce_ignorable`
+the same way any other Word 2010+ extension already does, rather than
+needing a schema exception.
+
+**A second real design gap closed, going further than a literal port**:
+docx-mcp's own tool surface requires the *caller* to already know a
+paragraph's `w14:paraId` (discovered via a separate `search_text`/
+`get_paragraph` call in its own MCP server, which keeps one document open
+in memory across many tool calls in one session). Coscribe's tools are
+all stateless per call (open -> operate -> save, no cross-call session),
+so requiring a separately-discovered, persisted paragraph id would have
+meant either a new session-state concept this codebase doesn't have
+anywhere else, or a discovery tool that has to *write* the file (to
+persist newly-assigned ids) despite being conceptually read-only.
+Resolved by hiding paragraph ids from the tool surface entirely: new
+`_locate_paragraph` tries every paragraph in the (already fully
+paraId-backed, single already-open) tree and requires exactly one
+unambiguous match, distinguishing "not found anywhere" from "ambiguous
+within one paragraph" (surfaced as a clear, distinct error) rather than
+collapsing both into one message. The five new tools --
+`insert_docx_tracked_text`/`delete_docx_tracked_text`/
+`replace_docx_tracked_text`/`accept_docx_tracked_changes`/
+`reject_docx_tracked_changes` -- address text by its own content
+(`context_before`/`context_after`/`find`), never a paragraph id, matching
+how a person would actually describe an edit.
+
+**Verified end-to-end against a real multi-paragraph document**: insert
+(context-anchored, correct `<w:ins>` with author/date), delete (correct
+`<w:del>`/`<w:delText>`), replace (word-level diff-minimised -- only the
+actually-changed word gets tracked markup, confirmed by reading the raw
+XML), accept (insertions become permanent, deletions actually removed,
+`accepted` count correct), reject (exact original text restored,
+byte-for-byte), and accept/reject scoped to one author while leaving
+another author's changes still pending. Every one of these round-trips
+through the Workstream A validation gate before saving -- confirmed with
+a dedicated test that all four tracked-edit tools chained together on
+one document still validate clean against `wml.xsd`. Real error paths
+verified too: `insert_docx_tracked_text` requires `context_before`
+(raises otherwise, since there's no other way to locate an insertion
+point); text not found anywhere raises; text found in two different
+paragraphs raises as ambiguous, naming the disambiguation option.
+
+**Explicitly not doing**: exposing `get_body_text` (accepted-view full
+text) as a coscribe tool -- `read_docx`'s existing markdown export
+already covers that need; the vendored method stays available but unused
+(harmless, matches "vendor the file, use what's needed" over hand-
+pruning). Headers/footers and footnotes are out of scope for these five
+tools (docx-mcp's own `tracks.py` only ever operates on
+`word/document.xml`) -- a documented v1 limit, not a bug.
+
+**Verified**: `ruff check src tests`/`mypy src` both clean (the new
+`_native_docx_tracks/` package is excluded from both, same treatment as
+the pre-existing `_native_formula/`, since it's vendored code kept
+diffable against upstream, not coscribe's own style). 15 new tests
+(5 schema, 10 tracked-edit) across `test_ooxml_validate.py`/
+`test_documents_tool.py`; full suite green throughout.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

@@ -346,6 +346,180 @@ def test_write_docx_track_changes_with_template_marks_old_content_deleted(
     assert ins_run_texts == {"New Title", "New paragraph."}
 
 
+_CONTRACT_CONTENT = (
+    "# Report\n\n"
+    "The total price is 100 dollars, due within 30 days of the invoice date.\n\n"
+    "A second unrelated paragraph about widgets.\n"
+)
+
+
+def test_insert_docx_tracked_text_wraps_the_insertion_in_a_real_w_ins(tmp_path: Path) -> None:
+    from docx.oxml.ns import qn
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+
+    result = tools["insert_docx_tracked_text"](
+        path="c.docx", text=" (extended)", context_before="30 days", author="Alice"
+    )
+    assert result["type"] == "insertion"
+    assert result["author"] == "Alice"
+
+    doc = Document(tmp_path / "c.docx")
+    ins_elements = list(doc.element.body.iter(qn("w:ins")))
+    assert len(ins_elements) == 1
+    assert ins_elements[0].get(qn("w:author")) == "Alice"
+    assert "".join(t.text or "" for t in ins_elements[0].iter(qn("w:t"))) == " (extended)"
+    # The inserted text is invisible from python-docx's own paragraph.text
+    # (it walks bare <w:r> children, not <w:ins>) until accepted -- this is
+    # exactly the "reviewable, not silently final" property tracked
+    # insertion exists for.
+    assert " (extended)" not in doc.paragraphs[1].text
+
+
+def test_delete_docx_tracked_text_wraps_the_deletion_in_a_real_w_del(tmp_path: Path) -> None:
+    from docx.oxml.ns import qn
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+
+    result = tools["delete_docx_tracked_text"](path="c.docx", text="100 dollars", author="Bob")
+    assert result["type"] == "deletion"
+
+    doc = Document(tmp_path / "c.docx")
+    del_elements = list(doc.element.body.iter(qn("w:del")))
+    assert len(del_elements) == 1
+    assert del_elements[0].get(qn("w:author")) == "Bob"
+    assert (
+        "".join(t.text or "" for t in del_elements[0].iter(qn("w:delText"))) == "100 dollars"
+    )
+    # Still present as a <w:delText>, not actually removed -- the text is
+    # gone from python-docx's own paragraph.text (which skips w:del) but
+    # not from the file itself.
+    assert "100 dollars" not in doc.paragraphs[1].text
+
+
+def test_replace_docx_tracked_text_marks_only_the_changed_portion(tmp_path: Path) -> None:
+    from docx.oxml.ns import qn
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+
+    result = tools["replace_docx_tracked_text"](path="c.docx", find="widgets", replace="gadgets")
+    assert result["type"] == "replacement"
+
+    doc = Document(tmp_path / "c.docx")
+    deleted = {
+        t.text for el in doc.element.body.iter(qn("w:del")) for t in el.iter(qn("w:delText"))
+    }
+    inserted = {t.text for el in doc.element.body.iter(qn("w:ins")) for t in el.iter(qn("w:t"))}
+    assert deleted == {"widgets"}
+    assert inserted == {"gadgets"}
+
+
+def test_accept_docx_tracked_changes_makes_insertions_permanent_and_removes_deletions(
+    tmp_path: Path,
+) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+    tools["insert_docx_tracked_text"](path="c.docx", text=" (extended)", context_before="30 days")
+    tools["delete_docx_tracked_text"](path="c.docx", text="100 dollars")
+
+    result = tools["accept_docx_tracked_changes"](path="c.docx")
+    assert result["accepted"] == 2
+    assert result["scope"] == "all"
+
+    doc = Document(tmp_path / "c.docx")
+    body_text = doc.paragraphs[1].text
+    assert "100 dollars" not in body_text
+    assert "30 days (extended)" in body_text
+
+
+def test_reject_docx_tracked_changes_restores_the_original_text(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+    tools["insert_docx_tracked_text"](path="c.docx", text=" (extended)", context_before="30 days")
+    tools["delete_docx_tracked_text"](path="c.docx", text="100 dollars")
+
+    result = tools["reject_docx_tracked_changes"](path="c.docx")
+    assert result["rejected"] == 2
+
+    doc = Document(tmp_path / "c.docx")
+    assert doc.paragraphs[1].text == (
+        "The total price is 100 dollars, due within 30 days of the invoice date."
+    )
+
+
+def test_accept_docx_tracked_changes_can_be_scoped_to_one_author(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+    tools["insert_docx_tracked_text"](
+        path="c.docx", text=" ALICE", context_before="30 days", author="Alice"
+    )
+    tools["insert_docx_tracked_text"](
+        path="c.docx", text=" BOB", context_before="invoice date", author="Bob"
+    )
+
+    result = tools["accept_docx_tracked_changes"](path="c.docx", author="Alice")
+    assert result["accepted"] == 1
+    assert result["scope"] == "by_author"
+
+    doc = Document(tmp_path / "c.docx")
+    from docx.oxml.ns import qn
+
+    remaining_ins_authors = {
+        el.get(qn("w:author")) for el in doc.element.body.iter(qn("w:ins"))
+    }
+    assert remaining_ins_authors == {"Bob"}
+    assert " ALICE" in doc.paragraphs[1].text
+
+
+def test_insert_docx_tracked_text_requires_context_before(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+
+    with pytest.raises(ValueError, match="context_before is required"):
+        tools["insert_docx_tracked_text"](path="c.docx", text="x", context_before="")
+
+
+def test_delete_docx_tracked_text_raises_when_text_not_found(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+
+    with pytest.raises(ValueError, match="not found"):
+        tools["delete_docx_tracked_text"](path="c.docx", text="nonexistent phrase")
+
+
+def test_delete_docx_tracked_text_raises_when_ambiguous_across_paragraphs(
+    tmp_path: Path,
+) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](
+        path="c.docx",
+        content="Alpha repeated text here.\n\nBeta repeated text here too.\n",
+    )
+
+    with pytest.raises(ValueError, match="different paragraphs"):
+        tools["delete_docx_tracked_text"](path="c.docx", text="repeated text")
+
+
+def test_tracked_edit_tools_still_validate_against_wml_xsd(tmp_path: Path) -> None:
+    # A real end-to-end confirmation that the tracked-change writers go
+    # through the same validation gate write_docx does -- not just that
+    # they produce *some* w:ins/w:del, but that the whole resulting tree
+    # stays a schema-conformant document.
+    from coscribe.tools._ooxml_validate import _WML_XSD, ooxml_errors
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+    tools["insert_docx_tracked_text"](path="c.docx", text=" (extended)", context_before="30 days")
+    tools["delete_docx_tracked_text"](path="c.docx", text="100 dollars")
+    tools["replace_docx_tracked_text"](path="c.docx", find="widgets", replace="gadgets")
+
+    doc = Document(tmp_path / "c.docx")
+    assert ooxml_errors(doc.element, schema_path=_WML_XSD) == []
+
+
 @pytest.mark.real_libreoffice
 @pytest.mark.skipif(not _libreoffice_actually_works(), reason="LibreOffice not usable here")
 def test_write_docx_with_all_advanced_features_converts_cleanly_via_libreoffice(
@@ -402,7 +576,15 @@ def test_read_tools_are_low_risk_write_tools_require_approval(tmp_path: Path) ->
         assert metadata.risk_category == "READ"
         assert metadata.requires_approval is False
 
-    for name in ("write_docx", "write_pdf"):
+    for name in (
+        "write_docx",
+        "write_pdf",
+        "insert_docx_tracked_text",
+        "delete_docx_tracked_text",
+        "replace_docx_tracked_text",
+        "accept_docx_tracked_changes",
+        "reject_docx_tracked_changes",
+    ):
         metadata = get_tool_metadata(tools[name])
         assert metadata.risk_category == "WRITE_LOCAL"
         assert metadata.requires_approval is True
