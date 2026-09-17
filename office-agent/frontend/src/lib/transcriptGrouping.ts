@@ -74,7 +74,19 @@ export interface ToolRunGroup {
   items: ToolOrApprovalItem[];
 }
 
-export type TranscriptEntry = LogItem | ToolRunGroup;
+// Excludes "tool"/"approval" from the LogItem side, not just LogItem |
+// ToolRunGroup -- groupToolRuns below now always wraps every tool/
+// approval run into a ToolRunGroup (even a run of one), so a bare
+// tool/approval item can genuinely never appear in its output anymore.
+// This is what lets ChatLog.tsx's own render switch narrow down to
+// LogItemView's stricter "user" | "agent" | "system" prop type after
+// excluding "tool_run" and "question" -- real build failure caught this
+// the first time around: `tsc --noEmit` alone didn't catch it (a looser
+// invocation than this project's real build command), but `tsc -b`
+// (what `npm run build` actually runs) correctly rejected the type
+// mismatch once TranscriptEntry's own type no longer reflected the
+// runtime invariant.
+export type TranscriptEntry = Exclude<LogItem, ToolOrApprovalItem> | ToolRunGroup;
 
 /** Render-time-only grouping pass -- no reducer/wire changes. Coalesces
  * every consecutive run of tool/approval items (a "run") between user/
