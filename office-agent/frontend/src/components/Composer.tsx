@@ -528,15 +528,6 @@ export function Composer({
             className="absolute bottom-3 right-3 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--fg)] text-[var(--bg)]"
             onClick={onStop}
           >
-            {/* rounded-full, not rounded-lg like the button itself -- this
-             * relies on the classic "colored top border only" CSS spinner
-             * trick (a transparent ring with just one edge colored, spun
-             * via animate-spin), which only reads as a smooth arc on a
-             * true circle. On a rounded *rectangle* the colored segment is
-             * a flat edge with two corners, which rotates into a stray
-             * blob poking out past a corner instead -- a real, reported
-             * bug ("a weird symbol spinning"), not a hypothetical. */}
-            <span className="absolute inset-[-3px] animate-spin rounded-full border-2 border-transparent border-t-[var(--fg)]" />
             <StopIcon className="h-[13px] w-[13px]" />
           </button>
         ) : (
