@@ -1552,6 +1552,16 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     async def get_tasks(thread_id: str) -> list[dict[str, Any]]:
         return TaskToolkit(thread_id, settings.state_dir).list_tasks()
 
+    @app.get("/api/threads/{thread_id}/context-breakdown")
+    async def get_context_breakdown_endpoint(thread_id: str) -> dict[str, Any]:
+        # Deliberately reuses _get_session (the same live-session cache
+        # every WS-driven call goes through), not a fresh throwaway
+        # ChatSessionLG -- the whole point is reporting *this* thread's
+        # real, currently-bound tool/skill/MCP set and its actual last
+        # usage report, not a generic recomputation from scratch.
+        session = _get_session(thread_id)
+        return await session.get_context_breakdown()
+
     # -- Sub Agents panel: background spawn_agent_background runs. GET
     # here is a plain polling read (see this feature's own design
     # discussion -- no push channel needed while the panel is open, a

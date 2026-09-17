@@ -53,3 +53,22 @@ export interface SubAgentTranscriptResponse {
 }
 
 export type SubAgentActionResult = SubAgentTask | { error: string };
+
+/** GET /api/threads/{id}/context-breakdown's response -- mirrors
+ * web/context_usage.py's build_context_breakdown() return shape
+ * exactly. `key` is a fixed, known set (see ContextBreakdownPanel.tsx's
+ * own CATEGORY_COLOR map) -- typed as `string`, not a literal union,
+ * since a frontend/backend version mismatch should degrade (an unknown
+ * category falls back to a neutral color) rather than fail to compile. */
+export interface ContextBreakdownCategory {
+  key: string;
+  label: string;
+  tokens: number;
+}
+
+export interface ContextBreakdown {
+  context_window: number;
+  total_tokens: number;
+  total_is_estimated: boolean;
+  categories: ContextBreakdownCategory[];
+}

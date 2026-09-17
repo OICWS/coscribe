@@ -149,6 +149,17 @@ dependencies = [
     # library existed in this codebase before this.
     "httpx>=0.27.0",
     "Pillow>=10.0.0",
+    # Context-window breakdown panel (web/context_usage.py) -- counts
+    # tokens for the system prompt/tool schemas/skill listing text to
+    # show where a turn's context budget actually goes. OpenAI's
+    # cl100k_base encoding, not any specific provider's real tokenizer
+    # (Claude/Gemini/custom-OpenAI-compatible providers each have their
+    # own) -- a proxy, same "right order of magnitude, not exact" caveat
+    # runtime_lg/README.md's own earlier ad-hoc measurement already
+    # accepted for the identical reason. The one authoritative number in
+    # the panel (total_tokens) still comes from the provider's own last
+    # real usage report, not this estimate -- see context_usage.py.
+    "tiktoken>=0.7.0",
 ]
 
 [project.optional-dependencies]

@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
 import { useClickOutside } from "../lib/useClickOutside";
 import { formatTokenCount } from "../lib/format";
+import { ContextBreakdownPanel } from "./ContextBreakdownPanel";
 
 interface ContextRingProps {
+  threadId: string;
   totalTokens: number;
   contextWindow: number;
   /** null when the provider hasn't reported prompt-cache stats yet this
@@ -22,8 +24,12 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
  * (useClickOutside + an absolutely-positioned panel opening upward).
  * Opens right-aligned (`right-0`) since it sits flush against the
  * composer's own right edge -- a left-aligned panel would run off it. */
-export function ContextRing({ totalTokens, contextWindow, cacheStats }: ContextRingProps) {
+export function ContextRing({ threadId, totalTokens, contextWindow, cacheStats }: ContextRingProps) {
   const [open, setOpen] = useState(false);
+  // Bumped every time the popover opens -- ContextBreakdownPanel re-fetches
+  // when this changes, so the breakdown reflects "as of the moment you
+  // opened it" without polling while the popover stays closed.
+  const [refreshKey, setRefreshKey] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   useClickOutside(rootRef, () => setOpen(false), open);
 
@@ -37,7 +43,12 @@ export function ContextRing({ totalTokens, contextWindow, cacheStats }: ContextR
         type="button"
         title="Context window"
         className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() =>
+          setOpen((v) => {
+            if (!v) setRefreshKey((k) => k + 1);
+            return !v;
+          })
+        }
       >
         <svg viewBox="0 0 24 24" className="h-5 w-5 -rotate-90">
           <circle cx="12" cy="12" r={RADIUS} fill="none" stroke="var(--border)" strokeWidth="3" />
@@ -55,7 +66,7 @@ export function ContextRing({ totalTokens, contextWindow, cacheStats }: ContextR
         </svg>
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 mb-1 min-w-48 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] p-3 text-sm shadow-[var(--shadow)]">
+        <div className="absolute bottom-full right-0 mb-1 w-72 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] p-3 text-sm shadow-[var(--shadow)]">
           <div className="mb-1.5 flex items-center justify-between gap-3">
             <span className="text-[var(--muted)]">Context window</span>
             <span>
@@ -74,6 +85,7 @@ export function ContextRing({ totalTokens, contextWindow, cacheStats }: ContextR
               </span>
             </div>
           )}
+          <ContextBreakdownPanel threadId={threadId} refreshKey={refreshKey} />
         </div>
       )}
     </div>

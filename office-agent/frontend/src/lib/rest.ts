@@ -32,6 +32,7 @@ import type {
 } from "../types/settings";
 import type {
   CommandsResponse,
+  ContextBreakdown,
   SubAgentActionResult,
   SubAgentTasksResponse,
   SubAgentTranscriptResponse,
@@ -224,6 +225,11 @@ export const pauseSubAgentTask = (taskId: string) =>
   postJson<SubAgentActionResult>(`/api/subagents/${encodeURIComponent(taskId)}/pause`, {});
 export const resumeSubAgentTask = (taskId: string) =>
   postJson<SubAgentActionResult>(`/api/subagents/${encodeURIComponent(taskId)}/resume`, {});
+
+// -- Context-window breakdown -------------------------------------------
+
+export const getContextBreakdown = (threadId: string) =>
+  getJson<ContextBreakdown>(`/api/threads/${encodeURIComponent(threadId)}/context-breakdown`);
 
 // -- Slash commands -----------------------------------------------------
 

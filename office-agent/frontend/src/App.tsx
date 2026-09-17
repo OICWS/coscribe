@@ -324,6 +324,7 @@ function App() {
               modelPicker={<ModelPicker currentModel={state.model} onSwitch={onSwitchModel} />}
               usageRing={
                 <ContextRing
+                  threadId={threadId}
                   totalTokens={state.totalTokens}
                   contextWindow={state.contextWindow}
                   cacheStats={state.cacheStats}

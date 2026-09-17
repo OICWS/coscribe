@@ -4811,6 +4811,105 @@ bridged, subagent-kind wake fires/stays-pending) plus the existing full
 suite, all green; `ruff`/`mypy` clean. Frontend: `npm run build`/
 `oxlint` clean.
 
+---
+
+## Phase 8ap -- Context-window breakdown panel; deferred-tools research grounded against a real second implementation
+
+Requested directly, with a real screenshot of Claude Code's own `/context`
+breakdown as the reference: click the composer's context-window ring to
+see *where* a turn's token budget actually goes (Messages/System tools/
+MCP tools/System prompt/Skills/Autocompact buffer/Free space), not just
+the single aggregate percentage it showed before. Framed explicitly
+around a bigger question -- coscribe's own initial-context cost is real
+and already measured (`runtime_lg/README.md`'s "Tool-loading context
+cost" section: ~34.6k tokens as the per-turn floor from tool schemas +
+`INSTRUCTIONS` alone) -- so this panel exists to make that cost visible
+on an ongoing basis, not just as a one-time investigation.
+
+**Backend, `web/context_usage.py` (new)**: `count_text_tokens`/
+`count_tool_schema_tokens` (tiktoken's `cl100k_base`, the same proxy-
+tokenizer approach the earlier ad-hoc investigation already used and
+justified -- no single real tokenizer covers Claude/Gemini/DeepSeek/
+Kimi/GLM/Ollama, all of which coscribe has to support). `build_context_
+breakdown` computes each *static* category (system prompt, skills
+listing, system tool schemas, MCP tool schemas) independently via
+tiktoken, then derives `messages` as the residual against the real,
+provider-reported `total_tokens` (`ChatSessionLG._last_usage_metadata`)
+when one exists -- deliberately *not* a proportional rescale of every
+category, so each static number stays independently comparable to the
+earlier README measurement, and any tiktoken/real-tokenizer discrepancy
+lands entirely on the one category (messages) that's both largest and
+most variable anyway. Falls back to the static estimate as the whole
+total (messages=0) before a thread's first real turn, or if the real
+total ever comes back smaller than the static estimate alone -- never a
+negative "messages" count. `autocompact_buffer`/`free_space` derive from
+the real `Settings.auto_compact_threshold` (default 0.8): the top
+`(1 - threshold)` slice of the context window is the reserved buffer,
+`threshold * window - total_tokens` is genuinely free. New `GET /api/
+threads/{id}/context-breakdown` endpoint, reusing the same live
+`ChatSessionLG` cache every WS-driven call already goes through -- reports
+*this* thread's real, currently-bound tool/skill/MCP set, not a generic
+recomputation. `ChatSessionLG.get_context_breakdown()` recomputes the
+enabled-skills listing text fresh via the exact same load-then-filter-
+by-name expression `__init__`/`set_enabled_skills`/`switch_model` already
+use to build `self._instructions` (guaranteed to match, not re-extracted
+by splitting the already-concatenated instructions string back apart).
+
+**Frontend**: `ContextRing.tsx`'s popover gained a `ContextBreakdownPanel`
+(new) -- a thin stacked bar plus a labeled list, fetched on open (a
+`refreshKey` bumped each time, not polled while closed). Colors follow
+this project's own dataviz skill: the five real "content" categories use
+its validated default categorical palette's first five slots (blue/
+orange/aqua/yellow/magenta) in fixed order, never reassigned by rank;
+`autocompact_buffer`/`free_space` (reserved/unused headroom, not real
+content) get neutral/muted tones instead of a 6th/7th saturated hue,
+matching the reference screenshot's own visual treatment where those two
+rows read as distinctly lighter than the colorful "used" ones.
+
+**Verified live, real backend + real headless Chromium**: a real turn
+with a scripted `usage_metadata` (41,800 total) produced a breakdown
+whose categories summed back to exactly that total, `autocompact_buffer`
+came out to exactly 20% of a 1M window (matching the 0.8 threshold), and
+`free_space` to exactly `800k - 41.8k = 758.2k` -- confirmed via a real
+screenshot, in both light and dark mode. Backend: 7 new tests in `tests/
+test_context_usage.py` (token counting is positive/monotonic, one
+unconvertible tool doesn't crash the whole count, categories reconcile
+exactly against a real reported total, the auto-compact-threshold math,
+the before-first-turn fallback, and the real-total-smaller-than-estimate
+edge case never goes negative) plus the existing full suite, all green;
+`ruff`/`mypy` clean. Frontend: `npm run build`/`oxlint` clean. New
+runtime dependency: `tiktoken>=0.7.0`.
+
+**Grounded, not guessed, before any of the above was built**: asked
+directly to look at how `claude-code-best/claude-code` (the same real,
+MIT, non-Anthropic reimplementation already read once this session for
+its `/goal` pause/resume design) implements the "deferred tools"
+mechanism its own `/context` screenshot's category list is modeled on.
+Real findings, from its actual cloned source, not its docs: a fixed
+`CORE_TOOLS` allowlist (~33 names -- Bash/Read/Edit/Write/Grep/TodoWrite
+and similar) is the only tool set whose full JSON schema always stays
+loaded; every other built-in tool *and all MCP tools* are deferred by
+default (`isDeferredTool`: not core -> deferred, MCP or not, no special
+case). Two tools bridge the gap -- `SearchExtraTools` (a real TF-IDF
+index over name/description/searchHint, weighted 3.0/1.0/2.5) finds a
+deferred tool's name, `ExecuteExtraTool` invokes it by name -- the exact
+same two-tool shape this environment's own `ToolSearch` mechanism already
+uses, and the same shape `runtime_lg/README.md`'s own prior decision
+(build a provider-agnostic client-side tool-search middleware, "option
+A") already committed to in principle. Skills are lazy the same way:
+only name/description/whenToUse stay in context; the full SKILL.md body
+loads on actual invocation. Their own design spec claims ~30-40% initial-
+prompt reduction from this. **Explicitly scoped to research only, per
+direct instruction** -- this phase ships the breakdown panel (independent,
+low-risk, ready now); actually building coscribe's own CORE_TOOLS-style
+deferred-loading middleware is a separate, larger architecture change
+(touches every tool call) to be discussed and scoped on its own, not
+bundled into this one.
+
+---
+
+## Later -- real intentions, not actively scheduled
+
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
 above) comes first; these get picked back up once that's done and there's
 a concrete reason to prioritize a new surface.

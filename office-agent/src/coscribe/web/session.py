@@ -111,6 +111,7 @@ from ..runtime_lg.messages import (
 )
 from ..tools import (
     QUESTION_TOOL_NAMES,
+    format_skill_listing,
     load_builtin_skills,
     load_skills,
     slugify_skill_name,
@@ -128,6 +129,7 @@ from ..tools.workflows import (
     WorkflowStepStatus,
     WorkflowStore,
 )
+from .context_usage import build_context_breakdown
 
 logger = logging.getLogger(__name__)
 
@@ -951,6 +953,44 @@ class ChatSessionLG:
                 "workspace_root": str(self.workspace_root),
                 "workspace_explicit": self._workspace_explicit,
             }
+        )
+
+    async def get_context_breakdown(self) -> dict[str, Any]:
+        """Where this thread's context-window budget actually goes --
+        backs the context-usage panel (ContextRing.tsx's expanded view).
+        See context_usage.py's own module docstring for the measurement
+        approach and its documented approximation.
+
+        Recomputes the currently-enabled skills' own listing text fresh
+        (rather than trying to re-extract it from the already-concatenated
+        self._instructions) via the exact same load-then-filter-by-name
+        expression __init__/set_enabled_skills/switch_model already use
+        to build self._instructions in the first place -- guaranteed to
+        match, since self.enabled_skill_names is the one shared input
+        every one of those call sites feeds into build_coordinator_agent's
+        own identical filter."""
+        if self._context_window is None:
+            self._context_window = await asyncio.to_thread(
+                self._context_window_client.get_context_window, self._model_string
+            )
+        skills = [
+            skill
+            for skill in load_builtin_skills() + load_skills(self.settings.skills_dir)
+            if skill.name in self.enabled_skill_names
+        ]
+        skills_listing = format_skill_listing(skills) if skills else ""
+        last_total = (
+            self._last_usage_metadata["total_tokens"] if self._last_usage_metadata else None
+        )
+        return await asyncio.to_thread(
+            build_context_breakdown,
+            instructions=self._instructions,
+            skills_listing=skills_listing,
+            base_tools=list(self._base_tools),
+            mcp_tools=list(self._extra_tools),
+            context_window=self._context_window or 0,
+            auto_compact_threshold=self.settings.auto_compact_threshold,
+            last_total_tokens=last_total,
         )
 
     async def notify_resync(self) -> None:
