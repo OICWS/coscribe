@@ -77,21 +77,21 @@ export interface ToolRunGroup {
 export type TranscriptEntry = LogItem | ToolRunGroup;
 
 /** Render-time-only grouping pass -- no reducer/wire changes. Coalesces
- * consecutive tool/approval items (a "run") between user/agent/system
- * messages into one ToolRunGroup; a lone tool/approval item (a "run" of
- * one) passes through unwrapped, since there's nothing to group -- both
- * still render collapsed-by-default via ToolCallRow either way. */
+ * every consecutive run of tool/approval items (a "run") between user/
+ * agent/system messages into one ToolRunGroup, including a run of just
+ * one -- always through ToolRunGroupView's own chevron/summary/expand
+ * treatment, never ToolCallRow's standalone bordered-card look (real,
+ * live-reported complaint: an isolated tool call between two agent
+ * replies rendered as an inconsistent box next to every grouped run's
+ * plain summary line, "完全不一致" against the reference UI, which
+ * treats a single tool call exactly like a group of one). */
 export function groupToolRuns(items: LogItem[]): TranscriptEntry[] {
   const result: TranscriptEntry[] = [];
   let current: ToolOrApprovalItem[] = [];
 
   const flush = () => {
     if (current.length === 0) return;
-    if (current.length === 1) {
-      result.push(current[0]);
-    } else {
-      result.push({ kind: "tool_run", id: `run-${current[0].id}`, items: current });
-    }
+    result.push({ kind: "tool_run", id: `run-${current[0].id}`, items: current });
     current = [];
   };
 

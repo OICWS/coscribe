@@ -206,11 +206,13 @@ function TurnView({
 
   return (
     <div className="flex flex-col gap-3">
+      {/* groupToolRuns now always wraps a tool/approval run into a
+       * ToolRunGroup, even a run of one (see its own comment) -- a bare
+       * "tool"/"approval" LogItem can no longer reach this map at all,
+       * so there's no case for it here anymore. */}
       {entries.map((entry) =>
         entry.kind === "tool_run" ? (
           <ToolRunGroupView key={entry.id} group={entry} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
-        ) : entry.kind === "tool" || entry.kind === "approval" ? (
-          <ToolCallRow key={entry.id} item={entry} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
         ) : entry.kind === "question" ? (
           <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
         ) : (
@@ -368,25 +370,19 @@ function ToolRunGroupView({
   );
 }
 
-/** One collapsible row per tool/approval item -- collapsed to a single
- * summary line (plus a preview thumbnail, if the result has one -- shown
- * regardless of collapsed state, since the visual result is usually the
- * point of looking at these). A still-pending approval starts expanded
- * (Approve/Deny buttons visible with no click needed); everything else
- * starts collapsed. Expanded content is the exact same markup this
- * rendered inline before grouping existed -- relocated, not rewritten.
- *
- * Two visual treatments, chosen by `compact`: standalone (the default --
- * a lone tool call, or any item inside a still-pending-approval group)
- * gets its own light rounded card (bg-card-bg, hover-panel-bg), since
- * without a card the plain "text row" look these used before made a run
- * of several tool calls read as an undifferentiated wall of gray text.
- * `compact` (set only by ToolRunGroupView's *resolved*-and-expanded list)
- * drops that card down to a plain, tightly-spaced text row instead --
- * stacking one bordered card per step *inside* a disclosure that's
- * already visually announcing "these go together" duplicated the
- * boundary and read as a wall of boxes with dead space between them, a
- * real complaint from a real user testing this build. */
+/** One row per tool/approval item, rendered inside ToolRunGroupView's
+ * own expanded list (the `compact` treatment -- a plain, tightly-spaced
+ * text row, no border/background) or, for a still-pending approval,
+ * unwrapped and visible with no disclosure to open (the *default*,
+ * bordered-card treatment -- an actionable item with Approve/Deny
+ * buttons warrants real visual weight, unlike a plain history row).
+ * Since groupToolRuns always wraps every tool/approval run into a
+ * ToolRunGroup now (even a run of one -- see its own comment), the
+ * bordered-card treatment is only ever reached via that pending-
+ * approval path; every already-resolved item, whether it was ever
+ * "grouped" with anything else or not, renders through the same
+ * `compact` row every other one does -- no more inconsistency between
+ * an isolated tool call and one that happened to land next to others. */
 function ToolCallRow({
   item,
   compact = false,

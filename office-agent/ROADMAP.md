@@ -4420,7 +4420,7 @@ and clicking Rewind invokes `onEditMessage` with the exact expected
 
 ---
 
-## Phase 8an -- Real-usage bug pass: model switcher, PPTX direct-edit gap (investigated, deferred), chat history pagination, six small UX fixes
+## Phase 8an -- Real-usage bug pass: model switcher, PPTX direct-edit gap (investigated, deferred), chat history pagination, tool-call collapse redesign, six small UX fixes
 
 Prompted by direct feedback from actually using the app (six numbered
 findings from one message, three more discovered live while working
@@ -4581,6 +4581,51 @@ instead of `TestClient` so a real browser could connect) plus a real
 turns render above a divider, scroll position stays anchored), click
 again (confirmed it correctly reports nothing left and the button
 disappears).
+
+**Tool-call collapse redesign: an isolated tool call rendered as an
+inconsistent bordered box next to every grouped run's plain summary
+line (shipped).** Direct complaint against a reference screenshot of
+the target UI (claude.ai's own transcript rows): every tool-call
+disclosure there is a flat "chevron + one-line summary" row that
+expands to a plain, unboxed list of individual steps, with no visual
+difference between a single tool call and a run of several. Reading
+the real code found this was *already* true for a run of 2+ items
+(`ToolRunGroupView`, no rounded box, plain expanded sub-items via
+`ToolCallRow`'s `compact` prop -- both from an earlier real-user
+complaint about "a wall of boxes") -- the inconsistency was narrower
+than first framed: `groupToolRuns` only wrapped a *run of 2 or more*
+into a `ToolRunGroup`; a lone tool call between two agent replies (a
+"run of one") fell through unwrapped and rendered via `ToolCallRow`'s
+own *default*, bordered-card styling instead -- the one path that
+still looked like the "before" screenshot.
+
+Also checked (per this file's own "grounded in the real current code"
+discipline) whether the group-header *summary text* itself needed new
+generic phrasing ("Used X tools", "Checked XX") for a mixed-tool-type
+run -- it didn't: `summarizeGroupParts` already lists each clause
+individually, capped at 3 plus "and N more" ("Listed files, Read
+`a.txt`, Read `b.txt`, and 2 more"), which is exactly the phrasing the
+reference screenshots themselves show ("Ran a command, Added a task:
+..., Added a task: ..., and 3 more") -- nothing to add there.
+
+**Fix**: `groupToolRuns` now always wraps a tool/approval run into a
+`ToolRunGroup`, including a run of exactly one -- removed the `length
+=== 1 passes through unwrapped` special case. `TurnView`'s own
+`entries.map` dropped the now-dead `entry.kind === "tool" ||
+"approval"` branch (a bare tool/approval `LogItem` can no longer reach
+it). `ToolCallRow`'s bordered-card styling is now reachable only via
+`ToolRunGroupView`'s still-unresolved-pending-approval path (an
+actionable item genuinely warrants more visual weight than a plain
+history row) -- every already-resolved tool call, singular or grouped,
+now renders through the identical flat `compact` row.
+
+`tsc`/`oxlint` clean, full backend suite green (no backend code
+touched). Verified live end-to-end against a real backend (scripted
+fake model issuing two isolated single-tool-call turns plus a three-
+call grouped turn) and a real headless-Chromium session: confirmed both
+the isolated calls and the group render as identical flat chevron rows
+with no border/background anywhere, and expand to the same plain
+nested-list treatment.
 
 ---
 
