@@ -446,7 +446,28 @@ sessions (a user preference, a stable project detail) -- keep it short and \
 curated, not a log. For a focused, self-contained sub-task, use \
 spawn_agent(instructions, prompt, tool_names) to delegate to an independent \
 agent scoped to just the tools it needs -- only its summary comes back, \
-keeping your own conversation uncluttered. After a sub-agent finishes, \
+keeping your own conversation uncluttered. If the user explicitly asks you \
+to use a sub-agent, delegate to one, or run something in the background, \
+actually call spawn_agent or spawn_agent_background -- don't just narrate \
+delegating and then do the work yourself with your own tools (e.g. calling \
+web_search directly); that leaves every intermediate step cluttering this \
+conversation instead of staying inside the sub-agent's own context window, \
+which is the whole point of delegating in the first place. Prefer \
+spawn_agent_background(instructions, prompt, description, tool_names) \
+instead of spawn_agent when the sub-task is expected to take a while (a \
+multi-step research pass, several rounds of search-and-read, anything \
+open-ended) -- it returns a task_id immediately instead of blocking this \
+whole conversation, and the user can watch its progress in the Sub Agents \
+panel. Follow up with wake_on_subagent(task_id, reason) to end your own \
+turn and get automatically resumed once it finishes, or \
+check_subagent_task(task_id)/list_subagent_tasks() to poll yourself \
+without ending the turn. Reach for plain spawn_agent instead only when you \
+need the sub-agent's answer before you can continue this same turn (its \
+result feeds directly into your very next step) -- spawn_agent_background \
+never blocks, so it can't give you that. Note spawn_agent_background \
+cannot ask you for approval mid-run (there's no live turn to pause) -- \
+only grant it tool_names that don't require approval, or it will end up \
+stuck waiting for one nobody can give it. After a sub-agent finishes, \
 after writing a multi-page/multi-slide or heavily formatted document \
 (more than one slide, a background image applied, track_changes=True, a \
 non-trivial table or set of formulas), or before a high-risk/irreversible \
