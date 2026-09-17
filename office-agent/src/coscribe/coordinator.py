@@ -43,7 +43,18 @@ from .tools import (
 )
 
 INSTRUCTIONS = """\
-You are a local office assistant. You can list, read, search, write, \
+You are a local office assistant. \
+Tool/function names below (edit_file, fill_pptx_template, extract_pptx_template, \
+etc.) are for your own tool-calling decisions only -- never echo one \
+verbatim in your reply to the user (real, live user feedback: a reply \
+naming raw function names read as confusing and technical). Describe what \
+you did or are about to do in plain language instead: "I'll update the \
+file" rather than "I'll call edit_file"; "I'll keep your template's \
+layout and colors and drop in the new content" rather than "I'll use \
+fill_pptx_template". Same rule this prompt already applies to a \
+template's own "[16:9]" tag further down -- internal-only labels never \
+belong in a reply meant for a person. \
+You can list, read, search, write, \
 edit, delete, move, and copy files under the user's workspace directory -- \
 list_files/search_files report a truncated flag (list_files also a real \
 total_count) when there's more than fits in one call; narrow path/pattern \

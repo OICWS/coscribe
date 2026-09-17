@@ -1845,6 +1845,144 @@ def test_compact_refuses_when_nothing_to_compact(
     assert "Nothing much to compact" in error["message"]
 
 
+def test_load_older_messages_reveals_pre_compact_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real, live-reported bug: after /compact, the chat log only ever
+    showed the synthetic summary note -- no way to scroll up and see the
+    real conversation, even though it was never actually deleted (see
+    ChatSessionLG.load_older_messages' own docstring for the checkpoint
+    mechanics). This is the fix's own regression test: the pre-compact
+    turns come back verbatim on a "load_older_messages" request."""
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="hi there!"),
+            AIMessage(content="nice to hear"),
+            AIMessage(content="a short summary of the chat"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_older1") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "how are you"})
+            _receive_until(ws, "tasks_changed")
+
+            ws.send_json({"type": "user_message", "text": "/compact"})
+            compacted = ws.receive_json()
+            assert compacted["type"] == "compacted"
+
+            ws.send_json({"type": "load_older_messages"})
+            older = ws.receive_json()
+            # has_more is a "try again" hint, not a real lookahead (see
+            # load_older_messages' own docstring) -- true here even
+            # though this genuinely is the last epoch, confirmed instead
+            # by a *second* call actually coming back empty below.
+            ws.send_json({"type": "load_older_messages"})
+            second_call = ws.receive_json()
+
+    assert older["type"] == "older_messages"
+    assert older["has_more"] is True
+    texts = [(e["kind"], e.get("text")) for e in older["entries"]]
+    assert texts == [
+        ("user", "hello"),
+        ("agent", "hi there!"),
+        ("user", "how are you"),
+        ("agent", "nice to hear"),
+    ]
+    assert second_call == {"type": "older_messages", "entries": [], "has_more": False}
+
+
+def test_load_older_messages_is_empty_when_the_thread_was_never_compacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="hi there!")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_older2") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+
+            ws.send_json({"type": "load_older_messages"})
+            older = ws.receive_json()
+
+    assert older == {"type": "older_messages", "entries": [], "has_more": False}
+
+
+def test_load_older_messages_across_two_compactions_reveals_each_epoch_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="reply one-a"),
+            AIMessage(content="reply one-b"),
+            AIMessage(content="first summary"),
+            AIMessage(content="reply two-a"),
+            AIMessage(content="reply two-b"),
+            AIMessage(content="second summary"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_older3") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            # /compact refuses below 4 messages (see _handle_compact) --
+            # two turns per epoch here, same as
+            # test_compact_collapses_history_and_survives_a_later_turn.
+            ws.send_json({"type": "user_message", "text": "turn one-a"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "turn one-b"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "/compact"})
+            assert ws.receive_json()["type"] == "compacted"
+
+            ws.send_json({"type": "user_message", "text": "turn two-a"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "turn two-b"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "/compact"})
+            assert ws.receive_json()["type"] == "compacted"
+
+            ws.send_json({"type": "load_older_messages"})
+            first_older = ws.receive_json()
+            ws.send_json({"type": "load_older_messages"})
+            second_older = ws.receive_json()
+            ws.send_json({"type": "load_older_messages"})
+            third_older = ws.receive_json()
+
+    # The first compact's own synthetic note is a real HumanMessage
+    # aupdate_state adds -- it becomes message #1 of the *next* epoch
+    # going forward (the model's context after a compact genuinely
+    # starts from that note), so it's what this epoch's own full
+    # accumulated list starts with, same as the live conversation would
+    # have shown it during epoch two itself.
+    first_texts = [(e["kind"], e.get("text")) for e in first_older["entries"]]
+    assert first_texts[0][0] == "user"
+    assert "first summary" in first_texts[0][1]
+    assert first_texts[1:] == [
+        ("user", "turn two-a"),
+        ("agent", "reply two-a"),
+        ("user", "turn two-b"),
+        ("agent", "reply two-b"),
+    ]
+    assert first_older["has_more"] is True
+    assert [(e["kind"], e.get("text")) for e in second_older["entries"]] == [
+        ("user", "turn one-a"),
+        ("agent", "reply one-a"),
+        ("user", "turn one-b"),
+        ("agent", "reply one-b"),
+    ]
+    assert second_older["has_more"] is True
+    # Nothing left before the very first turn -- and critically, this does
+    # NOT re-return the first epoch's messages a second time (the real bug
+    # a naive "always subset-check against the current checkpoint" version
+    # of this would have hit -- see load_older_messages' own docstring).
+    assert third_older == {"type": "older_messages", "entries": [], "has_more": False}
+
+
 def test_edit_message_truncates_history_and_regenerates_from_the_edit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3322,6 +3460,48 @@ def test_post_and_delete_provider_round_trip(
 
         providers = client.get("/api/providers").json()
         assert "deepseek" not in providers
+
+
+def test_get_providers_falls_back_to_the_global_default_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real bug, live-reported: a fresh install's COSCRIBE_GEMINI_DEFAULT_
+    MODEL was never written (see test_setup_app.py's own fix note), so
+    get_providers used to report an empty default_model for gemini even
+    though it's the app's own active default provider -- ModelPicker.tsx
+    filters out any entry with a blank default_model, so gemini would
+    silently vanish from the switcher's dropdown the moment the user
+    switched to a second, properly-configured provider and tried to
+    switch back. Fixed by falling back to COSCRIBE_DEFAULT_MODEL's own
+    model portion when the per-provider var is unset but that global
+    default names this same provider."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "GEMINI_API_KEY='test-gemini-key'\n"
+        "COSCRIBE_DEFAULT_MODEL='gemini:gemini-flash-latest'\n",
+        encoding="utf-8",
+    )
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        providers = client.get("/api/providers").json()
+        assert providers["gemini"]["default_model"] == "gemini-flash-latest"
+
+
+def test_get_providers_prefers_the_per_provider_default_model_when_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(
+        "GEMINI_API_KEY='test-gemini-key'\n"
+        "COSCRIBE_DEFAULT_MODEL='anthropic:claude-opus-5'\n"
+        "COSCRIBE_GEMINI_DEFAULT_MODEL='gemini-2.5-pro'\n"
+        "ANTHROPIC_API_KEY='sk-ant-test'\n",
+        encoding="utf-8",
+    )
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        providers = client.get("/api/providers").json()
+        assert providers["gemini"]["default_model"] == "gemini-2.5-pro"
 
 
 def test_post_provider_persists_an_absolute_path_not_a_cwd_relative_one(

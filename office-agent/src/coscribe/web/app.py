@@ -783,6 +783,15 @@ def create_setup_app(configured: asyncio.Future[Settings]) -> FastAPI:
             env_value_for_storage(f"builtin-provider:{builtin['api_key_env']}", api_key),
         )
         set_key(str(dotenv_path), "COSCRIBE_DEFAULT_MODEL", f"{provider_key}:{model}")
+        # Also write the per-provider default (COSCRIBE_GEMINI_DEFAULT_MODEL,
+        # etc.) -- get_providers below reads *that* var to decide whether
+        # this provider shows up in the model switcher at all, and first-run
+        # setup used to only ever populate the global COSCRIBE_DEFAULT_MODEL,
+        # leaving this one permanently unset. Real, live-reported bug: the
+        # default provider (set up here) would vanish from the switcher's
+        # own dropdown the instant the user switched to a second, properly-
+        # configured provider and tried to switch back.
+        set_key(str(dotenv_path), builtin["default_model_env"], model)
         harden_file_permissions(dotenv_path)
 
         settings = _load_settings_or_none()
@@ -2127,14 +2136,28 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/providers")
     async def get_providers() -> dict[str, Any]:
         env_values = dotenv_values(".env")
+        # Fallback for an existing .env from before /api/setup started also
+        # writing the per-provider default (see setup() above) -- without
+        # this, a provider whose own COSCRIBE_<X>_DEFAULT_MODEL was never
+        # set (true for whichever provider first-run setup picked, on any
+        # .env written before that fix) silently vanishes from this list,
+        # and therefore from the model switcher, the moment a *different*
+        # provider becomes the active model and this one is no longer
+        # rendered via the switcher's own currentModel-prop fallback.
+        default_provider_key, _, default_model_fallback = (
+            env_values.get("COSCRIBE_DEFAULT_MODEL") or ""
+        ).partition(":")
         result: dict[str, Any] = {}
         for provider in BUILTIN_PROVIDERS:
             api_key = env_resolve_secret_for_display(env_values.get(provider["api_key_env"])) or ""
             if not api_key:
                 continue
+            default_model = env_values.get(provider["default_model_env"]) or ""
+            if not default_model and provider["key"] == default_provider_key:
+                default_model = default_model_fallback
             result[provider["key"]] = {
                 "base_url": None,
-                "default_model": env_values.get(provider["default_model_env"]) or "",
+                "default_model": default_model,
                 "masked_key": _mask(api_key),
                 "builtin": True,
             }
@@ -2478,6 +2501,12 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     # desync the sidecar from a rejected/failed switch.
                     if await session.select_workspace(data["path"], websocket):
                         _write_workspace_sidecar(thread_id, data["path"])
+                elif message_type == "load_older_messages":
+                    # Directly awaited, not asyncio.create_task like
+                    # user_message -- same reasoning as switch_model above:
+                    # this never blocks on a human, so there's nothing to
+                    # keep this loop free to service concurrently.
+                    await session.load_older_messages(websocket)
         except WebSocketDisconnect:
             # A turn still blocked on an approval for *this* connection at
             # the moment it drops would otherwise dangle forever: nothing

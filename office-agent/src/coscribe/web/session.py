@@ -441,6 +441,13 @@ class ChatSessionLG:
         self._lg_tools = lg_tools
         self.lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
         self.config = {"configurable": {"thread_id": thread_id}}
+        # Pagination cursor for load_older_messages -- lazily set to
+        # whatever is currently live the first time that method is
+        # called, then advanced on every subsequent call. See that
+        # method's own docstring for what these two actually track, and
+        # why they're seeded lazily there rather than eagerly here.
+        self._history_boundary_config: dict[str, Any] | None = None
+        self._history_known_message_ids: set[str] | None = None
 
     def _build_lg_tools(self, model: Any) -> list[Callable[..., Any] | BaseTool]:
         # self._base_tools ("domain" tools) combined with self._extra_tools
@@ -937,6 +944,98 @@ class ChatSessionLG:
         messages = list(state.values.get("messages", [])) if state.values else []
         await websocket.send_json(
             {"type": "history", "entries": serialize_history_for_ws_lg(messages)}
+        )
+
+    async def load_older_messages(self, websocket: WebSocket) -> None:
+        """Scroll-up pagination for a thread that's been /compact'd: send_
+        history above only ever returns the *current* checkpoint's message
+        list, which right after a compaction is just the synthetic summary
+        note -- real, live-reported complaint that the earlier conversation
+        then looked permanently gone, with no way to scroll up and see it,
+        unlike every other AI product the user had used. The underlying
+        messages aren't actually gone: LangGraph's checkpointer is append-
+        only/versioned (aupdate_state's RemoveMessage(id=REMOVE_ALL_
+        MESSAGES) sentinel writes a *new* checkpoint, it doesn't delete the
+        old ones) -- this was purely a read-side gap, nothing ever walked
+        aget_state_history to read them back.
+
+        Mechanism, verified empirically against a real LangGraph graph
+        before wiring this in (a compacted thread's checkpoint sequence
+        behaves exactly as follows): within one "epoch" (the stretch of
+        checkpoints between two RemoveMessage(ALL) resets, or since the
+        thread's start), the messages list only ever grows -- the
+        add_messages reducer appends, so every older checkpoint's own id
+        set is a *subset* of the current one's. The moment a walk backward
+        crosses a RemoveMessage(ALL) boundary, that breaks: the checkpoint
+        immediately on the other side holds the *previous* epoch's own
+        final, fully-accumulated message list, entirely disjoint from
+        anything already known. So: walk aget_state_history backward from
+        `_history_boundary_config` and return the first checkpoint whose
+        message ids aren't already a subset of `_history_known_message_
+        ids` -- that's exactly the previous epoch's own full message
+        list, in one shot, not a partial slice of it. Advances both the
+        cursor and the known-ids set so a second "load older" click
+        (multiple compactions in one thread) correctly skips back past
+        the whole batch just revealed instead of re-finding it.
+
+        The cursor is lazily initialized to *whatever is currently live*
+        on this method's own first call, never to send_history's
+        connect-time snapshot -- real bug caught by this fix's own tests:
+        seeding it once in send_history left the cursor frozen at
+        connect time (typically an empty thread), so every message sent
+        *after* connecting -- the entire conversation a real user would
+        ever want to page back through -- looked like it was "before"
+        that stale cursor and never got walked at all. Recomputing here
+        instead means the boundary always reflects everything the
+        frontend has already rendered by the time the user actually
+        clicks "load older" (send_history's own dump, plus every live
+        turn since), which is the only version of "already known" that's
+        actually correct.
+
+        Real cost tradeoff, not free: for a thread that was *never*
+        compacted, every earlier checkpoint is always a subset of the
+        current one, so this walks the thread's *entire* checkpoint
+        history before concluding there's nothing older -- acceptable
+        because the frontend only calls this once per thread-view (on
+        first scroll-to-top) and remembers has_more=False afterward, not
+        because the walk itself is bounded."""
+        if self._history_boundary_config is None or self._history_known_message_ids is None:
+            current_state = await self.lg_agent.aget_state(self.config)
+            self._history_boundary_config = current_state.config
+            self._history_known_message_ids = (
+                {m.id for m in current_state.values.get("messages", [])}
+                if current_state.values
+                else set()
+            )
+
+        older: list[Any] = []
+        found_config: dict[str, Any] | None = None
+        async for snapshot in self.lg_agent.aget_state_history(
+            self.config, before=self._history_boundary_config
+        ):
+            snapshot_messages = list(snapshot.values.get("messages", [])) if snapshot.values else []
+            snapshot_ids = {m.id for m in snapshot_messages}
+            if not snapshot_ids <= self._history_known_message_ids:
+                older = snapshot_messages
+                found_config = snapshot.config
+                break
+
+        if found_config is not None:
+            self._history_boundary_config = found_config
+            self._history_known_message_ids |= {m.id for m in older}
+        # has_more is a hint to keep offering "load older", not a real
+        # lookahead -- true whenever this call itself found a batch, even
+        # on the very last one (confirming there's truly nothing earlier
+        # would mean walking one epoch further just to check, every time).
+        # An empty result is the one unambiguous "nothing left" signal;
+        # the frontend is expected to stop offering it only then, not on
+        # has_more alone.
+        await websocket.send_json(
+            {
+                "type": "older_messages",
+                "entries": serialize_history_for_ws_lg(older),
+                "has_more": bool(older),
+            }
         )
 
     async def _stream_turn(

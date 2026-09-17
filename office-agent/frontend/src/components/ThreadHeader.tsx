@@ -47,7 +47,7 @@ export function ThreadHeader({ sessionLabel, workspaceRoot, workspaceExplicit, o
             className="shrink-0 truncate rounded-full border border-[var(--border)] bg-[var(--card-bg)] px-2.5 py-0.5 text-xs"
             title={workspaceRoot ?? undefined}
           >
-            📁 {workspaceLabel}
+            {workspaceLabel}
           </span>
         ) : (
           <button
@@ -56,7 +56,7 @@ export function ThreadHeader({ sessionLabel, workspaceRoot, workspaceExplicit, o
             title={`${workspaceRoot} -- click to choose a different folder for this session`}
             onClick={onPickWorkspace}
           >
-            📁 {workspaceLabel}
+            {workspaceLabel}
           </button>
         ))}
     </div>

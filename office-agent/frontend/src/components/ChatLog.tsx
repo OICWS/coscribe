@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   groupHasPendingApproval,
   groupToolRuns,
@@ -65,6 +65,16 @@ interface ChatLogProps {
   /** A shape clicked in a pptx preview (PptxShapeOverlay) -- threaded up
    * to App.tsx exactly like BrowserPanel's own onSendToChat. */
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
+  /** Earlier, pre-/compact messages revealed via "Load earlier messages"
+   * -- kept as a separate list rendered above `items` rather than
+   * prepended into it, see ChatState.olderItems' own comment for why.
+   * Always read-only (no onEditMessage wired for these -- see
+   * TurnView's call below), and rendered as plain turns via the same
+   * groupTurns pass `items` gets, so a pre-compact turn looks identical
+   * to a live one apart from that. */
+  olderItems: LogItem[];
+  olderStatus: "idle" | "loading" | "no_more";
+  onLoadOlder: () => void;
 }
 
 export function ChatLog({
@@ -74,13 +84,44 @@ export function ChatLog({
   onEditMessage,
   onSuggestion,
   onPptxShapePicked,
+  olderItems,
+  olderStatus,
+  onLoadOlder,
 }: ChatLogProps) {
   const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const turns = groupTurns(items);
+  const olderTurns = groupTurns(olderItems);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
+    // Deliberately not [items, olderItems] -- appending a live item
+    // should always jump to the bottom, but revealing older history
+    // above should never move the viewport at all (see the scroll-
+    // anchoring effect below, which handles that case on its own terms
+    // instead of fighting this one for the same scroll position).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
+
+  // Keeps whatever the user was already looking at pinned in place when
+  // a new batch of older messages is prepended above it -- without this,
+  // the browser's own default scroll-anchoring is inconsistent across a
+  // prepend this large (a whole turn's worth of new DOM nodes above the
+  // current scrollTop), and the viewport visibly jumps. Captures height
+  // *before* the prepend (in onLoadOlder's own caller, App.tsx, via the
+  // ref read here at layout time -- scrollHeight already reflects the
+  // old, pre-prepend DOM on this effect's first run for a given
+  // olderItems change) and restores the equivalent scrollTop after.
+  const prevOlderScrollHeight = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (prevOlderScrollHeight.current !== null) {
+      el.scrollTop += el.scrollHeight - prevOlderScrollHeight.current;
+    }
+    prevOlderScrollHeight.current = el.scrollHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [olderItems]);
 
   if (items.length === 0) {
     return (
@@ -91,8 +132,33 @@ export function ChatLog({
   }
 
   return (
-    <div data-testid="chat-log" className="flex-1 overflow-y-auto">
+    <div data-testid="chat-log" className="flex-1 overflow-y-auto" ref={scrollRef}>
       <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-4 py-4">
+        {olderStatus !== "no_more" && (
+          <button
+            type="button"
+            className="self-center rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-60"
+            onClick={onLoadOlder}
+            disabled={olderStatus === "loading"}
+          >
+            {olderStatus === "loading" ? "Loading earlier messages..." : "Load earlier messages"}
+          </button>
+        )}
+        {olderTurns.map((turn) => (
+          // No onEditMessage (read-only replay, see olderItems' own prop
+          // comment) and onPptxShapePicked is a no-op -- targeting a
+          // follow-up edit off a pre-compact preview isn't something
+          // this pass adds a real affordance for, and TurnView requires
+          // the prop regardless of whether anything's clickable.
+          <TurnView
+            key={turn.id}
+            turn={turn}
+            onApprove={onApprove}
+            onAnswerQuestion={onAnswerQuestion}
+            onPptxShapePicked={() => {}}
+          />
+        ))}
+        {olderItems.length > 0 && <div className="border-b border-[var(--border)]" />}
         {turns.map((turn) => (
           <TurnView
             key={turn.id}
@@ -257,11 +323,19 @@ function ToolRunGroupView({
     <div className="self-start max-w-[85%] text-sm">
       <button
         type="button"
-        className="flex items-center gap-1.5 text-left text-[var(--muted)] hover:text-[var(--fg)]"
+        className="flex items-start gap-1.5 text-left text-[var(--muted)] hover:text-[var(--fg)]"
         onClick={() => setManuallyOpen((v) => !v)}
       >
-        <ChevronDownIcon className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`} />
-        <span className="truncate">
+        <ChevronDownIcon
+          className={`mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+        {/* Real, live-reported bug: `truncate` forces `white-space: nowrap`,
+         * which doesn't shrink long text -- it just runs the whole summary
+         * (e.g. "Listed X, Listed X, Listed X, and 2 more") off the right
+         * edge of the screen with no way to see the rest short of a
+         * horizontal scroll nobody expects on a chat log. Dropping it lets
+         * this wrap normally within the parent's own max-w-[85%] cap. */}
+        <span>
           {header.shown.map((parts, index) => (
             <span key={index}>
               {index > 0 && ", "}

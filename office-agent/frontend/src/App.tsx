@@ -167,6 +167,17 @@ function App() {
 
   const onSwitchModel = (model: string) => socketRef.current?.send({ type: "switch_model", model });
 
+  // Guarded by olderStatus in the reducer (a second call while one's
+  // already "loading" is a no-op there) -- ChatLog.tsx also only offers
+  // this while status is "idle", but a fast double scroll-to-top could
+  // still fire this twice before the first dispatch re-renders, so the
+  // reducer's own guard is the real one, this is just the send-request
+  // half of it.
+  const onLoadOlderMessages = () => {
+    dispatch({ type: "local_request_older_messages" });
+    socketRef.current?.send({ type: "load_older_messages" });
+  };
+
   const onSelectWorkspace = (path: string) => socketRef.current?.send({ type: "select_workspace", path });
   const onBrowserPanelCapture = (capture: BrowserCapture) => setPendingBrowserCapture(capture);
   const onPptxShapePicked = (capture: PptxShapeCapture) => setPendingPptxCapture(capture);
@@ -280,8 +291,21 @@ function App() {
               onEditMessage={state.turnInFlight ? undefined : onEditMessage}
               onSuggestion={onSuggestion}
               onPptxShapePicked={onPptxShapePicked}
+              olderItems={state.olderItems}
+              olderStatus={state.olderStatus}
+              onLoadOlder={onLoadOlderMessages}
             />
-            {state.error && <div className="px-4 py-1 text-sm text-red-500">{state.error}</div>}
+            {/* Real, live-reported bug: this used to be a bare full-width
+             * div, a sibling of ChatLog/Composer rather than living inside
+             * either one's own centered column -- so a turn-ending error
+             * (e.g. hitting a token-usage limit) rendered as a raw red
+             * line spanning edge-to-edge from the window's left border,
+             * instead of aligning with the chat column like everything
+             * else on this page. mx-auto/max-w-[760px]/px-4 here match
+             * ChatLog.tsx's own wrapper and Composer's root exactly. */}
+            {state.error && (
+              <div className="mx-auto w-full max-w-[760px] px-4 py-1 text-sm text-red-500">{state.error}</div>
+            )}
             <Composer
               turnInFlight={state.turnInFlight}
               totalTokens={state.totalTokens}

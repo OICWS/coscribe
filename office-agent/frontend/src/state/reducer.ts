@@ -115,6 +115,23 @@ export interface ChatState {
    * fresh history event to wait for), not by this reducer, since the
    * reducer has no notion of "a new connection started." */
   historyReceived: boolean;
+  /** Earlier, pre-/compact messages revealed via "load older messages" --
+   * kept separate from `items` (not prepended into it) since these are
+   * read-only replay (no turnIndex an edit could target -- see LogItem's
+   * own "user" variant comment) and load in from the *opposite* end of
+   * the log a live event ever appends to. Each successful load prepends
+   * a whole earlier epoch's worth at once (see wire.ts's
+   * OlderMessagesEvent), so this only ever grows further back in time,
+   * never forward. */
+  olderItems: LogItem[];
+  /** "loading" while a request is in flight (guards against a second
+   * scroll-triggered request piling on before the first resolves);
+   * "no_more" once a load returned zero entries -- ChatLog stops
+   * offering the control past that point. "idle" covers both "never
+   * tried yet" and "tried, got something, could try again" -- see
+   * OlderMessagesEvent's own has_more comment for why those two don't
+   * need to be told apart client-side. */
+  olderStatus: "idle" | "loading" | "no_more";
 }
 
 export const initialChatState: ChatState = {
@@ -133,6 +150,8 @@ export const initialChatState: ChatState = {
   workflowEventTick: 0,
   workflowRuns: [],
   historyReceived: false,
+  olderItems: [],
+  olderStatus: "idle",
 };
 
 /** Local, client-originated actions -- not part of the WS wire contract,
@@ -145,7 +164,8 @@ export type LocalAction =
   | { type: "local_approval_resolved"; id: string; approved: boolean }
   | { type: "local_question_answered"; id: string; answer: string }
   | { type: "local_hydrate_workflow_runs"; runs: WorkflowRun[] }
-  | { type: "local_connection_reset" };
+  | { type: "local_connection_reset" }
+  | { type: "local_request_older_messages" };
 
 export type ChatAction = WsServerEvent | LocalAction;
 
@@ -187,7 +207,17 @@ function closeStreamingBubble(items: LogItem[]): LogItem[] {
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "local_connection_reset":
-      return { ...state, historyReceived: false };
+      // A fresh connection means a fresh pagination cursor server-side
+      // too (ChatSessionLG.load_older_messages' own cursor lives on the
+      // session object, not across reconnects) -- carrying the previous
+      // connection's olderItems/olderStatus over would either show a
+      // stale "no_more" for a thread switch that never even tried, or
+      // (worse) silently duplicate a batch already revealed once the
+      // new connection's cursor starts over from its own current state.
+      return { ...state, historyReceived: false, olderItems: [], olderStatus: "idle" };
+
+    case "local_request_older_messages":
+      return state.olderStatus === "loading" ? state : { ...state, olderStatus: "loading" };
 
     case "local_user_message":
       return {
@@ -295,6 +325,38 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             isError: entry.is_error,
           } as const;
         }),
+      };
+    }
+
+    case "older_messages": {
+      if (action.entries.length === 0) {
+        return { ...state, olderStatus: "no_more" };
+      }
+      // turnIndex: -1 -- these are read-only replay, never rendered with
+      // onEditMessage wired (see ChatLog.tsx's older-history section), so
+      // the value is inert; -1 rather than a real count just makes that
+      // "not a real turn index" explicit rather than accidentally
+      // plausible-looking.
+      const revealed: LogItem[] = action.entries.map((entry) => {
+        if (entry.kind === "user") {
+          return { id: genId(), kind: "user", text: entry.text, turnIndex: -1 } as const;
+        }
+        if (entry.kind === "agent") {
+          return { id: genId(), kind: "agent", text: entry.text, streaming: false } as const;
+        }
+        return {
+          id: genId(),
+          kind: "tool",
+          toolName: entry.tool_name,
+          arguments: entry.arguments,
+          result: entry.result,
+          isError: entry.is_error,
+        } as const;
+      });
+      return {
+        ...state,
+        olderItems: [...revealed, ...state.olderItems],
+        olderStatus: action.has_more ? "idle" : "no_more",
       };
     }
 

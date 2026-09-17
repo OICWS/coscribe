@@ -11,7 +11,7 @@
  */
 
 // ---------------------------------------------------------------------
-// Server -> client WebSocket events (17 types)
+// Server -> client WebSocket events (18 types)
 // ---------------------------------------------------------------------
 
 export interface StateEvent {
@@ -59,6 +59,19 @@ export type HistoryEntry =
 export interface HistoryEvent {
   type: "history";
   entries: HistoryEntry[];
+}
+
+/** Reply to a client "load_older_messages" request (no payload) -- one
+ * whole pre-/compact epoch's worth of messages, revealed in one shot
+ * (see ChatSessionLG.load_older_messages's own docstring for why it's
+ * never a partial slice). `has_more` is a "try again" hint, not a real
+ * lookahead: true whenever this call itself found a batch, even on the
+ * very last one -- an empty `entries` array is the one unambiguous
+ * "nothing earlier" signal. */
+export interface OlderMessagesEvent {
+  type: "older_messages";
+  entries: HistoryEntry[];
+  has_more: boolean;
 }
 
 export interface AgentDeltaEvent {
@@ -223,6 +236,7 @@ export interface SkillSavedEvent {
 export type WsServerEvent =
   | StateEvent
   | HistoryEvent
+  | OlderMessagesEvent
   | AgentDeltaEvent
   | ToolResultEvent
   | ApprovalRequiredEvent
@@ -240,7 +254,7 @@ export type WsServerEvent =
   | WorkflowRunStartedEvent;
 
 // ---------------------------------------------------------------------
-// Client -> server WebSocket messages (6 types)
+// Client -> server WebSocket messages (7 types)
 // ---------------------------------------------------------------------
 
 /** Slash commands (/plan, /accept-edits, /compact, /clear,
@@ -325,6 +339,14 @@ export interface SelectWorkspaceOut {
   path: string;
 }
 
+/** No payload -- reveals one whole pre-/compact epoch's worth of older
+ * messages, prepended above whatever's currently shown. Responds with an
+ * OlderMessagesEvent. See ChatSessionLG.load_older_messages's own
+ * docstring for the pagination mechanism. */
+export interface LoadOlderMessagesOut {
+  type: "load_older_messages";
+}
+
 export type WsClientMessage =
   | UserMessageOut
   | EditMessageOut
@@ -333,4 +355,5 @@ export type WsClientMessage =
   | StopOut
   | SwitchModelOut
   | SelectSkillsOut
-  | SelectWorkspaceOut;
+  | SelectWorkspaceOut
+  | LoadOlderMessagesOut;

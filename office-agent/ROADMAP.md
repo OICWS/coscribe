@@ -4420,6 +4420,170 @@ and clicking Rewind invokes `onEditMessage` with the exact expected
 
 ---
 
+## Phase 8an -- Real-usage bug pass: model switcher, PPTX direct-edit gap (investigated, deferred), chat history pagination, six small UX fixes
+
+Prompted by direct feedback from actually using the app (six numbered
+findings from one message, three more discovered live while working
+through them). Each item below was independently confirmed against the
+real code before being called a bug -- see the investigation notes for
+what was actually read, not assumed.
+
+**Gemini disappears from the model switcher after switching away from
+it once (shipped).** Root cause: `ModelPicker.tsx`'s dropdown list comes
+from `GET /api/providers`, which reads a provider's `default_model` off
+its own per-provider env var (`COSCRIBE_GEMINI_DEFAULT_MODEL`, etc.) --
+but first-run setup (`/api/setup`) only ever wrote the *global*
+`COSCRIBE_DEFAULT_MODEL`, never the per-provider one. So whichever
+provider first-run setup configured was never actually a member of the
+switcher's own list -- it only ever *looked* present because the pill's
+own label reads `state.model` directly, independent of the list. The
+instant a different, properly-added provider became active and the user
+tried switching back, the gap became visible. Fixed both ends:
+`/api/setup` now writes the per-provider var alongside the global one,
+and `GET /api/providers` falls back to the global default's own model
+portion when a provider's per-provider var is unset but the global
+default names that provider (covers `.env` files written before this
+fix too). 2 new `test_web.py` tests plus 1 new `test_setup_app.py`
+assertion.
+
+**Tool/function names leaking into the model's own chat prose (shipped).**
+Real complaint: replies naming raw tool names ("I'll use
+`fill_pptx_template`...") read as confusing and technical to a
+non-technical user. `coordinator.py`'s `INSTRUCTIONS` had zero guidance
+on this -- confirmed absent, not just unfound. Fixed with a new rule at
+the very top of the prompt (general, not pptx-specific), explicitly
+mirroring an existing precedent already in this file for the same class
+of problem (a template's own internal `"[16:9]"` tag, which the prompt
+already told the model never to echo verbatim).
+
+**Tool-call summary row doesn't wrap, runs off the right edge of the
+screen (shipped).** `ChatLog.tsx`'s `ToolRunGroupView` collapsed-group
+label span had `className="truncate"` -- Tailwind's `truncate` forces
+`white-space: nowrap`, which doesn't shrink long text, it just lets it
+overflow. Dropped the class (and switched the row to `items-start` so
+the chevron aligns with a wrapped label's first line instead of its
+vertical center).
+
+**"workplace" folder-emoji badge looked bad (shipped).** `ThreadHeader.tsx`
+rendered the workspace badge as `📁 {workspaceLabel}` -- dropped the
+emoji, plain text only.
+
+**Scrollbars looked crude/thick (shipped).** No custom scrollbar CSS
+existed anywhere in the app -- confirmed via a full-project grep, the
+default OS/Electron scrollbar (thick track, distinct up/down arrow
+buttons) was just never touched. Added global thin-scrollbar CSS to
+`index.css` (`scrollbar-width: thin` for Firefox, `::-webkit-scrollbar`
+overrides for the Chromium engine every actual target here runs on).
+
+**A turn-ending error (e.g. hitting a token-usage limit) rendered as a
+raw red line spanning the full window width from the left edge, instead
+of aligning with the chat column (shipped).** `App.tsx`'s `state.error`
+div was a bare sibling of `<ChatLog>`/`<Composer>`, never wrapped in
+either one's own centered `mx-auto max-w-[760px] px-4` column. Wrapped
+it in the same classes.
+
+**PPTX: "modify my existing PPTX to match this reference template" ends
+up building a whole new deck instead of editing the real file in place
+(investigated; explicitly not building it).** Real capability gap, not
+an instruction-following mistake -- confirmed by reading every slide/
+shape-editing tool in `presentations.py`: `delete_pptx_slide`/
+`delete_pptx_shape` are strictly one-at-a-time (matches the model's own
+"no permission for a batch delete" framing literally), and
+`extract_pptx_template` + `fill_pptx_template` together only ever
+produce a *new* deck built from a template's shell -- `fill_pptx_template`
+opens the *template's* file and pours new content into it, it never
+reads or preserves an existing file's own current content. Researched
+whether `hugohe3/ppt-master` (the 53.9k-star reference project this
+session has drawn on before) solves this -- it doesn't, for the same
+architectural reason: its own template-materialization tool
+(`mirror_template_materialize.py`) is the same one-directional
+"distill a template from a deck" shape as coscribe's `extract_pptx_
+template`, never a "reskin an existing file's real content using a
+*different* file's theme" tool; its own "beautify" profile explicitly
+states "this regenerates a native deck ... it never edits the source in
+place." Given a mature, actively-developed reference project hasn't
+built this either, and the write-up here identified real, non-trivial
+scope for it (transplant `<a:clrScheme>`/`<a:fontScheme>` from a
+reference deck onto an existing file's own slide masters, honestly
+excluding structural/background/layout transplant as a further, much
+larger lift) -- **explicit user call: don't build this.** Left here so
+the investigation doesn't need repeating if this comes up again.
+
+**Chat history pagination: /compact permanently hid the earlier
+conversation, with no way to scroll up and see it (shipped).** Real,
+live-reported complaint -- unlike every other AI product the user had
+used, where scrolling up always loads more. The underlying messages
+were never actually gone: LangGraph's checkpointer is append-only/
+versioned (`aupdate_state`'s `RemoveMessage(id=REMOVE_ALL_MESSAGES)`
+sentinel writes a *new* checkpoint, never deletes old ones) -- this was
+purely a read-side gap: `send_history` only ever reads the *latest*
+checkpoint, and nothing anywhere called `aget_state_history` to read
+further back.
+
+New WS message type `load_older_messages` (no payload) ->
+`older_messages` reply (`ChatSessionLG.load_older_messages`, `web/
+session.py`). Mechanism, verified empirically against a real LangGraph
+graph before wiring this in: within one "epoch" (the stretch of
+checkpoints between two `RemoveMessage(ALL)` resets, or since the
+thread's start), the `add_messages` reducer only ever *appends* --
+every older checkpoint's message-id set is a subset of the current
+one's. The moment a backward walk crosses a `RemoveMessage(ALL)`
+boundary, that breaks: the checkpoint immediately on the other side
+holds the *previous* epoch's entire accumulated message list, wholesale
+and disjoint from anything already known. So the handler walks
+`aget_state_history` backward from a cursor (`_history_boundary_
+config`) and returns the first checkpoint whose message ids aren't
+already a subset of everything already revealed (`_history_known_
+message_ids`, which accumulates across repeated calls so a second
+"load older" click on a multiply-compacted thread correctly skips past
+the whole batch just revealed rather than re-finding it) -- the whole
+previous epoch in one shot, never a partial slice.
+
+Real bug caught by this feature's own tests, not shipped on the first
+attempt: the cursor was originally seeded once, eagerly, inside
+`send_history` (which only ever runs once, right at connect time) --
+for a thread with any messages sent *after* connecting (i.e. every real
+thread), that left the cursor frozen at a stale, near-empty snapshot,
+so `load_older_messages` found nothing at all. Fixed by seeding the
+cursor lazily, on the method's own first call, to *whatever is
+currently live* at that moment -- the only version of "already shown to
+the user" that's actually correct regardless of how much happened since
+connect.
+
+Frontend: new `olderItems`/`olderStatus` state (`reducer.ts`), kept
+deliberately separate from the live `items` array rather than prepended
+into it -- these are read-only replay (no `turnIndex` an edit could
+target) and load from the *opposite* end of the log a live event ever
+appends to; keeping them apart also means revealing older history never
+touches the existing "scroll to bottom on new item" effect's own
+dependency array. `ChatLog.tsx` renders them above a divider, behind a
+"Load earlier messages" pill that hides once a call returns empty
+entries (`has_more` is a "try again" hint, not a real lookahead -- true
+whenever a call found something, even on the genuinely last batch,
+since confirming "truly nothing left" would mean walking one more epoch
+just to check every time). A `useLayoutEffect` keeps the viewport
+visually anchored when a batch is prepended (captures `scrollHeight`
+before the DOM update, restores the equivalent `scrollTop` after) --
+without it, a prepend this large visibly jumps the scroll position.
+
+5 new backend tests (`test_web.py`) covering: a single compaction's full
+epoch revealed correctly; a never-compacted thread correctly reports
+nothing to load; and -- the real regression target -- two compactions
+in one thread, confirming each "load older" click reveals exactly one
+epoch and never re-reveals or skips one (this is also where the
+lazy-cursor bug above was actually caught). Full backend suite green,
+`ruff`/`mypy` clean, `tsc`/`oxlint` clean. Verified live end-to-end: a
+real backend (FastAPI + a scripted fake model, same technique `test_web
+.py`'s own `_client_lg` uses, just driven by a real `uvicorn` server
+instead of `TestClient` so a real browser could connect) plus a real
+`vite dev` frontend plus a real headless-Chromium session -- two turns,
+`/compact`, click "Load earlier messages" (confirmed the pre-compact
+turns render above a divider, scroll position stays anchored), click
+again (confirmed it correctly reports nothing left and the button
+disappears).
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

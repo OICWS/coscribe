@@ -148,6 +148,16 @@ async def test_setup_post_writes_env_and_resolves_configured(
     env_text = env_path.read_text()
     assert "COSCRIBE_DEFAULT_MODEL='anthropic:claude-sonnet-4-5-20250929'" in env_text
     assert "ANTHROPIC_API_KEY='sk-ant-test-key'" in env_text
+    # Real bug, live-reported: this used to write only the global
+    # COSCRIBE_DEFAULT_MODEL, never the per-provider COSCRIBE_ANTHROPIC_
+    # DEFAULT_MODEL that get_providers (web/app.py) reads to decide whether
+    # this provider appears in the model switcher at all -- so the very
+    # provider first-run setup just configured would silently vanish from
+    # the switcher's own dropdown the moment a second provider became the
+    # active model. See test_web.py's own
+    # test_get_providers_falls_back_to_the_global_default_model for the
+    # get_providers side of this fix.
+    assert "COSCRIBE_ANTHROPIC_DEFAULT_MODEL='claude-sonnet-4-5-20250929'" in env_text
 
 
 async def test_setup_post_rejects_a_second_submission_once_configured(
