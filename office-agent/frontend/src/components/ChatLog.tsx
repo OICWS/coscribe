@@ -65,17 +65,27 @@ interface ChatLogProps {
   /** A shape clicked in a pptx preview (PptxShapeOverlay) -- threaded up
    * to App.tsx exactly like BrowserPanel's own onSendToChat. */
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
-  /** Earlier, pre-/compact messages revealed via "Load earlier messages"
-   * -- kept as a separate list rendered above `items` rather than
-   * prepended into it, see ChatState.olderItems' own comment for why.
-   * Always read-only (no onEditMessage wired for these -- see
+  /** Earlier, pre-/compact messages revealed by scrolling near the top
+   * of the log -- kept as a separate list rendered above `items` rather
+   * than prepended into it, see ChatState.olderItems' own comment for
+   * why. Always read-only (no onEditMessage wired for these -- see
    * TurnView's call below), and rendered as plain turns via the same
    * groupTurns pass `items` gets, so a pre-compact turn looks identical
    * to a live one apart from that. */
   olderItems: LogItem[];
-  olderStatus: "idle" | "loading" | "no_more";
+  olderStatus: "none" | "idle" | "loading" | "no_more";
   onLoadOlder: () => void;
 }
+
+/** How close to the top of the scroll container (in px) counts as "the
+ * user is looking at the oldest thing currently loaded" -- real, live-
+ * reported preference: a manual "Load earlier messages" button read as
+ * unnecessary friction, the user wanted plain scroll-up-to-load-more
+ * like every other chat product. A small, nonzero threshold (rather
+ * than exactly 0) means the load kicks in a little before the user
+ * actually hits the physical top, so the prepend (and its own scroll-
+ * anchoring, below) has already landed by the time they'd notice. */
+const SCROLL_LOAD_OLDER_THRESHOLD_PX = 150;
 
 export function ChatLog({
   items,
@@ -121,6 +131,31 @@ export function ChatLog({
     prevOlderScrollHeight.current = el.scrollHeight;
   }, [olderItems]);
 
+  // Auto-loads on scroll-up instead of a manual button -- a ref (not
+  // onLoadOlder in the dependency array) holds the latest callback so
+  // this effect only re-subscribes when olderStatus itself actually
+  // changes, not on every unrelated parent re-render (App.tsx's
+  // onLoadOlderMessages is a fresh closure each render); without that,
+  // a render happening to land while still "idle" and still scrolled
+  // near the top would fire a duplicate load before the first one's own
+  // "loading" status had a chance to propagate back down and stop it.
+  // Checks once immediately on entering "idle" (not just on a scroll
+  // event) so a thread short enough that its content doesn't even fill
+  // the viewport -- already effectively "at the top" -- still loads
+  // without requiring an actual scroll gesture first.
+  const onLoadOlderRef = useRef(onLoadOlder);
+  onLoadOlderRef.current = onLoadOlder;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || olderStatus !== "idle") return;
+    const checkAndLoad = () => {
+      if (el.scrollTop < SCROLL_LOAD_OLDER_THRESHOLD_PX) onLoadOlderRef.current();
+    };
+    checkAndLoad();
+    el.addEventListener("scroll", checkAndLoad);
+    return () => el.removeEventListener("scroll", checkAndLoad);
+  }, [olderStatus]);
+
   if (items.length === 0) {
     return (
       <div data-testid="chat-log" className="flex-1 overflow-y-auto">
@@ -132,15 +167,8 @@ export function ChatLog({
   return (
     <div data-testid="chat-log" className="flex-1 overflow-y-auto" ref={scrollRef}>
       <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-4 py-4">
-        {olderStatus !== "no_more" && (
-          <button
-            type="button"
-            className="self-center rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-60"
-            onClick={onLoadOlder}
-            disabled={olderStatus === "loading"}
-          >
-            {olderStatus === "loading" ? "Loading earlier messages..." : "Load earlier messages"}
-          </button>
+        {olderStatus === "loading" && (
+          <p className="self-center text-xs text-[var(--muted)]">Loading earlier messages...</p>
         )}
         {olderTurns.map((turn) => (
           // No onEditMessage (read-only replay, see olderItems' own prop
@@ -313,6 +341,24 @@ function ToolRunGroupView({
         {group.items.map((item) => (
           <ToolCallRow key={item.id} item={item} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
         ))}
+      </div>
+    );
+  }
+
+  // Real, live-reported bug: a "run" of exactly one item still built the
+  // full group-header-plus-expand-to-reveal-a-child structure below,
+  // which for one item means a group header repeating the *exact same*
+  // label its own (compact) child row shows again once expanded --
+  // duplicated text, and two clicks (open the group, then open the
+  // child's own result toggle) to see anything. Skipping straight to
+  // ToolCallRow here means one row, one label, one click straight to the
+  // result -- ToolCallRow's own chevron/label/expand already *is* the
+  // exact interaction a length-1 "group" needs, no group wrapper adds
+  // anything real for a single item.
+  if (group.items.length === 1) {
+    return (
+      <div className="max-w-[85%]">
+        <ToolCallRow item={group.items[0]} compact onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
       </div>
     );
   }

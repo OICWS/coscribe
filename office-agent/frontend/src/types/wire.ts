@@ -59,6 +59,14 @@ export type HistoryEntry =
 export interface HistoryEvent {
   type: "history";
   entries: HistoryEntry[];
+  /** Cheap (O(1)) proxy for "does this thread have anything for
+   * load_older_messages to find" -- true iff the current checkpoint's
+   * own first message is a compaction summary note (see session.py's
+   * send_history and _COMPACT_NOTE_PREFIX). Gates whether ChatLog even
+   * offers to page further back at all -- real, live-reported bug this
+   * fixes: the control used to appear unconditionally, including on a
+   * brand-new thread with nothing to load. */
+  has_older: boolean;
 }
 
 /** Reply to a client "load_older_messages" request (no payload) -- one

@@ -124,14 +124,20 @@ export interface ChatState {
    * OlderMessagesEvent), so this only ever grows further back in time,
    * never forward. */
   olderItems: LogItem[];
-  /** "loading" while a request is in flight (guards against a second
-   * scroll-triggered request piling on before the first resolves);
-   * "no_more" once a load returned zero entries -- ChatLog stops
-   * offering the control past that point. "idle" covers both "never
+  /** "none" until the connect-time "history" event says has_older is
+   * true (or a real /compact happens mid-connection) -- the scroll-
+   * triggered auto-load in ChatLog.tsx never fires while this is "none",
+   * which is what keeps it from doing anything on a brand-new thread
+   * with nothing to page through (real, live-reported bug: it used to
+   * offer to load more unconditionally on every thread). "loading"
+   * while a request is in flight (guards against a second scroll-
+   * triggered request piling on before the first resolves); "no_more"
+   * once a load returned zero entries -- the auto-load stops trying
+   * past that point. "idle" covers both "has_older is true but never
    * tried yet" and "tried, got something, could try again" -- see
    * OlderMessagesEvent's own has_more comment for why those two don't
    * need to be told apart client-side. */
-  olderStatus: "idle" | "loading" | "no_more";
+  olderStatus: "none" | "idle" | "loading" | "no_more";
 }
 
 export const initialChatState: ChatState = {
@@ -151,7 +157,7 @@ export const initialChatState: ChatState = {
   workflowRuns: [],
   historyReceived: false,
   olderItems: [],
-  olderStatus: "idle",
+  olderStatus: "none",
 };
 
 /** Local, client-originated actions -- not part of the WS wire contract,
@@ -214,7 +220,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // stale "no_more" for a thread switch that never even tried, or
       // (worse) silently duplicate a batch already revealed once the
       // new connection's cursor starts over from its own current state.
-      return { ...state, historyReceived: false, olderItems: [], olderStatus: "idle" };
+      return { ...state, historyReceived: false, olderItems: [], olderStatus: "none" };
 
     case "local_request_older_messages":
       return state.olderStatus === "loading" ? state : { ...state, olderStatus: "loading" };
@@ -302,6 +308,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         historyReceived: true,
+        olderStatus: action.has_older ? "idle" : "none",
         items: action.entries.map((entry) => {
           if (entry.kind === "user") {
             // No `images` here -- the backend's own history entries don't

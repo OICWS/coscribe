@@ -4627,6 +4627,58 @@ the isolated calls and the group render as identical flat chevron rows
 with no border/background anywhere, and expand to the same plain
 nested-list treatment.
 
+**Follow-up round on the two features above, from continued real usage
+(shipped).** Four more real, live-reported issues:
+
+- **"Load earlier messages" appeared on every thread, including a
+  brand-new one with nothing to load.** `olderStatus` had no way to
+  distinguish "never tried, nothing to try" from "never tried, but
+  there's real reason to believe there's more" -- both just read
+  "idle". Fixed with a real, cheap (O(1)) signal from the backend:
+  `send_history` now checks whether the current checkpoint's own first
+  message is a compaction summary note (the exact text `_handle_compact`
+  writes, `_COMPACT_NOTE_PREFIX`, shared between both) and reports
+  `has_older` in the `history` WS event -- true only for a thread that's
+  actually been `/compact`'d at least once. `olderStatus` gained a
+  fourth state, `"none"`, that the frontend never auto-loads from.
+- **Manual button replaced with scroll-triggered auto-load.** Real
+  preference: infinite-scroll-up, not a click. `ChatLog.tsx`'s new
+  effect only re-subscribes when `olderStatus` itself changes (a ref
+  holds the latest `onLoadOlder` callback rather than putting it in the
+  dependency array) -- real bug caught before shipping: without that,
+  every unrelated parent re-render while still "idle" would re-fire the
+  effect and could send a duplicate load request before the first one's
+  own "loading" status had propagated back down to stop it. Checks once
+  immediately on entering "idle" too, not just on a scroll event, so a
+  thread short enough that its content doesn't fill the viewport still
+  loads without requiring an actual scroll gesture.
+- **A tool-call "group" of exactly one item still showed a group header
+  plus an expanded child repeating the identical label** -- two clicks
+  to see anything, and duplicated text. `ToolRunGroupView` now skips
+  straight to rendering a single `ToolCallRow` for a length-1 group;
+  `ToolCallRow`'s own chevron/label/expand-to-result is already the
+  exact interaction a "group" of one needs.
+- **`run_python_script`/`run_node_script` summaries ignored the tool's
+  own required `description` argument**, always reading as a bare "Ran
+  a command" -- every command in a group looked identical until
+  individually expanded. `TOOL_SUMMARIES` now threads `description`
+  through as the object, matching the reference UI's own Background
+  Tasks panel (which always names what a command was for) and the
+  precedent `run_background_script`'s entry already set.
+
+5 new/updated backend tests (`test_web.py`, including a real
+`has_older=True` case: compact a thread, reconnect with a fresh WS
+connection -- the actual scenario that matters, not just the flag in
+isolation). Full suite green (1111 passed), `ruff`/`mypy`/`tsc`/`oxlint`
+clean, `npm run build` (not just `tsc --noEmit`) verified clean after
+the `tsc -b`-only build failure the previous round shipped with (see
+that round's own follow-up commit). Verified live end-to-end: a real
+backend + real headless-Chromium session confirmed no button/indicator
+on a fresh thread, an isolated approved command expands to one clean
+block with its real description shown, and after a real page reload
+(the actual "reconnect" this feature targets) scrolling to the top
+auto-loads the pre-compact turns with zero clicks.
+
 ---
 
 ## Later -- real intentions, not actively scheduled

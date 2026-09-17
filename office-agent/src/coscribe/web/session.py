@@ -229,6 +229,16 @@ def _can_resolve_approvals(websocket: Any) -> bool:
 # Appended to this session's own instructions (not coordinator.py's shared
 # constant, which both runtimes still need to read the same way) so the
 # model doesn't try to call a tool that was never bound to this graph.
+# Shared between _handle_compact (which writes it as the first message of
+# a fresh epoch) and send_history (which checks for it, below) -- lets
+# send_history answer "might this thread have older history to page
+# through" with an O(1) check on just the current checkpoint's own first
+# message, instead of load_older_messages' own full backward walk (real,
+# live-reported bug this avoids: the frontend used to offer "load older
+# messages" unconditionally on *every* thread, including a brand new one
+# with nothing to load).
+_COMPACT_NOTE_PREFIX = "[Earlier conversation compacted to save context.]"
+
 _RUN_WORKFLOW_NOTE = (
     "Note: in this app, a saved workflow is only ever run via the "
     "/runworkflow <name> command or the workflow picker in the UI -- there "
@@ -942,8 +952,21 @@ class ChatSessionLG:
         casing needed for the new-thread path."""
         state = await self.lg_agent.aget_state(self.config)
         messages = list(state.values.get("messages", [])) if state.values else []
+        # O(1) proxy for "does load_older_messages have anything to find"
+        # -- a real full-history walk (that method's own, correct way to
+        # know for sure) is too expensive to do unconditionally on every
+        # connect; see _COMPACT_NOTE_PREFIX's own comment for why this
+        # check is safe and accurate in practice.
+        first_message = messages[0] if messages else None
+        has_older = isinstance(first_message, HumanMessage) and str(
+            first_message.content
+        ).startswith(_COMPACT_NOTE_PREFIX)
         await websocket.send_json(
-            {"type": "history", "entries": serialize_history_for_ws_lg(messages)}
+            {
+                "type": "history",
+                "entries": serialize_history_for_ws_lg(messages),
+                "has_older": has_older,
+            }
         )
 
     async def load_older_messages(self, websocket: WebSocket) -> None:
@@ -1793,7 +1816,7 @@ class ChatSessionLG:
             ]
         )
         summary = _extract_text(summary_message.content) or "(no summary)"
-        note = f"[Earlier conversation compacted to save context.]\n\n{summary}"
+        note = f"{_COMPACT_NOTE_PREFIX}\n\n{summary}"
         await self.lg_agent.aupdate_state(
             self.config,
             {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), HumanMessage(content=note)]},

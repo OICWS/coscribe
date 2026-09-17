@@ -215,8 +215,14 @@ function diffStatOf(result: unknown): { added: number; removed: number } | null 
  * "playwright_browser_navigate") falls through to summarizeToolNameParts's
  * generic prefix table below, not a hardcoded entry for all ~35+ tools. */
 const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
-  run_python_script: () => ({ verb: "Ran a command", object: null }),
-  run_node_script: () => ({ verb: "Ran a command", object: null }),
+  // description is a required argument on both -- "one sentence, plain
+  // language, what this script does" (see scripts.py's own docstring)
+  // -- real, live-reported complaint: without it, every command in a
+  // group read as a bare "Ran a command" with zero way to tell them
+  // apart short of expanding each one, unlike the reference UI's own
+  // Background Tasks panel, which always shows what a command was for.
+  run_python_script: (a) => ({ verb: "Ran a command", object: str(a, "description") ?? null, glue: ": " }),
+  run_node_script: (a) => ({ verb: "Ran a command", object: str(a, "description") ?? null, glue: ": " }),
   run_background_script: (a) => ({
     verb: "Started a background script",
     object: str(a, "description") ?? null,

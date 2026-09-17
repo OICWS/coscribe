@@ -5579,7 +5579,43 @@ def test_history_is_empty_for_a_brand_new_thread_lg(
             ws.receive_json()  # state
             history = ws.receive_json()
 
-    assert history == {"type": "history", "entries": []}
+    assert history == {"type": "history", "entries": [], "has_older": False}
+
+
+def test_history_reports_has_older_true_after_reconnecting_to_a_compacted_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real, live-reported bug: the frontend's "load earlier messages"
+    control used to be offered unconditionally on *every* thread,
+    including a brand-new one with nothing to page through -- this
+    `has_older` flag is what the frontend now gates that control on.
+    Regression-tests the O(1) proxy itself: a thread that's been
+    /compact'd, then reconnected to (a fresh connection, so send_history
+    -- not any state left over from the compacting connection -- is what
+    has to get this right), reports has_older=True."""
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="hi there!"),
+            AIMessage(content="nice to hear"),
+            AIMessage(content="a short summary of the chat"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_hist_has_older") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history -- empty, brand new thread
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "how are you"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "/compact"})
+            assert ws.receive_json()["type"] == "compacted"
+
+        with client.websocket_connect("/ws/t_hist_has_older") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+
+    assert history["has_older"] is True
 
 
 def test_reconnect_replays_conversation_history_lg(
@@ -5623,6 +5659,7 @@ def test_reconnect_replays_conversation_history_lg(
             },
             {"kind": "agent", "text": "the file says hello"},
         ],
+        "has_older": False,
     }
 
 
@@ -5654,6 +5691,7 @@ def test_history_omits_a_call_still_pending_approval_lg(
     assert history == {
         "type": "history",
         "entries": [{"kind": "user", "text": "write hi to note.txt"}],
+        "has_older": False,
     }
 
 
