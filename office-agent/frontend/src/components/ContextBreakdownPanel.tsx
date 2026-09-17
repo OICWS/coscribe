@@ -49,7 +49,6 @@ export function ContextBreakdownPanel({ threadId, refreshKey }: ContextBreakdown
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshKey is the trigger, not real data
   }, [threadId, refreshKey]);
 
   if (error) {
