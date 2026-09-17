@@ -53,8 +53,8 @@ the file is touched, rather than producing a `.docx` that happens to open
 in Word/LibreOffice's own forgiving parsers today but is not actually a
 conformant document.
 
-``insert_docx_tracked_text``/``delete_docx_tracked_text``/
-``replace_docx_tracked_text``/``accept_docx_tracked_changes``/
+``insert_docx_text``/``delete_docx_text``/
+``replace_docx_text``/``accept_docx_tracked_changes``/
 ``reject_docx_tracked_changes`` edit an *existing* docx in place with real
 ``<w:ins>``/``<w:del>`` tracked-changes markup, using
 ``_native_docx_tracks.tracks.TracksMixin`` (vendored from
@@ -861,12 +861,13 @@ class DocumentToolkit:
             "preview_skipped_reason": preview_skipped_reason,
         }
 
-    def insert_docx_tracked_text(
+    def insert_docx_text(
         self,
         path: str,
         text: str,
         context_before: str,
         context_after: str = "",
+        track_changes: bool = True,
         author: str = "Coscribe",
         ignore_case: bool = False,
     ) -> dict[str, object]:
@@ -886,16 +887,18 @@ class DocumentToolkit:
             context_before=context_before,
             context_after=context_after,
             ignore_case=ignore_case,
+            tracked=track_changes,
         )
         result.update(self._save_tracked_edit(file_path, document))
         return result
 
-    def delete_docx_tracked_text(
+    def delete_docx_text(
         self,
         path: str,
         text: str,
         context_before: str = "",
         context_after: str = "",
+        track_changes: bool = True,
         author: str = "Coscribe",
         ignore_case: bool = False,
     ) -> dict[str, object]:
@@ -910,17 +913,19 @@ class DocumentToolkit:
             context_before=context_before,
             context_after=context_after,
             ignore_case=ignore_case,
+            tracked=track_changes,
         )
         result.update(self._save_tracked_edit(file_path, document))
         return result
 
-    def replace_docx_tracked_text(
+    def replace_docx_text(
         self,
         path: str,
         find: str,
         replace: str,
         context_before: str = "",
         context_after: str = "",
+        track_changes: bool = True,
         author: str = "Coscribe",
         ignore_case: bool = False,
     ) -> dict[str, object]:
@@ -936,6 +941,7 @@ class DocumentToolkit:
             context_before=context_before,
             context_after=context_after,
             ignore_case=ignore_case,
+            tracked=track_changes,
         )
         result.update(self._save_tracked_edit(file_path, document))
         return result
@@ -1159,22 +1165,31 @@ def build_document_tools(
             comment_author=comment_author,
         )
 
-    def insert_docx_tracked_text(
+    def insert_docx_text(
         path: str,
         text: str,
         context_before: str,
         context_after: str = "",
+        track_changes: bool = True,
         author: str = "Coscribe",
         ignore_case: bool = False,
     ) -> dict[str, object]:
-        """Insert text into an existing Word (.docx) file as a tracked change.
+        """Insert text into an existing Word (.docx) file, in place.
 
-        Wraps the inserted text in a `<w:ins>` tracked-changes markup Word
-        shows in its Review pane, rather than editing the document silently.
-        The target location is found from `context_before` -- the existing
-        text to insert immediately after -- not a paragraph number or id;
-        this must be unique in the document, or use `context_after` (text
-        immediately following the insertion point) to disambiguate.
+        Edits the real document tree directly -- headers/footers, other
+        paragraphs, tables, and images are left completely untouched,
+        unlike `write_docx` (which regenerates the whole document from a
+        markdown subset and would silently drop anything that subset can't
+        represent). The target location is found from `context_before` --
+        the existing text to insert immediately after -- not a paragraph
+        number or id; this must be unique in the document, or use
+        `context_after` (text immediately following the insertion point)
+        to disambiguate.
+
+        With `track_changes=True` (the default), the inserted text is
+        wrapped in `<w:ins>` tracked-changes markup Word shows in its
+        Review pane, rather than becoming final text immediately -- use
+        `track_changes=False` for a plain, silent edit.
 
         Args:
             path: existing .docx file to edit, relative to the workspace root
@@ -1185,69 +1200,94 @@ def build_document_tools(
             context_after: existing text immediately following the
                 insertion point, to disambiguate when context_before alone
                 is not unique
-            author: author name recorded on the tracked-change markup
+            track_changes: insert as a reviewable tracked change (default)
+                rather than a plain, already-final edit
+            author: author name recorded on the tracked-change markup, when
+                track_changes is True
             ignore_case: match context_before/context_after case-insensitively
         """
-        return toolkit.insert_docx_tracked_text(
+        return toolkit.insert_docx_text(
             path=path,
             text=text,
             context_before=context_before,
             context_after=context_after,
+            track_changes=track_changes,
             author=author,
             ignore_case=ignore_case,
         )
 
-    def delete_docx_tracked_text(
+    def delete_docx_text(
         path: str,
         text: str,
         context_before: str = "",
         context_after: str = "",
+        track_changes: bool = True,
         author: str = "Coscribe",
         ignore_case: bool = False,
     ) -> dict[str, object]:
-        """Mark text in an existing Word (.docx) file as deleted, as a tracked change.
+        """Delete text from an existing Word (.docx) file, in place.
 
-        Wraps the text in `<w:del>` tracked-changes markup Word shows in its
-        Review pane (strikethrough), rather than removing it silently.
-        `text` must be unique in the document; use `context_before`/
-        `context_after` (surrounding text) to disambiguate if it appears
-        more than once.
+        Edits the real document tree directly -- headers/footers, other
+        paragraphs, tables, and images are left completely untouched,
+        unlike `write_docx` (which regenerates the whole document from a
+        markdown subset and would silently drop anything that subset can't
+        represent). `text` must be unique in the document; use
+        `context_before`/`context_after` (surrounding text) to disambiguate
+        if it appears more than once.
+
+        With `track_changes=True` (the default), the text is wrapped in
+        `<w:del>` tracked-changes markup Word shows in its Review pane
+        (strikethrough) rather than being removed immediately -- use
+        `track_changes=False` to remove it outright.
 
         Args:
             path: existing .docx file to edit, relative to the workspace root
-            text: the exact text to mark as deleted
+            text: the exact text to delete
             context_before: text immediately before `text`, to disambiguate
                 if it appears more than once
             context_after: text immediately after `text`, to disambiguate
                 if it appears more than once
-            author: author name recorded on the tracked-change markup
+            track_changes: mark as a reviewable tracked deletion (default)
+                rather than removing the text outright
+            author: author name recorded on the tracked-change markup, when
+                track_changes is True
             ignore_case: match text/context case-insensitively
         """
-        return toolkit.delete_docx_tracked_text(
+        return toolkit.delete_docx_text(
             path=path,
             text=text,
             context_before=context_before,
             context_after=context_after,
+            track_changes=track_changes,
             author=author,
             ignore_case=ignore_case,
         )
 
-    def replace_docx_tracked_text(
+    def replace_docx_text(
         path: str,
         find: str,
         replace: str,
         context_before: str = "",
         context_after: str = "",
+        track_changes: bool = True,
         author: str = "Coscribe",
         ignore_case: bool = False,
     ) -> dict[str, object]:
-        """Replace text in an existing Word (.docx) file as a tracked change.
+        """Replace text in an existing Word (.docx) file, in place.
 
-        Marks only the actually-changed portion of `find` as a tracked
-        deletion+insertion (e.g. replacing "red" with "blue" in "the red
-        car" tracks just "red" -> "blue", not the whole sentence). `find`
-        must be unique in the document; use `context_before`/
-        `context_after` to disambiguate if it appears more than once.
+        Edits the real document tree directly -- headers/footers, other
+        paragraphs, tables, and images are left completely untouched,
+        unlike `write_docx` (which regenerates the whole document from a
+        markdown subset and would silently drop anything that subset can't
+        represent). `find` must be unique in the document; use
+        `context_before`/`context_after` to disambiguate if it appears
+        more than once.
+
+        With `track_changes=True` (the default), marks only the actually-
+        changed portion of `find` as a tracked deletion+insertion (e.g.
+        replacing "red" with "blue" in "the red car" tracks just "red" ->
+        "blue", not the whole sentence) -- use `track_changes=False` for a
+        plain, silent edit.
 
         Args:
             path: existing .docx file to edit, relative to the workspace root
@@ -1257,15 +1297,19 @@ def build_document_tools(
                 if it appears more than once
             context_after: text immediately after `find`, to disambiguate
                 if it appears more than once
-            author: author name recorded on the tracked-change markup
+            track_changes: mark as a reviewable tracked change (default)
+                rather than a plain, already-final edit
+            author: author name recorded on the tracked-change markup, when
+                track_changes is True
             ignore_case: match find/context case-insensitively
         """
-        return toolkit.replace_docx_tracked_text(
+        return toolkit.replace_docx_text(
             path=path,
             find=find,
             replace=replace,
             context_before=context_before,
             context_after=context_after,
+            track_changes=track_changes,
             author=author,
             ignore_case=ignore_case,
         )
@@ -1341,9 +1385,9 @@ def build_document_tools(
     return [
         tool_metadata(read_docx, risk_category="READ", category="documents"),
         tool_metadata(write_docx, risk_category="WRITE_LOCAL", category="documents"),
-        tool_metadata(insert_docx_tracked_text, risk_category="WRITE_LOCAL", category="documents"),
-        tool_metadata(delete_docx_tracked_text, risk_category="WRITE_LOCAL", category="documents"),
-        tool_metadata(replace_docx_tracked_text, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(insert_docx_text, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(delete_docx_text, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(replace_docx_text, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(
             accept_docx_tracked_changes, risk_category="WRITE_LOCAL", category="documents"
         ),

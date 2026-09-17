@@ -5169,6 +5169,63 @@ diffable against upstream, not coscribe's own style). 15 new tests
 
 ---
 
+## Phase 8as -- DOCX quality track, Workstream C: plain (untracked) editing, folded into Workstream B's tools rather than duplicated
+
+Workstream C's original plan (see this file's Phase 8ar entry) was a
+separate raw-XML find-and-replace path for editing an existing docx in
+place without destroying content `write_docx`'s markdown-subset
+regeneration would silently drop. Re-examined once actually starting it:
+Workstream B's `insert_docx_tracked_text`/`delete_docx_tracked_text`/
+`replace_docx_tracked_text` **already are** that path -- they mutate the
+already-open `python-docx` tree directly, never regenerate the document,
+and the vendored `tracks.py`'s own `_flatten_para` already solves the
+"text fragmented across many `<w:r>` runs" problem by building one
+contiguous accepted-view string per paragraph before matching, so a
+separate `merge_runs.py`-style preprocessing step (part of the original
+plan) turned out to be unnecessary -- confirmed by reading the vendored
+code, not assumed. The one real gap: `tracks.py`'s own `insert_text`/
+`delete_text`/`replace_text` already accept a `tracked: bool` parameter
+(defaulting `True`) that Workstream B's tools never exposed, always
+calling it as `True` -- meaning "edit this file without redline markup"
+had no coscribe-facing path at all, despite the underlying engine
+already supporting it.
+
+Closed that gap by extending the three tools rather than adding three
+near-duplicate ones next to them (would have meant two parallel families
+doing the same text-location work): renamed
+`insert_docx_tracked_text`/`delete_docx_tracked_text`/
+`replace_docx_tracked_text` to `insert_docx_text`/`delete_docx_text`/
+`replace_docx_text` (dropping "tracked" since they now do both) and
+added `track_changes: bool = True` (matching `write_docx`'s own existing
+parameter name/default convention exactly), threaded straight through to
+`tracked=track_changes` on the vendored mixin's calls.
+`accept_docx_tracked_changes`/`reject_docx_tracked_changes` keep their
+names -- accept/reject only ever make sense for tracked edits. Renaming
+tools just shipped in the same session, before any real usage depended
+on the old names, was the safe window to do this in rather than carrying
+two overlapping tool families forward.
+
+**New tests, closing the actual verification gap the original plan
+called out**: `track_changes=False` variants of insert/delete/replace
+confirming no `<w:ins>`/`<w:del>` markup is produced and the edit is
+already-final; and a real end-to-end test building a document with a
+header, a footer, and a table (none of which `write_docx`'s markdown
+subset can represent at all) via `python-docx` directly, editing its
+main-body text with `replace_docx_text`, and confirming the header/
+footer/table content survives completely untouched -- the concrete claim
+this whole workstream exists to back up, not just "the tool didn't
+crash." (Also caught a test-authoring mistake of my own here, not a
+code bug: `replace_docx_text`'s collapseDiff minimisation correctly
+tracks only "100" -> "200" out of "100 dollars" -> "200 dollars", leaving
+"dollars" untouched either side -- my first draft of this test asserted
+the whole phrase was tracked, which is the redlined-Word-document
+equivalent of not reading your own feature's docstring.)
+
+**Verified**: `ruff check src tests`/`mypy src` both clean; 4 new tests;
+full suite green throughout.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

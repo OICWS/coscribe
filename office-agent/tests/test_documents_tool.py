@@ -353,13 +353,13 @@ _CONTRACT_CONTENT = (
 )
 
 
-def test_insert_docx_tracked_text_wraps_the_insertion_in_a_real_w_ins(tmp_path: Path) -> None:
+def test_insert_docx_text_wraps_the_insertion_in_a_real_w_ins(tmp_path: Path) -> None:
     from docx.oxml.ns import qn
 
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
 
-    result = tools["insert_docx_tracked_text"](
+    result = tools["insert_docx_text"](
         path="c.docx", text=" (extended)", context_before="30 days", author="Alice"
     )
     assert result["type"] == "insertion"
@@ -377,13 +377,13 @@ def test_insert_docx_tracked_text_wraps_the_insertion_in_a_real_w_ins(tmp_path: 
     assert " (extended)" not in doc.paragraphs[1].text
 
 
-def test_delete_docx_tracked_text_wraps_the_deletion_in_a_real_w_del(tmp_path: Path) -> None:
+def test_delete_docx_text_wraps_the_deletion_in_a_real_w_del(tmp_path: Path) -> None:
     from docx.oxml.ns import qn
 
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
 
-    result = tools["delete_docx_tracked_text"](path="c.docx", text="100 dollars", author="Bob")
+    result = tools["delete_docx_text"](path="c.docx", text="100 dollars", author="Bob")
     assert result["type"] == "deletion"
 
     doc = Document(tmp_path / "c.docx")
@@ -399,13 +399,13 @@ def test_delete_docx_tracked_text_wraps_the_deletion_in_a_real_w_del(tmp_path: P
     assert "100 dollars" not in doc.paragraphs[1].text
 
 
-def test_replace_docx_tracked_text_marks_only_the_changed_portion(tmp_path: Path) -> None:
+def test_replace_docx_text_marks_only_the_changed_portion(tmp_path: Path) -> None:
     from docx.oxml.ns import qn
 
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
 
-    result = tools["replace_docx_tracked_text"](path="c.docx", find="widgets", replace="gadgets")
+    result = tools["replace_docx_text"](path="c.docx", find="widgets", replace="gadgets")
     assert result["type"] == "replacement"
 
     doc = Document(tmp_path / "c.docx")
@@ -422,8 +422,8 @@ def test_accept_docx_tracked_changes_makes_insertions_permanent_and_removes_dele
 ) -> None:
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
-    tools["insert_docx_tracked_text"](path="c.docx", text=" (extended)", context_before="30 days")
-    tools["delete_docx_tracked_text"](path="c.docx", text="100 dollars")
+    tools["insert_docx_text"](path="c.docx", text=" (extended)", context_before="30 days")
+    tools["delete_docx_text"](path="c.docx", text="100 dollars")
 
     result = tools["accept_docx_tracked_changes"](path="c.docx")
     assert result["accepted"] == 2
@@ -438,8 +438,8 @@ def test_accept_docx_tracked_changes_makes_insertions_permanent_and_removes_dele
 def test_reject_docx_tracked_changes_restores_the_original_text(tmp_path: Path) -> None:
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
-    tools["insert_docx_tracked_text"](path="c.docx", text=" (extended)", context_before="30 days")
-    tools["delete_docx_tracked_text"](path="c.docx", text="100 dollars")
+    tools["insert_docx_text"](path="c.docx", text=" (extended)", context_before="30 days")
+    tools["delete_docx_text"](path="c.docx", text="100 dollars")
 
     result = tools["reject_docx_tracked_changes"](path="c.docx")
     assert result["rejected"] == 2
@@ -453,10 +453,10 @@ def test_reject_docx_tracked_changes_restores_the_original_text(tmp_path: Path) 
 def test_accept_docx_tracked_changes_can_be_scoped_to_one_author(tmp_path: Path) -> None:
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
-    tools["insert_docx_tracked_text"](
+    tools["insert_docx_text"](
         path="c.docx", text=" ALICE", context_before="30 days", author="Alice"
     )
-    tools["insert_docx_tracked_text"](
+    tools["insert_docx_text"](
         path="c.docx", text=" BOB", context_before="invoice date", author="Bob"
     )
 
@@ -474,23 +474,23 @@ def test_accept_docx_tracked_changes_can_be_scoped_to_one_author(tmp_path: Path)
     assert " ALICE" in doc.paragraphs[1].text
 
 
-def test_insert_docx_tracked_text_requires_context_before(tmp_path: Path) -> None:
+def test_insert_docx_text_requires_context_before(tmp_path: Path) -> None:
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
 
     with pytest.raises(ValueError, match="context_before is required"):
-        tools["insert_docx_tracked_text"](path="c.docx", text="x", context_before="")
+        tools["insert_docx_text"](path="c.docx", text="x", context_before="")
 
 
-def test_delete_docx_tracked_text_raises_when_text_not_found(tmp_path: Path) -> None:
+def test_delete_docx_text_raises_when_text_not_found(tmp_path: Path) -> None:
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
 
     with pytest.raises(ValueError, match="not found"):
-        tools["delete_docx_tracked_text"](path="c.docx", text="nonexistent phrase")
+        tools["delete_docx_text"](path="c.docx", text="nonexistent phrase")
 
 
-def test_delete_docx_tracked_text_raises_when_ambiguous_across_paragraphs(
+def test_delete_docx_text_raises_when_ambiguous_across_paragraphs(
     tmp_path: Path,
 ) -> None:
     tools = _tools_by_name(tmp_path)
@@ -500,7 +500,7 @@ def test_delete_docx_tracked_text_raises_when_ambiguous_across_paragraphs(
     )
 
     with pytest.raises(ValueError, match="different paragraphs"):
-        tools["delete_docx_tracked_text"](path="c.docx", text="repeated text")
+        tools["delete_docx_text"](path="c.docx", text="repeated text")
 
 
 def test_tracked_edit_tools_still_validate_against_wml_xsd(tmp_path: Path) -> None:
@@ -512,12 +512,106 @@ def test_tracked_edit_tools_still_validate_against_wml_xsd(tmp_path: Path) -> No
 
     tools = _tools_by_name(tmp_path)
     tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
-    tools["insert_docx_tracked_text"](path="c.docx", text=" (extended)", context_before="30 days")
-    tools["delete_docx_tracked_text"](path="c.docx", text="100 dollars")
-    tools["replace_docx_tracked_text"](path="c.docx", find="widgets", replace="gadgets")
+    tools["insert_docx_text"](path="c.docx", text=" (extended)", context_before="30 days")
+    tools["delete_docx_text"](path="c.docx", text="100 dollars")
+    tools["replace_docx_text"](path="c.docx", find="widgets", replace="gadgets")
 
     doc = Document(tmp_path / "c.docx")
     assert ooxml_errors(doc.element, schema_path=_WML_XSD) == []
+
+
+def test_insert_docx_text_with_track_changes_false_edits_silently(tmp_path: Path) -> None:
+    from docx.oxml.ns import qn
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+
+    tools["insert_docx_text"](
+        path="c.docx", text=" (extended)", context_before="30 days", track_changes=False
+    )
+
+    doc = Document(tmp_path / "c.docx")
+    assert list(doc.element.body.iter(qn("w:ins"))) == []
+    assert "30 days (extended)" in doc.paragraphs[1].text
+
+
+def test_delete_docx_text_with_track_changes_false_removes_outright(tmp_path: Path) -> None:
+    from docx.oxml.ns import qn
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+
+    tools["delete_docx_text"](path="c.docx", text="100 dollars", track_changes=False)
+
+    doc = Document(tmp_path / "c.docx")
+    assert list(doc.element.body.iter(qn("w:del"))) == []
+    assert "100 dollars" not in doc.paragraphs[1].text
+
+
+def test_replace_docx_text_with_track_changes_false_edits_silently(tmp_path: Path) -> None:
+    from docx.oxml.ns import qn
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="c.docx", content=_CONTRACT_CONTENT)
+
+    tools["replace_docx_text"](
+        path="c.docx", find="widgets", replace="gadgets", track_changes=False
+    )
+
+    doc = Document(tmp_path / "c.docx")
+    assert list(doc.element.body.iter(qn("w:ins"))) == []
+    assert list(doc.element.body.iter(qn("w:del"))) == []
+    assert "gadgets" in doc.paragraphs[2].text
+    assert "widgets" not in doc.paragraphs[2].text
+
+
+def test_edit_tools_preserve_headers_footers_and_tables_write_docx_would_drop(
+    tmp_path: Path,
+) -> None:
+    # The whole point of these in-place edit tools over write_docx's
+    # regenerate-from-markdown model: content the markdown subset can't
+    # represent (headers/footers, tables) must survive an edit untouched,
+    # not get silently dropped.
+    from docx import Document as DocxDocument
+
+    path = tmp_path / "report.docx"
+    doc = DocxDocument()
+    doc.add_paragraph("The total price is 100 dollars, due within 30 days.")
+    header = doc.sections[0].header
+    header.paragraphs[0].text = "Acme Corp -- Confidential"
+    footer = doc.sections[0].footer
+    footer.paragraphs[0].text = "Page footer text"
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Item"
+    table.cell(0, 1).text = "Qty"
+    table.cell(1, 0).text = "Widgets"
+    table.cell(1, 1).text = "5"
+    doc.save(str(path))
+
+    tools = _tools_by_name(tmp_path)
+    tools["replace_docx_text"](path="report.docx", find="100 dollars", replace="200 dollars")
+
+    reopened = DocxDocument(str(path))
+    assert reopened.sections[0].header.paragraphs[0].text == "Acme Corp -- Confidential"
+    assert reopened.sections[0].footer.paragraphs[0].text == "Page footer text"
+    assert reopened.tables[0].cell(0, 0).text == "Item"
+    assert reopened.tables[0].cell(1, 0).text == "Widgets"
+    assert reopened.tables[0].cell(1, 1).text == "5"
+    # And the actual edit really happened, tracked -- collapseDiff trims the
+    # tracked markup to just the changed word ("100" -> "200"), leaving the
+    # shared "dollars" as plain, untracked text either side of it.
+    from docx.oxml.ns import qn
+
+    deleted = {
+        t.text
+        for el in reopened.element.body.iter(qn("w:del"))
+        for t in el.iter(qn("w:delText"))
+    }
+    inserted = {
+        t.text for el in reopened.element.body.iter(qn("w:ins")) for t in el.iter(qn("w:t"))
+    }
+    assert deleted == {"100"}
+    assert inserted == {"200"}
 
 
 @pytest.mark.real_libreoffice
@@ -579,9 +673,9 @@ def test_read_tools_are_low_risk_write_tools_require_approval(tmp_path: Path) ->
     for name in (
         "write_docx",
         "write_pdf",
-        "insert_docx_tracked_text",
-        "delete_docx_tracked_text",
-        "replace_docx_tracked_text",
+        "insert_docx_text",
+        "delete_docx_text",
+        "replace_docx_text",
         "accept_docx_tracked_changes",
         "reject_docx_tracked_changes",
     ):
