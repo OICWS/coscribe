@@ -1,16 +1,18 @@
-"""Structural OOXML schema validation for `presentations.py`'s hand-written
-XML -- `set_pptx_transition`, `add_pptx_animation`, `edit_pptx_theme_colors`,
-and the theme-blob edits inside `write_pptx`/`fill_pptx_template`
-(`_apply_theme`/`_apply_cjk_font_fix`). Those are the only places this
-package writes OOXML python-pptx has no public API for (see
-presentations.py's own module docstring); this is the safety net a
-schema-conformant library call doesn't need, catching a wrong-order or
-missing-required-field mistake in hand-built XML that `prs.save()` +
-LibreOffice's own more forgiving parser would silently let through.
+"""Structural OOXML schema validation for this package's own hand-written
+XML -- originally just `presentations.py`'s (`set_pptx_transition`,
+`add_pptx_animation`, `edit_pptx_theme_colors`, the theme-blob edits inside
+`write_pptx`/`fill_pptx_template`), now also `documents.py`'s `write_docx`
+via `assert_wml_valid`. Those are places this package writes OOXML
+python-pptx/python-docx has no public API for, or edits a whole document
+tree by hand; this is the safety net a schema-conformant library call
+doesn't need, catching a wrong-order or missing-required-field mistake in
+hand-built XML that `prs.save()`/`document.save()` + LibreOffice's own
+more forgiving parser would silently let through.
 
-`_ooxml_schemas/transitional/pml.xsd` (see that directory's NOTICE.md for
-provenance) is the real presentationml schema real-world `.pptx` files --
-PowerPoint's own, python-pptx's, pptxgenjs's -- conform to. Its own
+`_ooxml_schemas/transitional/pml.xsd` and `wml.xsd` (see that directory's
+NOTICE.md for provenance) are the real presentationml/wordprocessingml
+schemas real-world `.pptx`/`.docx` files -- PowerPoint's/Word's own,
+python-pptx's/python-docx's, pptxgenjs's -- conform to. `pml.xsd`'s own
 `xsd:import` chain pulls in drawingml (`dml-main.xsd`, the same namespace
 `<a:theme>` lives in), so one compiled schema validates both a `<p:sld>`
 slide element and an `<a:theme>` theme-part root -- confirmed empirically,
@@ -19,17 +21,17 @@ real python-pptx-authored file, and the schema does reject real defects
 (verified with a deliberately reordered `<p:transition>` before `<p:cSld>`,
 which the ECMA-376 sequence requires the other way around).
 
-Every call site in `presentations.py` runs this *before* the mutated
-element is serialized back into the file being written -- `assert_valid`
+Every call site runs this *before* the mutated element is serialized back
+into the file being written -- `assert_ooxml_valid`/`assert_wml_valid`
 raising here means the user's file was never touched, the same guarantee
 `add_pptx_animation`'s own `_verify_animation_readback` already makes for
 its own narrower, application-level check. This is a stronger, general
 check on top of that one, not a replacement for it: readback confirms
 *the specific animation we meant to add is there*; schema validation
-confirms *the whole slide is still a schema-conformant OOXML document*,
-catching classes of mistake the readback check was never designed to
-notice (e.g. an attribute on an unrelated element, or a child added in
-the wrong position elsewhere in the tree).
+confirms *the whole slide/document is still a schema-conformant OOXML
+document*, catching classes of mistake the readback check was never
+designed to notice (e.g. an attribute on an unrelated element, or a child
+added in the wrong position elsewhere in the tree).
 """
 
 from __future__ import annotations
@@ -40,6 +42,12 @@ from typing import Any
 
 _SCHEMA_DIR = Path(__file__).parent / "_ooxml_schemas" / "transitional"
 _PML_XSD = _SCHEMA_DIR / "pml.xsd"
+_WML_XSD = _SCHEMA_DIR / "wml.xsd"
+
+# Namespace URI wml.xsd imports (for `xml:space` on `<w:t>`/`<w:instrText>`)
+# with no `schemaLocation` in Ecma's own published file -- see NOTICE.md.
+_XSD_NS = "http://www.w3.org/2001/XMLSchema"
+_XML_1998_NS = "http://www.w3.org/XML/1998/namespace"
 
 # ECMA-376 Part 3's Markup Compatibility and Extensibility namespace -- the
 # vendored Part 4 (Transitional) schema this module validates against
@@ -58,14 +66,23 @@ _MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 _MC_IGNORABLE = f"{{{_MC_NS}}}Ignorable"
 
 
-@lru_cache(maxsize=1)
-def _compiled_schema() -> Any:
-    """Compiled once per process (~30ms measured), cached after that --
-    every call site below shares this one object rather than recompiling
-    per call."""
+@lru_cache(maxsize=2)
+def _compiled_schema(schema_path: Path = _PML_XSD) -> Any:
+    """Compiled once per process per schema (~30ms measured), cached after
+    that -- every call site below shares these objects rather than
+    recompiling per call."""
     from lxml import etree
 
-    return etree.XMLSchema(etree.parse(str(_PML_XSD)))
+    tree = etree.parse(str(schema_path))
+    if schema_path == _WML_XSD:
+        # Patch the missing schemaLocation onto this in-memory copy only
+        # -- never the file on disk, which stays byte-identical to Ecma's
+        # own download (see NOTICE.md). `xml.xsd` sits alongside wml.xsd
+        # in the same directory, so the relative schemaLocation resolves.
+        for import_element in tree.getroot().findall(f"{{{_XSD_NS}}}import"):
+            if import_element.get("namespace") == _XML_1998_NS:
+                import_element.set("schemaLocation", "xml.xsd")
+    return etree.XMLSchema(tree)
 
 
 def _strip_mce_ignorable(element: Any) -> Any:
@@ -127,28 +144,36 @@ def _strip_mce_ignorable(element: Any) -> Any:
     return working
 
 
-def ooxml_errors(element: Any) -> list[str]:
-    """Validate an already-parsed lxml `element` (a `<p:sld>` or `<a:theme>`
-    root, still living in memory) against the ECMA-376 Transitional schema,
-    after stripping any content a declared `mc:Ignorable` namespace marks
-    as extension content (see `_strip_mce_ignorable`). Returns
-    human-readable error strings, empty if valid."""
-    schema = _compiled_schema()
+def ooxml_errors(element: Any, schema_path: Path = _PML_XSD) -> list[str]:
+    """Validate an already-parsed lxml `element` (e.g. a `<p:sld>`/
+    `<a:theme>` root against `pml.xsd`, or a `<w:document>` root against
+    `wml.xsd`) against the ECMA-376 Transitional schema named by
+    `schema_path`, after stripping any content a declared `mc:Ignorable`
+    namespace marks as extension content (see `_strip_mce_ignorable`).
+    Returns human-readable error strings, empty if valid."""
+    schema = _compiled_schema(schema_path)
     if schema.validate(_strip_mce_ignorable(element)):
         return []
     return [str(error) for error in schema.error_log]
 
 
-def assert_ooxml_valid(element: Any, context: str) -> None:
+def assert_ooxml_valid(element: Any, context: str, schema_path: Path = _PML_XSD) -> None:
     """Raise `RuntimeError` if `element` fails schema validation. Call this
     strictly before the element (or the blob it's serialized into) is
-    written to the real file -- every call site in `presentations.py` does,
-    so the error message's "not modified" claim is always true, not
-    aspirational."""
-    errors = ooxml_errors(element)
+    written to the real file -- every call site does, so the error
+    message's "not modified" claim is always true, not aspirational."""
+    errors = ooxml_errors(element, schema_path)
     if not errors:
         return
     raise RuntimeError(
         f"{context}: the generated OOXML failed schema validation -- the file "
         f"was not modified. Errors:\n" + "\n".join(errors)
     )
+
+
+def assert_wml_valid(element: Any, context: str) -> None:
+    """`assert_ooxml_valid` against `wml.xsd` (WordprocessingML) instead of
+    `pml.xsd` -- for `documents.py`'s hand-written/hand-mutated docx XML
+    (`write_docx`'s tracked-changes markup, comment anchors, TOC field,
+    template body-clearing)."""
+    assert_ooxml_valid(element, context, schema_path=_WML_XSD)

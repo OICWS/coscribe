@@ -41,6 +41,17 @@ before writing the new content. Verified empirically (round-tripped
 through python-docx) that removing anything else, or removing ``sectPr``
 too, breaks the document; this is the one thing in this file that isn't a
 pure library call.
+
+``write_docx`` validates its finished in-memory document tree against the
+real ECMA-376 ``wml.xsd`` schema (``_ooxml_validate.assert_wml_valid``)
+immediately before ``document.save()`` -- the same "never serialize an
+unvalidated write" discipline ``presentations.py`` already established
+for its own hand-built OOXML (tracked-changes markup, TOC field,
+comment-range anchors, and template body-clearing are all hand-mutated
+XML python-docx has no schema-checked API for). A failure raises before
+the file is touched, rather than producing a `.docx` that happens to open
+in Word/LibreOffice's own forgiving parsers today but is not actually a
+conformant document.
 """
 
 from __future__ import annotations
@@ -55,6 +66,7 @@ from typing import Any
 from xml.sax.saxutils import escape as _xml_escape
 
 from ..runtime.types import tool_metadata
+from ._ooxml_validate import assert_wml_valid
 from ._thumbnail import render_thumbnail
 from ._workspace import WorkspaceScope
 from .files import DEFAULT_IGNORES
@@ -653,6 +665,7 @@ class DocumentToolkit:
         for index, (paragraph_element, _) in enumerate(pending_comments):
             _new_comment_anchor(paragraph_element, str(index))
 
+        assert_wml_valid(document.element, "write_docx")
         document.save(str(file_path))
 
         if pending_comments:

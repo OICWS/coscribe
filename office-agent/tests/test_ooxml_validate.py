@@ -2,7 +2,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from coscribe.tools._ooxml_validate import assert_ooxml_valid, ooxml_errors
+from coscribe.tools._ooxml_validate import assert_ooxml_valid, assert_wml_valid, ooxml_errors
 
 _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 _A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -121,3 +121,111 @@ def test_unrelated_ignorable_namespace_does_not_hide_a_real_defect() -> None:
 
     errors = ooxml_errors(sld)
     assert errors != []
+
+
+def test_valid_real_docx_document_passes_wml_validation(tmp_path: Path) -> None:
+    # Exercises every write_docx block kind in one document: headings,
+    # bullets, numbers, a table, a TOC field, and a {{comment: ...}}
+    # anchor -- the full real surface `write_docx` produces.
+    from coscribe.tools.documents import DocumentToolkit
+
+    toolkit = DocumentToolkit(tmp_path)
+    content = (
+        "# Title\n\n## Subheading\n\nA plain paragraph with **bold** text.\n\n"
+        "- bullet one\n- bullet two\n\n1. number one\n2. number two\n\n"
+        "[TOC]\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n"
+        "Last paragraph.{{comment: a note}}\n"
+    )
+    toolkit.write_docx("out.docx", content)  # must not raise
+
+    from docx import Document
+
+    reopened = Document(str(tmp_path / "out.docx"))
+    assert ooxml_errors(reopened.element, schema_path=_wml_xsd()) == []
+    assert_wml_valid(reopened.element, "test")  # must not raise
+
+
+def test_valid_real_docx_with_track_changes_passes_wml_validation(tmp_path: Path) -> None:
+    # <w:ins>/<w:del> tracked-insertion markup (_mark_paragraph_inserted)
+    # is hand-built XML, exactly the class of write this gate exists for.
+    from coscribe.tools.documents import DocumentToolkit
+
+    toolkit = DocumentToolkit(tmp_path)
+    toolkit.write_docx(
+        "tracked.docx",
+        "# Heading\n\nA new paragraph.",
+        track_changes=True,
+        change_author="Reviewer",
+    )
+
+    from docx import Document
+
+    reopened = Document(str(tmp_path / "tracked.docx"))
+    assert ooxml_errors(reopened.element, schema_path=_wml_xsd()) == []
+
+
+def test_valid_real_docx_from_template_with_track_changes_passes_wml_validation(
+    tmp_path: Path,
+) -> None:
+    # _mark_body_deleted's <w:del> paragraph-mark-deletion markup on a
+    # template's existing content, exercised together with a new
+    # tracked-insertion paragraph.
+    from coscribe.tools.documents import DocumentToolkit
+
+    toolkit = DocumentToolkit(tmp_path)
+    toolkit.write_docx("template.docx", "# Old Report\n\nOld paragraph content.")
+    toolkit.write_docx(
+        "redlined.docx",
+        "# New Heading\n\nNew paragraph body.",
+        template_path="template.docx",
+        track_changes=True,
+    )
+
+    from docx import Document
+
+    reopened = Document(str(tmp_path / "redlined.docx"))
+    assert ooxml_errors(reopened.element, schema_path=_wml_xsd()) == []
+
+
+def test_docx_element_in_wrong_position_is_rejected() -> None:
+    # A <w:sectPr> (section properties) directly inside a run is
+    # schema-illegal -- a real defect this gate exists to catch, the wml
+    # analogue of the pml "wrong transition order" test above.
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    document = Document()
+    document.add_paragraph("hello")
+    paragraph = document.element.body.find(qn("w:p"))
+    run = paragraph.find(qn("w:r"))
+    run.append(OxmlElement("w:sectPr"))
+
+    errors = ooxml_errors(document.element, schema_path=_wml_xsd())
+    assert errors != []
+    assert any("sectPr" in error for error in errors)
+
+
+def test_assert_wml_valid_raises_with_context_and_leaves_no_side_effect() -> None:
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    document = Document()
+    document.add_paragraph("hello")
+    paragraph = document.element.body.find(qn("w:p"))
+    run = paragraph.find(qn("w:r"))
+    run.append(OxmlElement("w:sectPr"))
+
+    try:
+        assert_wml_valid(document.element, "write_docx")
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "write_docx" in str(exc)
+        assert "not modified" in str(exc)
+
+
+def _wml_xsd() -> Path:
+    from coscribe.tools._ooxml_validate import _WML_XSD
+
+    return _WML_XSD
