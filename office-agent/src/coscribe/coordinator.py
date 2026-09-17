@@ -43,6 +43,43 @@ from .tools import (
     load_skills,
 )
 
+# The always-bound tool set when Settings.defer_tools is on (see
+# web/session.py's _build_lg_agent and runtime_lg/tool_deferral.py) --
+# everything else among this module's own tools stays hidden until the
+# model calls search_tools for it. A reasoned starting set, not measured
+# usage data (no per-tool call-frequency log exists yet to measure it
+# from -- AuditLog only records approval *decisions* for gated tools,
+# not every call): the plain file primitives and task tracking are
+# INSTRUCTIONS' own first things mentioned, ask_user_question is the
+# one interaction primitive nothing else can substitute for, web_search
+# is the single most common "go find out" tool, and the four format
+# readers (docx/pdf/pptx/xlsx) are as foundational to a *document*
+# assistant as read_file itself -- unlike every add_pptx_*/edit_pptx_*/
+# xlsx-specific writer tool below, which only matters once a specific
+# document task is already underway. Deliberately a plain module
+# constant, not computed, so it's easy to re-tune from real usage once
+# there's data to tune it from -- see ROADMAP.md's Phase 8ap for the
+# design discussion this implements.
+CORE_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_files",
+        "search_files",
+        "get_file_info",
+        "task_create",
+        "task_update",
+        "task_list",
+        "ask_user_question",
+        "web_search",
+        "read_docx",
+        "read_pdf",
+        "read_pptx",
+        "read_xlsx",
+    }
+)
+
 INSTRUCTIONS = """\
 You are a local office assistant. \
 Tool/function names below (edit_file, fill_pptx_template, extract_pptx_template, \

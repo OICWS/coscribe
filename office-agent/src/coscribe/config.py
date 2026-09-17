@@ -155,6 +155,32 @@ class Settings(BaseSettings):
     auto_compact_threshold" section.
     """
 
+    defer_tools: bool = False
+    """When True, only `coordinator.CORE_TOOL_NAMES` stay bound to the
+    top-level conversation's model by default -- everything else (most
+    of coscribe's own 95 built-in tools, all MCP tools) is hidden until
+    the model calls `search_tools(query)` to find it, then stays
+    available for the rest of that conversation. See runtime_lg/
+    tool_deferral.py's own module docstring for the full design and
+    ROADMAP.md's Phase 8ap for the measured cost this addresses (~27k
+    tokens of tool JSON schema alone, before this).
+
+    Defaults to False, not because it's unproven -- the core mechanism
+    (hiding/revealing `ModelRequest.tools` per call, and that an
+    approval-gated deferred tool still pauses correctly once discovered)
+    was verified live against real LangChain internals before this
+    setting existed -- but because the real, harder-to-automatically-
+    catch risk is a *capability regression*: a model that doesn't search
+    for a tool it needed just silently doesn't use it, which reads
+    completely differently from a crash. Wired in via web/session.py's
+    ChatSessionLG._build_lg_agent, which passes this straight through to
+    build_langgraph_agent's own `defer_tools`/`core_tool_names`
+    parameters. Only applies to the top-level conversation loop --
+    spawn_agent/spawn_agent_background's own sub-agent graphs already
+    get an explicit, small, parent-chosen tool_names subset, so they
+    have no version of this problem to solve.
+    """
+
     wake_poll_seconds: int = 30
     """How often the web server checks for due sleep_until/sleep_for/
     wake_on/wake_on_event requests (tools/selfwake.py) and resumes their

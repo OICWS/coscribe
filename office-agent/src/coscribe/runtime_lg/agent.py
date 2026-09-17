@@ -26,6 +26,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphBubbleUp
 
 from ..runtime.types import get_tool_metadata
+from .tool_deferral import DeferredToolMiddleware, build_search_tools_tool
 
 
 def tool_name(tool: Callable[..., Any] | BaseTool) -> str:
@@ -139,6 +140,8 @@ def build_langgraph_agent(
     question_tool_names: Iterable[str] = (),
     max_turns: int | None = None,
     auto_compact_tokens: int | None = None,
+    defer_tools: bool = False,
+    core_tool_names: Iterable[str] = (),
 ) -> Any:
     """Build a LangGraph agent reusing coscribe's own ToolMetadata.
 
@@ -207,6 +210,19 @@ def build_langgraph_agent(
     counts raw graph steps (not model calls) and raises `GraphRecursionError`
     instead of ending cleanly; see runtime_lg/README.md for the
     `recursion_limit = 2*max_turns + 1` formula this middleware replaced.
+
+    `defer_tools`/`core_tool_names`: when `defer_tools` is True, every tool
+    not named in `core_tool_names` is hidden from the model by default --
+    a `search_tools` tool (see `tool_deferral.py`) is added so the model
+    can discover and start calling any of them on demand. `tools` itself
+    is unaffected either way (the full set is always given to
+    `create_agent`, so `ToolNode` can execute anything once called --
+    only what's *advertised* to the model per call changes); see
+    `tool_deferral.py`'s own module docstring for why this is safe with
+    approval gating and doesn't need `core_tool_names` to include
+    anything already covered by `extra_interrupt_tool_names`/
+    `question_tool_names` above. `core_tool_names` is ignored when
+    `defer_tools` is False.
 
     `auto_compact_tokens`: when set, adds a `SummarizationMiddleware` using
     `trigger=("tokens", auto_compact_tokens)` rather than the middleware's
@@ -279,9 +295,22 @@ def build_langgraph_agent(
             SummarizationMiddleware(model=model, trigger=("tokens", auto_compact_tokens))
         )
 
+    final_tools = list(tools)
+    if defer_tools:
+        core_names = set(core_tool_names)
+        deferred = [t for t in tools if tool_name(t) not in core_names]
+        # Appended to the *full* tools list passed to create_agent below
+        # (not a separate, restricted one) -- ToolNode needs to recognize
+        # search_tools' own discoveries the moment they're called, same
+        # as every other tool here; only DeferredToolMiddleware's
+        # wrap_model_call, added last, ever narrows what a given request
+        # actually advertises.
+        final_tools.append(build_search_tools_tool(deferred))
+        middleware.append(DeferredToolMiddleware(core_names))
+
     return create_agent(
         model,
-        list(tools),
+        final_tools,
         system_prompt=instructions,
         middleware=middleware,
         checkpointer=checkpointer or InMemorySaver(),

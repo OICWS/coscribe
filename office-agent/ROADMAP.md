@@ -4908,6 +4908,123 @@ bundled into this one.
 
 ---
 
+## Phase 8aq -- Deferred tool loading: CORE_TOOL_NAMES + search_tools, behind Settings.defer_tools (off by default)
+
+The "separate, larger architecture change" Phase 8ap deliberately left
+unscoped -- picked back up on direct request for a concrete
+implementation plan, self-reviewed, then built.
+
+**A real, shipped LangChain middleware almost changed the plan.**
+Before finalizing the design, found `langchain.agents.middleware.
+LLMToolSelectorMiddleware` already installed and provider-agnostic
+(reading its real source, not docs) -- an LLM call selects relevant
+tools from name+description each turn, filtered via `request.override
+(tools=...)`. Genuinely less code to own than a custom search tool. Not
+used: it pays one full extra sequential model round-trip on *every*
+turn, even "hello" -- a real, material latency cost for coscribe's
+interactive-chat shape, unlike Anthropic's own Tool Search Tool,
+`claude-code-best`'s `SearchExtraTools`, or this harness's own
+`ToolSearch`, none of which add a round-trip except when the model
+itself decides to search. Weighed the tradeoff explicitly and confirmed
+the CORE_TOOLS + explicit-search path before writing any code.
+
+**Verified against real LangChain internals before writing the real
+module, not assumed from docs** (two throwaway scripts, not part of the
+shipped test suite): (1) a tool excluded from `ModelRequest.tools` via
+`wrap_model_call`'s `request.override(tools=...)` really is invisible to
+`model.bind_tools` on one call and really does reappear on the next once
+discovered -- confirmed `create_agent`'s own `tools=` parameter (the
+*complete* set `ToolNode` can execute) is entirely independent of what
+any single request happens to advertise, the mechanism both
+`ProviderToolSearchMiddleware` and `LLMToolSelectorMiddleware` already
+rely on; (2) a deferred tool that also requires approval still correctly
+pauses `HumanInTheLoopMiddleware` once discovered and called -- interrupt
+gating is computed once from the *full* tool list at graph-build time,
+unaffected by per-request advertising.
+
+**`runtime_lg/tool_deferral.py`** (new): `build_search_tools_tool`
+indexes the deferred tool set once (name tokens weighted 3x a
+description token's, matching `claude-code-best`'s own real
+`SearchExtraToolsTool` field weights, plus a substring-match bonus since
+coscribe's own tool names are unusually literal/prefixed --
+`add_pptx_*`/`edit_pptx_*`/`read_*`/`write_*` -- so a query like "pptx"
+hits a name directly far more often than generic APIs would see); no
+embeddings, no new dependency, lexical scoring is enough at coscribe's
+95-tool scale, same conclusion `claude-code-best`'s own real TF-IDF
+choice reaches at a comparable size. `search_tools(query)` returns a
+JSON string of `{"name", "description"}` matches (top 8). `Deferred
+ToolMiddleware.wrap_model_call`/`awrap_model_call` derive "discovered so
+far" fresh from `request.messages` on every call -- unioning every
+completed `search_tools` `ToolMessage`'s own JSON result -- rather than
+tracking it as mutable middleware state: a pure function of data
+LangGraph already checkpoints, sidestepping the exact replay-correctness
+question this session already got burned by once
+(`runtime_lg/subagents.py`'s `spawn_agent` child_checkpointer bug).
+
+**`runtime_lg/agent.py`**: `build_langgraph_agent` gained `defer_tools`/
+`core_tool_names` parameters. The *full* tool list is always passed to
+`create_agent` regardless (so `ToolNode` can execute anything once
+called); `defer_tools=True` additionally injects `search_tools` (built
+from everything not in `core_tool_names`) and appends
+`DeferredToolMiddleware(core_tool_names)` to the middleware list.
+
+**`coordinator.py`**: `CORE_TOOL_NAMES` (new, plain module constant --
+deliberately not measured usage data, since no per-tool call-frequency
+log exists to measure from yet, `AuditLog` only records approval
+*decisions* for gated tools): plain file primitives, task tracking,
+`ask_user_question`, `web_search`, and the four format readers (docx/
+pdf/pptx/xlsx -- as foundational to coscribe specifically as `read_file`
+itself). Everything else -- all 37 `add_pptx_*`/`edit_pptx_*`/etc.
+tools, xlsx-specific writers, background-task/selfwake/scheduled-task/
+subagent-task/workflow/image/skill tools, all MCP tools -- deferred by
+default, no special-casing for MCP (matching `claude-code-best`'s own
+verified "no special case" finding).
+
+**`config.py`**: `Settings.defer_tools: bool = False`. Off by default
+not for lack of confidence in the mechanism (verified live above) but
+because the real risk here is a silent *capability regression* -- a
+model that doesn't call `search_tools` for something it needed just
+doesn't use it, which reads nothing like a crash and won't necessarily
+surface in this project's own test suite. Worth testing against real
+usage before flipping the default, same posture `claude-code-best`'s own
+`ENABLE_SEARCH_EXTRA_TOOLS` env var (`tst`/`tst-auto`/`standard`) takes.
+`.env.example` documents `COSCRIBE_DEFER_TOOLS=true`. Only applies to
+the top-level coordinator graph -- spawn_agent/spawn_agent_background's
+own sub-agent graphs already get an explicit, small, parent-chosen
+`tool_names` subset, so they never had this problem to begin with.
+
+**`web/session.py`**: `_build_lg_agent` passes `Settings.defer_tools`/
+`coordinator.CORE_TOOL_NAMES` straight through. New `_SEARCH_TOOLS_NOTE`,
+appended to `self._instructions` only when `defer_tools` is on (the
+model has no other way to learn `search_tools` exists, since most tools
+are hidden from its own tool list by default in that mode) -- and a new
+shared `_build_instructions` helper so this and the pre-existing
+`_RUN_WORKFLOW_NOTE` can no longer end up added in one of `__init__`/
+`select_workspace`/`set_enabled_skills` and silently forgotten in
+another (all three previously duplicated the same inline ternary).
+
+**Verified live, real backend + real headless Chromium, `defer_tools=
+True`, not just unit tests**: turn 1 ("hello") bound exactly the 16
+core tools (`CORE_TOOL_NAMES` plus `search_tools`) -- confirmed both via
+a printed `bind_tools` call log and the context-breakdown panel (Phase
+8ap) showing "System tools: 28.7k / 2.9%" for that turn, a small
+fraction of what all 95 tools would cost. Turn 2 ("add a chart to my
+pptx") called `search_tools("pptx chart")`, correctly surfaced 8 newly-
+bound pptx-related tools on the very next model call (confirmed in the
+same log), called the real, approval-gated `add_pptx_chart`, paused for
+approval exactly as expected, and completed normally once approved --
+the chat log's own existing tool-call-collapse UI rendered the whole
+exchange as "Searched pptx chart, Added a chart" with zero frontend
+changes needed for this phase. Backend: 10 new tests in `tests/
+test_tool_deferral.py` (tokenizing/scoring, `search_tools`' own ranking/
+empty-result/max-results behavior, discovered-name parsing, the full
+hide-then-reveal round trip through a real `build_langgraph_agent`
+graph, the deferred+approval-gated interrupt case, core tools always
+present, and `defer_tools=False`'s untouched baseline) plus the existing
+full suite, all green; `ruff`/`mypy` clean.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

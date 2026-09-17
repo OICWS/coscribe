@@ -71,7 +71,7 @@ from langgraph.types import Command
 
 from ..cli import INIT_PROMPT
 from ..config import Settings
-from ..coordinator import build_coordinator_agent
+from ..coordinator import CORE_TOOL_NAMES, build_coordinator_agent
 from ..runtime import (
     COMPACT_INSTRUCTIONS,
     LLMClient,
@@ -165,6 +165,22 @@ def _now_iso_lg() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _build_instructions(agent_instructions: str | None, *, defer_tools: bool) -> str:
+    """Appends _RUN_WORKFLOW_NOTE (always) and _SEARCH_TOOLS_NOTE (only
+    when defer_tools is on) to whatever build_coordinator_agent already
+    assembled -- shared by every one of this class's own call sites that
+    (re)build self._instructions (__init__, select_workspace,
+    set_enabled_skills -- switch_model doesn't, since it never rebuilds
+    the coordinator Agent itself), so the search_tools note can never
+    end up added in one place and forgotten in another."""
+    notes = [_RUN_WORKFLOW_NOTE]
+    if defer_tools:
+        notes.append(_SEARCH_TOOLS_NOTE)
+    if not agent_instructions:
+        return "\n\n".join(notes)
+    return "\n\n".join([agent_instructions, *notes])
+
+
 def _usage_event(usage: UsageMetadata) -> dict[str, Any]:
     """Build the "usage" WS event from a response's UsageMetadata,
     including prompt-cache stats when the provider reports them --
@@ -248,6 +264,21 @@ _RUN_WORKFLOW_NOTE = (
     "is no run_workflow tool here. If the user asks you to run a saved "
     "workflow, tell them to type /runworkflow <name> (or use the picker); "
     "do not attempt to call a tool named run_workflow."
+)
+
+# Only appended when Settings.defer_tools is on (see _build_instructions
+# below) -- the model has no other way to learn search_tools exists or
+# when to reach for it, since most tools are hidden from its own tool
+# list by default in that mode (see runtime_lg/tool_deferral.py).
+_SEARCH_TOOLS_NOTE = (
+    "Most tools beyond the basics aren't in your tool list yet -- this "
+    "keeps this conversation's context small. If what you need isn't "
+    "there (a PPTX/XLSX edit tool, a background script, a workflow tool, "
+    "etc.), call search_tools(query) first -- e.g. search_tools(\"pptx "
+    "chart\") -- it makes any match callable by its real name starting "
+    "with your very next tool call. Don't assume something can't be done "
+    "just because you don't see a tool for it yet; search before giving up "
+    "or falling back to a workaround."
 )
 
 
@@ -419,10 +450,8 @@ class ChatSessionLG:
         # that. Combined back in by _build_lg_tools below (same treatment
         # spawn_agent/review_work/list_recorded_steps already get).
         self._extra_tools: list[Callable[..., Any] | BaseTool] = list(extra_tools)
-        self._instructions = (
-            f"{agent.instructions}\n\n{_RUN_WORKFLOW_NOTE}"
-            if agent.instructions
-            else _RUN_WORKFLOW_NOTE
+        self._instructions = _build_instructions(
+            agent.instructions, defer_tools=settings.defer_tools
         )
         self._model_string = settings.default_model
 
@@ -574,6 +603,8 @@ class ChatSessionLG:
             question_tool_names=QUESTION_TOOL_NAMES,
             max_turns=self.settings.max_turns,
             auto_compact_tokens=auto_compact_tokens,
+            defer_tools=self.settings.defer_tools,
+            core_tool_names=CORE_TOOL_NAMES,
         )
 
     def resolve_approval(self, request_id: str, approved: bool) -> None:
@@ -835,12 +866,9 @@ class ChatSessionLG:
                 skill_names=self.enabled_skill_names,
                 workspace_root=self.workspace_root,
             )
-            new_instructions = (
-                f"{agent.instructions}\n\n{_RUN_WORKFLOW_NOTE}"
-                if agent.instructions
-                else _RUN_WORKFLOW_NOTE
+            self._instructions = _build_instructions(
+                agent.instructions, defer_tools=self.settings.defer_tools
             )
-            self._instructions = new_instructions
             self._base_tools = [
                 t for t in agent.tools if tool_name(t) != "list_recorded_steps"
             ]
@@ -893,10 +921,8 @@ class ChatSessionLG:
         agent = build_coordinator_agent(
             self.settings, self.thread_id, skill_names=self.enabled_skill_names
         )
-        self._instructions = (
-            f"{agent.instructions}\n\n{_RUN_WORKFLOW_NOTE}"
-            if agent.instructions
-            else _RUN_WORKFLOW_NOTE
+        self._instructions = _build_instructions(
+            agent.instructions, defer_tools=self.settings.defer_tools
         )
         self._base_tools = [t for t in agent.tools if tool_name(t) != "list_recorded_steps"]
         self._context_window = None
