@@ -100,7 +100,6 @@ export function ChatLog({
     // above should never move the viewport at all (see the scroll-
     // anchoring effect below, which handles that case on its own terms
     // instead of fighting this one for the same scroll position).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
 
   // Keeps whatever the user was already looking at pinned in place when
@@ -120,7 +119,6 @@ export function ChatLog({
       el.scrollTop += el.scrollHeight - prevOlderScrollHeight.current;
     }
     prevOlderScrollHeight.current = el.scrollHeight;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [olderItems]);
 
   if (items.length === 0) {
