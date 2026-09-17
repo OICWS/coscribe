@@ -16,7 +16,11 @@ from .providers import resolve_chat_model
 from .scheduled_tasks import poll_due_scheduled_tasks
 from .selfwake import poll_due_wakes
 from .skill_authoring import SkillSaveProposal, propose_skill_save_lg, write_skill_lg
-from .subagents import build_review_work_tool, build_spawn_agent_tool
+from .subagents import (
+    build_review_work_tool,
+    build_spawn_agent_background_tool,
+    build_spawn_agent_tool,
+)
 from .workflows import (
     infer_step_assertions_lg,
     propose_workflow_save_lg,
@@ -32,6 +36,7 @@ __all__ = [
     "ExecPolicy",
     "build_langgraph_agent",
     "build_review_work_tool",
+    "build_spawn_agent_background_tool",
     "build_spawn_agent_tool",
     "connect_mcp_tools_lg",
     "extract_text",

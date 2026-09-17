@@ -32,6 +32,9 @@ import type {
 } from "../types/settings";
 import type {
   CommandsResponse,
+  SubAgentActionResult,
+  SubAgentTasksResponse,
+  SubAgentTranscriptResponse,
   ThreadDeleteResult,
   ThreadRenameResult,
   ThreadsResponse,
@@ -210,6 +213,17 @@ export const getThreads = () => getJson<ThreadsResponse>("/api/threads");
 export const deleteThread = (id: string) => del<ThreadDeleteResult>(`/api/threads/${encodeURIComponent(id)}`);
 export const renameThread = (id: string, title: string) =>
   postJson<ThreadRenameResult>(`/api/threads/${encodeURIComponent(id)}/rename`, { title });
+
+// -- Sub Agents (background spawn_agent_background runs) --------------------
+
+export const getSubAgentTasks = (threadId: string) =>
+  getJson<SubAgentTasksResponse>(`/api/threads/${encodeURIComponent(threadId)}/subagents`);
+export const getSubAgentTranscript = (taskId: string) =>
+  getJson<SubAgentTranscriptResponse>(`/api/subagents/${encodeURIComponent(taskId)}/transcript`);
+export const pauseSubAgentTask = (taskId: string) =>
+  postJson<SubAgentActionResult>(`/api/subagents/${encodeURIComponent(taskId)}/pause`, {});
+export const resumeSubAgentTask = (taskId: string) =>
+  postJson<SubAgentActionResult>(`/api/subagents/${encodeURIComponent(taskId)}/resume`, {});
 
 // -- Slash commands -----------------------------------------------------
 

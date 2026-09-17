@@ -11,7 +11,8 @@ import { RunPanel } from "./components/RunPanel";
 import { DirBrowserModal } from "./components/settings/DirBrowserModal";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
-import { BrowserIcon, HelpIcon, SettingsIcon } from "./components/icons";
+import { SubAgentsPanel } from "./components/SubAgentsPanel";
+import { BrowserIcon, HelpIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
 import { getCommands, getThreads, getWorkflowRuns } from "./lib/rest";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
@@ -26,6 +27,7 @@ function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [browserPanelOpen, setBrowserPanelOpen] = useState(false);
+  const [subAgentsPanelOpen, setSubAgentsPanelOpen] = useState(false);
   // Set by BrowserPanel's "Send to chat" (an element it picked, screenshot
   // + a short description) -- Composer watches this prop and appends it to
   // its own pendingImages the moment it changes, same "external image
@@ -262,6 +264,14 @@ function App() {
           </button>
           <button
             type="button"
+            title="Sub Agents"
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${subAgentsPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
+            onClick={() => setSubAgentsPanelOpen((v) => !v)}
+          >
+            <SubAgentsIcon className="h-[18px] w-[18px]" />
+          </button>
+          <button
+            type="button"
             title="Keyboard shortcuts (?)"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
             onClick={() => setShortcutsOpen(true)}
@@ -354,6 +364,9 @@ function App() {
       </div>
       {browserPanelOpen && (
         <BrowserPanel onClose={() => setBrowserPanelOpen(false)} onSendToChat={onBrowserPanelCapture} />
+      )}
+      {subAgentsPanelOpen && (
+        <SubAgentsPanel threadId={threadId} onClose={() => setSubAgentsPanelOpen(false)} />
       )}
     </div>
   );

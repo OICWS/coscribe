@@ -26,6 +26,7 @@ from typing import Any
 
 from ..tools.background_tasks import BackgroundTaskStore
 from ..tools.selfwake import SignalStore, WakeRequest, WakeStore
+from ..tools.subagent_tasks import SubAgentTaskStore
 from ..tools.workflows import WorkflowRunStore
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ def _is_due(
     now: datetime,
     run_store: WorkflowRunStore,
     task_store: BackgroundTaskStore,
+    subagent_task_store: SubAgentTaskStore,
     signal_store: SignalStore,
 ) -> bool:
     if wake.kind == "timer":
@@ -91,6 +93,18 @@ def _is_due(
         task = task_store.load(wake.task_id)
         # Same "vanished counts as due" reasoning as "job" above.
         return task is None or task.status != "running"
+    if wake.kind == "subagent":
+        if wake.subagent_task_id is None:
+            return False
+        subagent_task = subagent_task_store.load(wake.subagent_task_id)
+        # Same "vanished/non-running counts as due" reasoning as "task"
+        # above -- "paused" and "blocked_on_approval" both count as due
+        # too, not just the two terminal statuses "task" has: the human
+        # (or lack of one to answer an approval) is the reason nothing's
+        # progressing, and the main thread should get a chance to react
+        # to that instead of waiting for an eventual success/failure that
+        # a paused/stuck sub-agent may never reach on its own.
+        return subagent_task is None or subagent_task.status != "running"
     if wake.kind == "event":
         if wake.event_key is None:
             return False
@@ -114,12 +128,18 @@ async def poll_due_wakes(
     signal_store = SignalStore(state_dir)
     run_store = WorkflowRunStore(state_dir)
     task_store = BackgroundTaskStore(state_dir)
+    subagent_task_store = SubAgentTaskStore(state_dir)
     now = datetime.now(UTC)
 
     fired: list[WakeRequest] = []
     for wake in wake_store.list_pending():
         if not _is_due(
-            wake, now=now, run_store=run_store, task_store=task_store, signal_store=signal_store
+            wake,
+            now=now,
+            run_store=run_store,
+            task_store=task_store,
+            subagent_task_store=subagent_task_store,
+            signal_store=signal_store,
         ):
             continue
         try:

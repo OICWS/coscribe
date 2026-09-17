@@ -121,6 +121,12 @@ from ..tools.script_env import (
     uninstall_package,
     working_interpreters,
 )
+from ..tools.subagent_tasks import (
+    SubAgentTaskStore,
+    get_subagent_transcript,
+    pause_subagent_task,
+    resume_subagent_task,
+)
 from ..tools.tasks import TaskToolkit
 from ..tools.workflows import WorkflowRunStore, WorkflowStore, reconcile_interrupted_runs
 from .background_events import BackgroundEvent, BackgroundEventBus
@@ -1285,6 +1291,19 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                             thread_id=wake.thread_id,
                         )
                     )
+                    # poll_due_wakes already resumed wake.thread_id's own
+                    # checkpointer correctly (via _SilentSocket) -- this
+                    # is the other half, nudging a *live* browser tab (if
+                    # any) that was already open on that thread to go
+                    # re-fetch it, closing the real, previously-documented
+                    # gap where a poller-triggered resume wrote correctly
+                    # but never appeared in an already-open tab until its
+                    # next reload/reconnect. A no-op if no tab is open on
+                    # that thread right now (see notify_resync's own
+                    # docstring).
+                    live_session = sessions.get(wake.thread_id)
+                    if live_session is not None:
+                        await live_session.notify_resync()
             except Exception:
                 logging.getLogger(__name__).exception("selfwake: poll_due_wakes failed")
             try:
@@ -1300,6 +1319,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                             thread_id=trigger.thread_id,
                         )
                     )
+                    # Same resync nudge as the wake loop above.
+                    live_session = sessions.get(trigger.thread_id)
+                    if live_session is not None:
+                        await live_session.notify_resync()
             except Exception:
                 logging.getLogger(__name__).exception(
                     "scheduled_tasks: poll_due_scheduled_tasks failed"
@@ -1528,6 +1551,46 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/threads/{thread_id}/tasks")
     async def get_tasks(thread_id: str) -> list[dict[str, Any]]:
         return TaskToolkit(thread_id, settings.state_dir).list_tasks()
+
+    # -- Sub Agents panel: background spawn_agent_background runs. GET
+    # here is a plain polling read (see this feature's own design
+    # discussion -- no push channel needed while the panel is open, a
+    # few-second poll is the same trade-off both Claude Code's own
+    # documented remote-sync model and claude-code-best's goal service
+    # make); pause/resume are direct REST actions from the panel's own
+    # button, not model tools (see pause_subagent_task's docstring).
+
+    @app.get("/api/threads/{thread_id}/subagents")
+    async def list_subagents_endpoint(thread_id: str) -> list[dict[str, Any]]:
+        tasks = SubAgentTaskStore(settings.state_dir).list_for_thread(thread_id)
+        return [t.to_dict() for t in tasks]
+
+    @app.get("/api/subagents/{task_id}/transcript")
+    async def get_subagent_transcript_endpoint(task_id: str) -> JSONResponse:
+        task = SubAgentTaskStore(settings.state_dir).load(task_id)
+        if task is None:
+            return JSONResponse({"error": f"No sub-agent task {task_id!r}"}, status_code=404)
+        transcript = get_subagent_transcript(task_id)
+        entries = (transcript or {}).get("entries", [])
+        return JSONResponse({"task": task.to_dict(), "entries": entries})
+
+    @app.post("/api/subagents/{task_id}/pause")
+    async def pause_subagent_endpoint(task_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(pause_subagent_task(settings.state_dir, task_id))
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except (ValueError, RuntimeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+
+    @app.post("/api/subagents/{task_id}/resume")
+    async def resume_subagent_endpoint(task_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(resume_subagent_task(settings.state_dir, task_id))
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except (ValueError, RuntimeError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
 
     # -- /api/workflows, /api/workflow-runs -- direct ports of web/app.py's
     # identical endpoints (see this module's docstring for the general
@@ -2433,6 +2496,15 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     ) -> None:
         await websocket.accept()
         session = _get_session(thread_id, skills, workspace)
+        # See ChatSessionLG.notify_resync's own docstring -- this is the
+        # one place that knows "a real browser tab is watching this
+        # thread right now," so it's the one place that sets/clears it.
+        # A *new* connection to an already-open thread (two tabs, or a
+        # reload racing its own old socket's teardown) simply overwrites
+        # this with the newest connection -- acceptable: resync is a
+        # best-effort nudge, not a correctness-critical channel, and the
+        # newest tab is the one actually worth nudging.
+        session._live_websocket = websocket
         try:
             await session.send_state(websocket)
             await session.send_history(websocket)
@@ -2522,6 +2594,13 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # is untouched and a genuine reconnect still redelivers it.
             session.abandon_orphaned_turn()
             await session.run_session_end_hooks()
+        finally:
+            # Only clear if this is still *this* connection's own socket --
+            # a newer connection (see the comment above where this is set)
+            # may have already overwritten it with itself, and this older,
+            # now-dead connection's teardown must not clobber that.
+            if session._live_websocket is websocket:
+                session._live_websocket = None
 
     app.mount("/static", _NoCacheStaticFiles(directory=STATIC_DIR), name="static")
 

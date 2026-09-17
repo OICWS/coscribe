@@ -30,6 +30,14 @@ not hypothetical:
   silently accept an id from either -- a new kind keeps each one's
   validation and _is_due check (runtime_lg/selfwake.py) unambiguous,
   same reasoning "job" itself didn't try to reuse "timer"'s shape.
+- "subagent": wake_on_subagent(task_id) -- task_id is a tools/
+  subagent_tasks.py SubAgentTask.task_id, a background spawn_agent_
+  background run. Same "new kind, new id space" reasoning as "task"
+  above, one step further: unlike a background script (only ever
+  "running" or a terminal status), a sub-agent task can also be
+  "paused" or "blocked_on_approval" -- both non-"running", so _is_due
+  treats them as due too, same as any other terminal status (see
+  runtime_lg/selfwake.py's _is_due for "subagent").
 - "event": wake_on_event(event_key) -- resolved by a signal_event call
   (this thread, another thread, or -- once ROADMAP.md Phase 5c's Slack/
   webhook work lands -- an external event source calling the same
@@ -52,9 +60,10 @@ from urllib.parse import quote
 
 from ..runtime.types import tool_metadata
 from .background_tasks import BackgroundTaskStore
+from .subagent_tasks import SubAgentTaskStore
 from .workflows import WorkflowRunStore
 
-VALID_KINDS = ("timer", "job", "task", "event")
+VALID_KINDS = ("timer", "job", "task", "subagent", "event")
 VALID_STATUSES = ("pending", "woken", "cancelled")
 
 
@@ -85,6 +94,7 @@ class WakeRequest:
     wake_at: str | None = None  # kind="timer": ISO timestamp to fire at
     job_id: str | None = None  # kind="job": a WorkflowRun.run_id
     task_id: str | None = None  # kind="task": a BackgroundTask.task_id
+    subagent_task_id: str | None = None  # kind="subagent": a SubAgentTask.task_id
     event_key: str | None = None  # kind="event"
     woken_at: str | None = None
 
@@ -99,6 +109,7 @@ class WakeRequest:
             "wake_at": self.wake_at,
             "job_id": self.job_id,
             "task_id": self.task_id,
+            "subagent_task_id": self.subagent_task_id,
             "event_key": self.event_key,
             "woken_at": self.woken_at,
         }
@@ -115,6 +126,7 @@ class WakeRequest:
             wake_at=data.get("wake_at"),
             job_id=data.get("job_id"),
             task_id=data.get("task_id"),
+            subagent_task_id=data.get("subagent_task_id"),
             event_key=data.get("event_key"),
             woken_at=data.get("woken_at"),
         )
@@ -202,6 +214,7 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
     signal_store = SignalStore(state_dir)
     run_store = WorkflowRunStore(state_dir)
     task_store = BackgroundTaskStore(state_dir)
+    subagent_task_store = SubAgentTaskStore(state_dir)
 
     def _create(kind: str, reason: str, **fields: Any) -> dict[str, Any]:
         wake = WakeRequest(
@@ -294,6 +307,26 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
             raise ValueError(f"No background task with id {task_id!r}")
         return _create("task", reason, task_id=task_id)
 
+    def wake_on_subagent(task_id: str, reason: str) -> dict[str, Any]:
+        """Pause this conversation and automatically resume it once a
+        background sub-agent started via spawn_agent_background finishes
+        (succeeds, fails, is paused, or ends up blocked on an approval it
+        can't ask for in the background) -- for "let me know when that
+        sub-agent is done" instead of calling check_subagent_task
+        yourself over and over. task_id must be a real, currently-running
+        background sub-agent task id (see spawn_agent_background's own
+        return value, or list_subagent_tasks).
+
+        Args:
+            task_id: the task_id of an in-progress background sub-agent.
+            reason: what to do or check when you wake up -- e.g. "read
+                its result with check_subagent_task and summarize it."
+        """
+        subagent_task = subagent_task_store.load(task_id)
+        if subagent_task is None:
+            raise ValueError(f"No sub-agent task with id {task_id!r}")
+        return _create("subagent", reason, subagent_task_id=task_id)
+
     def wake_on_event(event_key: str, reason: str) -> dict[str, Any]:
         """Pause this conversation and automatically resume it once a named
         event fires -- for waiting on something external to this
@@ -360,6 +393,7 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
         tool_metadata(sleep_for, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on_task, risk_category="WRITE_LOCAL", category="selfwake"),
+        tool_metadata(wake_on_subagent, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on_event, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(signal_event, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(list_wakes, risk_category="READ", category="selfwake"),

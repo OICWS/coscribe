@@ -85,6 +85,7 @@ from ..runtime_lg import (
     SkillSaveProposal,
     build_langgraph_agent,
     build_review_work_tool,
+    build_spawn_agent_background_tool,
     build_spawn_agent_tool,
     propose_skill_save_lg,
     propose_workflow_save_lg,
@@ -458,6 +459,13 @@ class ChatSessionLG:
         # why they're seeded lazily there rather than eagerly here.
         self._history_boundary_config: dict[str, Any] | None = None
         self._history_known_message_ids: set[str] | None = None
+        # The currently-connected browser tab's websocket, if any -- set/
+        # cleared by app.py's ws_endpoint around its own connection
+        # lifetime, *not* threaded through every method call the way
+        # every other websocket use in this class already is (see
+        # notify_resync's own docstring for why this one specifically
+        # needs a place to live outside any single call's stack).
+        self._live_websocket: WebSocket | None = None
 
     def _build_lg_tools(self, model: Any) -> list[Callable[..., Any] | BaseTool]:
         # self._base_tools ("domain" tools) combined with self._extra_tools
@@ -471,6 +479,9 @@ class ChatSessionLG:
         # own available_tools=agent.tools call).
         combined_tools = [*self._base_tools, *self._extra_tools]
         spawn_agent_tool = build_spawn_agent_tool(model, combined_tools)
+        spawn_agent_background_tool = build_spawn_agent_background_tool(
+            model, combined_tools, self.thread_id, self.settings.state_dir
+        )
         # The reviewer only ever gets read-only "documents" tools (read_docx/
         # read_pdf/search_pdf/read_xlsx/read_pptx today) -- independent
         # verification of a generated file's real content, never a way for
@@ -489,7 +500,13 @@ class ChatSessionLG:
         # review_work are -- see __init__'s comment on why list_recorded_
         # steps was stripped out of self._base_tools in the first place.
         list_recorded_steps_tool = self._build_list_recorded_steps_tool()
-        return [*combined_tools, spawn_agent_tool, review_work_tool, list_recorded_steps_tool]
+        return [
+            *combined_tools,
+            spawn_agent_tool,
+            spawn_agent_background_tool,
+            review_work_tool,
+            list_recorded_steps_tool,
+        ]
 
     def _build_list_recorded_steps_tool(self) -> Callable[..., Any]:
         """runtime_lg-aware replacement for tools/workflows.py's
@@ -935,6 +952,44 @@ class ChatSessionLG:
                 "workspace_explicit": self._workspace_explicit,
             }
         )
+
+    async def notify_resync(self) -> None:
+        """Tell whichever browser tab is currently watching this thread
+        (if any) that something changed server-side outside of its own
+        turn -- a background wake/scheduled-task/sub-agent resuming this
+        thread while nobody was actively typing into it. Real, previously-
+        documented gap this closes: a poller-triggered resume wrote
+        correctly to the checkpointer but never appeared in an already-
+        open tab until its next reload/reconnect (ROADMAP.md).
+
+        Deliberately just re-sends the exact same "history" event
+        send_history already sends on every fresh connection, rather than
+        inventing a new WS message type/frontend handler -- the frontend's
+        "history" reducer case already replaces state.items wholesale
+        with the authoritative replay (see reducer.ts), which is exactly
+        "go re-fetch the now-correct state," and reusing it means zero
+        new frontend wiring. This is the "stored state + resync" shape
+        this feature's own design discussion found Claude Code's own
+        Remote Control (stored transcript, reconnect/resync) and
+        claude-code-best's goal service (plain status flag, no event
+        emitter) both already use, rather than a full multi-listener
+        broadcast bus -- this app only ever has one browser tab watching
+        a given thread at a time in practice, so there's nothing more to
+        fan out to.
+
+        Silently does nothing if no tab is currently connected (the
+        common case for an unattended wake) -- there's nothing to nudge.
+        Best-effort: a dead/closing socket's send can raise, and a missed
+        resync is recoverable (the next reconnect sees correct state
+        anyway), not worth failing whatever background work triggered
+        this over."""
+        websocket = self._live_websocket
+        if websocket is None:
+            return
+        try:
+            await self.send_history(websocket)
+        except Exception:
+            logger.debug("notify_resync: failed to notify the live tab for %s", self.thread_id)
 
     async def send_history(self, websocket: WebSocket) -> None:
         """One-shot replay of this thread's checkpointed messages, sent

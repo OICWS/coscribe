@@ -33,6 +33,14 @@ from .skills import (
     slugify_skill_name,
 )
 from .spreadsheets import build_spreadsheet_tools
+from .subagent_tasks import (
+    SubAgentTask,
+    SubAgentTaskStore,
+    build_subagent_task_tools,
+    get_subagent_transcript,
+    pause_subagent_task,
+    resume_subagent_task,
+)
 from .tasks import build_task_tools
 from .websearch import build_websearch_tools
 from .workflows import (
@@ -55,6 +63,8 @@ __all__ = [
     "SignalStore",
     "SkillInfo",
     "SkillUploadError",
+    "SubAgentTask",
+    "SubAgentTaskStore",
     "TemplateInfo",
     "WakeRequest",
     "WakeStore",
@@ -76,6 +86,7 @@ __all__ = [
     "build_selfwake_tools",
     "build_skill_tools",
     "build_spreadsheet_tools",
+    "build_subagent_task_tools",
     "build_task_tools",
     "build_websearch_tools",
     "build_workflow_tools",
@@ -83,13 +94,16 @@ __all__ = [
     "format_memory_section",
     "format_skill_listing",
     "format_template_listing",
+    "get_subagent_transcript",
     "load_builtin_skills",
     "load_builtin_templates",
     "load_mcp_server_configs",
     "load_memory",
     "load_pptx_templates",
     "load_skills",
+    "pause_subagent_task",
     "reconcile_interrupted_runs",
+    "resume_subagent_task",
     "save_uploaded_skill",
     "slugify_skill_name",
 ]

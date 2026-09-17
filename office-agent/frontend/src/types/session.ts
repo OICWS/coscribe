@@ -24,3 +24,32 @@ export interface CommandInfo {
 export type CommandsResponse = CommandInfo[];
 
 export type UploadResult = { path: string; bytes_written: number } | { error: string };
+
+/** A background spawn_agent_background run -- mirrors tools/
+ * subagent_tasks.py's SubAgentTask.to_dict() exactly. */
+export interface SubAgentTask {
+  task_id: string;
+  thread_id: string;
+  instructions: string;
+  prompt: string;
+  tool_names: string;
+  description: string;
+  status: "running" | "paused" | "blocked_on_approval" | "succeeded" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  result: string | null;
+  error: string | null;
+}
+
+export type SubAgentTasksResponse = SubAgentTask[];
+
+/** GET /api/subagents/{task_id}/transcript's response -- `entries` reuses
+ * wire.ts's own HistoryEntry shape (imported by the one caller, the Sub
+ * Agents panel, rather than re-exported here to avoid a wire.ts <->
+ * session.ts import cycle for a single type). */
+export interface SubAgentTranscriptResponse {
+  task: SubAgentTask;
+  entries: import("./wire").HistoryEntry[];
+}
+
+export type SubAgentActionResult = SubAgentTask | { error: string };

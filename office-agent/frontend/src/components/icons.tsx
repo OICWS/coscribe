@@ -320,6 +320,40 @@ export function BrowserIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Sub Agents header button + panel: feather-icons "git-branch" -- a
+ * delegated sub-task branching off the main conversation and rejoining
+ * it, which reads more specifically as "spawned work" than a generic
+ * bot/cpu glyph would. */
+export function SubAgentsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </Icon>
+  );
+}
+
+/** feather-icons "pause" -- the Sub Agents panel's own pause button. */
+export function PauseIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <rect x="6" y="4" width="4" height="16" />
+      <rect x="14" y="4" width="4" height="16" />
+    </Icon>
+  );
+}
+
+/** feather-icons "play" -- the Sub Agents panel's own resume button. */
+export function PlayIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <polygon points="5 3 19 12 5 21 5 3" />
+    </Icon>
+  );
+}
+
 export function HelpIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

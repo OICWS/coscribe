@@ -29,6 +29,7 @@ from .tools import (
     build_selfwake_tools,
     build_skill_tools,
     build_spreadsheet_tools,
+    build_subagent_task_tools,
     build_task_tools,
     build_websearch_tools,
     build_workflow_tools,
@@ -691,6 +692,7 @@ def build_coordinator_agent(
         + build_script_tools(root, settings.state_dir)
         + build_node_script_tools(root, settings.state_dir)
         + build_background_task_tools(thread_id, root, settings.state_dir)
+        + build_subagent_task_tools(thread_id, settings.state_dir)
     )
     instructions = INSTRUCTIONS
     extra_dirs_note = _describe_extra_dirs(extra_readable, extra_writable)

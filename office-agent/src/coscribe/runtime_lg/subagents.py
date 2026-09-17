@@ -77,9 +77,11 @@ second copy of this function.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import uuid
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -88,6 +90,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, interrupt
 
 from ..tools import QUESTION_TOOL_NAMES
+from ..tools.subagent_tasks import (
+    SubAgentTask,
+    SubAgentTaskStore,
+    register_live_subagent,
+    run_supervised_subagent,
+    track_supervisor_task,
+)
 from .agent import build_langgraph_agent
 from .agent import tool_name as _tool_name
 from .messages import extract_text
@@ -248,6 +257,107 @@ def build_spawn_agent_tool(
         return content or "(sub-agent produced no text reply)"
 
     return spawn_agent
+
+
+def build_spawn_agent_background_tool(
+    model: Any,
+    available_tools: Sequence[Callable[..., Any] | BaseTool],
+    thread_id: str,
+    state_dir: Path,
+) -> Callable[..., Any]:
+    """Return spawn_agent_background, the non-blocking counterpart to
+    spawn_agent above -- for a self-contained sub-task expected to take a
+    while, where the model would rather end its own turn (freeing the
+    user to keep talking, or the thread to genuinely go idle) than sit
+    blocked on a synchronous `.invoke()` the way spawn_agent does.
+
+    Deliberately a *separate* tool rather than a `background: bool` flag
+    on spawn_agent itself -- same reasoning tools/background_tasks.py's
+    own docstring gives for run_background_script vs run_python_script:
+    "started" (a task_id) and "the complete final reply" are different
+    enough result shapes that cramming both into one tool's return type
+    makes it ambiguous depending on a boolean the model has to remember
+    to check.
+
+    No nested-interrupt bridging here (contrast spawn_agent's own
+    docstring) -- see tools/subagent_tasks.py's module docstring for why
+    that mechanism fundamentally can't apply to a backgrounded run, and
+    what happens instead (status="blocked_on_approval") when a
+    background sub-agent's own tool call needs approval.
+    """
+    excluded_names = {"spawn_agent", "spawn_agent_background", *QUESTION_TOOL_NAMES}
+    tools_by_name = {
+        _tool_name(t): t for t in available_tools if _tool_name(t) not in excluded_names
+    }
+    store = SubAgentTaskStore(state_dir)
+
+    async def spawn_agent_background(
+        instructions: str,
+        prompt: str,
+        description: str,
+        tool_names: str = "",
+    ) -> dict[str, Any]:
+        """Delegate a self-contained sub-task to an independent agent with
+        its own context window, running in the background -- returns
+        immediately with a task_id instead of waiting for it to finish.
+        Use this instead of spawn_agent when the sub-task is expected to
+        take a while and you'd rather not block this whole conversation
+        on it. Follow up with wake_on_subagent(task_id, reason) to end
+        this turn and get automatically resumed once it finishes, or
+        check_subagent_task(task_id) to poll yourself. Note: if the
+        sub-agent needs your approval for one of its tool calls, it
+        pauses (status="blocked_on_approval") rather than asking you
+        mid-background-run -- only give it tool_names that don't need
+        approval unless you're prepared to check back and notice that.
+
+        Args:
+            instructions: the sub-agent's system prompt / role.
+            prompt: the specific task for the sub-agent to do.
+            description: one sentence, plain language, what this
+                sub-agent is doing -- shown in the Sub Agents panel.
+            tool_names: comma-separated names of your own tools to grant
+                the sub-agent, e.g. "read_file,write_file". Empty for a
+                pure-reasoning sub-agent with no tools.
+        """
+        selected = []
+        for name in (n.strip() for n in tool_names.split(",")):
+            if not name:
+                continue
+            if name not in tools_by_name:
+                raise ValueError(f"Unknown tool for a sub-agent: {name!r}")
+            selected.append(tools_by_name[name])
+
+        # One InMemorySaver per call (not shared across calls the way
+        # spawn_agent's child_checkpointer is) -- each background run gets
+        # its own permanent task_id/thread up front, so there's no
+        # interrupt()-replay reason to share one across multiple calls the
+        # way spawn_agent's own docstring explains it needs to.
+        child_checkpointer = InMemorySaver()
+        sub_agent = build_langgraph_agent(
+            model, selected, instructions, checkpointer=child_checkpointer
+        )
+        task_id = uuid.uuid4().hex[:12]
+        child_config = {"configurable": {"thread_id": f"bgspawn-{task_id}"}}
+        task = SubAgentTask(
+            task_id=task_id,
+            thread_id=thread_id,
+            instructions=instructions,
+            prompt=prompt,
+            tool_names=tool_names,
+            description=description,
+            status="running",
+            started_at=datetime.now(UTC).isoformat(),
+        )
+        store.save(task)
+        register_live_subagent(task_id, sub_agent, child_config)
+        supervisor = asyncio.create_task(
+            run_supervised_subagent(store, task, sub_agent, child_config)
+        )
+        track_supervisor_task(supervisor)
+
+        return {"task_id": task_id, "status": "running", "description": description}
+
+    return spawn_agent_background
 
 
 # LibreOffice's own PNG export (render_pptx_preview et al) has no

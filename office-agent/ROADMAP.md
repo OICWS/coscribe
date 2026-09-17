@@ -4681,7 +4681,135 @@ auto-loads the pre-compact turns with zero clicks.
 
 ---
 
-## Later -- real intentions, not actively scheduled
+## Phase 8ao -- Sub Agents: a panel to watch spawn_agent runs, background execution + auto-resume, pause (shipped)
+
+Requested directly, aligned explicitly with Claude Code's own naming
+("叫 sub agents, claude code 里叫 background tasks"): (1) a "Sub Agents"
+button next to the header's Browser toggle, opening a panel to observe
+`spawn_agent` delegation -- confirmed the bar is "post-hoc, see the full
+record once it's done" (what it did + its output), not live token
+streaming; (2) make delegation non-blocking -- the main conversation
+ends its turn, and automatically resumes once the sub-agent finishes,
+"like the existing running tasks"; (3) let the user pause a running
+sub-agent.
+
+**Design discussion before any code, per explicit instruction.** The
+real, already-documented gap this runs into: a poller-triggered resume
+on a thread open live in a browser tab writes correctly to the
+checkpointer but doesn't stream into that tab in real time (no
+multi-writer broadcast mechanism exists) -- Phase 4's own limitation.
+Before proposing a fix, grounded the comparison in how other agent
+harnesses actually solve this rather than guessing:
+
+- **Claude Code's own Remote Control** (read live, code.claude.com/docs):
+  state is stored server-side; devices sync via reconnect, not
+  simultaneous multi-listener push -- "you can't have multiple remote
+  devices controlling the same session simultaneously... though you can
+  switch between devices since the conversation syncs."
+- **`claude-code-best/claude-code`** (a from-scratch, MIT, non-Anthropic
+  reimplementation -- 22.6k stars, explicitly NOT leaked/decompiled
+  Anthropic source per its own README disclaimer; read its real
+  `src/services/goal/goalState.ts` on GitHub, not just its docs): its
+  own `/goal` pause/resume/auto-drive feature is a plain in-memory
+  `Map<string, GoalState>`, no event emitter, no broadcast -- pause is
+  `pauseGoal()` setting `status: "paused"`, a driving loop checking that
+  flag at its own next natural checkpoint.
+
+Both independently confirmed the same shape: durable state + a
+lightweight resync nudge, not a general N-listener broadcast bus --
+this app only ever has one browser tab open on a given thread in
+practice, so there was never anything to fan out to.
+
+**Backend, mirroring `tools/background_tasks.py`'s existing "separate
+tool from the synchronous one" shape (`run_background_script` vs
+`run_python_script`) on purpose -- "started" and "the final reply" are
+different enough result shapes to keep apart:**
+
+- `tools/subagent_tasks.py` (new): `SubAgentTask`/`SubAgentTaskStore`
+  (one JSON record per run, same shape as `BackgroundTask`, no separate
+  log file -- a sub-agent's transcript is read live off its own
+  checkpointer instead of accumulated text), `run_supervised_subagent`
+  (the async supervisor), `pause_subagent_task`/`resume_subagent_task`
+  (REST-only, not model tools -- this is the *user* pausing it),
+  `get_subagent_transcript` (reuses `serialize_history_for_ws_lg`, the
+  exact same entry shape the main chat's own history replay already
+  uses, so the panel needs zero new rendering logic on the backend
+  side).
+- `runtime_lg/subagents.py`: `build_spawn_agent_background_tool`, a
+  `spawn_agent_background` sibling to the existing `spawn_agent` --
+  starts the sub-agent's own compiled graph, registers it in
+  `subagent_tasks.py`'s live registries, and returns a `task_id`
+  immediately via `asyncio.create_task`, never blocking the calling
+  turn.
+- **No nested-interrupt bridging for the background version** (contrast
+  `spawn_agent`'s own hand-rolled `interrupt()`-inside-the-parent's-own-
+  tool-node bridge) -- that mechanism only works because the parent turn
+  is still synchronously on the stack when the child pauses; a
+  backgrounded run has already returned control by then. A background
+  sub-agent that hits `HumanInTheLoopMiddleware` is left exactly where
+  `_SilentSocket` already leaves an unattended top-level turn: paused,
+  durable in its own checkpointer, surfaced as `status=
+  "blocked_on_approval"` rather than silently bridged or dropped -- a
+  real, accepted v1 scope cut, not an oversight.
+- **Auto-resume reuses the existing selfwake machinery exactly**,
+  following the same precedent `wake_on_task` itself set for
+  `wake_on`/`job`: a fifth wake kind, `"subagent"`, alongside a new
+  `wake_on_subagent(task_id, reason)` tool -- `poll_due_wakes`'s
+  existing loop (same one driving timers/jobs/background scripts)
+  resumes the thread the moment a sub-agent task's status leaves
+  `"running"` (succeeded, failed, paused, or blocked-on-approval all
+  count, same "non-running counts as due" rule `"task"` already uses).
+  No new poller, no new resume path.
+- **The resync nudge, closing the Phase 4 gap for real**: `ChatSessionLG`
+  now tracks `_live_websocket` (set/cleared by `ws_endpoint` around its
+  own connection lifetime) and a `notify_resync()` method that just
+  re-sends the exact same `"history"` event `send_history` already sends
+  on connect -- the frontend's existing `"history"` reducer case already
+  replaces `state.items` wholesale with the authoritative replay, so
+  reusing it needed zero new frontend message types. `_wake_poll_loop`
+  calls `notify_resync()` for a thread's live session (if any) right
+  after resuming it via a fired wake, for both the `sleep_until/wake_on/
+  wake_on_task/wake_on_subagent` path and the Scheduled Tasks path.
+- **Pause is cooperative, not a cancel** -- checked between LangGraph
+  superstep boundaries (`stream_mode="values"` yields once per completed
+  step, driven manually via `.astream(None, config)` to continue a
+  checkpointed thread with no interrupt pending), so a pause request
+  never tears down a tool call mid-flight, only ever stops the child
+  *between* steps; the already-completed steps' checkpoints are
+  untouched, and resuming just continues the same checkpointed thread.
+  Same shape `claude-code-best`'s own goal service uses, confirmed
+  above.
+
+**Frontend**: a `SubAgentsIcon` header button next to Browser
+(`App.tsx`), opening `SubAgentsPanel.tsx` -- a fixed-width side panel
+matching `BrowserPanel.tsx`'s own shell (`border-l`, `bg-[var(--panel-
+bg)]`, header + close button). List view polls `GET /api/threads/
+{id}/subagents` every few seconds while open (plain polling, not a push
+channel -- consistent with the "no broadcast bus" finding above, and
+with the user's own "post-hoc is enough" bar); a status badge per task
+(running/paused/blocked_on_approval/succeeded/failed, reusing `RunPanel.
+tsx`'s existing `--accent`-for-success/`--danger`-for-failure
+convention rather than inventing a new palette); click a task for its
+full transcript (`GET /api/subagents/{id}/transcript`, rendering the
+same `user`/`agent`/`tool` entry shapes `ChatLog.tsx`'s own history
+replay already knows, kept as a lighter, panel-scoped renderer rather
+than importing `ChatLog`'s live-turn-coupled components directly); a
+Pause/Resume button on any running or paused task, both in the list row
+and the detail header.
+
+**Verified live, real backend + real headless Chromium, not just unit
+tests**: a real chat turn delegates to `spawn_agent_background` (via a
+content-dispatching fake model -- an index-based fake would race against
+itself here, since the main turn and the background sub-agent it spawns
+both call the *same* model instance concurrently, accurate to real
+production behavior), the panel shows it going to "Done," the transcript
+view shows the real task/prompt/status/reply, and the back button
+returns to the list correctly. Backend: 6 new tests in `tests/
+test_subagent_tasks.py` (completion, pause-before-any-step-then-resume,
+pause-without-a-live-handle raises, blocked-on-approval is never
+bridged, subagent-kind wake fires/stays-pending) plus the existing full
+suite, all green; `ruff`/`mypy` clean. Frontend: `npm run build`/
+`oxlint` clean.
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
 above) comes first; these get picked back up once that's done and there's
