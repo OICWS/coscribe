@@ -13,6 +13,7 @@ importorskip rather than failing collection when it isn't present.
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -163,6 +164,65 @@ def test_review_work_falls_back_to_text_only_when_preview_file_missing(tmp_path:
 
     sent = _last_human_message(model.calls[0]).content
     assert isinstance(sent, str)
+
+
+def test_review_work_downscales_a_preview_past_the_max_dimension(tmp_path: Path) -> None:
+    """Real, live-reported cost problem: LibreOffice's own PNG export has
+    no explicit width/height cap, so a real slide preview commonly lands
+    well past what a reviewer actually needs to judge layout/legibility
+    -- and vision APIs charge roughly per pixel (see subagents.py's own
+    _downscale_preview_for_review docstring), so sending it at full
+    resolution is real, avoidable token cost. This is the regression
+    test: a preview past _REVIEW_PREVIEW_MAX_DIMENSION on either side
+    comes out smaller, not byte-identical to the original."""
+    from PIL import Image
+
+    from coscribe.runtime_lg.subagents import _REVIEW_PREVIEW_MAX_DIMENSION
+
+    previews_dir = tmp_path / "previews"
+    previews_dir.mkdir()
+    oversized = Image.new("RGB", (3200, 1800), color=(200, 50, 50))
+    buffer = BytesIO()
+    oversized.save(buffer, format="PNG")
+    original_bytes = buffer.getvalue()
+    (previews_dir / "big.png").write_bytes(original_bytes)
+
+    model = _FakeModel(responses=[AIMessage(content="ok")])
+    review_work = build_review_work_tool(model, [], tmp_path)
+
+    review_work(original_request="req", summary_of_work="summary", preview_name="big.png")
+
+    sent = _last_human_message(model.calls[0]).content
+    assert isinstance(sent, list)
+    data_url = sent[1]["image_url"]["url"]
+    assert data_url != f"data:image/png;base64,{base64.b64encode(original_bytes).decode('ascii')}"
+    sent_bytes = base64.b64decode(data_url.removeprefix("data:image/png;base64,"))
+    with Image.open(BytesIO(sent_bytes)) as resized:
+        assert resized.width <= _REVIEW_PREVIEW_MAX_DIMENSION
+        assert resized.height <= _REVIEW_PREVIEW_MAX_DIMENSION
+        # Aspect ratio preserved (3200:1800 = 16:9).
+        assert abs(resized.width / resized.height - 3200 / 1800) < 0.01
+
+
+def test_review_work_leaves_a_small_preview_untouched(tmp_path: Path) -> None:
+    from PIL import Image
+
+    previews_dir = tmp_path / "previews"
+    previews_dir.mkdir()
+    small = Image.new("RGB", (400, 225), color=(50, 100, 200))
+    buffer = BytesIO()
+    small.save(buffer, format="PNG")
+    original_bytes = buffer.getvalue()
+    (previews_dir / "small.png").write_bytes(original_bytes)
+
+    model = _FakeModel(responses=[AIMessage(content="ok")])
+    review_work = build_review_work_tool(model, [], tmp_path)
+
+    review_work(original_request="req", summary_of_work="summary", preview_name="small.png")
+
+    sent = _last_human_message(model.calls[0]).content
+    expected_data_url = f"data:image/png;base64,{base64.b64encode(original_bytes).decode('ascii')}"
+    assert sent[1]["image_url"]["url"] == expected_data_url
 
 
 def test_review_work_extracts_plain_text_from_a_thinking_style_reply(tmp_path: Path) -> None:

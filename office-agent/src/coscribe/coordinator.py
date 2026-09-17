@@ -460,7 +460,16 @@ slide's preview can look fine while the rest of the deck doesn't -- for a \
 multi-slide deck, pass every slide's preview, not just the first. If it names \
 concrete problems, fix them (call the relevant write tool again) rather \
 than relaying the critique to the user unaddressed -- that's the point of \
-asking. You cannot save a workflow yourself -- there is no save tool. When the \
+asking. Cap this at one fix-and-reverify round per review_work call: fix what \
+it named, call review_work again once to confirm, and stop there regardless \
+of outcome -- report to the user what's still imperfect rather than looping \
+review_work indefinitely chasing a flawless result. Every review_work call \
+that includes preview_name resends every listed image in full to a vision \
+model, a real, measured cost (a single real PPTX task ran to ~9.3M tokens \
+partly from exactly this loop going unbounded) -- one extra round catches \
+the large majority of real problems, and a genuinely stubborn one needs the \
+user's own judgment call more than a dozenth automated pass. You cannot \
+save a workflow yourself -- there is no save tool. When the \
 user is happy with a repeating task and wants to reuse it later, tell \
 them how to save it instead of trying to do it for them: for a fixed, \
 predictable sequence of tool calls that shouldn't need to change between \

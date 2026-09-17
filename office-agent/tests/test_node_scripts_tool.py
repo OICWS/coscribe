@@ -95,6 +95,19 @@ def test_run_node_script_times_out_and_reports_partial_output(tools: NodeScriptT
     assert "timed out after" in result["stderr"]
 
 
+def test_run_node_script_truncates_a_huge_stdout(tools: NodeScriptTools) -> None:
+    """Same real, live-reported cost problem as run_python_script's
+    identical test -- see tools/_output_truncation.py's own docstring."""
+    result = tools.run_node_script(
+        script="console.log('x'.repeat(30000))",
+        description="print something huge",
+    )
+
+    assert result["exit_code"] == 0
+    assert len(result["stdout"]) < 30_000
+    assert "characters truncated" in result["stdout"]
+
+
 def test_run_node_script_does_not_pollute_the_workspace_with_the_script_file(
     tools: NodeScriptTools,
 ) -> None:

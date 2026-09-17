@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from ..runtime.types import tool_metadata
+from ._output_truncation import truncate_script_output
 from .script_env import ensure_script_env, venv_python
 
 # Matches Claude Code's own Bash tool exactly -- a default long enough for
@@ -82,16 +83,17 @@ def _run_python_script(
         except subprocess.TimeoutExpired as exc:
             partial_stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
             partial_stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr
+            timeout_note = f"\n[timed out after {timeout}s]"
             return {
                 "exit_code": None,
-                "stdout": partial_stdout or "",
-                "stderr": (partial_stderr or "") + f"\n[timed out after {timeout}s]",
+                "stdout": truncate_script_output(partial_stdout or ""),
+                "stderr": truncate_script_output(partial_stderr or "") + timeout_note,
                 "timed_out": True,
             }
         return {
             "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "stdout": truncate_script_output(result.stdout),
+            "stderr": truncate_script_output(result.stderr),
             "timed_out": False,
         }
     finally:

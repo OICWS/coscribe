@@ -250,6 +250,60 @@ def build_spawn_agent_tool(
     return spawn_agent
 
 
+# LibreOffice's own PNG export (render_pptx_preview et al) has no
+# explicit width/height set (see tools/_thumbnail.py), so a slide preview
+# commonly lands well past this on its long edge -- and vision APIs
+# charge per-pixel-patch (Anthropic: ceil(w/28) * ceil(h/28) "visual
+# tokens", verified live against Anthropic's own docs 2026-09-17), not a
+# flat per-image fee, so an oversized image is real, avoidable cost, not
+# a one-time flat cost. 1568px matches Claude's own documented "standard
+# tier" long-edge cap -- Claude itself silently downscales to at most
+# this before scoring an image, so sending anything larger only spends
+# extra upload bytes/latency with zero fidelity benefit on that
+# provider; for a provider that instead prices roughly by raw pixel
+# count (most other vision APIs use a similar patch-tiling scheme),
+# this directly cuts the real token cost. A reviewer needs to judge
+# layout/legibility/color, not read every pixel at native slide
+# resolution, so this tradeoff costs nothing quality-wise that matters
+# for that job.
+_REVIEW_PREVIEW_MAX_DIMENSION = 1568
+
+
+def _downscale_preview_for_review(image_bytes: bytes) -> bytes:
+    """Resize a rendered slide/page preview PNG so neither dimension
+    exceeds `_REVIEW_PREVIEW_MAX_DIMENSION`, preserving aspect ratio --
+    a no-op (returns the original bytes untouched) if it's already
+    smaller, so a small preview never gets needlessly re-encoded.
+    Real, live-reported cost problem this addresses: a real multi-slide
+    review pass (render every slide, call review_work with all of them)
+    sent every preview at LibreOffice's own uncapped export resolution,
+    a meaningful and entirely avoidable slice of a run that measured
+    ~9.3M tokens for one deck.
+
+    Never raises: same best-effort contract render_thumbnail's own
+    docstring establishes for preview generation -- a corrupt/
+    unreadable/unusual-format image falls back to the original bytes
+    unchanged (the review still proceeds, just without the token
+    saving) rather than failing the whole review_work call over a
+    preview-resizing problem that isn't the point of calling it."""
+    from io import BytesIO
+
+    from PIL import Image, UnidentifiedImageError
+
+    max_dim = _REVIEW_PREVIEW_MAX_DIMENSION
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            if image.width <= max_dim and image.height <= max_dim:
+                return image_bytes
+            resized = image.copy()
+            resized.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+            buffer = BytesIO()
+            resized.save(buffer, format="PNG")
+            return buffer.getvalue()
+    except (UnidentifiedImageError, OSError):
+        return image_bytes
+
+
 def build_review_work_tool(
     model: Any,
     reviewer_tools: Sequence[Callable[..., Any] | BaseTool],
@@ -327,6 +381,7 @@ def build_review_work_tool(
                     image_bytes = (state_dir / "previews" / name).read_bytes()
                 except OSError:
                     continue
+                image_bytes = _downscale_preview_for_review(image_bytes)
                 encoded = base64.b64encode(image_bytes).decode("ascii")
                 blocks.append(
                     {

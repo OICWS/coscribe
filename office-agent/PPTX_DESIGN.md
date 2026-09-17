@@ -3367,3 +3367,117 @@ literal type string Gemini's strict schema validation rejects outright)
 immediately. Fixed the same way `edit_file_batch`'s own `edits` param
 already solved this: one `"name=value"` pair per line instead of a
 structured object.
+
+## 37. Token cost of the "read/edit XML, write scripts, review" loop -- investigated live, three low-risk fixes shipped, the real structural lever deferred
+
+Prompted by direct, real usage data: a real reference-template-matching
+task, run with deepseek-flash, took ~1 hour and consumed 9,296,376
+tokens -- genuinely high-quality output (the user's own words: better
+than other AI PPT tools tried, including finding/generating on-topic
+data charts), but a real cost concern. Investigated with the same
+"grounded in the real code, not guessed" bar this file's every other
+section uses, plus real external research (not assumed): does
+`hugohe3/ppt-master` (this project's own recurring benchmark) have the
+same tradeoff?
+
+**Yes -- confirmed by ppt-master's own community and its own docs, not
+inferred.** A real GitHub issue on that repo, titled "Best quality but
+most costly" (hugohe3/ppt-master#256), reports a cost-efficiency score
+of 16.83 for ppt-master against 2.93-6.68 for competing tools (lower is
+better) -- roughly 2.5-5.7x more expensive for its admittedly best
+output. ppt-master's own `docs/roadmap.md` states outright: "In the
+cost / speed / quality triangle this project picks quality." This isn't
+a coscribe-specific problem; it's the real, community-confirmed
+tradeoff of this whole class of thorough, iterative, high-quality
+approach.
+
+**But ppt-master's architecture is still structurally cheaper per unit
+of work, for a real, mechanistic reason, not tuning.** Its LLM never
+reads or writes raw OOXML/DrawingML XML at all -- it authors each slide
+as SVG (compact, human-legible) in `svg_output/`, and the SVG-to-native-
+PPTX conversion (`scripts/svg_to_pptx/pptx_package/builder.py`) plus its
+primary quality-check gate (the ~9800-line `svg_quality/checker.py`) are
+both **pure deterministic Python with zero LLM calls** -- confirmed by
+reading both modules' own imports (stdlib + `python-pptx` only, no
+`anthropic`/`openai`/API-key references anywhere). Its own quality-check
+report has a documented "hard rule": never `cat` the complete JSON into
+context. The one LLM-vision review pass analogous to coscribe's
+`review_work` (`workflows/stages/visual-review.md`) is **opt-in only,
+never auto-invoked**, and its own docs state a concrete, accepted cost
+up front ("~100-150K additional input tokens for a 20-page deck at
+K=5") rather than leaving it open-ended.
+
+**coscribe's own current design, investigated the same way**: `read_pptx_
+xml`/`edit_pptx_xml` are already scoped to one shape at a time (`_get_
+shape_at_index` + `etree.tostring(shape._element)`), not a whole-slide-
+file blob per call -- this part was already reasonably efficient, not a
+bug. Three real, confirmed gaps, not assumptions:
+
+1. `review_work`'s `preview_name` path base64-encoded every named PNG at
+   LibreOffice's own uncapped export resolution -- no downscaling at
+   all, and `coordinator.py`'s own instructions direct passing *every*
+   slide's preview on *every* call, in what was an unbounded "fix,
+   re-render, re-review, repeat" loop.
+2. `run_python_script`/`run_node_script` echoed captured stdout/stderr
+   back into context completely uncapped -- no truncation mechanism at
+   all, unlike `read_file`'s own existing head/tail option elsewhere in
+   this codebase.
+3. `fill_pptx_template` (the recommended path for "build a new deck
+   matching a reference template") can't express charts/tables/complex
+   layouts -- so a reference deck with real charts structurally pushes
+   the model toward the expensive raw-XML-plus-script route out of
+   necessity, not choice. This is the real, larger lever (giving
+   `fill_pptx_template`/`write_pptx` genuine chart/complex-layout
+   expressiveness, closing the gap that forces the fallback) -- **not
+   shipped this pass, deferred pending further scoping** at the user's
+   own explicit request ("先继续评估下").
+
+**Fixed, all three grounded in real, measured mechanics, not guesses**:
+
+- `runtime_lg/subagents.py`'s new `_downscale_preview_for_review`
+  resizes a preview to at most 1568px on its long edge before base64-
+  encoding (a no-op if already smaller) -- 1568px matches Claude's own
+  documented "standard tier" long-edge cap (verified live against
+  Anthropic's vision docs, 2026-09-17: images past that are silently
+  downscaled server-side before scoring, so sending more only spends
+  extra upload bytes/latency on that provider with zero fidelity
+  benefit; most other vision APIs price by a similar per-pixel-patch
+  scheme, so this is real, not just Claude-specific, savings). Never
+  raises on a corrupt/unusual-format image -- falls back to the
+  original bytes, same best-effort contract `_thumbnail.py`'s own
+  preview generation already promises elsewhere in this codebase. 2 new
+  tests (a real oversized PNG gets downscaled and shrinks; a real small
+  one passes through byte-identical) plus the 3 pre-existing
+  synthetic-bytes tests (which PIL can't parse) now exercising the
+  fallback path instead of failing.
+- New shared `tools/_output_truncation.py` (`truncate_script_output`,
+  `MAX_SCRIPT_OUTPUT_CHARS = 20_000`) -- keeps 4000 characters from each
+  end past the cap with an honest "`...[N characters truncated]...`"
+  marker in the middle, not a silent head-only cut, since a script's
+  most useful output (the final result, or a traceback's last frame) is
+  disproportionately likely to be at the *end*. Wired into both
+  `scripts.py`'s and `node_scripts.py`'s `_run_*_script`, on both the
+  normal-completion and timeout-partial-output paths. 4 unit tests for
+  the helper itself plus one live integration test per tool (a script
+  that prints 30,000 characters comes back truncated).
+- `coordinator.py`'s `review_work` guidance now caps the fix-and-
+  reverify loop at one round per call ("fix what it named, call
+  review_work again once to confirm, and stop there regardless of
+  outcome") with the real ~9.3M-token number cited directly in the
+  instruction itself as the reason, rather than leaving it open-ended.
+  A prompt-level cap, not a code-enforced one -- this loop spans
+  multiple separate top-level tool calls across an open conversation,
+  not one bounded call the way `spawn_agent`'s own `max_rounds` is, so
+  there's no equivalent hard-stop mechanism available without real new
+  state-tracking work; stated as such, not oversold.
+
+None of these three narrow or discourage reaching for `read_pptx_xml`/
+`edit_pptx_xml`/`run_python_script` when genuinely needed (animations,
+SmartArt, anything only the XML layer can express) -- confirmed with
+the user directly before implementing: they're orthogonal reductions in
+incidental waste around an already-made decision to do the expensive
+thing, not a push toward avoiding it. Full suite green, `ruff`/`mypy`
+clean on every touched file.
+
+Sources: [hugohe3/ppt-master#256](https://github.com/hugohe3/ppt-master/issues/256);
+[Anthropic vision docs](https://platform.claude.com/docs/en/build-with-claude/vision).

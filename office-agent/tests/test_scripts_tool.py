@@ -91,6 +91,23 @@ def test_run_python_script_times_out_and_reports_partial_output(tools: ScriptToo
     assert "timed out after" in result["stderr"]
 
 
+def test_run_python_script_truncates_a_huge_stdout(tools: ScriptTools) -> None:
+    """Real, live-reported cost problem: a script's own stdout used to go
+    back into context completely uncapped -- a real ~9.3M-token PPTX-
+    generation run spent a meaningful, avoidable slice of that on exactly
+    this. See tools/_output_truncation.py's own docstring/unit tests for
+    the truncation logic itself; this confirms run_python_script actually
+    applies it, not just that the helper works in isolation."""
+    result = tools.run_python_script(
+        script="print('x' * 30000)",
+        description="print something huge",
+    )
+
+    assert result["exit_code"] == 0
+    assert len(result["stdout"]) < 30_000
+    assert "characters truncated" in result["stdout"]
+
+
 def test_run_python_script_does_not_pollute_the_workspace_with_the_script_file(
     tools: ScriptTools,
 ) -> None:
