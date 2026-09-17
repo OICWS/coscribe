@@ -5226,6 +5226,83 @@ full suite green throughout.
 
 ---
 
+## Phase 8at -- XLSX quality track, Workstreams D+E: gap-filling (merges, conditional formatting, data validation, freeze panes, column widths) + a surgical cell-range editor
+
+Grounded in the same cross-check against Anthropic's own xlsx skill this
+file's own module docstring already cited once (for the formula-safety
+handling): merged cells, conditional formatting, data validation, freeze
+panes, and column widths are all named in that skill's real-world usage
+but had no `spreadsheets.py` tool at all before this phase. Seven new
+tools, all native `openpyxl` -- no new dependency, matching the user's
+"avoid third-party libraries" instruction from the same discussion that
+scoped the OfficeCLI integration (Workstream F, not started) to an
+external MCP process rather than a pip package.
+
+**Workstream D**: `merge_xlsx_cells`/`unmerge_xlsx_cells`,
+`add_xlsx_conditional_format` (`cell_is`/`color_scale`/`data_bar` rule
+types -- the three genuinely common cases; icon sets deliberately left
+out, no real request for them), `set_xlsx_data_validation` (`list`/
+`whole`/`decimal`/`date`/`time`/`textLength`/`custom`), `freeze_xlsx_panes`,
+`set_xlsx_column_width` (accepts a single column or a range, e.g.
+`"B:D"`, looping `column_dimensions` per letter since openpyxl has no
+native range form for this one).
+
+**Two real gaps found empirically while building `merge_xlsx_cells`, not
+assumed**: (1) openpyxl's own `merge_cells` does **not** reject an
+overlapping second merge -- confirmed live (`ws.merge_cells('A1:B2')`
+then `ws.merge_cells('B1:C2')` both silently "succeed", leaving a
+double-merged range real Excel would show as corrupt); `merge_xlsx_cells`
+checks every existing merged range's `CellRange.isdisjoint` itself before
+calling openpyxl, raising a clear error instead of writing a bad file.
+(2) `set_xlsx_data_validation`'s `list` type needs Excel's own quoted-
+literal form (`'"Yes,No,Maybe"'`) to render as a dropdown -- a plain
+comma list written bare is silently ignored by Excel; auto-quotes a
+plain list (detected by "no `:` and doesn't already start with `"` or
+`=`") the same "don't make the model remember an OOXML wrinkle" way
+`write_xlsx`'s own `_xlfn.` auto-prefixing already does, leaving a range
+reference (`"$D$1:$D$5"`) or an already-quoted/formula value untouched.
+
+**Workstream E**: `edit_xlsx_cells` -- the surgical range editor this
+whole track's plan called out as the fix for `write_xlsx`'s one real
+structural risk: writing even a single cell there means replacing the
+*entire named sheet*, silently dropping any merge/conditional format/
+chart/formatting on it that the new call's own content doesn't
+reconstruct. `edit_xlsx_cells` writes only the block `content` (the same
+pipe-table syntax and `_coerce_cell`/formula-validation `write_xlsx`
+already uses, reused rather than duplicated) actually covers, anchored
+at `start_cell` -- verified with a real test that merges a range and
+colors a font, then edits an unrelated cell, and confirms both survive
+untouched. Auto-recalculates via the existing `_recalc_xlsx` when the
+edited block contains a formula, same as `write_xlsx`.
+
+**A real, pre-existing scope gap noticed while building this, not fixed
+here**: `format_xlsx_cells`/`add_xlsx_chart` (shipped in an earlier
+phase) resolve their target path through `_check_readable` (read-scoped)
+and then call `workbook.save()` on that same path -- meaning an edit to
+a file under `extra_readable` (deliberately read-only in this package's
+own scope model) would attempt to write back through a path the scope
+model never granted write access to, relying only on the OS's own
+permissions to actually stop it. All seven new tools in this phase use a
+new `_check_editable` (write-scoped, requires the file already exist --
+the same fix `documents.py`'s own `_check_editable` already made for its
+tracked-edit tools in Phase 8ar) instead of repeating that pattern, but
+the two older tools were left as-is -- retrofitting them wasn't part of
+this pass's actual scope, and touching already-shipped/tested code
+without being asked to isn't this session's habit.
+
+**Verified**: `ruff check src tests`/`mypy src` both clean (two
+`# type: ignore[no-untyped-call]`/`[arg-type]` comments added for
+`CellIsRule`/`ColorScaleRule`/`DataBarRule`, which are plain unannotated
+factory functions in openpyxl -- confirmed by reading their source --
+and for `DataValidation`'s `type`/`operator` Literal params, which this
+tool's own runtime checks against `_DATA_VALIDATION_TYPES` already
+narrow but mypy can't see through a plain `str` parameter, the same
+reasoning `add_xlsx_chart`'s pre-existing `type: ignore[call-arg]`
+already documents for its own `sheet.add_chart` call). 26 new tests;
+full suite green throughout.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

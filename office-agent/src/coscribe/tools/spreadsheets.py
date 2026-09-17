@@ -57,6 +57,26 @@ verified empirically here) and reports any Excel error strings
 openpyxl just wrote reads back as ``None`` to ``read_xlsx``/anything using
 ``data_only=True`` until the user happens to open the file in real Excel
 -- a real, confirmed gap this closes.
+
+``merge_xlsx_cells``/``unmerge_xlsx_cells``/``add_xlsx_conditional_format``/
+``set_xlsx_data_validation``/``freeze_xlsx_panes``/``set_xlsx_column_width``/
+``edit_xlsx_cells`` fill gaps found by cross-referencing this file against
+Anthropic's own xlsx skill a second time (the same discipline the formula
+handling above already used): merged cells ("write the top-left anchor
+only", already true of how ``format_xlsx_cells``' range-flattening
+handles a merged range -- openpyxl itself makes every non-anchor cell a
+read-only ``MergedCell``), conditional formatting, data validation,
+freeze panes, and column widths were all named in that skill but had no
+tool here at all; ``write_xlsx``'s whole-sheet replace was also the one
+thing on this file's own backlog (see this package's own design log,
+``ROADMAP.md``) -- ``edit_xlsx_cells`` writes only the addressed block,
+leaving the rest of the sheet (other cells, formatting, merges, charts)
+untouched, reusing ``write_xlsx``'s own pipe-table parsing/formula
+validation rather than duplicating it. ``merge_xlsx_cells`` explicitly
+rejects a range that overlaps an already-merged one -- confirmed
+empirically that openpyxl's own ``merge_cells`` does *not* raise on this
+(it silently accepts a corrupt-looking double-merge), so this tool adds
+the check openpyxl itself skips.
 """
 
 from __future__ import annotations
@@ -331,6 +351,12 @@ def _workbook_has_any_formula(workbook: Any) -> bool:
 
 _CHART_TYPES = frozenset({"bar", "line", "pie"})
 
+_CONDITIONAL_FORMAT_RULE_TYPES = frozenset({"cell_is", "color_scale", "data_bar"})
+
+_DATA_VALIDATION_TYPES = frozenset(
+    {"list", "whole", "decimal", "date", "time", "textLength", "custom"}
+)
+
 
 class SpreadsheetToolkit:
     def __init__(
@@ -359,6 +385,19 @@ class SpreadsheetToolkit:
         if file_path.exists() and file_path.is_dir():
             raise ValueError(f"Path is a directory: {path}")
         file_path.parent.mkdir(parents=True, exist_ok=True)
+        return file_path
+
+    def _check_editable(self, path: str) -> Path:
+        """Like `_check_writable`, but requires the file to already exist --
+        for tools that edit an existing workbook in place (merge/format/
+        validation/etc.) rather than creating one, matching the same
+        write-scoped-and-must-already-exist contract `documents.py`'s
+        `_check_editable` uses for its own tracked-edit tools."""
+        file_path = self._scope.resolve(path, write=True)
+        if not file_path.exists():
+            raise ValueError(f"File does not exist: {path}")
+        if not file_path.is_file():
+            raise ValueError(f"Path is not a file: {path}")
         return file_path
 
     def read_xlsx(self, path: str, sheet: Optional[str] = None) -> str:  # noqa: UP045
@@ -572,6 +611,314 @@ class SpreadsheetToolkit:
             "preview_skipped_reason": preview_skipped_reason,
         }
 
+    def merge_xlsx_cells(self, path: str, sheet_name: str, cell_range: str) -> dict[str, object]:
+        from openpyxl import load_workbook
+        from openpyxl.worksheet.cell_range import CellRange
+
+        file_path = self._check_editable(path)
+        workbook = load_workbook(str(file_path))
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError(
+                f"Sheet {sheet_name!r} not found. Available sheets: {workbook.sheetnames}"
+            )
+        sheet = workbook[sheet_name]
+        try:
+            new_range = CellRange(cell_range)
+        except ValueError as exc:
+            raise ValueError(f"Invalid cell_range {cell_range!r}: {exc}") from None
+
+        # openpyxl's own merge_cells does not check this -- confirmed
+        # empirically it silently accepts a second, overlapping merge
+        # rather than raising, which real Excel treats as corrupt.
+        for existing in sheet.merged_cells.ranges:
+            if not new_range.isdisjoint(existing):
+                raise ValueError(
+                    f"{cell_range!r} overlaps an already-merged range {existing.coord!r}"
+                )
+
+        sheet.merge_cells(cell_range)
+        workbook.save(str(file_path))
+        return {
+            "path": self._scope.relative(file_path),
+            "sheet": sheet_name,
+            "cell_range": cell_range,
+        }
+
+    def unmerge_xlsx_cells(self, path: str, sheet_name: str, cell_range: str) -> dict[str, object]:
+        from openpyxl import load_workbook
+
+        file_path = self._check_editable(path)
+        workbook = load_workbook(str(file_path))
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError(
+                f"Sheet {sheet_name!r} not found. Available sheets: {workbook.sheetnames}"
+            )
+        sheet = workbook[sheet_name]
+        try:
+            sheet.unmerge_cells(cell_range)
+        except (ValueError, KeyError) as exc:
+            raise ValueError(f"Cannot unmerge {cell_range!r}: {exc}") from None
+        workbook.save(str(file_path))
+        return {
+            "path": self._scope.relative(file_path),
+            "sheet": sheet_name,
+            "cell_range": cell_range,
+        }
+
+    def add_xlsx_conditional_format(
+        self,
+        path: str,
+        sheet_name: str,
+        cell_range: str,
+        rule_type: str,
+        operator: str = "",
+        formula: str = "",
+        fill_color: str = "",
+        min_color: str = "",
+        mid_color: str = "",
+        max_color: str = "",
+    ) -> dict[str, object]:
+        from openpyxl import load_workbook
+        from openpyxl.formatting.rule import CellIsRule, ColorScaleRule, DataBarRule
+        from openpyxl.styles import PatternFill
+
+        if rule_type not in _CONDITIONAL_FORMAT_RULE_TYPES:
+            raise ValueError(
+                f"Unknown rule_type {rule_type!r}. Use one of: "
+                f"{', '.join(sorted(_CONDITIONAL_FORMAT_RULE_TYPES))}"
+            )
+        file_path = self._check_editable(path)
+        workbook = load_workbook(str(file_path))
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError(
+                f"Sheet {sheet_name!r} not found. Available sheets: {workbook.sheetnames}"
+            )
+        sheet = workbook[sheet_name]
+
+        # CellIsRule/ColorScaleRule/DataBarRule are plain factory functions
+        # in openpyxl (confirmed by reading their source -- no annotations
+        # at all, `Rule` is what's actually typed), same reason
+        # `add_xlsx_chart`'s own `sheet.add_chart` call above needs its
+        # `type: ignore`.
+        if rule_type == "cell_is":
+            if not operator or not formula:
+                raise ValueError("rule_type 'cell_is' requires both operator and formula")
+            rule = CellIsRule(  # type: ignore[no-untyped-call]
+                operator=operator,
+                formula=[part.strip() for part in formula.split(",")],
+                fill=PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
+                if fill_color
+                else None,
+            )
+        elif rule_type == "color_scale":
+            if not min_color or not max_color:
+                raise ValueError("rule_type 'color_scale' requires min_color and max_color")
+            rule = ColorScaleRule(  # type: ignore[no-untyped-call]
+                start_type="min",
+                start_color=min_color,
+                mid_type="percentile" if mid_color else None,
+                mid_value=50 if mid_color else None,
+                mid_color=mid_color or None,
+                end_type="max",
+                end_color=max_color,
+            )
+        else:  # "data_bar"
+            if not fill_color:
+                raise ValueError("rule_type 'data_bar' requires fill_color")
+            rule = DataBarRule(  # type: ignore[no-untyped-call]
+                start_type="min", end_type="max", color=fill_color, showValue=True
+            )
+
+        sheet.conditional_formatting.add(cell_range, rule)
+        workbook.save(str(file_path))
+        return {
+            "path": self._scope.relative(file_path),
+            "sheet": sheet_name,
+            "cell_range": cell_range,
+            "rule_type": rule_type,
+        }
+
+    def set_xlsx_data_validation(
+        self,
+        path: str,
+        sheet_name: str,
+        cell_range: str,
+        validation_type: str,
+        formula1: str,
+        formula2: str = "",
+        operator: str = "between",
+        allow_blank: bool = True,
+        error_message: str = "",
+        error_title: str = "",
+    ) -> dict[str, object]:
+        from openpyxl import load_workbook
+        from openpyxl.worksheet.datavalidation import DataValidation
+
+        if validation_type not in _DATA_VALIDATION_TYPES:
+            raise ValueError(
+                f"Unknown validation_type {validation_type!r}. Use one of: "
+                f"{', '.join(sorted(_DATA_VALIDATION_TYPES))}"
+            )
+        file_path = self._check_editable(path)
+        workbook = load_workbook(str(file_path))
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError(
+                f"Sheet {sheet_name!r} not found. Available sheets: {workbook.sheetnames}"
+            )
+        sheet = workbook[sheet_name]
+
+        # A plain comma list ("Yes,No,Maybe") needs to be Excel's own
+        # quoted-literal form ('"Yes,No,Maybe"') to work as a dropdown --
+        # a range reference (contains ":") or an already-quoted/formula
+        # value is left alone, the same "don't make the model remember an
+        # OOXML wrinkle" reasoning write_xlsx's own _xlfn. prefixing uses.
+        if (
+            validation_type == "list"
+            and ":" not in formula1
+            and not formula1.startswith(("\"", "="))
+        ):
+            formula1 = f'"{formula1}"'
+
+        # `type`/`operator` are Literal-typed in openpyxl's stubs; both are
+        # already checked against `_DATA_VALIDATION_TYPES`/a plain default
+        # string at runtime above, mypy just can't narrow a `str` parameter
+        # to a Literal on its own.
+        validation = DataValidation(
+            type=validation_type,  # type: ignore[arg-type]
+            operator=operator  # type: ignore[arg-type]
+            if validation_type not in ("list", "custom")
+            else None,
+            formula1=formula1,
+            formula2=formula2 or None,
+            allow_blank=allow_blank,
+            showErrorMessage=bool(error_message),
+            error=error_message or None,
+            errorTitle=error_title or None,
+        )
+        validation.add(cell_range)
+        sheet.add_data_validation(validation)
+        workbook.save(str(file_path))
+        return {
+            "path": self._scope.relative(file_path),
+            "sheet": sheet_name,
+            "cell_range": cell_range,
+            "validation_type": validation_type,
+        }
+
+    def freeze_xlsx_panes(self, path: str, sheet_name: str, cell: str = "") -> dict[str, object]:
+        from openpyxl import load_workbook
+
+        file_path = self._check_editable(path)
+        workbook = load_workbook(str(file_path))
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError(
+                f"Sheet {sheet_name!r} not found. Available sheets: {workbook.sheetnames}"
+            )
+        sheet = workbook[sheet_name]
+        if cell and cell.upper() != "A1":
+            try:
+                sheet.freeze_panes = cell
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(f"Invalid cell {cell!r}: {exc}") from None
+        else:
+            sheet.freeze_panes = None
+        workbook.save(str(file_path))
+        return {
+            "path": self._scope.relative(file_path),
+            "sheet": sheet_name,
+            "freeze_panes": sheet.freeze_panes,
+        }
+
+    def set_xlsx_column_width(
+        self, path: str, sheet_name: str, columns: str, width: float
+    ) -> dict[str, object]:
+        from openpyxl import load_workbook
+        from openpyxl.utils import column_index_from_string, get_column_letter
+
+        file_path = self._check_editable(path)
+        workbook = load_workbook(str(file_path))
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError(
+                f"Sheet {sheet_name!r} not found. Available sheets: {workbook.sheetnames}"
+            )
+        sheet = workbook[sheet_name]
+
+        start_letter, _, end_letter = columns.upper().partition(":")
+        end_letter = end_letter or start_letter
+        try:
+            start_idx = column_index_from_string(start_letter)
+            end_idx = column_index_from_string(end_letter)
+        except ValueError as exc:
+            raise ValueError(f"Invalid columns {columns!r}: {exc}") from None
+        if end_idx < start_idx:
+            raise ValueError(f"Invalid columns {columns!r}: end is before start")
+
+        letters = [get_column_letter(idx) for idx in range(start_idx, end_idx + 1)]
+        for letter in letters:
+            sheet.column_dimensions[letter].width = width
+        workbook.save(str(file_path))
+        return {
+            "path": self._scope.relative(file_path),
+            "sheet": sheet_name,
+            "columns": letters,
+            "width": width,
+        }
+
+    @locked_by_path
+    def edit_xlsx_cells(
+        self, path: str, sheet_name: str, start_cell: str, content: str
+    ) -> dict[str, object]:
+        from openpyxl import load_workbook
+        from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
+
+        rows = _parse_table_rows(content)
+        if not rows:
+            raise ValueError("content has no rows to write")
+
+        file_path = self._check_editable(path)
+        workbook = load_workbook(str(file_path))
+        if sheet_name not in workbook.sheetnames:
+            raise ValueError(
+                f"Sheet {sheet_name!r} not found. Available sheets: {workbook.sheetnames}"
+            )
+        sheet = workbook[sheet_name]
+
+        try:
+            start_col_letter, start_row = coordinate_from_string(start_cell)
+            start_col = column_index_from_string(start_col_letter)
+        except ValueError as exc:
+            raise ValueError(f"Invalid start_cell {start_cell!r}: {exc}") from None
+
+        for row_offset, row in enumerate(rows):
+            for col_offset, raw_cell in enumerate(row):
+                sheet.cell(
+                    row=start_row + row_offset, column=start_col + col_offset
+                ).value = _coerce_cell(raw_cell)
+
+        has_formula = _workbook_has_any_formula(workbook)
+        workbook.save(str(file_path))
+
+        recalc_result: dict[str, object] = {"status": "skipped", "skipped_reason": None}
+        if has_formula:
+            recalc_result = _recalc_xlsx(file_path)
+
+        preview_path, preview_skipped_reason = render_thumbnail(file_path, self._state_dir)
+        return {
+            "path": self._scope.relative(file_path),
+            "sheet": sheet_name,
+            "start_cell": start_cell,
+            "rows_written": len(rows),
+            "cols_written": max(len(row) for row in rows),
+            "bytes_written": file_path.stat().st_size,
+            "preview_path": preview_path,
+            "preview_skipped_reason": preview_skipped_reason,
+            "recalc_status": recalc_result["status"],
+            "recalc_skipped_reason": recalc_result.get("skipped_reason"),
+            "total_formulas": recalc_result.get("total_formulas"),
+            "total_errors": recalc_result.get("total_errors"),
+            "formula_error_locations": recalc_result.get("error_locations"),
+        }
+
 
 def build_spreadsheet_tools(
     root: str | Path,
@@ -765,10 +1112,226 @@ def build_spreadsheet_tools(
             anchor=anchor,
         )
 
+    def merge_xlsx_cells(path: str, sheet_name: str, cell_range: str) -> dict[str, object]:
+        """Merge a cell range in an existing Excel (.xlsx) file into one cell.
+
+        Only the top-left cell of `cell_range` keeps its value/formatting
+        after merging -- write to that cell (e.g. with `edit_xlsx_cells`)
+        before or after merging, not any other cell in the range, which
+        openpyxl makes read-only once merged. Rejects a range that
+        overlaps a merge that already exists on the sheet.
+
+        Args:
+            path: file to modify, relative to the workspace root
+            sheet_name: sheet containing the range
+            cell_range: range to merge, e.g. "A1:C1"
+        """
+        return toolkit.merge_xlsx_cells(path=path, sheet_name=sheet_name, cell_range=cell_range)
+
+    def unmerge_xlsx_cells(path: str, sheet_name: str, cell_range: str) -> dict[str, object]:
+        """Undo a merge in an existing Excel (.xlsx) file, restoring individual cells.
+
+        `cell_range` must exactly match a range that's currently merged
+        (e.g. what `merge_xlsx_cells` was called with) -- raises if it
+        isn't currently merged.
+
+        Args:
+            path: file to modify, relative to the workspace root
+            sheet_name: sheet containing the range
+            cell_range: the exact currently-merged range to undo, e.g. "A1:C1"
+        """
+        return toolkit.unmerge_xlsx_cells(path=path, sheet_name=sheet_name, cell_range=cell_range)
+
+    def add_xlsx_conditional_format(
+        path: str,
+        sheet_name: str,
+        cell_range: str,
+        rule_type: str,
+        operator: str = "",
+        formula: str = "",
+        fill_color: str = "",
+        min_color: str = "",
+        mid_color: str = "",
+        max_color: str = "",
+    ) -> dict[str, object]:
+        """Add conditional formatting to a cell range in an existing Excel (.xlsx) file.
+
+        `rule_type` is one of:
+        - `"cell_is"`: highlights cells that satisfy a comparison. Needs
+          `operator` (`">"`, `"<"`, `">="`, `"<="`, `"="`, `"!="`, or
+          `"between"`/`"notBetween"`) and `formula` (the comparison
+          value, e.g. `"0"`; for `"between"`/`"notBetween"`, two values
+          separated by a comma, e.g. `"10,20"`) and `fill_color`.
+        - `"color_scale"`: a gradient from `min_color` to `max_color`
+          (both required) across the range's actual min/max values;
+          `mid_color` optionally adds a third stop at the median.
+        - `"data_bar"`: an in-cell bar proportional to each cell's value
+          relative to the range's min/max, filled with `fill_color`.
+
+        Args:
+            path: file to modify, relative to the workspace root
+            sheet_name: sheet containing the range
+            cell_range: range the rule applies to, e.g. "B2:B20"
+            rule_type: "cell_is", "color_scale", or "data_bar"
+            operator: comparison operator, for "cell_is" only
+            formula: comparison value(s), for "cell_is" only
+            fill_color: 6-digit hex RGB with no "#", for "cell_is"/"data_bar"
+            min_color: 6-digit hex RGB with no "#", for "color_scale"
+            mid_color: 6-digit hex RGB with no "#", optional, for "color_scale"
+            max_color: 6-digit hex RGB with no "#", for "color_scale"
+        """
+        return toolkit.add_xlsx_conditional_format(
+            path=path,
+            sheet_name=sheet_name,
+            cell_range=cell_range,
+            rule_type=rule_type,
+            operator=operator,
+            formula=formula,
+            fill_color=fill_color,
+            min_color=min_color,
+            mid_color=mid_color,
+            max_color=max_color,
+        )
+
+    def set_xlsx_data_validation(
+        path: str,
+        sheet_name: str,
+        cell_range: str,
+        validation_type: str,
+        formula1: str,
+        formula2: str = "",
+        operator: str = "between",
+        allow_blank: bool = True,
+        error_message: str = "",
+        error_title: str = "",
+    ) -> dict[str, object]:
+        """Restrict what can be entered into a cell range in an existing Excel (.xlsx) file.
+
+        `validation_type` is `"list"` (a dropdown -- `formula1` is either
+        a plain comma-separated list of options, e.g. `"Yes,No,Maybe"`,
+        or a range reference, e.g. `"$D$1:$D$5"`), `"whole"`/`"decimal"`
+        (numeric range, using `operator` and `formula1`/`formula2`,
+        e.g. operator `"between"` with formula1/formula2 as the bounds),
+        `"date"`/`"time"` (same, with date/time values), `"textLength"`
+        (character count), or `"custom"` (an arbitrary formula in
+        `formula1` that must evaluate to TRUE).
+
+        Args:
+            path: file to modify, relative to the workspace root
+            sheet_name: sheet containing the range
+            cell_range: range the validation applies to, e.g. "B2:B20"
+            validation_type: "list", "whole", "decimal", "date", "time",
+                "textLength", or "custom"
+            formula1: the option list/range/bound/formula -- meaning
+                depends on validation_type, see above
+            formula2: second bound, for "between"/"notBetween" operators
+                on numeric/date/time types
+            operator: "between", "notBetween", "equal", "notEqual",
+                "lessThan", "lessThanOrEqual", "greaterThan", or
+                "greaterThanOrEqual" -- ignored for "list"/"custom"
+            allow_blank: whether an empty cell is considered valid
+            error_message: message shown when an invalid value is entered;
+                omit for no error popup at all
+            error_title: title of the error popup, when error_message is set
+        """
+        return toolkit.set_xlsx_data_validation(
+            path=path,
+            sheet_name=sheet_name,
+            cell_range=cell_range,
+            validation_type=validation_type,
+            formula1=formula1,
+            formula2=formula2,
+            operator=operator,
+            allow_blank=allow_blank,
+            error_message=error_message,
+            error_title=error_title,
+        )
+
+    def freeze_xlsx_panes(path: str, sheet_name: str, cell: str = "") -> dict[str, object]:
+        """Freeze rows/columns above and left of `cell` in an existing Excel (.xlsx) file.
+
+        E.g. `cell="B2"` freezes row 1 and column A so they stay visible
+        while scrolling; `cell="A3"` freezes just the first two rows;
+        `cell="C1"` freezes just the first two columns. Omit `cell` (or
+        pass `"A1"`) to remove any existing freeze.
+
+        Args:
+            path: file to modify, relative to the workspace root
+            sheet_name: sheet to freeze panes on
+            cell: the first scrollable cell, e.g. "B2"; omit to unfreeze
+        """
+        return toolkit.freeze_xlsx_panes(path=path, sheet_name=sheet_name, cell=cell)
+
+    def set_xlsx_column_width(
+        path: str, sheet_name: str, columns: str, width: float
+    ) -> dict[str, object]:
+        """Set column width(s) in an existing Excel (.xlsx) file.
+
+        `width` is in Excel's own character-width units (roughly the
+        number of digits of the default font that fit -- 8.43 is Excel's
+        own default; wide text columns commonly want 20-40).
+
+        Args:
+            path: file to modify, relative to the workspace root
+            sheet_name: sheet containing the column(s)
+            columns: a single column letter (e.g. "B") or a range (e.g. "B:D")
+            width: column width to set
+        """
+        return toolkit.set_xlsx_column_width(
+            path=path, sheet_name=sheet_name, columns=columns, width=width
+        )
+
+    def edit_xlsx_cells(
+        path: str, sheet_name: str, start_cell: str, content: str
+    ) -> dict[str, object]:
+        """Write a block of cells into an existing sheet, leaving everything else untouched.
+
+        Unlike `write_xlsx` (which replaces the *entire* named sheet's
+        content), this only touches the cells `content` actually covers,
+        starting at `start_cell` -- other cells, formatting, merged
+        ranges, and charts on the sheet are left exactly as they were.
+        Use this to fix or update a few cells in a sheet that already has
+        real structure you don't want to lose.
+
+        `content` uses the same pipe-table syntax as `write_xlsx`
+        (`| cell | cell |`, one row per line) -- a single cell is just one
+        row with one column, e.g. `"| 42 |"`. Cells that look numeric
+        become real numbers; a cell starting with `=` becomes a real
+        formula, validated/auto-corrected the same way `write_xlsx` does
+        (rejecting `XLOOKUP`-class functions, `_xlfn.`-prefixing post-2007
+        functions). If any formula is written, this automatically
+        recalculates the workbook via LibreOffice the same way `write_xlsx`
+        does -- see the response's `recalc_status`/`total_errors`.
+
+        The response's `preview_path` (when LibreOffice is installed) names
+        a rendered thumbnail of `sheet_name` the user can see in the chat
+        UI -- not something to fetch or parse yourself.
+
+        Args:
+            path: file to modify, relative to the workspace root
+            sheet_name: sheet to edit -- must already exist
+            start_cell: top-left cell of the block to write, e.g. "B3"
+            content: pipe-table rows to write starting at start_cell
+        """
+        return toolkit.edit_xlsx_cells(
+            path=path, sheet_name=sheet_name, start_cell=start_cell, content=content
+        )
+
     return [
         tool_metadata(read_xlsx, risk_category="READ", category="documents"),
         tool_metadata(write_xlsx, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(recalc_xlsx, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(format_xlsx_cells, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(add_xlsx_chart, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(merge_xlsx_cells, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(unmerge_xlsx_cells, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(
+            add_xlsx_conditional_format, risk_category="WRITE_LOCAL", category="documents"
+        ),
+        tool_metadata(
+            set_xlsx_data_validation, risk_category="WRITE_LOCAL", category="documents"
+        ),
+        tool_metadata(freeze_xlsx_panes, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(set_xlsx_column_width, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(edit_xlsx_cells, risk_category="WRITE_LOCAL", category="documents"),
     ]
