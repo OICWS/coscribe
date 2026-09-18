@@ -5663,6 +5663,40 @@ def test_reconnect_replays_conversation_history_lg(
     }
 
 
+def test_reconnect_replays_a_sent_images_data_urls_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real, user-reported bug: an attached image rendered fine for the
+    rest of the live WS connection that sent it (the browser's own
+    optimistic local echo, still holding the data URL in memory), but
+    vanished on reload/reconnect/thread-switch-and-back -- the image was
+    already faithfully checkpointed (baked into the HumanMessage's own
+    image_url content blocks), just never read back out by
+    serialize_history_for_ws_lg. See messages.py's extract_images and
+    this same function's docstring."""
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="nice photo")])
+    data_url = "data:image/png;base64,aGVsbG8="
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_hist_images") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history -- empty, brand new thread
+            ws.send_json({"type": "user_message", "text": "what's in this?", "images": [data_url]})
+            _receive_until(ws, "tasks_changed")
+
+        with client.websocket_connect("/ws/t_hist_images") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+
+    assert history == {
+        "type": "history",
+        "entries": [
+            {"kind": "user", "text": "what's in this?", "images": [data_url]},
+            {"kind": "agent", "text": "nice photo"},
+        ],
+        "has_older": False,
+    }
+
+
 def test_history_omits_a_call_still_pending_approval_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
