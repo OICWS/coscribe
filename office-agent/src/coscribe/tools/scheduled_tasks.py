@@ -20,7 +20,7 @@ instead, since that needs a live ChatSessionLG.
 Schedule times (`ScheduleRule.at`, "HH:MM" for recurring rules) are
 interpreted in the server's own local wall-clock time, not UTC -- coscribe
 is single-user, local-first software with no per-user timezone concept
-(see ARCHITECTURE.md's "explicitly not adopting: any hosted component"),
+(see ROADMAP.md's "explicitly not adopting: any hosted component"),
 so "the machine coscribe runs on" and "the user" are assumed to share a
 timezone, the same assumption any local scheduled-task tool (cron, Windows
 Task Scheduler) already makes. This is a real limitation if coscribe is
