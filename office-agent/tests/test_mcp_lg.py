@@ -14,6 +14,7 @@ importorskip rather than failing collection when it isn't present.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -72,6 +73,9 @@ class _FakeMultiServerMCPClient:
     async def session(self, server_name: str, *, auto_initialize: bool = True):  # type: ignore[no-untyped-def]
         if server_name == "broken":
             raise RuntimeError("connection refused")
+        if server_name == "hangs":
+            # A session that spawns fine but never completes its handshake.
+            await asyncio.sleep(3600)
         try:
             yield _FakeClientSession()
         finally:
@@ -144,12 +148,13 @@ async def test_connect_one_mcp_server_lg_returns_empty_list_on_connect_failure(
 ) -> None:
     _patch_mcp(monkeypatch)
 
-    tools, connection = await connect_one_mcp_server_lg(
+    tools, connection, error = await connect_one_mcp_server_lg(
         "broken", {"command": "does-not-exist", "args": []}
     )
 
     assert tools == []
     assert connection is None
+    assert error == "connection refused"
 
 
 async def test_connect_one_mcp_server_lg_returns_a_closeable_connection(
@@ -157,7 +162,8 @@ async def test_connect_one_mcp_server_lg_returns_a_closeable_connection(
 ) -> None:
     _patch_mcp(monkeypatch)
 
-    tools, connection = await connect_one_mcp_server_lg("fs", {"command": "npx", "args": []})
+    tools, connection, error = await connect_one_mcp_server_lg("fs", {"command": "npx", "args": []})
+    assert error is None
 
     assert len(tools) == 1
     assert connection is not None
@@ -168,6 +174,46 @@ async def test_connect_one_mcp_server_lg_returns_a_closeable_connection(
     # on the underlying subprocess actually being gone yet (see
     # McpServerConnection's own docstring).
     assert connection._task.done()  # noqa: SLF001 -- whitebox check, this test's whole point
+
+
+async def test_connect_one_mcp_server_lg_reports_a_clear_error_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shrinks the module's real connect-timeout constant rather than
+    actually waiting 60s for this test."""
+    _patch_mcp(monkeypatch)
+    monkeypatch.setattr("coscribe.runtime_lg.mcp._CONNECT_TIMEOUT_SECONDS", 0.05)
+
+    tools, connection, error = await connect_one_mcp_server_lg(
+        "hangs", {"command": "npx", "args": []}
+    )
+
+    assert tools == []
+    assert connection is None
+    assert error is not None
+    assert "timed out" in error.lower()
+    assert "hangs" in error
+
+
+async def test_mcp_server_connection_connect_times_out_instead_of_hanging_forever(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whitebox counterpart to the test above: connect() raises on timeout,
+    and the background task is still running afterward (proving a graceful
+    close() would hang, and cancel() is the only safe cleanup)."""
+    _patch_mcp(monkeypatch)
+    monkeypatch.setattr("coscribe.runtime_lg.mcp._CONNECT_TIMEOUT_SECONDS", 0.05)
+    connection = McpServerConnection("hangs", {"command": "npx", "args": []})
+
+    with pytest.raises(TimeoutError):
+        await connection.connect()
+
+    assert not connection._task.done()  # noqa: SLF001 -- whitebox, this test's whole point
+
+    connection._task.cancel()  # noqa: SLF001
+    with pytest.raises(asyncio.CancelledError):
+        await connection._task  # noqa: SLF001
+    assert connection._task.done()  # noqa: SLF001
 
 
 async def test_mcp_server_connection_close_is_safe_to_call_twice(
@@ -310,8 +356,11 @@ async def test_connect_one_mcp_server_lg_strips_boolean_enums_from_the_real_sche
         "coscribe.runtime_lg.mcp.load_mcp_tools", _fake_load_mcp_tools_with_bad_schema
     )
 
-    tools, connection = await connect_one_mcp_server_lg("github", {"command": "npx", "args": []})
+    tools, connection, error = await connect_one_mcp_server_lg(
+        "github", {"command": "npx", "args": []}
+    )
 
+    assert error is None
     assert "enum" not in tools[0].args_schema["properties"]["pinned"]  # type: ignore[index]
     assert connection is not None
     await connection.close()

@@ -457,7 +457,9 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
         setStatus({ text: `Not added -- ${rejectedEntries[0][1]}`, error: true });
       } else {
         setStatus({
-          text: result.connected ? "Added." : "Saved, but couldn't connect -- check the command/args.",
+          text: result.connected
+            ? "Added."
+            : `Saved, but couldn't connect${result.error ? ` -- ${result.error}` : " -- check the command/args."}`,
           error: !result.connected,
         });
       }

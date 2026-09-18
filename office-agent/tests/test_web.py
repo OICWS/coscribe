@@ -332,8 +332,10 @@ def _client_lg(
     # test_web.py's equivalent connect_one_mcp_server stub uses -- a
     # specific test overrides this when it needs to prove tools actually
     # got spliced in).
-    async def _fake_connect_one_mcp_server_lg(name: str, config: Any) -> tuple[list[Any], None]:
-        return [], None
+    async def _fake_connect_one_mcp_server_lg(
+        name: str, config: Any
+    ) -> tuple[list[Any], None, None]:
+        return [], None, None
 
     monkeypatch.setattr(
         "coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", _fake_connect_one_mcp_server_lg
@@ -3048,7 +3050,7 @@ def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(
         # connect_one_mcp_server_lg is stubbed to [] by _client_lg -- "saved
         # but didn't connect live" -- see the dedicated splice-in test below
         # for the case where it actually returns tools.
-        assert response.json() == {"rejected": {}, "connected": False}
+        assert response.json() == {"rejected": {}, "connected": False, "error": None}
 
         mcp_config = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))
         assert mcp_config["mcpServers"]["fetch"]["command"] == "uvx"
@@ -3079,7 +3081,7 @@ def test_get_mcp_servers_connected_reflects_a_real_live_connection(
         async def close(self) -> None:
             pass
 
-    async def _fake_connect_returns_a_tool(name: str, config: Any) -> tuple[list[Any], Any]:
+    async def _fake_connect_returns_a_tool(name: str, config: Any) -> tuple[list[Any], Any, None]:
         from coscribe.runtime.types import tool_metadata
 
         def _tool(x: str = "") -> str:
@@ -3088,7 +3090,7 @@ def test_get_mcp_servers_connected_reflects_a_real_live_connection(
 
         _tool.__name__ = f"{name}__tool"
         tool_metadata(_tool, risk_category="READ", category=f"mcp:{name}")
-        return [_tool], _FakeConnection()
+        return [_tool], _FakeConnection(), None
 
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
@@ -3303,8 +3305,8 @@ def test_post_mcp_server_splices_tools_into_both_new_and_already_open_sessions(
         async def close(self) -> None:
             pass
 
-    async def _fake_connect_returns_a_tool(name: str, config: Any) -> tuple[list[Any], Any]:
-        return [_fake_tool_fn], _FakeConnection()
+    async def _fake_connect_returns_a_tool(name: str, config: Any) -> tuple[list[Any], Any, None]:
+        return [_fake_tool_fn], _FakeConnection(), None
 
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
@@ -3337,7 +3339,7 @@ def test_post_mcp_server_splices_tools_into_both_new_and_already_open_sessions(
             "/api/mcp/servers",
             json={"name": "fetch", "command": "uvx", "args": ["mcp-server-fetch"]},
         )
-        assert response.json() == {"rejected": {}, "connected": True}
+        assert response.json() == {"rejected": {}, "connected": True, "error": None}
 
         with client.websocket_connect("/ws/before") as ws:
             ws.receive_json()  # state

@@ -87,6 +87,14 @@ from ..tools.mcp import load_mcp_server_configs
 
 logger = logging.getLogger(__name__)
 
+# Bounds connect() below -- unlike MCP_STARTUP_TIMEOUT_SECONDS in web/app.py,
+# which only bounds how long *app startup* waits, this applies to every
+# connect attempt (startup and live Connectors-panel Add/reconnect alike).
+# 60s because a cold `npx` package-manager resolve plus a real MCP
+# initialize handshake can legitimately take tens of seconds on a slow
+# connection.
+_CONNECT_TIMEOUT_SECONDS = 60.0
+
 
 def _to_lg_connection(config: Mapping[str, Any]) -> Connection:
     """Translate one of tools/mcp.py's already-validated MCPConfig entries
@@ -317,7 +325,14 @@ class McpServerConnection:
             self._ready.set()
 
     async def connect(self) -> list[BaseTool]:
-        await self._ready.wait()
+        try:
+            await asyncio.wait_for(self._ready.wait(), timeout=_CONNECT_TIMEOUT_SECONDS)
+        except TimeoutError:
+            raise TimeoutError(
+                f"Timed out after {_CONNECT_TIMEOUT_SECONDS:.0f}s waiting for "
+                f"{self.name!r} to connect -- the server process may be stuck "
+                "(a stalled package download, no network access, ...)"
+            ) from None
         if self._error is not None:
             raise self._error
         return self._tools
@@ -331,12 +346,17 @@ class McpServerConnection:
 
 async def connect_one_mcp_server_lg(
     name: str, config: Mapping[str, Any]
-) -> tuple[list[BaseTool], McpServerConnection | None]:
+) -> tuple[list[BaseTool], McpServerConnection | None, str | None]:
     """Connect a single already-validated server config, returning its
     tagged LangChain tools plus the McpServerConnection backing them (None
-    on failure -- nothing to close). Failure is logged rather than raised,
-    same tolerance as tools/connect_one_mcp_server so one bad server config
-    doesn't take down every other configured server.
+    on failure -- nothing to close), plus a human-readable error message
+    (None on success). Failure is logged rather than raised, same
+    tolerance as tools/connect_one_mcp_server so one bad server config
+    doesn't take down every other configured server. Only add_mcp_server
+    (web/app.py) surfaces the error string to a response today;
+    connect_mcp_tools_lg's own startup path below still only logs it,
+    matching that path's "one broken server can't block the others"
+    posture.
 
     Unlike before this module's persistent-session fix, the caller now
     *must* eventually call the returned connection's close() once this
@@ -347,10 +367,15 @@ async def connect_one_mcp_server_lg(
     connection = McpServerConnection(name, config)
     try:
         tools = await connection.connect()
-    except Exception:
+    except Exception as exc:
         logger.warning("Skipping MCP server %r: failed to connect", name, exc_info=True)
-        return [], None
-    return tools, connection
+        # cancel(), not close(): close() waits for _run() to unwind via
+        # self._stop, but a timeout means _run() is stuck inside the
+        # connect attempt itself, never reaching that checkpoint -- close()
+        # would hang. cancel() is safe unconditionally.
+        connection._task.cancel()  # noqa: SLF001 -- best-effort cleanup, not a public API
+        return [], None, str(exc) or type(exc).__name__
+    return tools, connection, None
 
 
 async def connect_mcp_tools_lg(
@@ -386,7 +411,7 @@ async def connect_mcp_tools_lg(
     )
     tools: list[BaseTool] = []
     connections: dict[str, McpServerConnection] = {}
-    for name, (server_tools, connection) in zip(configs, results, strict=True):
+    for name, (server_tools, connection, _error) in zip(configs, results, strict=True):
         tools.extend(server_tools)
         if connection is not None:
             connections[name] = connection

@@ -139,6 +139,20 @@ file, do real multi-step analysis (groupby, pivot_table, merge, pct_change, \
 whatever the task needs), and write results back with \
 pd.ExcelWriter(..., engine="openpyxl", mode="a") into new sheets of the \
 same workbook -- verified to round-trip cleanly with read_xlsx afterward. \
+run_python_script/run_node_script run with no sandbox at all -- a script's \
+reach is the user's own OS account (any file it can read, any network \
+destination it can reach), not scoped to the workspace directory the way \
+every other tool here is. Never reach for either just to explore or verify \
+something you can already answer from your own current tool list or \
+already-known state -- e.g. whether a particular MCP connector is loaded \
+this turn is answered by checking your own available tools, not by \
+enumerating OS processes or probing network ports to look for its server; \
+a broad system scan run to confirm something your own tool list already \
+answers is unnecessary exposure for no real benefit, and its output (host \
+names, process lists, whatever it finds) becomes part of this \
+conversation the moment it prints. Reserve run_python_script/ \
+run_node_script for the file-format- and Python/Node-specific work \
+described throughout this prompt. \
 Use read_pptx/write_pptx \
 for PowerPoint files -- content there is markdown where a line containing \
 exactly "---" separates slides; within a slide, the first heading becomes \
