@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { DirBrowserModal } from "./DirBrowserModal";
 import { SettingRow, SettingRowInput } from "./SettingRow";
-import { WORKSPACE_FIELDS, WORKSPACE_ROOT_KEY, type DirEntry, type DirPermission } from "./fields";
+import { SKILLS_DIR_KEY, WORKSPACE_FIELDS, WORKSPACE_ROOT_KEY, type DirEntry, type DirPermission } from "./fields";
 
 interface WorkspaceTabProps {
   values: Record<string, string>;
@@ -13,7 +13,7 @@ interface WorkspaceTabProps {
 export function WorkspaceTab({ values, onChange, dirEntries, onDirEntriesChange }: WorkspaceTabProps) {
   const [addValue, setAddValue] = useState("");
   const [browserOpen, setBrowserOpen] = useState(false);
-  const [browserTarget, setBrowserTarget] = useState<"root" | "extra">("extra");
+  const [browserTarget, setBrowserTarget] = useState<"root" | "skills" | "extra">("extra");
 
   const setPermission = (path: string, permission: DirPermission) => {
     onDirEntriesChange(dirEntries.map((e) => (e.path === path ? { ...e, permission } : e)));
@@ -67,11 +67,31 @@ export function WorkspaceTab({ values, onChange, dirEntries, onDirEntriesChange 
             label={field.label}
             description={field.description}
             control={
-              <SettingRowInput
-                value={values[field.key] ?? ""}
-                placeholder={field.placeholder}
-                onChange={(v) => onChange(field.key, v)}
-              />
+              field.key === SKILLS_DIR_KEY ? (
+                <div className="flex items-center gap-2">
+                  <SettingRowInput
+                    value={values[field.key] ?? ""}
+                    placeholder={field.placeholder}
+                    onChange={(v) => onChange(field.key, v)}
+                  />
+                  <button
+                    type="button"
+                    className="rounded-md border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--card-bg)]"
+                    onClick={() => {
+                      setBrowserTarget("skills");
+                      setBrowserOpen(true);
+                    }}
+                  >
+                    Browse...
+                  </button>
+                </div>
+              ) : (
+                <SettingRowInput
+                  value={values[field.key] ?? ""}
+                  placeholder={field.placeholder}
+                  onChange={(v) => onChange(field.key, v)}
+                />
+              )
             }
           />
         ))}
@@ -152,6 +172,8 @@ export function WorkspaceTab({ values, onChange, dirEntries, onDirEntriesChange 
           onSelect={(path) => {
             if (browserTarget === "root") {
               onChange(WORKSPACE_ROOT_KEY, path);
+            } else if (browserTarget === "skills") {
+              onChange(SKILLS_DIR_KEY, path);
             } else {
               addPaths(path);
             }

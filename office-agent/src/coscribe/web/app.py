@@ -1223,22 +1223,26 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         if connection is not None:
             await connection.close()
 
-    async def _connect_and_register_mcp_server_lg(name: str, config: Any) -> bool:
+    async def _connect_and_register_mcp_server_lg(
+        name: str, config: Any
+    ) -> tuple[bool, str | None]:
         """Connects one MCP server and registers its tools into
-        extra_tools_holder. Returns whether it actually connected --
-        connect_one_mcp_server_lg's only failure signal is an empty tool
-        list, same imprecision as treating a real server that happens to
-        expose zero tools as "didn't connect"; accepted here since real
-        MCP servers always expose at least one tool in practice."""
+        extra_tools_holder. Returns (connected, error) -- error is a
+        human-readable failure reason from connect_one_mcp_server_lg, or
+        None on success. connect_one_mcp_server_lg's only positive-connect
+        signal is a non-empty tool list, same imprecision as treating a
+        real server that happens to expose zero tools as "didn't connect";
+        accepted here since real MCP servers always expose at least one
+        tool in practice."""
         # Deferred import -- see the top-of-file comment above MCP_STARTUP_TIMEOUT_SECONDS.
         from ..runtime_lg.mcp import connect_one_mcp_server_lg
 
-        new_tools, connection = await connect_one_mcp_server_lg(name, config)
+        new_tools, connection, error = await connect_one_mcp_server_lg(name, config)
         if not new_tools or connection is None:
-            return False
+            return False, error
         extra_tools_holder["tools"].extend(new_tools)
         mcp_connections[name] = connection
-        return True
+        return True, None
 
     async def _refresh_all_sessions_extra_tools() -> None:
         """Real, live-reported bug: add/remove/bump_mcp_server above only
@@ -2105,9 +2109,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             set_key(".env", "COSCRIBE_MCP_CONFIG_PATH", str(path))
 
         await _disconnect_mcp_server_lg(payload.name)
-        connected = await _connect_and_register_mcp_server_lg(payload.name, config)
+        connected, error = await _connect_and_register_mcp_server_lg(payload.name, config)
         await _refresh_all_sessions_extra_tools()
-        return {"rejected": {}, "connected": connected}
+        return {"rejected": {}, "connected": connected, "error": error}
 
     @app.delete("/api/mcp/servers/{name}")
     async def remove_mcp_server(name: str) -> dict[str, Any]:
@@ -2163,9 +2167,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         raw["mcpServers"][name] = entry
         settings.mcp_config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
         await _disconnect_mcp_server_lg(name)
-        connected = await _connect_and_register_mcp_server_lg(name, config)
+        connected, error = await _connect_and_register_mcp_server_lg(name, config)
         await _refresh_all_sessions_extra_tools()
-        return {"connected": connected}
+        return {"connected": connected, "error": error}
 
     @app.get("/api/providers/catalog")
     async def get_providers_catalog() -> list[dict[str, Any]]:

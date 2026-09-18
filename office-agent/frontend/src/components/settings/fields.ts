@@ -21,12 +21,6 @@ export const GENERAL_FIELDS: SettingsField[] = [
     description: "The model a new session starts with. Switch models on any thread from its own picker.",
   },
   {
-    key: "COSCRIBE_LOG_LEVEL",
-    label: "Log Level",
-    placeholder: "INFO",
-    description: "How much detail coscribe-web writes to its own log output.",
-  },
-  {
     key: "COSCRIBE_MAX_TURNS",
     label: "Max Turns",
     placeholder: "20",
@@ -34,9 +28,26 @@ export const GENERAL_FIELDS: SettingsField[] = [
   },
 ];
 
+// Log Level's real values are this fixed, small set (Python's own logging
+// module level names) -- rendered as a SegmentedControl instead of free
+// text, see GeneralTab.tsx. Not in GENERAL_FIELDS above: that array feeds
+// a generic free-text-field loop, and this isn't one.
+export const LOG_LEVEL_KEY = "COSCRIBE_LOG_LEVEL";
+export const LOG_LEVELS = [
+  { value: "DEBUG", label: "Debug" },
+  { value: "INFO", label: "Info" },
+  { value: "WARNING", label: "Warning" },
+  { value: "ERROR", label: "Error" },
+] as const;
+
+// Skills Directory is a real folder (unlike the file-path fields below it in
+// this array), so it's the one WORKSPACE_FIELDS entry GeneralTab/WorkspaceTab
+// pairs with a DirBrowserModal "Browse..." button -- see WorkspaceTab.tsx.
+export const SKILLS_DIR_KEY = "COSCRIBE_SKILLS_DIR";
+
 export const WORKSPACE_FIELDS: SettingsField[] = [
   {
-    key: "COSCRIBE_SKILLS_DIR",
+    key: SKILLS_DIR_KEY,
     label: "Skills Directory",
     placeholder: "./skills",
     description: "Where your own saved Skills live, alongside the built-in ones.",

@@ -141,6 +141,10 @@ export type McpServersResponse = Record<string, McpServerInfo>;
 export interface McpServerUpdateResult {
   rejected: Record<string, string>;
   connected: boolean;
+  /** Human-readable reason a connect attempt failed, or null on success
+   * or when `rejected` already explains the outcome (a local validation
+   * failure, caught before any connect was attempted). */
+  error: string | null;
 }
 
 export interface BrowserCheckResponse {
