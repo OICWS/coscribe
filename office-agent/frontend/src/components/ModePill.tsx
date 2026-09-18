@@ -1,11 +1,13 @@
 import { useRef, useState } from "react";
 import { useClickOutside } from "../lib/useClickOutside";
-import { ChevronDownIcon } from "./icons";
 
 type Mode = "normal" | "plan" | "accept-edits";
 
+// "Auto", not "Normal" -- explicit rename request, matching the mode's
+// real behavior (the agent decides permission on its own in this mode,
+// same as it always did; only the label changed).
 const MODE_LABELS: Record<Mode, string> = {
-  normal: "Normal",
+  normal: "Auto",
   plan: "Plan",
   "accept-edits": "Accept Edits",
 };
@@ -35,11 +37,10 @@ export function ModePill({ planMode, acceptEdits, sendRaw }: ModePillProps) {
     <div className="relative" ref={rootRef}>
       <button
         type="button"
-        className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+        className="flex h-8 items-center rounded-lg px-2 text-sm text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
         onClick={() => setOpen((v) => !v)}
       >
         {MODE_LABELS[current]}
-        <ChevronDownIcon className="h-3.5 w-3.5" />
       </button>
       {open && (
         <div className="absolute bottom-full left-0 mb-1 min-w-32 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] shadow-[var(--shadow)]">
