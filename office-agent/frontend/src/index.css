@@ -94,7 +94,10 @@
   --primary: #171614;
   --primary-hover: #322f2c;
   --primary-fg: #fcfcfb;
-  --user-bubble: var(--accent-soft);
+  /* Explicit correction: the rose accent-soft tint read as pink, not the
+     neutral gray asked for -- the user's own message bubble uses --card-bg
+     (the same gray as every other "resting" surface in this app) now. */
+  --user-bubble: var(--card-bg);
   --user-bubble-fg: var(--fg);
   --agent-bubble: transparent;
   --agent-bubble-fg: #1f1f1f;
@@ -122,7 +125,7 @@
     --primary: #f7f5f3;
     --primary-hover: #ffffff;
     --primary-fg: #232120;
-    --user-bubble: var(--accent-soft);
+    --user-bubble: var(--card-bg);
     --user-bubble-fg: var(--fg);
     --agent-bubble: transparent;
     --agent-bubble-fg: #ece9e6;
@@ -145,39 +148,59 @@
   -webkit-text-fill-color: transparent;
 }
 
-/* The running-turn indicator (RunStatus.tsx's wrapping element in
-   Composer.tsx): a soft rose->sage wave sweeping left-to-right along the
-   composer's top edge while a turn is in flight -- explicit design
-   request ("正在跑命令，有个动画颜色从左到右的波浪形流动代表正在跑").
-   Sized at 200% and animated via background-position (not a transform)
-   so the gradient itself visibly travels rather than the whole bar
-   sliding off-screen. prefers-reduced-motion gets a static gradient
-   instead of the sweep -- still communicates "different state," no
-   motion. */
+/* The running-turn indicator (Composer.tsx's own input box while
+   turnInFlight): a rose->sage wave sweeping around the composer's whole
+   outline -- explicit design request ("正在跑命令，有个动画颜色从左到右
+   的波浪形流动代表正在跑"; corrected from an earlier top-edge-only
+   version to wrap the full border, "不止是上面，整个外围都覆盖比较好
+   看"). Classic two-layer animated-gradient-border technique: a
+   transparent border reserves the ring's width, one background layer
+   (padding-box) repaints the box's own interior so content never shows
+   the gradient behind it, the other (border-box, sized to 200% and
+   animated via background-position so the gradient visibly travels
+   rather than the box itself sliding) paints the ring. Needs its own
+   background set on the element (Composer.tsx passes --bg, matching the
+   input box's normal fill) since border-box here fully replaces the
+   plain `bg-[var(--bg)]` utility class that would otherwise show
+   through. prefers-reduced-motion gets a static gradient ring instead of
+   the sweep -- still communicates "different state," no motion. */
 @keyframes wave-flow {
   0% {
-    background-position: 0% 0%;
+    background-position:
+      0% 0%,
+      0% 0%;
   }
   100% {
-    background-position: 200% 0%;
+    background-position:
+      0% 0%,
+      200% 0%;
   }
 }
-.running-wave {
-  background: linear-gradient(
-    90deg,
-    var(--accent) 0%,
-    var(--accent-2) 25%,
-    var(--accent) 50%,
-    var(--accent-2) 75%,
-    var(--accent) 100%
-  );
-  background-size: 200% 100%;
+.running-wave-ring {
+  border: 2px solid transparent;
+  background-image:
+    linear-gradient(var(--bg), var(--bg)),
+    linear-gradient(
+      90deg,
+      var(--accent) 0%,
+      var(--accent-2) 25%,
+      var(--accent) 50%,
+      var(--accent-2) 75%,
+      var(--accent) 100%
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  background-size:
+    100% 100%,
+    200% 100%;
   animation: wave-flow 2.2s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .running-wave {
+  .running-wave-ring {
     animation: none;
-    background: var(--gradient-accent);
+    background-image:
+      linear-gradient(var(--bg), var(--bg)),
+      var(--gradient-accent);
   }
 }
 

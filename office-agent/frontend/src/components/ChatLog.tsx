@@ -185,10 +185,11 @@ export function ChatLog({
           />
         ))}
         {olderItems.length > 0 && <div className="border-b border-[var(--border)]" />}
-        {turns.map((turn) => (
+        {turns.map((turn, i) => (
           <TurnView
             key={turn.id}
             turn={turn}
+            isLastTurn={i === turns.length - 1}
             onApprove={onApprove}
             onAnswerQuestion={onAnswerQuestion}
             onEditMessage={onEditMessage}
@@ -203,24 +204,40 @@ export function ChatLog({
 
 /** Renders one turn's items (via the same groupToolRuns pass the whole
  * thread used to go through directly) plus, once the turn is actually
- * done, a bottom-left copy+rewind footer -- replaces the old one-
- * CopyButton-per-agent-message placement (see ROADMAP.md's Phase 8am
- * items 7-8). "Done" means: has a final agent reply that isn't still
+ * done, a bottom-left copy+rewind+relative-time footer -- replaces the
+ * old one-CopyButton-per-agent-message placement (see ROADMAP.md's Phase
+ * 8am items 7-8). "Done" means: has a final agent reply that isn't still
  * streaming, and no approval in this turn is still waiting on the user
  * -- the same real backend rule handle_edit_message itself enforces
  * ("Resolve the pending approval before editing"), so rewind is never
  * offered somewhere it would just come back as a WS error. Rewind reuses
  * onEditMessage verbatim with the turn's own original, unedited text --
  * a real backend call (truncate-then-resubmit), not a new mechanism; see
- * that prop's own doc on ChatLogProps for why it can be undefined. */
+ * that prop's own doc on ChatLogProps for why it can be undefined.
+ *
+ * Rewind is further restricted to `isLastTurn` -- explicit correction:
+ * every past turn used to offer it, but rewinding to an earlier turn
+ * while later ones already exist is exactly what "edit an earlier
+ * message" (the pencil icon on the user bubble itself, still available
+ * on every turn) already does more explicitly; a second, identically-
+ * named affordance on every turn read as "rewind to any point," which
+ * isn't what this does (it can only ever discard everything *after* the
+ * turn clicked, same as edit). The whole footer is also now hover-only
+ * (opacity-0, revealed via the turn's own group/turn on hover) instead
+ * of permanently visible -- matches the rest of this app's hover-reveal
+ * convention for secondary actions (ThreadRow's "..." menu, the user
+ * bubble's own edit pencil) rather than a footer under every single
+ * reply, always on screen. */
 function TurnView({
   turn,
+  isLastTurn = false,
   onApprove,
   onAnswerQuestion,
   onEditMessage,
   onPptxShapePicked,
 }: {
   turn: Turn;
+  isLastTurn?: boolean;
   onApprove: (id: string, approved: boolean) => void;
   onAnswerQuestion: (id: string, answer: string) => void;
   onEditMessage?: (turnIndex: number, text: string) => void;
@@ -233,7 +250,7 @@ function TurnView({
     finalAgentItem !== null && userItem !== null && !finalAgentItem.streaming && !turn.hasPendingApproval;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="group/turn flex flex-col gap-3">
       {/* groupToolRuns now always wraps a tool/approval run into a
        * ToolRunGroup, even a run of one (see its own comment) -- a bare
        * "tool"/"approval" LogItem can no longer reach this map at all,
@@ -248,13 +265,13 @@ function TurnView({
         ),
       )}
       {canFooter && (
-        <div className="-mt-2 flex items-center gap-0.5 self-start">
+        <div className="-mt-2 flex items-center gap-0.5 self-start opacity-0 transition-opacity group-hover/turn:opacity-100">
           <CopyButton
             getText={() => finalAgentItem.text}
             title="Copy reply"
             className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
           />
-          {onEditMessage && (
+          {onEditMessage && isLastTurn && (
             <button
               type="button"
               title="Rewind to here"
@@ -357,7 +374,7 @@ function ToolRunGroupView({
   // anything real for a single item.
   if (group.items.length === 1) {
     return (
-      <div className="max-w-[85%]">
+      <div className="max-w-[92%]">
         <ToolCallRow item={group.items[0]} compact onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
       </div>
     );
@@ -366,7 +383,7 @@ function ToolRunGroupView({
   const open = manuallyOpen;
   const header = summarizeGroupParts(group.items);
   return (
-    <div className="self-start max-w-[85%] text-sm">
+    <div className="self-start max-w-[92%] text-sm">
       <button
         type="button"
         className="flex items-start gap-1.5 text-left text-[var(--muted)] hover:text-[var(--fg)]"
@@ -380,7 +397,7 @@ function ToolRunGroupView({
          * (e.g. "Listed X, Listed X, Listed X, and 2 more") off the right
          * edge of the screen with no way to see the rest short of a
          * horizontal scroll nobody expects on a chat log. Dropping it lets
-         * this wrap normally within the parent's own max-w-[85%] cap. */}
+         * this wrap normally within the parent's own max-w-[92%] cap. */}
         <span>
           {header.shown.map((parts, index) => (
             <span key={index}>
@@ -456,8 +473,8 @@ function ToolCallRow({
         compact
           ? "self-start w-full py-1 text-sm"
           : isPendingApproval
-            ? "self-start max-w-[85%] rounded-xl border border-[var(--accent)] bg-[var(--card-bg)] px-3 py-2 text-sm"
-            : "self-start max-w-[85%] rounded-xl border border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm hover:bg-[var(--panel-bg)]"
+            ? "self-start max-w-[92%] rounded-xl border border-[var(--accent)] bg-[var(--card-bg)] px-3 py-2 text-sm"
+            : "self-start max-w-[92%] rounded-xl border border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm hover:bg-[var(--panel-bg)]"
       }
     >
       <button
@@ -695,7 +712,7 @@ function UserMessageView({
 
   if (editing) {
     return (
-      <div className="ml-auto flex max-w-[75%] flex-col items-end gap-1.5">
+      <div className="ml-auto flex max-w-[92%] flex-col items-end gap-1.5">
         <textarea
           autoFocus
           className="w-full resize-none rounded-2xl rounded-br-[4px] border border-[var(--accent)] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] outline-none"
@@ -733,7 +750,7 @@ function UserMessageView({
   }
 
   return (
-    <div className="ml-auto flex max-w-[75%] flex-col items-end gap-1.5">
+    <div className="ml-auto flex max-w-[92%] flex-col items-end gap-1.5">
       {item.images && item.images.length > 0 && (
         <div className="flex flex-wrap justify-end gap-1.5">
           {item.images.map((src, i) => (
@@ -794,7 +811,7 @@ function LogItemView({
   if (item.kind === "agent") {
     const text = item.streaming ? `${item.text} ▍` : item.text;
     return (
-      <div className="max-w-[85%]">
+      <div className="max-w-[92%]">
         {/* No border/bubble at all, like claude.ai's own assistant replies
          * -- the earlier border-l-2 "anchor" (dc76b88) was real, live
          * user feedback at the time, but became its own live complaint

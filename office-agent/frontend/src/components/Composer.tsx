@@ -69,6 +69,10 @@ interface PendingPaste {
 const PASTE_CARD_MIN_CHARS = 1000;
 const PASTE_CARD_MIN_LINES = 12;
 
+// Explicit cap: images and files share this limit (both are literal file
+// attachments, unlike a pasted-text card, which isn't).
+const MAX_ATTACHED_FILES = 5;
+
 interface ComposerProps {
   turnInFlight: boolean;
   totalTokens: number;
@@ -394,6 +398,10 @@ export function Composer({
   };
 
   const onFileChosen = async (file: File) => {
+    if (pendingImages.length + pendingFiles.length >= MAX_ATTACHED_FILES) {
+      onLocalError(`Up to ${MAX_ATTACHED_FILES} attachments at a time -- remove one first.`);
+      return;
+    }
     if (file.type.startsWith("image/")) {
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -428,90 +436,19 @@ export function Composer({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {(pendingImages.length > 0 || pendingFiles.length > 0 || pendingPastes.length > 0) && (
-        <div className="mb-2 flex flex-wrap gap-2">
-          {pendingImages.map((img, i) => (
-            <span
-              key={`img-${i}`}
-              className="group relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--border)]"
-            >
-              <button
-                type="button"
-                title={`Preview ${img.name}`}
-                className="h-full w-full cursor-zoom-in"
-                onClick={() => setLightboxSrc({ src: img.dataUrl, alt: img.name })}
-              >
-                <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
-              </button>
-              <button
-                type="button"
-                aria-label={`Remove ${img.name}`}
-                className="absolute right-0.5 top-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-black/60 text-xs text-white opacity-0 hover:bg-black/80 group-hover:opacity-100"
-                onClick={() => setPendingImages((prev) => prev.filter((_, idx) => idx !== i))}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          {pendingFiles.map((f, i) => (
-            <span
-              key={`file-${i}`}
-              className="flex max-w-[220px] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card-bg)] py-1.5 pl-3 pr-1.5 text-xs"
-            >
-              <span className="truncate">{f.name}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${f.name}`}
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--muted)] hover:bg-[var(--border)]"
-                onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          {pendingPastes.map((p, i) => (
-            <span
-              key={`paste-${i}`}
-              className="flex max-w-[220px] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card-bg)] py-1.5 pl-3 pr-1.5 text-xs"
-            >
-              <button
-                type="button"
-                title="Preview pasted content"
-                className="min-w-0 flex-1 truncate text-left hover:underline"
-                onClick={() => setPastePreview(p.text)}
-              >
-                Pasted ({p.charCount.toLocaleString()} chars)
-              </button>
-              <button
-                type="button"
-                aria-label="Remove pasted content"
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--muted)] hover:bg-[var(--border)]"
-                onClick={() => setPendingPastes((prev) => prev.filter((_, idx) => idx !== i))}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
       <div
-        className={`relative rounded-2xl border p-3 shadow-sm transition-colors ${
-          isDraggingOver
-            ? "border-[var(--accent)] bg-[var(--card-bg)]"
-            : "border-[var(--border)] bg-[var(--bg)] hover:border-[var(--border-hover)] focus-within:border-[var(--border-hover)]"
+        className={`relative rounded-2xl p-3 shadow-sm transition-colors ${
+          turnInFlight
+            ? // Running-turn indicator: a rose->sage wave sweeping around
+              // the composer's *entire* outline, not just the top edge --
+              // explicit correction, see index.css's .running-wave-ring
+              // for the animated-gradient-border technique itself.
+              "running-wave-ring bg-[var(--bg)]"
+            : isDraggingOver
+              ? "border border-[var(--accent)] bg-[var(--card-bg)]"
+              : "border border-[var(--border)] bg-[var(--bg)] hover:border-[var(--border-hover)] focus-within:border-[var(--border-hover)]"
         }`}
       >
-        {/* Running-turn indicator: a thin rose->sage wave sweeping along
-         * the composer's top edge -- explicit design request, see
-         * index.css's .running-wave for the animation itself. Sits right
-         * at the rounded top edge (matching the container's own
-         * rounded-2xl radius) rather than as a full top border, so it
-         * reads as "something is moving" without boxing the composer in
-         * a second color. */}
-        {turnInFlight && (
-          <div className="running-wave pointer-events-none absolute -top-px left-3 right-3 h-[2px] rounded-full" />
-        )}
         {isDraggingOver && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl text-sm text-[var(--accent)]">
             Drop to attach
@@ -531,6 +468,76 @@ export function Composer({
                 <span className="font-mono text-[var(--accent)]">/{cmd.name}</span>
                 <span className="truncate text-xs text-[var(--muted)]">{cmd.description}</span>
               </div>
+            ))}
+          </div>
+        )}
+
+        {/* Attachment tray -- inside the composer box now (used to sit
+         * above it, outside the border, reading as a separate element),
+         * explicit correction. Each item stays click-to-preview/remove. */}
+        {(pendingImages.length > 0 || pendingFiles.length > 0 || pendingPastes.length > 0) && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {pendingImages.map((img, i) => (
+              <span
+                key={`img-${i}`}
+                className="group relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--border)]"
+              >
+                <button
+                  type="button"
+                  title={`Preview ${img.name}`}
+                  className="h-full w-full cursor-zoom-in"
+                  onClick={() => setLightboxSrc({ src: img.dataUrl, alt: img.name })}
+                >
+                  <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${img.name}`}
+                  className="absolute right-0.5 top-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-black/60 text-xs text-white opacity-0 hover:bg-black/80 group-hover:opacity-100"
+                  onClick={() => setPendingImages((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {pendingFiles.map((f, i) => (
+              <span
+                key={`file-${i}`}
+                className="flex max-w-[220px] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card-bg)] py-1.5 pl-3 pr-1.5 text-xs"
+              >
+                <span className="truncate">{f.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${f.name}`}
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--muted)] hover:bg-[var(--border)]"
+                  onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {pendingPastes.map((p, i) => (
+              <span
+                key={`paste-${i}`}
+                className="flex max-w-[220px] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card-bg)] py-1.5 pl-3 pr-1.5 text-xs"
+              >
+                <button
+                  type="button"
+                  title="Preview pasted content"
+                  className="min-w-0 flex-1 truncate text-left hover:underline"
+                  onClick={() => setPastePreview(p.text)}
+                >
+                  Pasted ({p.charCount.toLocaleString()} chars)
+                </button>
+                <button
+                  type="button"
+                  aria-label="Remove pasted content"
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--muted)] hover:bg-[var(--border)]"
+                  onClick={() => setPendingPastes((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  ×
+                </button>
+              </span>
             ))}
           </div>
         )}
@@ -578,7 +585,6 @@ export function Composer({
 
       <div className="flex items-center justify-between gap-2 pt-2">
         <div className="flex items-center gap-0.5">
-          {modePill}
           <input
             ref={fileInputRef}
             type="file"
@@ -597,6 +603,7 @@ export function Composer({
           >
             <PlusIcon className="h-[18px] w-[18px]" />
           </button>
+          {modePill}
         </div>
         <RunStatus turnInFlight={turnInFlight} totalTokens={totalTokens} />
         <div className="flex items-center gap-1.5">

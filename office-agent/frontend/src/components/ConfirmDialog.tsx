@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 interface ConfirmDialogProps {
   title: string;
@@ -22,8 +23,12 @@ export function ConfirmDialog({
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onCancel}>
+  // Portaled to document.body -- same fix, same reason as SettingsModal's
+  // own (see its docstring): a modal rendered in place, deep in App's
+  // tree, could end up painted under a sibling panel despite z-index math
+  // saying otherwise.
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
       <div
         className="w-[min(360px,100vw-2rem)] rounded-[14px] border border-[var(--border)] bg-[var(--panel-bg)] p-4 shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
@@ -47,6 +52,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

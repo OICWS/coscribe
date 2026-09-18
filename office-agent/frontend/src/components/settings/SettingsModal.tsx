@@ -1,4 +1,5 @@
 import { type ComponentType, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { getConfig, updateConfig } from "../../lib/rest";
 import type { ConfigResponse } from "../../types/settings";
 import {
@@ -182,9 +183,19 @@ export function SettingsModal({
 
   const showSaveBar = category === "general" || category === "workspace";
 
-  return (
+  // Portaled straight to document.body -- real, reproduced bug: rendered
+  // in place (a descendant of App's own root, a sibling of BrowserPanel),
+  // this modal's `fixed inset-0 z-50` backdrop visually failed to dim
+  // BrowserPanel's own content even though z-index math said it should
+  // (confirmed the click-blocking half of that *was* correct -- clicks
+  // into BrowserPanel were genuinely blocked -- but the paint clearly
+  // wasn't matching). A portal to body removes the ambiguity by
+  // construction: nothing in App's own tree (BrowserPanel's canvas-based
+  // remote-page view included) can end up compositing above a dialog
+  // that isn't a descendant of it in the first place.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="relative flex h-[min(680px,100vh-2rem)] w-[min(920px,100vw-2rem)] overflow-hidden rounded-[14px] border border-[var(--border)] bg-[var(--panel-bg)] shadow-[var(--shadow)]">
@@ -272,6 +283,7 @@ export function SettingsModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
