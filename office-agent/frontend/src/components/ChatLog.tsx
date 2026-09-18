@@ -712,10 +712,10 @@ function UserMessageView({
 
   if (editing) {
     return (
-      <div className="ml-auto flex max-w-[92%] flex-col items-end gap-1.5">
+      <div className="ml-auto flex max-w-[96%] flex-col items-end gap-1.5">
         <textarea
           autoFocus
-          className="w-full resize-none rounded-2xl rounded-br-[4px] border border-[var(--accent)] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] outline-none"
+          className="w-full resize-none rounded-2xl border border-[var(--accent)] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] outline-none"
           rows={Math.min(10, draft.split("\n").length)}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -750,7 +750,7 @@ function UserMessageView({
   }
 
   return (
-    <div className="ml-auto flex max-w-[92%] flex-col items-end gap-1.5">
+    <div className="ml-auto flex max-w-[96%] flex-col items-end gap-1.5">
       {item.images && item.images.length > 0 && (
         <div className="flex flex-wrap justify-end gap-1.5">
           {item.images.map((src, i) => (
@@ -777,7 +777,7 @@ function UserMessageView({
             <PencilIcon className="h-3.5 w-3.5" />
           </button>
         )}
-        <div className="rounded-2xl rounded-br-[4px] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] whitespace-pre-wrap">
+        <div className="rounded-2xl bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] whitespace-pre-wrap">
           {shownText}
         </div>
       </div>
