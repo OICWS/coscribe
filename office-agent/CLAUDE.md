@@ -53,6 +53,28 @@ flagged a deliberately-planted mutable-default-argument bug in a
 synthetic test. Favor precision over recall per the rule set's own
 instruction -- only raise something you're actually confident about.
 
+## Code comments: WHY only, never WHAT or history
+
+A comment earns its place by explaining a non-obvious design reason --
+a hidden constraint, an invariant, a workaround, something that would
+surprise a reader. Real drift caught and corrected 2026-09-18: comments
+kept accumulating three other kinds that don't belong in code at all --
+
+- **Restating WHAT the code does** ("renders X as Y ⟨chip⟩") -- the
+  code already says this; delete.
+- **History/evolution narration** ("this used to X", "a user reported
+  Y, this closes that gap", "real gap this closes: ...") -- this is a
+  commit-message sentence wearing a `#`. Put it in the commit message
+  (or PR description) instead, never in the code.
+- **Product/UX reasoning or restated user intent** ("用户想要...于是
+  ...", "a manual button read as unnecessary friction so...") -- same
+  answer, same destination: commit message, not a comment.
+
+Before writing a comment, ask whether it survives with every sentence
+that isn't a "why" removed, and whether a reader with zero memory of
+this conversation still needs it. If not, it goes in the commit
+message or gets deleted outright -- never both.
+
 ## Dual-repo sync -- every commit goes to both
 
 Private (`OICWS/project`, branch `claude/local-office-agent-system-k2cle1-13gepc`)
