@@ -87,14 +87,6 @@ git remote remove private-project && git checkout dev
 cached read -- if a branch state looks wrong, cross-check with
 `git ls-remote origin <ref>` (a live query) before trusting `fetch`.
 
-Every commit ends with:
-```
-Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01PQwscSQFymBK1Yj5fjjynD
-```
-(the session URL is this specific session's own -- a new session gets
-a new one; don't carry this exact line forward blindly).
-
 ## Test discipline
 
 Full suite (`pytest tests/`, ~4-5 min, runs in the background) green
