@@ -499,9 +499,19 @@ export function Composer({
         className={`relative rounded-2xl border p-3 shadow-sm transition-colors ${
           isDraggingOver
             ? "border-[var(--accent)] bg-[var(--card-bg)]"
-            : "border-[var(--border)] bg-[var(--bg)]"
+            : "border-[var(--border)] bg-[var(--bg)] hover:border-[var(--border-hover)] focus-within:border-[var(--border-hover)]"
         }`}
       >
+        {/* Running-turn indicator: a thin rose->sage wave sweeping along
+         * the composer's top edge -- explicit design request, see
+         * index.css's .running-wave for the animation itself. Sits right
+         * at the rounded top edge (matching the container's own
+         * rounded-2xl radius) rather than as a full top border, so it
+         * reads as "something is moving" without boxing the composer in
+         * a second color. */}
+        {turnInFlight && (
+          <div className="running-wave pointer-events-none absolute -top-px left-3 right-3 h-[2px] rounded-full" />
+        )}
         {isDraggingOver && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl text-sm text-[var(--accent)]">
             Drop to attach
@@ -557,7 +567,7 @@ export function Composer({
           <button
             type="button"
             title="Send"
-            className="absolute bottom-3 right-3 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-40 disabled:hover:bg-transparent"
+            className="absolute bottom-3 right-3 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-40 disabled:hover:bg-transparent"
             onClick={performSend}
             disabled={!canSend}
           >

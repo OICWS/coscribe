@@ -55,7 +55,7 @@ export function EmptyState({ onSuggestion }: EmptyStateProps) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 px-4 text-center">
       <div className="flex flex-col gap-1.5">
-        <h1 className="text-xl font-semibold">{greeting}</h1>
+        <h1 className="gradient-text text-xl font-semibold">{greeting}</h1>
         <p className="max-w-sm text-sm text-[var(--muted)]">
           coscribe is a local office assistant. Reads and writes real Word, Excel, and PowerPoint files, works
           with the files already in your workspace, and can save what it just did as a workflow to run again

@@ -35,36 +35,62 @@
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* Modernist red-accent palette, from the "Nav rail, Create/Run split, and a
-   mono-red token set" design pass -- see ARCHITECTURE.md's 范围边界 section
-   (the "前端 'Nav rail, Create/Run split' 重设计" bullet) for how this
-   replaced the earlier orange-accent Phase A palette. --border
-   is a computed color-mix, not a fixed hex, so it always reads correctly
-   against --fg without a separate dark-mode override; --danger reuses the
-   accent ramp rather than introducing a second hue (there is no separate
-   "success" color -- see components using a check icon on neutral text
-   instead). --agent-bubble/--shadow aren't part of that token set (chat-
-   bubble-specific, predates it); --shadow is unchanged. --user-bubble
-   used to just be neutral --card-bg (indistinguishable from the page
-   background, --bg is only ~3% lighter) -- now --accent-soft, an
-   existing token from the same palette that had no component actually
-   using it until now, giving the user's own messages real contrast
-   against both the page and the agent's reply without introducing a new
-   color. */
+/* Rose/sage palette -- replaced the earlier "modernist red-accent" set
+   (single --accent, mono-red) per explicit design direction: an off-white
+   canvas (--bg) with a warm neutral gray (--card-bg) for specific chrome
+   elements -- a session row in the nav rail, a settings option row, the
+   workspace indicator -- and two accent hues instead of one: --accent
+   (rose, #de6f90) for the usual single-color accent role every existing
+   `var(--accent)` reference already has, --accent-2 (sage, #7fc790) added
+   alongside it purely for the gradient pairing below. Real, explicit swap
+   from the previous palette: --bg and --card-bg used to be two near-
+   identical grays (~#f3f2f2 and ~#f8f4f4) with the *canvas* reading
+   slightly darker than *rows sitting on it* -- backwards from what a
+   white-canvas/gray-chrome design wants, so their roles (not just their
+   values) are swapped here: --bg is now the near-white canvas, --card-bg
+   the visibly gray surface.
+
+   --gradient-accent (rose -> sage) is a reusable two-stop gradient, not a
+   flat accent -- used sparingly (see --gradient-accent's own call sites:
+   the running-turn indicator's flowing wave, and gradient-text.tsx-style
+   decorative headings), never as a body-text or background-behind-text
+   color, where a gradient would fight legibility rather than add polish.
+   --primary/--primary-fg is a separate near-black/white pair for a
+   primary "create/add" action (NavRail's "New session"), deliberately
+   apart from the two accent hues -- a real design call: rose/sage read as
+   *highlight* colors (a link, a focus ring, a status), not as the color
+   of the one button whose whole job is drawing the eye first.
+
+   --panel-bg (the nav rail's own background, dropdown/menu popovers) is
+   now the *same* value as --bg, not a third near-identical gray -- those
+   surfaces sit flush with the canvas, separated only by --border, so the
+   *rows* placed on them (a session in the nav rail, a settings option, a
+   workspace indicator) are what actually carry --card-bg's gray, reading
+   as distinct chips against a white panel rather than the whole panel
+   itself going gray. --card-bg-hover is one step darker for exactly
+   those chip rows' hover state, since hovering a --card-bg row with
+   another --card-bg background would show nothing at all. */
 :root {
   color-scheme: light dark;
-  --bg: #f3f2f2;
-  --panel-bg: #eae9e9;
+  --bg: #fcfcfb;
+  --panel-bg: var(--bg);
   --fg: #201e1d;
   --muted: #7d7979;
-  --border: color-mix(in srgb, var(--fg) 40%, transparent);
-  --accent: #ec3013;
-  --accent-hover: #dd2b0f;
-  --accent-soft: #fff2ef;
-  --accent-fg: #f3f2f2;
-  --danger: #dd2b0f;
-  --danger-fg: #7c1405;
-  --card-bg: #f8f4f4;
+  --border: color-mix(in srgb, var(--fg) 14%, transparent);
+  --border-hover: color-mix(in srgb, var(--fg) 26%, transparent);
+  --accent: #de6f90;
+  --accent-hover: #c85778;
+  --accent-2: #7fc790;
+  --accent-soft: #fbeef1;
+  --accent-fg: #fcfcfb;
+  --gradient-accent: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+  --danger: #c85778;
+  --danger-fg: #7c1f34;
+  --card-bg: #f0f0ef;
+  --card-bg-hover: #e6e6e4;
+  --primary: #171614;
+  --primary-hover: #322f2c;
+  --primary-fg: #fcfcfb;
   --user-bubble: var(--accent-soft);
   --user-bubble-fg: var(--fg);
   --agent-bubble: transparent;
@@ -75,24 +101,81 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #2d2b2b;
-    --panel-bg: #444141;
-    --fg: #f8f4f4;
-    --muted: #9b9797;
-    --border: color-mix(in srgb, var(--fg) 18%, transparent);
-    --accent: #ff563c;
-    --accent-hover: #ff9783;
+    --bg: #232120;
+    --panel-bg: var(--bg);
+    --fg: #f7f5f3;
+    --muted: #a19d9b;
+    --border: color-mix(in srgb, var(--fg) 14%, transparent);
+    --border-hover: color-mix(in srgb, var(--fg) 26%, transparent);
+    --accent: #ef92ab;
+    --accent-hover: #f5aec1;
+    --accent-2: #94d6a2;
     --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
-    --accent-fg: #2d2b2b;
-    --danger: #ff9783;
-    --danger-fg: #ffc4b8;
-    --card-bg: #444141;
+    --accent-fg: #232120;
+    --gradient-accent: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
+    --danger: #f5aec1;
+    --danger-fg: #fbd8e1;
+    --card-bg: #322f2e;
+    --card-bg-hover: #3d3a38;
+    --primary: #f7f5f3;
+    --primary-hover: #ffffff;
+    --primary-fg: #232120;
     --user-bubble: var(--accent-soft);
     --user-bubble-fg: var(--fg);
     --agent-bubble: transparent;
     --agent-bubble-fg: #ece9e6;
     --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
     --code-bg: color-mix(in srgb, var(--fg) 12%, transparent);
+  }
+}
+
+/* Reusable rose->sage gradient text -- see the palette comment above for
+   when to reach for this vs. a flat --accent. Falls back to a flat
+   --accent color when the browser can't clip a background to text
+   (background-clip: text has near-universal support in the Chromium/
+   WebKit engines this app actually ships to, but this keeps a readable
+   fallback rather than invisible text on an unsupported engine). */
+.gradient-text {
+  color: var(--accent);
+  background: var(--gradient-accent);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* The running-turn indicator (RunStatus.tsx's wrapping element in
+   Composer.tsx): a soft rose->sage wave sweeping left-to-right along the
+   composer's top edge while a turn is in flight -- explicit design
+   request ("正在跑命令，有个动画颜色从左到右的波浪形流动代表正在跑").
+   Sized at 200% and animated via background-position (not a transform)
+   so the gradient itself visibly travels rather than the whole bar
+   sliding off-screen. prefers-reduced-motion gets a static gradient
+   instead of the sweep -- still communicates "different state," no
+   motion. */
+@keyframes wave-flow {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 200% 0%;
+  }
+}
+.running-wave {
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    var(--accent-2) 25%,
+    var(--accent) 50%,
+    var(--accent-2) 75%,
+    var(--accent) 100%
+  );
+  background-size: 200% 100%;
+  animation: wave-flow 2.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .running-wave {
+    animation: none;
+    background: var(--gradient-accent);
   }
 }
 

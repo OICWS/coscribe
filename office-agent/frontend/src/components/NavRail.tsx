@@ -91,7 +91,7 @@ function ThreadRow({ thread, isCurrent, onRenamed, onDeleteRequest }: ThreadRowP
 
   return (
     <div
-      className={`group flex min-w-0 items-center justify-between gap-1 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--card-bg)] ${
+      className={`group flex min-w-0 items-center justify-between gap-1 rounded-md bg-[var(--card-bg)] px-2 py-1.5 text-sm hover:bg-[var(--card-bg-hover)] ${
         isCurrent ? "font-medium" : "cursor-pointer"
       }`}
       onClick={() => !isCurrent && goToThread(thread.thread_id)}
@@ -281,7 +281,7 @@ export function NavRail({
         {expanded && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2">
             {mode === "create" && (
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+              <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
                 {currentRun && (
                   <div className="mb-2 rounded-md border border-[var(--border)] p-2">
                     <div className="flex min-w-0 items-center justify-between text-sm">
@@ -294,10 +294,17 @@ export function NavRail({
                 )}
                 <button
                   type="button"
-                  className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium text-[var(--accent)] hover:bg-[var(--card-bg)]"
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--bg)]"
                   onClick={startNewSession}
                 >
-                  <PlusIcon className="h-3.5 w-3.5" /> New session
+                  {/* Solid black "add" treatment (see index.css's palette
+                   * comment) -- a filled --primary badge stays visible on
+                   * any surface and reads as the one clearly primary
+                   * action here, apart from the two lighter accent hues. */}
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-fg)]">
+                    <PlusIcon className="h-3 w-3" />
+                  </span>
+                  New session
                 </button>
                 <div className="mb-1 mt-2 px-2 text-xs font-medium tracking-wide text-[var(--muted)]">RECENTS</div>
                 {threads.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No sessions yet.</div>}
