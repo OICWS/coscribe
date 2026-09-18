@@ -94,6 +94,25 @@ def extract_text(content: Any) -> str:
     return ""
 
 
+def extract_images(content: Any) -> list[str]:
+    """A HumanMessage's own image_url content blocks (see web/session.py's
+    _handle_user_message_locked, which appends `{"type": "image_url",
+    "image_url": {"url": ...}}` per attached image) -- the data URLs
+    themselves, in the order they were attached. Mirrors extract_text's
+    same list-of-content-blocks walk, just pulling a different block
+    type; a plain-string .content (every non-multimodal message) has no
+    images by construction."""
+    if not isinstance(content, list):
+        return []
+    urls = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "image_url":
+            url = block.get("image_url", {}).get("url")
+            if url:
+                urls.append(url)
+    return urls
+
+
 def tool_result_value(content: Any) -> Any:
     """ToolMessage.content is usually a JSON-serialized string of the
     tool's real return value -- decode it back so callers see the raw
@@ -156,6 +175,20 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
     stripped back off -- the live bubble the user actually saw when they
     hit Send never had it, so a history replay shouldn't show it either.
 
+    Real, user-reported bug this also closes: a "user" entry's own
+    attached images used to be silently dropped on replay -- the images
+    were already faithfully checkpointed (baked into the HumanMessage's
+    own image_url content blocks, see web/session.py's
+    _handle_user_message_locked), just never read back out here, so they
+    rendered fine for the rest of the *live* WS connection that sent them
+    (the frontend's own optimistic local echo still had the data URLs in
+    memory) but vanished the moment that connection's history got
+    replayed -- a reload, a reconnect, or switching threads and back.
+    Fixed via extract_images (this module) alongside extract_text; an
+    image-only send (no caption) is also no longer dropped entirely by
+    the empty-text skip below, which used to fire before any image was
+    ever looked at.
+
     Known, accepted gap for v1: a /compact'd thread's history includes the
     synthetic HumanMessage _handle_compact replaces the tail with (the
     rendered pre-compaction transcript, folded into one message) -- it
@@ -192,12 +225,22 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
         if message.type == "tool":
             continue  # already folded into its call's own entry above
         text = extract_text(message.content)
+        if message.type == "human":
+            # Checked before the `if not text` skip below -- an image-only
+            # send (no caption text) has an empty extract_text() result,
+            # but real content (the image itself) that a bare text check
+            # would otherwise drop the whole entry over.
+            images = extract_images(message.content)
+            if not text and not images:
+                continue
+            entry: dict[str, Any] = {"kind": "user", "text": strip_mode_note(text)}
+            if images:
+                entry["images"] = images
+            entries.append(entry)
+            continue
         if not text:
             continue
-        if message.type == "human":
-            entries.append({"kind": "user", "text": strip_mode_note(text)})
-        else:
-            entries.append({"kind": "agent", "text": text})
+        entries.append({"kind": "agent", "text": text})
     return entries
 
 

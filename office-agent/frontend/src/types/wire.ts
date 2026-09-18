@@ -42,7 +42,7 @@ export interface StateEvent {
 }
 
 export type HistoryEntry =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; images?: string[] }
   | { kind: "agent"; text: string }
   | {
       kind: "tool";

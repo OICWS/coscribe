@@ -311,14 +311,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         olderStatus: action.has_older ? "idle" : "none",
         items: action.entries.map((entry) => {
           if (entry.kind === "user") {
-            // No `images` here -- the backend's own history entries don't
-            // carry them back out yet (see web/session.py's
+            // entry.images, when present, is the same data-URL list the
+            // composer originally attached -- real, user-reported bug
+            // this closes: the backend's own history entries used to
+            // never carry them back out (see runtime_lg/messages.py's
             // serialize_history_for_ws_lg), so a sent image's thumbnail
-            // only survives for the rest of *this* live session, not a
-            // page reload. `local_user_message` below is the only path
-            // that currently populates `images`, from the composer's own
-            // still-in-memory data URLs.
-            return { id: genId(), kind: "user", text: entry.text, turnIndex: userTurnIndex++ } as const;
+            // only survived for the rest of *that* live session, not a
+            // reload/reconnect/thread-switch-and-back.
+            return {
+              id: genId(),
+              kind: "user",
+              text: entry.text,
+              turnIndex: userTurnIndex++,
+              images: entry.images,
+            } as const;
           }
           if (entry.kind === "agent") {
             return { id: genId(), kind: "agent", text: entry.text, streaming: false } as const;
@@ -346,7 +352,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // plausible-looking.
       const revealed: LogItem[] = action.entries.map((entry) => {
         if (entry.kind === "user") {
-          return { id: genId(), kind: "user", text: entry.text, turnIndex: -1 } as const;
+          return { id: genId(), kind: "user", text: entry.text, turnIndex: -1, images: entry.images } as const;
         }
         if (entry.kind === "agent") {
           return { id: genId(), kind: "agent", text: entry.text, streaming: false } as const;

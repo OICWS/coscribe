@@ -63,13 +63,17 @@
 
    --panel-bg (the nav rail's own background, dropdown/menu popovers) is
    now the *same* value as --bg, not a third near-identical gray -- those
-   surfaces sit flush with the canvas, separated only by --border, so the
-   *rows* placed on them (a session in the nav rail, a settings option, a
-   workspace indicator) are what actually carry --card-bg's gray, reading
-   as distinct chips against a white panel rather than the whole panel
-   itself going gray. --card-bg-hover is one step darker for exactly
-   those chip rows' hover state, since hovering a --card-bg row with
-   another --card-bg background would show nothing at all. */
+   surfaces sit flush with the canvas, separated only by --border. --card-
+   bg is a *hover*-only surface for a list of many rows sitting on that
+   panel (a session in the nav rail, a workflow, a settings option) --
+   explicit correction: an earlier pass gave the nav rail's session rows
+   --card-bg at rest too (permanently gray, not just on hover), and that
+   was wrong -- only the row the pointer is actually over should read as
+   gray, exactly like every other hover state in this app; the rest stay
+   flush with the white panel. --card-bg still applies at-rest to a
+   genuinely standalone chip (the workspace badge in ThreadHeader.tsx,
+   the search box here) -- those aren't one row among many competing for
+   the same "what's under my cursor" signal. */
 :root {
   color-scheme: light dark;
   --bg: #fcfcfb;
@@ -87,7 +91,6 @@
   --danger: #c85778;
   --danger-fg: #7c1f34;
   --card-bg: #f0f0ef;
-  --card-bg-hover: #e6e6e4;
   --primary: #171614;
   --primary-hover: #322f2c;
   --primary-fg: #fcfcfb;
@@ -116,7 +119,6 @@
     --danger: #f5aec1;
     --danger-fg: #fbd8e1;
     --card-bg: #322f2e;
-    --card-bg-hover: #3d3a38;
     --primary: #f7f5f3;
     --primary-hover: #ffffff;
     --primary-fg: #232120;
