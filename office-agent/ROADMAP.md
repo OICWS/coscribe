@@ -5303,6 +5303,96 @@ full suite green throughout.
 
 ---
 
+## Phase 8au -- Workstream F rejected (unauditable binary); native XLOOKUP/XMATCH instead
+
+**Workstream F** (the previously-planned `iOfficeAI/OfficeCLI` MCP
+integration) was dropped entirely, not built. Verified it has a real,
+working release binary (downloaded and ran `officecli-linux-x64` v1.0.151
+directly in this sandbox -- 35MB, no .NET runtime needed, `--version`
+correctly printed) and a real `officecli mcp` stdio server -- but its MCP
+surface turned out to be **one generic tool** (`officecli`, taking a raw
+CLI command-line string), not per-format tools, so the plan's own
+"allowlist Word/Excel, exclude PowerPoint" scoping was never actually
+achievable at the MCP tool level. Raised as a design pivot; user's own
+call, final: running a closed, compiled, ~6-month-old binary from a
+2-person-commit-concentration project -- however real its Apache-2.0
+license and SHA256-verified release pipeline -- is not something this
+project will audit-by-trust, full stop. Not a close call to revisit later
+with mitigations; the binary itself is the disqualifier.
+
+Two real gaps OfficeCLI would have closed got solved natively instead:
+
+**XLOOKUP/XMATCH (scalar usage)** -- new `_xlsx_lookup_formulas.py`.
+Deliberately scoped to the common case (one lookup value, one result);
+`SORT`/`FILTER`/`UNIQUE`/`SEQUENCE` (true "dynamic array" functions that
+spill a result across multiple cells) stay hard-blocked, since a real,
+separate research pass (see below) found the write side needs Excel-
+365-only OOXML machinery this pass wasn't scoped to build.
+
+- **Why direct XML patching, not through openpyxl**: confirmed by reading
+  `openpyxl.cell._writer.etree_write_cell`'s actual source that it
+  unconditionally discards a formula cell's value after writing `<f>` --
+  for *every* formula, not just these two. There is no openpyxl API,
+  public or private, that produces a formula cell with a cached value;
+  this module does the same "compute it ourselves, patch the saved XML"
+  thing `_recalc_xlsx` already does via LibreOffice for every other
+  formula, just for the two LibreOffice itself can't compute.
+- **Confirmed empirically, not assumed, how LibreOffice treats a formula
+  it can't parse**: `=_xlfn.XLOOKUP(...)` comes back lowercased
+  (`_xlfn.xlookup(...)`) with a real `t="e"`/`<v>#NAME?</v>` error cell --
+  it doesn't crash or corrupt anything, and every *other* formula in the
+  same file still recalculates correctly. This fixed the pass ordering
+  (LibreOffice recalc first, native XLOOKUP/XMATCH pass second, reading
+  already-recalculated sibling-cell values) and confirmed the "declined"
+  case (a formula too complex for this module to evaluate, e.g.
+  `=1+XLOOKUP(...)`) is a true no-regression: it's left exactly as
+  LibreOffice's own pass already leaves it, not newly broken.
+- **A real bug found and fixed via a failing test, not assumed correct
+  from a code read**: sheet-name-to-archive-path resolution (needed to
+  find the right `xl/worksheets/sheetN.xml` to patch) initially mishandled
+  openpyxl's own relationship-target convention -- confirmed by reading a
+  real saved file's `xl/_rels/workbook.xml.rels` that openpyxl writes
+  `Target="/xl/worksheets/sheet1.xml"` (absolute-from-package-root,
+  leading slash), not the relative form a naive `startswith("xl/")` check
+  assumed, silently producing a bogus double-prefixed path that matched
+  no real archive entry -- every patch attempt failed silently, formulas
+  stayed unevaluated, no error surfaced. Invisible in a single-sheet test
+  (nothing to mismatch against); caught by adding a **two-sheet** test,
+  which is now a permanent regression test
+  (`test_evaluate_and_patch_lookup_formulas_resolves_the_correct_sheet_in_a_multi_sheet_workbook`).
+- Scoped, not a formula parser: only a formula whose entire body is one
+  top-level call to XLOOKUP/XMATCH (optional `_xlfn.`/`_xlfn._xlws.`
+  prefix, case-insensitive) with literal or plain cell/range-reference
+  arguments is evaluated; anything else (nested calls, operators) is
+  declined, not guessed at. `XLOOKUP`/`XMATCH` added to
+  `_XLSX_XLFN_FUNCTIONS` (confirmed against `vinci1it2000/formulas`'s own
+  `FUNCTIONS['_XLFN.XLOOKUP']`/`['_XLFN.XMATCH']` registrations: plain
+  `_xlfn.`, not the `_xlfn._xlws.` FILTER/SORT need) so a bare
+  `=XLOOKUP(...)` the model writes is still correct for real Excel, not
+  just this pipeline.
+
+**Real research on `SORT`/`FILTER`/`UNIQUE`/`SEQUENCE`'s spill mechanism,
+grounding a real follow-up instead of leaving it a guess**: a dedicated
+research pass found `jmcnamara/XlsxWriter` (BSD-2-Clause) has a
+production-grade, several-years-old real implementation, independently
+corroborated by real Excel-365-saved XML pasted in a `libxlsxwriter`
+GitHub issue -- the anchor cell needs `t="array" ref="..."` plus `cm="1"`
+on `<c>`, sibling spilled cells get a bare `<v>` with no formula, and a
+new `xl/metadata.xml` part (`XLDAPR`/`dynamicArrayProperties
+fDynamic="1"`) plus a `sheetMetadata` relationship are required for real
+Excel to treat it as live rather than `#SPILL!`-erroring. `FILTER`/`SORT`
+specifically need `_xlfn._xlws.`, not plain `_xlfn.`. Not built this
+phase -- real, additional scope (porting the metadata-writing logic plus
+implementing FILTER/SORT/UNIQUE/SEQUENCE's own compute logic) -- but no
+longer "maybe never," a grounded next phase whenever picked up.
+
+**Verified**: `ruff check src tests`/`mypy src` both clean; 16 new tests
+(`test_xlsx_lookup_formulas.py`'s own unit coverage of the parser/
+matcher/patcher plus new `test_spreadsheets_tool.py` end-to-end cases);
+full suite green throughout.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

@@ -39,24 +39,39 @@ validator to catch it after the fact.
 formulas -- openpyxl already does this for any cell string starting with
 ``=``, no special handling needed there. What *is* handled explicitly,
 cross-checked against Anthropic's own published xlsx skill rather than
-guessed: (1) a hard block on ``XLOOKUP``/``XMATCH``/``SORT``/``FILTER``/
-``UNIQUE``/``SEQUENCE`` -- LibreOffice (used below to verify every formula
-actually evaluates) cannot compute these under any prefix, and because
-openpyxl writes no spill metadata, a partially-working version would
-silently populate only one cell instead of failing loudly; (2)
-auto-prefixing the six post-2007 functions Excel stores with a hidden
-``_xlfn.`` prefix (``TEXTJOIN``/``CONCAT``/``IFS``/``SWITCH``/``MAXIFS``/
-``MINIFS``) -- written bare, each evaluates to ``#NAME?`` in the saved
-file, so the model doesn't need to remember this Excel/OOXML wrinkle
-itself. After writing, ``_recalc_xlsx`` force-recalculates the whole
-workbook via a LibreOffice macro (the same ``ThisComponent.calculateAll()
-+ store() + close()`` technique the xlsx skill's own ``recalc.py`` uses --
-plain ``--convert-to`` does NOT force recalculation, only a macro does,
-verified empirically here) and reports any Excel error strings
-(``#DIV/0!`` etc.) found afterward. Without this, every formula cell
-openpyxl just wrote reads back as ``None`` to ``read_xlsx``/anything using
-``data_only=True`` until the user happens to open the file in real Excel
--- a real, confirmed gap this closes.
+guessed: (1) a hard block on ``SORT``/``FILTER``/``UNIQUE``/``SEQUENCE``
+(``_xlsx_unsupported_functions``' own comment has the real reasoning --
+these "dynamic array" functions need Excel-365-only OOXML machinery this
+package doesn't write yet); (2) auto-prefixing the post-2007 functions
+Excel stores with a hidden ``_xlfn.`` prefix (``TEXTJOIN``/``CONCAT``/
+``IFS``/``SWITCH``/``MAXIFS``/``MINIFS``/``XLOOKUP``/``XMATCH``) --
+written bare, each evaluates to ``#NAME?`` in the saved file, so the
+model doesn't need to remember this Excel/OOXML wrinkle itself. After
+writing, ``_recalc_xlsx`` force-recalculates the whole workbook via a
+LibreOffice macro (the same ``ThisComponent.calculateAll() + store() +
+close()`` technique the xlsx skill's own ``recalc.py`` uses -- plain
+``--convert-to`` does NOT force recalculation, only a macro does, verified
+empirically here) and reports any Excel error strings (``#DIV/0!`` etc.)
+found afterward. Without this, every formula cell openpyxl just wrote
+reads back as ``None`` to ``read_xlsx``/anything using ``data_only=True``
+until the user happens to open the file in real Excel -- a real,
+confirmed gap this closes.
+
+``XLOOKUP``/``XMATCH`` are the two exceptions LibreOffice still can't
+compute, but *aren't* hard-blocked -- their common scalar usage (one
+lookup value, one result -- as opposed to a lookup value spanning
+multiple cells, or a multi-column ``return_array``, both real Excel
+usages this module declines rather than guesses at) needs no spill
+metadata at all, so ``_xlsx_lookup_formulas.py`` evaluates them itself
+and patches a real cached value straight into the saved worksheet XML --
+``_recalc_xlsx_and_evaluate_lookups`` is the combined entry point
+``write_xlsx``/``edit_xlsx_cells``/``recalc_xlsx`` all call instead of
+``_recalc_xlsx`` directly. See that module's own docstring for why direct
+XML patching is necessary (openpyxl has no API to write *any* formula
+cell's cached value, confirmed by reading its writer source) and exactly
+how narrowly it's scoped (declines anything beyond a single top-level
+call with literal/plain-reference arguments, same as this file's own
+"fail loudly, don't guess" formula-safety posture).
 
 ``merge_xlsx_cells``/``unmerge_xlsx_cells``/``add_xlsx_conditional_format``/
 ``set_xlsx_data_validation``/``freeze_xlsx_panes``/``set_xlsx_column_width``/
@@ -101,17 +116,41 @@ if TYPE_CHECKING:
 
 _XLSX_RECALC_TIMEOUT = 30.0
 
-# Never usable under any prefix -- LibreOffice (used to verify formulas
-# below) cannot evaluate these, and since openpyxl writes no spill
-# metadata, a partial success would silently populate only the top-left
-# cell rather than failing loudly. Confirmed against Anthropic's own
-# published xlsx skill, not guessed.
-_XLSX_UNSUPPORTED_FUNCTIONS = ("XLOOKUP", "XMATCH", "SORT", "FILTER", "UNIQUE", "SEQUENCE")
+# SORT/FILTER/UNIQUE/SEQUENCE stay blocked -- they're "dynamic array"
+# functions (spill a result across multiple cells), which needs real
+# Excel-365-only OOXML machinery openpyxl can't write and this package
+# hasn't built yet (a `t="array"` `<f>`/`cm=` cell plus a new
+# `xl/metadata.xml` part -- see `_xlsx_lookup_formulas.py`'s own module
+# docstring for the real, verified reference: `jmcnamara/XlsxWriter`,
+# BSD-2-Clause). Writing a partial version (values with no spill metadata)
+# would silently populate only the top-left cell rather than failing
+# loudly, so still hard-blocked rather than half-supported.
+#
+# XLOOKUP/XMATCH are NOT blocked -- their common *scalar* usage (one
+# lookup value, one result) needs no spill metadata at all, and
+# `_xlsx_lookup_formulas.py` evaluates them natively (LibreOffice itself
+# can't -- confirmed empirically it lowercases the function name and
+# writes a real #NAME? error rather than crashing).
+_XLSX_UNSUPPORTED_FUNCTIONS = ("SORT", "FILTER", "UNIQUE", "SEQUENCE")
 
-# Excel stores these six post-2007 functions with a hidden `_xlfn.` prefix
-# in the file's XML (its UI hides the prefix) -- written bare, each
-# evaluates to #NAME?. Confirmed against the same source.
-_XLSX_XLFN_FUNCTIONS = ("TEXTJOIN", "CONCAT", "IFS", "SWITCH", "MAXIFS", "MINIFS")
+# Excel stores these post-2007 functions with a hidden `_xlfn.` prefix in
+# the file's XML (its UI hides the prefix) -- written bare, each evaluates
+# to #NAME? in real Excel. First six confirmed against Anthropic's own
+# published xlsx skill; XLOOKUP/XMATCH confirmed against `formulas`
+# (vinci1it2000, real open-source formula-evaluation library)'s own
+# `FUNCTIONS['_XLFN.XLOOKUP']`/`FUNCTIONS['_XLFN.XMATCH']` registrations --
+# plain `_xlfn.`, not the `_xlfn._xlws.` prefix FILTER/SORT need (those
+# stay hard-blocked above, unrelated to this list).
+_XLSX_XLFN_FUNCTIONS = (
+    "TEXTJOIN",
+    "CONCAT",
+    "IFS",
+    "SWITCH",
+    "MAXIFS",
+    "MINIFS",
+    "XLOOKUP",
+    "XMATCH",
+)
 
 _XLSX_ERROR_STRINGS = ("#VALUE!", "#DIV/0!", "#REF!", "#NAME?", "#NULL!", "#NUM!", "#N/A")
 
@@ -294,6 +333,16 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
     finally:
         shutil.rmtree(profile_dir, ignore_errors=True)
 
+    return _scan_xlsx_formulas(file_path)
+
+
+def _scan_xlsx_formulas(file_path: Path) -> dict[str, object]:
+    """Count every formula cell and every real Excel error string
+    (`#DIV/0!` etc.) currently in `file_path`. Factored out of `_recalc_xlsx`
+    so `_recalc_xlsx_and_evaluate_lookups` can call it a second time, after
+    its own native XLOOKUP/XMATCH pass, to get the true final count -- the
+    first scan (right after LibreOffice's own recalc) is stale for any cell
+    that pass goes on to patch."""
     from openpyxl import load_workbook
 
     values_workbook = load_workbook(str(file_path), data_only=True)
@@ -335,6 +384,37 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
             error: locations[:20] for error, locations in error_locations.items()
         },
     }
+
+
+def _recalc_xlsx_and_evaluate_lookups(
+    file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT
+) -> dict[str, object]:
+    """`_recalc_xlsx`'s LibreOffice pass, followed by
+    `_xlsx_lookup_formulas.evaluate_and_patch_lookup_formulas` for the two
+    functions LibreOffice can't compute at all (confirmed empirically --
+    see that module's own docstring: LibreOffice lowercases the function
+    name and writes a real `#NAME?` error rather than crashing or leaving
+    other formulas unrecalculated). The single entry point `write_xlsx`/
+    `edit_xlsx_cells`/`recalc_xlsx` call instead of `_recalc_xlsx` directly,
+    so a workbook's XLOOKUP/XMATCH cells get real values through the exact
+    same "recalc after every formula write" path as everything else.
+    """
+    result = _recalc_xlsx(file_path, timeout=timeout)
+    if result["status"] == "skipped":
+        return result  # LibreOffice itself unavailable -- nothing to layer on top of
+
+    from ._xlsx_lookup_formulas import evaluate_and_patch_lookup_formulas
+
+    native_result = evaluate_and_patch_lookup_formulas(file_path)
+    if not native_result["formulas_evaluated"]:
+        return result
+
+    # Re-scan rather than patch the counts by hand -- the native pass can
+    # both fix a #NAME? LibreOffice left *and* legitimately introduce a
+    # new #N/A/#VALUE! of its own (a genuinely-not-found lookup, mismatched
+    # range lengths), so LibreOffice's own pre-native-pass report is stale
+    # either way, not just "off by the count we already know."
+    return _scan_xlsx_formulas(file_path)
 
 
 def _workbook_has_any_formula(workbook: Any) -> bool:
@@ -451,7 +531,7 @@ class SpreadsheetToolkit:
 
         recalc_result: dict[str, object] = {"status": "skipped", "skipped_reason": None}
         if has_formula:
-            recalc_result = _recalc_xlsx(file_path)
+            recalc_result = _recalc_xlsx_and_evaluate_lookups(file_path)
 
         preview_path, preview_skipped_reason = render_thumbnail(file_path, self._state_dir)
         return {
@@ -469,7 +549,7 @@ class SpreadsheetToolkit:
 
     def recalc_xlsx(self, path: str, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict[str, object]:
         file_path = self._check_readable(path)
-        result = _recalc_xlsx(file_path, timeout=timeout)
+        result = _recalc_xlsx_and_evaluate_lookups(file_path, timeout=timeout)
         return {
             "path": self._scope.relative(file_path),
             "status": result["status"],
@@ -900,7 +980,7 @@ class SpreadsheetToolkit:
 
         recalc_result: dict[str, object] = {"status": "skipped", "skipped_reason": None}
         if has_formula:
-            recalc_result = _recalc_xlsx(file_path)
+            recalc_result = _recalc_xlsx_and_evaluate_lookups(file_path)
 
         preview_path, preview_skipped_reason = render_thumbnail(file_path, self._state_dir)
         return {
