@@ -5,6 +5,7 @@ import {
   pauseSubAgentTask,
   resumeSubAgentTask,
 } from "../lib/rest";
+import { formatElapsed } from "../lib/format";
 import type { SubAgentTask } from "../types/session";
 import type { HistoryEntry } from "../types/wire";
 import {
@@ -35,22 +36,25 @@ const STATUS_LABEL: Record<SubAgentTask["status"], string> = {
   failed: "Failed",
 };
 
-function StatusBadge({ status }: { status: SubAgentTask["status"] }) {
+function StatusBadge({ status, iconOnly }: { status: SubAgentTask["status"]; iconOnly?: boolean }) {
   const colorClass =
     status === "succeeded"
-      ? "text-[var(--accent)]"
+      ? "text-[var(--accent-2)]"
       : status === "failed"
         ? "text-[var(--danger)]"
         : status === "running"
           ? "text-[var(--fg)]"
           : "text-yellow-600 dark:text-yellow-400";
   return (
-    <span className={`flex shrink-0 items-center gap-1 text-xs font-medium ${colorClass}`}>
+    <span
+      className={`flex shrink-0 items-center gap-1 text-xs font-medium ${colorClass}`}
+      title={iconOnly ? STATUS_LABEL[status] : undefined}
+    >
       {status === "running" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />}
       {status === "succeeded" && <CheckCircleIcon className="h-3.5 w-3.5" />}
       {status === "failed" && <XCircleIcon className="h-3.5 w-3.5" />}
       {(status === "paused" || status === "blocked_on_approval") && <ClockIcon className="h-3.5 w-3.5" />}
-      {STATUS_LABEL[status]}
+      {!iconOnly && STATUS_LABEL[status]}
     </span>
   );
 }
@@ -63,6 +67,16 @@ function relativeTime(iso: string): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+/** One-line "output" preview for a list row -- deliberately just the
+ * first line of task.result/error, not the full step-by-step transcript
+ * (that stays behind a click into the detail view, see TranscriptEntryView
+ * below). Explicit design request: the list itself should show only "one
+ * thing it's doing, and one output," not a live blow-by-blow. */
+function outputPreview(task: SubAgentTask): string {
+  const text = task.result ?? task.error ?? "";
+  return text.split("\n")[0]?.trim() || "No output yet";
 }
 
 function ToolEntryView({ entry }: { entry: Extract<HistoryEntry, { kind: "tool" }> }) {
@@ -146,6 +160,65 @@ function PauseResumeButton({ task, busy, onToggle, compact }: PauseResumeButtonP
   );
 }
 
+/** "Running"/"Finished" section label -- the two-bucket grouping is what
+ * now carries the primary at-a-glance state (a row's own StatusBadge
+ * drops to icon-only, see SubAgentRow below), matching the explicit
+ * reference layout: a flat list split into just these two groups, not a
+ * status label repeated on every row. */
+function SubAgentSectionHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="px-3 pb-1 pt-3 text-xs font-medium tracking-wide text-[var(--muted)]">
+      {label} · {count}
+    </div>
+  );
+}
+
+interface SubAgentRowProps {
+  task: SubAgentTask;
+  now: number;
+  busy: boolean;
+  onToggle: (task: SubAgentTask) => void;
+  onSelect: (taskId: string) => void;
+}
+
+/** One list row: description ("what it's doing"), a live elapsed timer
+ * while running (or a relative "finished Xm ago" once it isn't), a
+ * one-line output preview (outputPreview above -- explicitly not the
+ * full transcript, that's the click-through detail view), and the
+ * pause/resume control -- exactly the fields the reference screenshot
+ * showed per row, no more. Hover darkens to --card-bg, same "resting
+ * gray on a white panel" affordance the rest of this app's chrome now
+ * uses (see index.css's palette comment). */
+function SubAgentRow({ task, now, busy, onToggle, onSelect }: SubAgentRowProps) {
+  const timeLabel =
+    task.status === "running"
+      ? formatElapsed(now - new Date(task.started_at).getTime())
+      : task.finished_at
+        ? `${relativeTime(task.finished_at)}`
+        : `${relativeTime(task.started_at)}`;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="flex flex-col gap-1 rounded-lg px-3 py-2.5 text-left hover:bg-[var(--card-bg)]"
+      onClick={() => onSelect(task.task_id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onSelect(task.task_id);
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-sm font-medium">{task.description}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <StatusBadge status={task.status} iconOnly />
+          <span className="tabular-nums text-xs text-[var(--muted)]">{timeLabel}</span>
+          <PauseResumeButton task={task} busy={busy} onToggle={onToggle} compact />
+        </div>
+      </div>
+      <span className="truncate text-xs text-[var(--muted)]">{outputPreview(task)}</span>
+    </div>
+  );
+}
+
 interface SubAgentsPanelProps {
   threadId: string;
   onClose: () => void;
@@ -165,6 +238,19 @@ export function SubAgentsPanel({ threadId, onClose }: SubAgentsPanelProps) {
   const [selectedTask, setSelectedTask] = useState<SubAgentTask | null>(null);
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  const runningTasks = tasks.filter((t) => t.status === "running");
+  const finishedTasks = tasks.filter((t) => t.status !== "running");
+
+  // One shared ticking clock for every running row's live elapsed time
+  // (explicit design request) -- a single interval, not one per row, and
+  // only running while there's actually a running task to tick for.
+  useEffect(() => {
+    if (runningTasks.length === 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [runningTasks.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,40 +353,48 @@ export function SubAgentsPanel({ threadId, onClose }: SubAgentsPanelProps) {
             </div>
           )
         ) : (
-          <div className="flex flex-col">
+          <div className="flex flex-col px-1 pb-2">
             {tasks.length === 0 && (
               <div className="p-6 text-center text-sm text-[var(--muted)]">
                 No sub-agents delegated in this conversation yet.
               </div>
             )}
-            {tasks
-              .slice()
-              .reverse()
-              .map((task) => (
-                <div
-                  key={task.task_id}
-                  role="button"
-                  tabIndex={0}
-                  className="flex flex-col gap-1 border-b border-[var(--border)] px-3 py-3 text-left hover:bg-[var(--card-bg)]"
-                  onClick={() => setSelectedId(task.task_id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") setSelectedId(task.task_id);
-                  }}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-sm font-medium">{task.description}</span>
-                    <StatusBadge status={task.status} />
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-xs text-[var(--muted)]">
-                      {task.finished_at
-                        ? `Finished ${relativeTime(task.finished_at)}`
-                        : `Started ${relativeTime(task.started_at)}`}
-                    </span>
-                    <PauseResumeButton task={task} busy={busyTaskId === task.task_id} onToggle={togglePause} compact />
-                  </div>
-                </div>
-              ))}
+            {runningTasks.length > 0 && (
+              <>
+                <SubAgentSectionHeader label="Running" count={runningTasks.length} />
+                {runningTasks
+                  .slice()
+                  .reverse()
+                  .map((task) => (
+                    <SubAgentRow
+                      key={task.task_id}
+                      task={task}
+                      now={now}
+                      busy={busyTaskId === task.task_id}
+                      onToggle={togglePause}
+                      onSelect={setSelectedId}
+                    />
+                  ))}
+              </>
+            )}
+            {finishedTasks.length > 0 && (
+              <>
+                <SubAgentSectionHeader label="Finished" count={finishedTasks.length} />
+                {finishedTasks
+                  .slice()
+                  .reverse()
+                  .map((task) => (
+                    <SubAgentRow
+                      key={task.task_id}
+                      task={task}
+                      now={now}
+                      busy={busyTaskId === task.task_id}
+                      onToggle={togglePause}
+                      onSelect={setSelectedId}
+                    />
+                  ))}
+              </>
+            )}
           </div>
         )}
       </div>
