@@ -186,6 +186,12 @@ def test_get_context_window_falls_back_when_provider_has_no_live_lookup(
 
     assert client.get_context_window("fake:claude-3") == 200_000
     assert client.get_context_window("fake:gpt-4o") == 128_000
+    # Real, user-reported bug: deepseek-flash (a real, current DeepSeek
+    # model -- verified live against api-docs.deepseek.com, 1M-token
+    # context) had no entry here, so it silently fell through to the
+    # generic 128k default -- an 8x-too-small number shown right on the
+    # context-window ring for a real, configured provider.
+    assert client.get_context_window("fake:deepseek-flash") == 1_000_000
     assert client.get_context_window("fake:some-unknown-model") == 128_000
 
 

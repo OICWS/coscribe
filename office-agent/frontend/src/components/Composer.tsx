@@ -6,6 +6,7 @@ import { ImageLightbox } from "./ImageLightbox";
 import { PlusIcon, ReturnIcon, StopIcon } from "./icons";
 import type { PptxShapeCapture } from "./PptxShapeOverlay";
 import { RunStatus } from "./RunStatus";
+import { TextLightbox } from "./TextLightbox";
 
 /** Commands that get an instant "state" reply and never run an agent
  * turn -- mirrors app.js's INSTANT_COMMANDS (session.py's FIXED_COMMANDS
@@ -21,7 +22,13 @@ const INSTANT_COMMANDS = new Set([
 ]);
 
 export interface ComposerSendPayload {
-  /** What the chat-log bubble shows -- the raw typed text, unmodified. */
+  /** What the chat-log bubble shows. The raw typed text, plus any pasted
+   * content collapsed into a "Pasted content" chip below it (see submit()
+   * in Composer.tsx) -- unlike a file attachment (which points at a path
+   * already on disk) or an image (rendered from its own `images` field
+   * below), pasted text has nowhere else to live once the turn is sent, so
+   * dropping it here would make it permanently unrecoverable from the chat
+   * log, not just temporarily hidden. */
   displayText: string;
   /** What actually gets sent as user_message.text -- includes the
    * workspace attachment note, if any. */
@@ -117,6 +124,7 @@ export function Composer({
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
   const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string } | null>(null);
+  const [pastePreview, setPastePreview] = useState<string | null>(null);
   const [autocompleteMatches, setAutocompleteMatches] = useState<CommandInfo[]>([]);
   const [autocompleteIndex, setAutocompleteIndex] = useState(-1);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -233,9 +241,17 @@ export function Composer({
     // produced). displayText below is left untouched, same as the file
     // note above: the chat bubble stays short, the model still gets
     // everything.
+    // Same text, appended to displayText too -- previously only outgoingText
+    // got it, so the chat-log bubble showed nothing but the generic
+    // "(attachment sent)" fallback below with no way to see what was
+    // actually sent. ChatLog.tsx's UserMessageView collapses a long bubble
+    // behind "Show more" on its own, so there's no separate truncation
+    // needed here.
+    let displayText = text;
     if (pendingPastes.length > 0) {
       const pasted = pendingPastes.map((p) => p.text).join("\n\n");
       outgoingText = outgoingText ? `${outgoingText}\n\n${pasted}` : pasted;
+      displayText = displayText ? `${displayText}\n\n${pasted}` : pasted;
     }
     // Browser-panel "Select an element" captures include the element's
     // own extracted text alongside the screenshot -- previously read
@@ -262,7 +278,7 @@ export function Composer({
     }
     const commandWord = text.trim().split(/\s+/, 1)[0]?.toLowerCase();
     onSend({
-      displayText: text || "(attachment sent)",
+      displayText: displayText || "(attachment sent)",
       outgoingText,
       images: pendingImages.length > 0 ? pendingImages.map((f) => f.dataUrl) : undefined,
       isInstant: INSTANT_COMMANDS.has(commandWord ?? ""),
@@ -458,7 +474,14 @@ export function Composer({
               key={`paste-${i}`}
               className="flex max-w-[220px] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card-bg)] py-1.5 pl-3 pr-1.5 text-xs"
             >
-              <span className="truncate">Pasted ({p.charCount.toLocaleString()} chars)</span>
+              <button
+                type="button"
+                title="Preview pasted content"
+                className="min-w-0 flex-1 truncate text-left hover:underline"
+                onClick={() => setPastePreview(p.text)}
+              >
+                Pasted ({p.charCount.toLocaleString()} chars)
+              </button>
               <button
                 type="button"
                 aria-label="Remove pasted content"
@@ -574,6 +597,9 @@ export function Composer({
     </div>
     {lightboxSrc && (
       <ImageLightbox src={lightboxSrc.src} alt={lightboxSrc.alt} onClose={() => setLightboxSrc(null)} />
+    )}
+    {pastePreview !== null && (
+      <TextLightbox text={pastePreview} onClose={() => setPastePreview(null)} />
     )}
     </>
   );

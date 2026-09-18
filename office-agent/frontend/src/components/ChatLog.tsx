@@ -659,6 +659,14 @@ function ApprovalDetail({
  * lifted into ChatState) mirrors ToolCallRow/ToolRunGroupView's existing
  * pattern of local, ephemeral UI state that doesn't need to survive a
  * remount or be visible to any other component. */
+// A user bubble past this length collapses behind "Show more" -- mainly
+// hit by a pasted-content turn (Composer.tsx's submit() now puts the real
+// pasted text in displayText instead of dropping it), where the raw text
+// can otherwise be long enough to push the rest of the conversation off
+// screen. Same magnitude as Composer's own PASTE_CARD_MIN_CHARS, so "long
+// enough to collapse" means the same thing on both sides of a send.
+const LONG_MESSAGE_COLLAPSE_CHARS = 1000;
+
 function UserMessageView({
   item,
   onEditMessage,
@@ -669,6 +677,10 @@ function UserMessageView({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [textExpanded, setTextExpanded] = useState(false);
+  const isLongText = item.text.length > LONG_MESSAGE_COLLAPSE_CHARS;
+  const shownText =
+    isLongText && !textExpanded ? `${item.text.slice(0, LONG_MESSAGE_COLLAPSE_CHARS)}…` : item.text;
 
   const cancel = () => {
     setDraft(item.text);
@@ -749,9 +761,18 @@ function UserMessageView({
           </button>
         )}
         <div className="rounded-2xl rounded-br-[4px] bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] whitespace-pre-wrap">
-          {item.text}
+          {shownText}
         </div>
       </div>
+      {isLongText && (
+        <button
+          type="button"
+          className="text-xs text-[var(--muted)] hover:text-[var(--fg)] hover:underline"
+          onClick={() => setTextExpanded((prev) => !prev)}
+        >
+          {textExpanded ? "Show less" : "Show more"}
+        </button>
+      )}
       {lightboxSrc && (
         <ImageLightbox src={lightboxSrc} alt="Attachment preview" onClose={() => setLightboxSrc(null)} />
       )}

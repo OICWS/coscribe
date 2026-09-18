@@ -17,13 +17,18 @@ export function freshThreadPath(prefix: string): string {
  * model pill to show a real model (not the "Select model" placeholder)
  * as a reliable signal the surviving connection is up.
  *
- * The initial render gate used to be a "Sessions" button -- removed by
- * the Nav rail/Create-Run-split redesign (NavRail.tsx), which replaced
- * it with an icon-only "Toggle navigation" button (no text content, so
- * its accessible name comes from its `title` attribute). Waiting on
- * that instead of jumping straight to the model-pill check keeps the
- * same "app has rendered at all" gate this helper always had. */
+ * The initial render gate used to be a "Sessions" button, then a
+ * "Toggle navigation" button -- both removed by later NavRail.tsx
+ * changes. It's now a pin/unpin toggle whose accessible name (from its
+ * `title` attribute -- see NavRail.tsx) flips between "Pin navigation
+ * open" and "Unpin navigation" depending on pinned state, so this
+ * matches on the shared "navigation" substring rather than the exact
+ * label -- a real, live-caught staleness bug: the exact-label match
+ * above silently timed out on every spec in this suite once the label
+ * changed, none of them actually exercising anything by that point.
+ * Waiting on it instead of jumping straight to the model-pill check
+ * keeps the same "app has rendered at all" gate this helper always had. */
 export async function waitForConnected(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Toggle navigation" }).waitFor();
+  await page.getByRole("button", { name: /navigation/i }).waitFor();
   await expect(page.getByTestId("model-pill")).not.toHaveText("Select model", { timeout: 10_000 });
 }
