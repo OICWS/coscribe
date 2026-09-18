@@ -53,7 +53,12 @@ export function GlobalInstructionsSection({ active }: { active: boolean }) {
   };
 
   return (
-    <div>
+    // pt-4 here, not on SettingRow itself: SettingRow's own `first:pt-0`
+    // zeroes its top padding because this wrapper makes it the sole (so
+    // both first *and* last) child of its own container, collapsing the
+    // gap above it to nothing and pulling it flush against the divider
+    // the parent's divide-y draws above this section.
+    <div className="pt-4">
       <SettingRow
         label="Global Instructions"
         description="Preferences, conventions, or context coscribe should always know. Applies to every new session."
