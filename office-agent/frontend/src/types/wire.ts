@@ -181,6 +181,15 @@ export interface ClearedEvent {
   cancelled_recording: boolean;
 }
 
+/** Confirms a rewind_message truncation actually happened -- the frontend
+ * already updated its own log optimistically (same posture edit_message's
+ * own local_edit_message reducer case takes), so this is mostly a
+ * consistency check, not something the UI blocks on. */
+export interface RewoundEvent {
+  type: "rewound";
+  index: number;
+}
+
 export interface RecordingStartedEvent {
   type: "recording_started";
   discarded_previous: boolean;
@@ -255,6 +264,7 @@ export type WsServerEvent =
   | AgentMessageEvent
   | CompactedEvent
   | ClearedEvent
+  | RewoundEvent
   | RecordingStartedEvent
   | WorkflowSavedEvent
   | SkillSavedEvent
@@ -293,6 +303,18 @@ export interface EditMessageOut {
   index: number;
   text: string;
   images?: string[];
+}
+
+/** Undo the last question and its reply -- distinct from edit_message,
+ * which truncates *and* immediately reruns with new text. This only
+ * truncates; the client hands the original question text back to the
+ * composer itself rather than sending it. Same 0-based indexing as
+ * EditMessageOut. Real, live-reported bug this exists to fix: the "Rewind"
+ * button used to send edit_message with the turn's own unedited text,
+ * which is retry (same question, new answer), not rewind. */
+export interface RewindMessageOut {
+  type: "rewind_message";
+  index: number;
 }
 
 export interface ApprovalResponseOut {
@@ -358,6 +380,7 @@ export interface LoadOlderMessagesOut {
 export type WsClientMessage =
   | UserMessageOut
   | EditMessageOut
+  | RewindMessageOut
   | ApprovalResponseOut
   | QuestionResponseOut
   | StopOut

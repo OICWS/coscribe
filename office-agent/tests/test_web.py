@@ -2043,6 +2043,61 @@ def test_edit_message_rejects_an_out_of_range_index(
     assert "No such message to edit" in error["message"]
 
 
+def test_rewind_message_truncates_without_regenerating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for a real, live-reported bug: the UI's "Rewind"
+    button used to call edit_message with the turn's own unedited text,
+    which truncates *and* immediately reruns it -- that's retry, not
+    rewind. rewind_message must truncate and stop there, with no new turn
+    (and so no new agent_message) following it."""
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="hi there!"), AIMessage(content="nice to hear")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_rewind1") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "how are you"})
+            _receive_until(ws, "tasks_changed")
+
+            # index 1 -- the second turn -- rewound. Only that turn's own
+            # "how are you"/"nice to hear" is discarded; the first turn is
+            # untouched, and nothing regenerates in its place.
+            ws.send_json({"type": "rewind_message", "index": 1})
+            rewound = ws.receive_json()
+
+        with client.websocket_connect("/ws/t_rewind1") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+
+    assert rewound == {"type": "rewound", "index": 1}
+    assert history["entries"] == [
+        {"kind": "user", "text": "hello"},
+        {"kind": "agent", "text": "hi there!"},
+    ]
+
+
+def test_rewind_message_rejects_an_out_of_range_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="hi there!")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_rewind2") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+
+            ws.send_json({"type": "rewind_message", "index": 5})
+            error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert "No such message to rewind" in error["message"]
+
+
 def test_pretool_use_hook_denial_blocks_a_call_even_in_accept_edits_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3067,6 +3122,70 @@ def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(
                 "connected": False,
             }
         }
+
+
+def test_post_mcp_server_reconnect_retries_a_previously_failed_add(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for a real gap: once a server is added (`isAdded`
+    true), the Connectors panel had no way to replay a failed connect --
+    only Remove + re-add, which also throws away the saved config.
+    /reconnect re-runs connect_one_mcp_server_lg against the *same*
+    persisted config, so a connector that failed once (e.g. a timeout,
+    a stale npm cache) can be retried without deleting it first."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        # connect_one_mcp_server_lg is stubbed to [] by _client_lg -- saved
+        # but not connected, same as the first attempt failing.
+        add_response = client.post(
+            "/api/mcp/servers",
+            json={"name": "fetch", "command": "uvx", "args": ["mcp-server-fetch"]},
+        )
+        assert add_response.json() == {"rejected": {}, "connected": False, "error": None}
+
+        # Simulates the underlying problem being resolved before the retry
+        # (e.g. the user installed uv) -- this time connect succeeds.
+        class _FakeConnection:
+            async def close(self) -> None:
+                pass
+
+        async def _fake_connect_succeeds(name: str, config: Any) -> tuple[list[Any], Any, None]:
+            from coscribe.runtime.types import tool_metadata
+
+            def _tool(x: str = "") -> str:
+                """fake"""
+                return x
+
+            _tool.__name__ = "fetch__tool"
+            tool_metadata(_tool, risk_category="READ", category="mcp:fetch")
+            return [_tool], _FakeConnection(), None
+
+        monkeypatch.setattr(
+            "coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", _fake_connect_succeeds
+        )
+
+        reconnect_response = client.post("/api/mcp/servers/fetch/reconnect")
+        assert reconnect_response.json() == {"connected": True, "error": None}
+
+        servers = client.get("/api/mcp/servers").json()
+        assert servers["fetch"]["connected"] is True
+        # The persisted config itself is untouched by a reconnect -- only
+        # bump-version is allowed to rewrite mcp.json.
+        mcp_config = json.loads((tmp_path / "mcp.json").read_text(encoding="utf-8"))
+        assert mcp_config["mcpServers"]["fetch"]["command"] == "uvx"
+
+
+def test_post_mcp_server_reconnect_reports_not_found_for_an_unconfigured_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post("/api/mcp/servers/does-not-exist/reconnect")
+        assert response.json() == {"error": "not found", "connected": False}
 
 
 def test_get_mcp_servers_connected_reflects_a_real_live_connection(

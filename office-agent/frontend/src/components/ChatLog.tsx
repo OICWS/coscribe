@@ -59,6 +59,10 @@ interface ChatLogProps {
    * the very history the edit is about to truncate, so the affordance is
    * hidden entirely rather than left clickable-but-erroring. */
   onEditMessage?: (turnIndex: number, text: string) => void;
+  /** Rewind (undo the last question+reply, hand the text back to the
+   * composer) -- same "hidden while a turn is in flight" reasoning as
+   * onEditMessage above, and offered on the same footer, see TurnView. */
+  onRewindMessage?: (turnIndex: number, text: string) => void;
   /** Runs a suggested prompt from EmptyState, shown in place of the
    * (otherwise empty) message list on a brand-new thread. */
   onSuggestion: (prompt: string) => void;
@@ -92,6 +96,7 @@ export function ChatLog({
   onApprove,
   onAnswerQuestion,
   onEditMessage,
+  onRewindMessage,
   onSuggestion,
   onPptxShapePicked,
   olderItems,
@@ -193,6 +198,7 @@ export function ChatLog({
             onApprove={onApprove}
             onAnswerQuestion={onAnswerQuestion}
             onEditMessage={onEditMessage}
+            onRewindMessage={onRewindMessage}
             onPptxShapePicked={onPptxShapePicked}
           />
         ))}
@@ -204,36 +210,44 @@ export function ChatLog({
 
 /** Renders one turn's items (via the same groupToolRuns pass the whole
  * thread used to go through directly) plus, once the turn is actually
- * done, a bottom-left copy+rewind+relative-time footer -- replaces the
- * old one-CopyButton-per-agent-message placement (see ROADMAP.md's Phase
- * 8am items 7-8). "Done" means: has a final agent reply that isn't still
- * streaming, and no approval in this turn is still waiting on the user
- * -- the same real backend rule handle_edit_message itself enforces
- * ("Resolve the pending approval before editing"), so rewind is never
- * offered somewhere it would just come back as a WS error. Rewind reuses
- * onEditMessage verbatim with the turn's own original, unedited text --
- * a real backend call (truncate-then-resubmit), not a new mechanism; see
- * that prop's own doc on ChatLogProps for why it can be undefined.
+ * done, a bottom-left copy+retry+rewind+relative-time footer -- replaces
+ * the old one-CopyButton-per-agent-message placement (see ROADMAP.md's
+ * Phase 8am items 7-8). "Done" means: has a final agent reply that isn't
+ * still streaming, and no approval in this turn is still waiting on the
+ * user -- the same real backend rule handle_edit_message/
+ * handle_rewind_message both enforce ("Resolve the pending approval
+ * before editing/rewinding"), so neither button is ever offered
+ * somewhere it would just come back as a WS error.
  *
- * Rewind is further restricted to `isLastTurn` -- explicit correction:
- * every past turn used to offer it, but rewinding to an earlier turn
- * while later ones already exist is exactly what "edit an earlier
- * message" (the pencil icon on the user bubble itself, still available
- * on every turn) already does more explicitly; a second, identically-
- * named affordance on every turn read as "rewind to any point," which
- * isn't what this does (it can only ever discard everything *after* the
- * turn clicked, same as edit). The whole footer is also now hover-only
- * (opacity-0, revealed via the turn's own group/turn on hover) instead
- * of permanently visible -- matches the rest of this app's hover-reveal
- * convention for secondary actions (ThreadRow's "..." menu, the user
- * bubble's own edit pencil) rather than a footer under every single
- * reply, always on screen. */
+ * Retry and Rewind are two different operations, previously conflated
+ * under one "Rewind" button that actually retried (real, live-reported
+ * bug): Retry truncates the turn and immediately resubmits the same
+ * question (onEditMessage with unedited text) -- same question, new
+ * answer. Rewind truncates and stops there, handing the original
+ * question text back to the composer instead (onRewindMessage) -- an
+ * undo, with no new answer generated. Retry's icon is Rewind's own icon
+ * mirrored (scale-x-[-1]), not a new one -- they're inverse operations of
+ * the same "go back" shape.
+ *
+ * Both restricted to `isLastTurn` -- explicit correction: every past turn
+ * used to offer this, but reaching back to an earlier turn while later
+ * ones already exist is exactly what "edit an earlier message" (the
+ * pencil icon on the user bubble itself, still available on every turn)
+ * already does more explicitly; a second, identically-named affordance on
+ * every turn read as "jump to any point," which isn't what either of
+ * these do (both only ever discard everything *after* the turn clicked,
+ * same as edit). The whole footer is also hover-only (opacity-0, revealed
+ * via the turn's own group/turn on hover) instead of permanently visible
+ * -- matches the rest of this app's hover-reveal convention for secondary
+ * actions (ThreadRow's "..." menu, the user bubble's own edit pencil)
+ * rather than a footer under every single reply, always on screen. */
 function TurnView({
   turn,
   isLastTurn = false,
   onApprove,
   onAnswerQuestion,
   onEditMessage,
+  onRewindMessage,
   onPptxShapePicked,
 }: {
   turn: Turn;
@@ -241,6 +255,7 @@ function TurnView({
   onApprove: (id: string, approved: boolean) => void;
   onAnswerQuestion: (id: string, answer: string) => void;
   onEditMessage?: (turnIndex: number, text: string) => void;
+  onRewindMessage?: (turnIndex: number, text: string) => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const entries = groupToolRuns(turn.items);
@@ -274,9 +289,19 @@ function TurnView({
           {onEditMessage && isLastTurn && (
             <button
               type="button"
-              title="Rewind to here"
+              title="Retry -- ask this again"
               className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
               onClick={() => onEditMessage(userItem.turnIndex, userItem.text)}
+            >
+              <RewindIcon className="h-3.5 w-3.5 scale-x-[-1]" />
+            </button>
+          )}
+          {onRewindMessage && isLastTurn && (
+            <button
+              type="button"
+              title="Rewind -- undo this question"
+              className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+              onClick={() => onRewindMessage(userItem.turnIndex, userItem.text)}
             >
               <RewindIcon className="h-3.5 w-3.5" />
             </button>

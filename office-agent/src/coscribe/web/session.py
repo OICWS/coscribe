@@ -2073,6 +2073,47 @@ class ChatSessionLG:
 
         await self._handle_user_message_locked(text, websocket, images=images)
 
+    async def handle_rewind_message(self, index: int, websocket: WebSocket) -> None:
+        # Same _turn_lock serialization as handle_edit_message -- see that
+        # method's own comment.
+        async with self._turn_lock:
+            self._current_turn_task = asyncio.current_task()
+            await self._handle_rewind_message_locked(index, websocket)
+
+    async def _handle_rewind_message_locked(self, index: int, websocket: WebSocket) -> None:
+        """Undo the last question and its reply -- real, live-reported
+        bug this fixes: the UI's "Rewind" button used to call
+        handle_edit_message with the turn's own *unedited* text, which
+        truncates and immediately reruns it -- that's retry (same
+        question, new answer), not rewind. This only truncates; the
+        frontend hands the original question text back to the composer
+        instead of resubmitting it, so the user decides what happens next
+        (edit it, discard it, or resend it unchanged). Same truncation
+        mechanism and guards as _handle_edit_message_locked (pending-
+        approval check, index range check), just without the rerun step
+        at the end."""
+        state = await self.lg_agent.aget_state(self.config)
+        messages = list(state.values.get("messages", [])) if state.values else []
+        if state.next:
+            await websocket.send_json(
+                {"type": "error", "message": "Resolve the pending approval before rewinding."}
+            )
+            return
+
+        human_positions = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+        if index < 0 or index >= len(human_positions):
+            await websocket.send_json(
+                {"type": "error", "message": f"No such message to rewind (index {index})."}
+            )
+            return
+
+        to_remove = messages[human_positions[index] :]
+        if to_remove:
+            await self.lg_agent.aupdate_state(
+                self.config, {"messages": [RemoveMessage(id=m.id) for m in to_remove]}
+            )
+        await websocket.send_json({"type": "rewound", "index": index})
+
     async def _handle_start_workflow(self, websocket: WebSocket) -> None:
         """Mark the current tool-call-step count as the start of a chain-
         workflow recording -- /endworkflow later captures only steps from

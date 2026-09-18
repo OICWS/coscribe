@@ -167,6 +167,7 @@ export const initialChatState: ChatState = {
 export type LocalAction =
   | { type: "local_user_message"; text: string; instant: boolean; images?: string[] }
   | { type: "local_edit_message"; turnIndex: number; text: string }
+  | { type: "local_rewind_message"; turnIndex: number }
   | { type: "local_approval_resolved"; id: string; approved: boolean }
   | { type: "local_question_answered"; id: string; answer: string }
   | { type: "local_hydrate_workflow_runs"; runs: WorkflowRun[] }
@@ -266,6 +267,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         error: null,
         items: [...kept, { id: genId(), kind: "user", text: action.text, turnIndex: action.turnIndex }],
       };
+    }
+
+    case "local_rewind_message": {
+      // Unlike local_edit_message, appends nothing back -- rewind is a
+      // pure undo. The turn's own question text goes to the composer
+      // instead (App.tsx's onRewindMessage, via setPendingComposerText),
+      // not back into the log, and no turn is running afterward.
+      const cutIndex = state.items.findIndex(
+        (item) => item.kind === "user" && item.turnIndex === action.turnIndex,
+      );
+      return cutIndex === -1 ? state : { ...state, items: state.items.slice(0, cutIndex) };
     }
 
     case "local_hydrate_workflow_runs":
@@ -533,6 +545,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           },
         ],
       };
+
+    case "rewound":
+      // No-op: local_rewind_message already truncated items optimistically
+      // (see App.tsx's onRewindMessage) -- this is just the server's own
+      // confirmation that the checkpointed history actually matches.
+      return state;
 
     case "workflow_run_progress": {
       const exists = state.workflowRuns.some((run) => run.run_id === action.run.run_id);
