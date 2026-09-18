@@ -60,3 +60,56 @@ test("pasting a large block of text collapses into a removable pill instead of f
   });
   await expect(page.getByText(/Pasted \(/)).toHaveCount(1);
 });
+
+test("clicking a pending paste pill previews its full text before sending", async ({ page }) => {
+  await page.goto(freshThreadPath("paste-preview"));
+  await waitForConnected(page);
+
+  const longText = "line of pasted content\n".repeat(60);
+  const textarea = page.locator("textarea");
+  await textarea.click();
+  await textarea.evaluate((el, text) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("text/plain", text);
+    el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dataTransfer }));
+  }, longText);
+
+  // Real, user-reported bug: the pill had no way to see what it held --
+  // no click handler, no title, nothing -- before this fix.
+  await page.getByRole("button", { name: /Pasted \(/ }).click();
+  await expect(page.getByText("line of pasted content", { exact: false }).first()).toBeVisible();
+
+  // Click-outside (the backdrop) closes it, same convention as ImageLightbox.
+  await page.mouse.click(10, 10);
+  await expect(page.getByRole("button", { name: /Pasted \(/ })).toBeVisible();
+});
+
+test("a sent paste shows its real text in the chat log, not a generic placeholder", async ({ page }) => {
+  await page.goto(freshThreadPath("paste-sent"));
+  await waitForConnected(page);
+
+  // Real, user-reported bug: displayText fell back to the literal string
+  // "(attachment sent)" whenever the typed textarea was empty, even though
+  // outgoingText (what the model actually received) already carried the
+  // full pasted text -- the chat log showed a placeholder with no way to
+  // see what was actually sent.
+  const longText = "paste-content-marker line\n".repeat(60);
+  const textarea = page.locator("textarea");
+  await textarea.click();
+  await textarea.evaluate((el, text) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("text/plain", text);
+    el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dataTransfer }));
+  }, longText);
+
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByText("(attachment sent)")).not.toBeVisible();
+  await expect(page.getByText("paste-content-marker line", { exact: false }).first()).toBeVisible();
+  // 60 repeats of a 26-char line is well past LONG_MESSAGE_COLLAPSE_CHARS
+  // (1000), so it should render collapsed behind "Show more".
+  const showMore = page.getByRole("button", { name: "Show more" });
+  await expect(showMore).toBeVisible();
+  await showMore.click();
+  await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
+});

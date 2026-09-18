@@ -59,6 +59,13 @@ _FALLBACK_CONTEXT_WINDOWS: list[tuple[str, int]] = [
     ("gpt", 128_000),
     ("o1", 128_000),
     ("o3", 128_000),
+    # Verified live against api-docs.deepseek.com/quick_start/pricing/
+    # (2026-09-18): both deepseek-flash and deepseek-v4-pro advertise a 1M
+    # token context window. Without this entry every DeepSeek model fell
+    # through to _DEFAULT_CONTEXT_WINDOW (128_000) -- a real, live-reported
+    # UI bug (the context-window ring showed "78.9k / 128.0k" for a model
+    # that actually has ~8x that headroom).
+    ("deepseek", 1_000_000),
 ]
 _DEFAULT_CONTEXT_WINDOW = 128_000
 

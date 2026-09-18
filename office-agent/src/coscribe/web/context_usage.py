@@ -39,17 +39,36 @@ def _encoder() -> Any:
 
 
 def count_text_tokens(text: str) -> int:
-    """Best-effort token count for a plain string -- 0 (never a crash) if
-    tiktoken's encoding data can't be loaded (e.g. no network on first
-    use, in an offline deployment): this feeds a diagnostic panel, never
-    a real request to a provider, so a degraded/zeroed estimate is the
-    right failure mode, not an error surfaced to the user."""
+    """Best-effort token count for a plain string. Falls back to a rough
+    chars-per-token estimate (never a crash, never 0 for non-empty text) if
+    tiktoken's encoding data can't be loaded -- it downloads
+    `cl100k_base.tiktoken` from a remote CDN on first use and caches it
+    locally, so a genuinely offline deployment (or a proxy that doesn't
+    cover that one host) fails every call, not just the first. A real,
+    live-reported bug: this used to return 0 on that failure, which -- since
+    every one of build_context_breakdown's static categories (system
+    prompt/skills/system tools/MCP tools) routes through this function --
+    silently zeroed out four of its seven categories at once with no error
+    shown, while `messages` (computed from the provider's own real usage
+    report, not this estimate) kept reporting correctly and absorbed the
+    entire total. That looked exactly like "tools/prompt cost nothing,"
+    the opposite of the real problem, on a screen whose whole purpose is
+    showing where the budget actually goes."""
     if not text:
         return 0
     try:
         return len(_encoder().encode(text))
     except Exception:
-        return 0
+        return _fallback_token_estimate(text)
+
+
+def _fallback_token_estimate(text: str) -> int:
+    """~4 chars/token is the standard rough English-text heuristic (the same
+    order of magnitude OpenAI's own tokenizer docs quote) -- not accurate,
+    but "roughly right order of magnitude" is what this module's own
+    docstring already promises for tiktoken's cl100k_base proxy itself, so
+    this fallback only has to clear that same bar, not be exact."""
+    return max(1, len(text) // 4)
 
 
 def count_tool_schema_tokens(tools: list[Any]) -> int:
