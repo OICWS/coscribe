@@ -8,6 +8,7 @@ import {
   getMcpServers,
   getNpmLatestVersion,
   installBrowser,
+  reconnectMcpServer,
   removeMcpServer,
 } from "../../lib/rest";
 import type { McpCatalogEntry, McpServerInfo, McpServersResponse } from "../../types/settings";
@@ -114,13 +115,14 @@ interface ConnectorRowViewProps {
   updateCheck: string | undefined;
   onConnect: () => void;
   onRemove: () => void;
+  onRetry: () => void;
   onCheckUpdate: (pkg: string) => void;
   onApplyUpdate: (pkg: string, version: string) => void;
 }
 
 /** One <tr> in the unified table -- top-level, not nested in
  * ConnectorsTab, per this repo's own "no inner components" convention. */
-function ConnectorRowView({ row, isPending, updateCheck, onConnect, onRemove, onCheckUpdate, onApplyUpdate }: ConnectorRowViewProps) {
+function ConnectorRowView({ row, isPending, updateCheck, onConnect, onRemove, onRetry, onCheckUpdate, onApplyUpdate }: ConnectorRowViewProps) {
   const pinned = row.type === "local" ? findPinnedNpmPackage(row.serverInfo?.args ?? []) : null;
   const latest = updateCheck?.startsWith("latest:") ? updateCheck.slice(7) : null;
   const detail =
@@ -168,13 +170,32 @@ function ConnectorRowView({ row, isPending, updateCheck, onConnect, onRemove, on
           row.connected ? (
             <CheckIcon className="h-4 w-4 text-[var(--accent)]" />
           ) : (
-            <span className="text-sm text-[var(--muted)]">Not connected</span>
+            // Real gap this replaces: a failed/never-connected server used
+            // to be a dead-end static "Not connected" label -- the only
+            // way to retry was Remove + re-add, which also throws away
+            // the saved config. Same running-wave-ring treatment as the
+            // composer's own in-flight indicator while isPending, so a
+            // slow first-run install reads as "working," not "stuck."
+            <button
+              type="button"
+              disabled={isPending}
+              className={`rounded-md px-2.5 py-1 text-sm disabled:opacity-90 ${
+                isPending
+                  ? "running-wave-ring bg-[var(--bg)]"
+                  : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--fg)]"
+              }`}
+              onClick={onRetry}
+            >
+              {isPending ? "Retrying…" : "Retry"}
+            </button>
           )
         ) : (
           <button
             type="button"
             disabled={isPending}
-            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm disabled:opacity-60"
+            className={`rounded-md px-2.5 py-1 text-sm disabled:opacity-90 ${
+              isPending ? "running-wave-ring bg-[var(--bg)]" : "border border-[var(--border)]"
+            }`}
             onClick={onConnect}
           >
             {isPending ? "Connecting…" : "Connect"}
@@ -528,13 +549,47 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
   };
 
   const applyUpdate = async (name: string, pkg: string, version: string) => {
-    await bumpMcpVersion(name, pkg, version);
-    const next = { ...updateChecks };
-    delete next[name];
-    setUpdateChecks(next);
-    setStatus({ text: "Updated.", error: false });
-    refresh();
-    pollLiveServers();
+    pendingConnectorAdds.add(name);
+    notifyPendingChanged();
+    try {
+      // Real, live-reported bug: this used to discard the result and
+      // always show "Updated." even when the version bump saved fine but
+      // the reconnect that follows it failed -- the exact same
+      // "Saved, but couldn't connect" case performAdd already handles
+      // correctly, just silently swallowed here instead.
+      const result = await bumpMcpVersion(name, pkg, version);
+      setStatus({
+        text: result.connected
+          ? "Updated."
+          : `Updated, but couldn't reconnect${result.error ? ` -- ${result.error}` : "."}`,
+        error: !result.connected,
+      });
+    } finally {
+      pendingConnectorAdds.delete(name);
+      notifyPendingChanged();
+      const next = { ...updateChecks };
+      delete next[name];
+      setUpdateChecks(next);
+      refresh();
+      pollLiveServers();
+    }
+  };
+
+  const retry = async (name: string) => {
+    pendingConnectorAdds.add(name);
+    notifyPendingChanged();
+    setStatus({ text: "Reconnecting…", error: false });
+    try {
+      const result = await reconnectMcpServer(name);
+      setStatus({
+        text: result.connected ? "Connected." : `Still couldn't connect${result.error ? ` -- ${result.error}` : "."}`,
+        error: !result.connected,
+      });
+    } finally {
+      pendingConnectorAdds.delete(name);
+      notifyPendingChanged();
+      pollLiveServers();
+    }
   };
 
   if (view === "add") {
@@ -632,6 +687,7 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
                 updateCheck={updateChecks[row.name]}
                 onConnect={() => row.catalogEntry && onCatalogAdd(row.catalogEntry)}
                 onRemove={() => remove(row.name)}
+                onRetry={() => retry(row.name)}
                 onCheckUpdate={(pkg) => checkUpdate(row.name, pkg)}
                 onApplyUpdate={(pkg, version) => applyUpdate(row.name, pkg, version)}
               />

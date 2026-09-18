@@ -124,7 +124,7 @@ async def test_connect_mcp_tools_lg_skips_broken_server_but_keeps_others(
     _patch_mcp(monkeypatch)
     config_path = _write_config(
         tmp_path,
-        {"broken": {"command": "does-not-exist"}, "fs": {"command": "npx", "args": []}},
+        {"broken": {"command": "npx"}, "fs": {"command": "npx", "args": []}},
     )
 
     tools, connections = await connect_mcp_tools_lg(config_path)
@@ -149,7 +149,7 @@ async def test_connect_one_mcp_server_lg_returns_empty_list_on_connect_failure(
     _patch_mcp(monkeypatch)
 
     tools, connection, error = await connect_one_mcp_server_lg(
-        "broken", {"command": "does-not-exist", "args": []}
+        "broken", {"command": "npx", "args": []}
     )
 
     assert tools == []
@@ -256,18 +256,26 @@ def test_to_lg_connection_stdio_resolves_command_via_shutil_which(
     }
 
 
-def test_to_lg_connection_stdio_falls_back_to_the_bare_command_if_unresolvable(
+def test_to_lg_connection_raises_a_clear_error_when_the_command_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When shutil.which can't find the command at all (genuinely not
-    installed), the original string is used unchanged so the resulting
-    error is the same informative "couldn't connect" rather than a
-    different, more confusing failure."""
+    installed, not just a PATHEXT quirk), a real, live-reported gap: this
+    used to fall through to the bare command name, which reached the
+    actual subprocess spawn and failed with an opaque `[WinError 2] The
+    system cannot find the file specified` -- correct, but useless to a
+    user with no reason to know what that code means. Now raises with the
+    install instructions instead."""
     monkeypatch.setattr("coscribe.runtime_lg.mcp.shutil.which", lambda name: None)
 
-    connection = _to_lg_connection({"command": "npx", "args": []})
+    with pytest.raises(FileNotFoundError, match="uv"):
+        _to_lg_connection({"command": "uvx", "args": []})
 
-    assert connection["command"] == "npx"
+    with pytest.raises(FileNotFoundError, match="Node.js"):
+        _to_lg_connection({"command": "npx", "args": []})
+
+    with pytest.raises(FileNotFoundError, match="some-other-command"):
+        _to_lg_connection({"command": "some-other-command", "args": []})
 
 
 def test_to_lg_connection_streamable_http() -> None:

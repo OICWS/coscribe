@@ -8,6 +8,7 @@ import type {
   McpCatalogEntry,
   McpServerUpdateResult,
   McpServersResponse,
+  McpReconnectResult,
   McpVersionBumpResult,
   MemoryResponse,
   NpmLatestVersionResponse,
@@ -146,6 +147,8 @@ export const addMcpServer = (
     | { server_url: string; headers?: Record<string, string> },
 ) => postJson<McpServerUpdateResult>("/api/mcp/servers", { name, ...server });
 export const removeMcpServer = (name: string) => del<Record<string, never>>(`/api/mcp/servers/${encodeURIComponent(name)}`);
+export const reconnectMcpServer = (name: string) =>
+  postJson<McpReconnectResult>(`/api/mcp/servers/${encodeURIComponent(name)}/reconnect`, {});
 export const checkBrowser = () => getJson<BrowserCheckResponse>("/api/mcp/browser-check");
 export const installBrowser = () => postJson<InstallBrowserResponse>("/api/mcp/install-browser", {});
 export const getNpmLatestVersion = (pkg: string) =>

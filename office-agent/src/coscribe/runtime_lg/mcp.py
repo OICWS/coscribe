@@ -119,11 +119,26 @@ def _to_lg_connection(config: Mapping[str, Any]) -> Connection:
         # how to launch a `.cmd`/`.bat` file when given its full path
         # (auto-invokes it via cmd.exe) -- the bug was purely in *finding*
         # the file, not running it once found. A no-op on Linux/macOS,
-        # where the bare command already resolved correctly. Falls back to
-        # the original string if not found at all, so the error stays the
-        # same informative "couldn't connect" rather than a different,
-        # more confusing failure.
-        command = shutil.which(config["command"]) or config["command"]
+        # where the bare command already resolved correctly.
+        #
+        # Genuinely missing (shutil.which returns None -- the command
+        # isn't installed at all, not just a PATHEXT quirk) is a separate
+        # case: falling through to the bare name used to let it reach the
+        # actual subprocess spawn, which fails with an opaque `[WinError
+        # 2] The system cannot find the file specified` -- correct, but
+        # useless to a user with no reason to know what that code means.
+        # Raise a clear message instead, naming what to install.
+        raw_command = config["command"]
+        command = shutil.which(raw_command)
+        if command is None:
+            install_hint = {
+                "npx": "install Node.js (https://nodejs.org)",
+                "uvx": "install uv (https://docs.astral.sh/uv/)",
+            }.get(raw_command, f"install {raw_command!r} and make sure it's on PATH")
+            raise FileNotFoundError(
+                f"{raw_command!r} isn't installed (or isn't on PATH) -- {install_hint}, "
+                "then restart coscribe."
+            )
         connection: dict[str, Any] = {
             "transport": "stdio",
             "command": command,

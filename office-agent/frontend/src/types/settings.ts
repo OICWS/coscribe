@@ -159,7 +159,12 @@ export interface InstallBrowserResponse {
 
 export type NpmLatestVersionResponse = { package: string; latest: string } | { error: string };
 
-export type McpVersionBumpResult = { connected: boolean } | { error: string; connected: false };
+// Both bump-version and reconnect return this same shape -- backend's
+// web/app.py builds both from the same {"connected": ..., "error": ...}
+// pattern (error non-null covers a thrown validate_mcp_config failure or
+// "not found" too, not just a failed connect attempt).
+export type McpVersionBumpResult = { connected: boolean; error: string | null };
+export type McpReconnectResult = { connected: boolean; error: string | null };
 
 // ---------------------------------------------------------------------
 // Providers tab

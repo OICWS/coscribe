@@ -155,6 +155,17 @@ function App() {
     socketRef.current?.send({ type: "edit_message", index: turnIndex, text });
   };
 
+  /** Undo, not regenerate -- truncates the turn like onEditMessage does,
+   * but hands the original question text back to the composer
+   * (pendingComposerText/Composer's externalText prop, same mechanism
+   * onCreateSkill below uses) instead of resubmitting it. No turn runs
+   * afterward, unlike edit. */
+  const onRewindMessage = (turnIndex: number, text: string) => {
+    dispatch({ type: "local_rewind_message", turnIndex });
+    setPendingComposerText(text);
+    socketRef.current?.send({ type: "rewind_message", index: turnIndex });
+  };
+
   const onLocalError = (message: string) => dispatch({ type: "error", message });
 
   const onApprove = (id: string, approved: boolean) => {
@@ -299,6 +310,7 @@ function App() {
               onApprove={onApprove}
               onAnswerQuestion={onAnswerQuestion}
               onEditMessage={state.turnInFlight ? undefined : onEditMessage}
+              onRewindMessage={state.turnInFlight ? undefined : onRewindMessage}
               onSuggestion={onSuggestion}
               onPptxShapePicked={onPptxShapePicked}
               olderItems={state.olderItems}
