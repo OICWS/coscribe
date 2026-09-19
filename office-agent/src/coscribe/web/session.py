@@ -239,6 +239,24 @@ def _can_resolve_approvals(websocket: Any) -> bool:
     return getattr(websocket, "can_resolve_approvals", True)
 
 
+# langchain_google_genai's gRPC channel accumulates something into the
+# outgoing x-goog-api-client metadata header across repeated calls on the
+# same long-lived channel -- an unresolved upstream bug in google-auth-
+# library-python (see e.g. googleapis/python-aiplatform#3965,
+# langchain-ai/langchain-google#306), not fixable from this codebase.
+# Eventually the header outgrows grpc's default metadata soft limit and
+# every further call on that channel fails with this exact message --
+# waiting or retrying on the *same* channel never helps, since this
+# session's ChatGoogleGenerativeAI client (and its channel) lives as long
+# as the thread does. Forcing transport="rest" to dodge gRPC state
+# entirely was already tried and reverted for a different real bug in
+# this SDK version's async REST streaming path -- see providers.py's own
+# comment. The narrow fix instead: recognize this one signature and
+# recreate the client (a fresh channel starts the header at zero) before
+# retrying.
+_GRPC_METADATA_OVERFLOW_SIGNATURE = "metadata size exceeds soft limit"
+
+
 # coordinator.py's shared INSTRUCTIONS (used verbatim by both runtimes) tells
 # the model to call run_workflow(name) to actually run a saved workflow --
 # accurate for ChatSession, but runtime_lg has no model-callable run_workflow
@@ -2893,57 +2911,78 @@ class ChatSessionLG:
         # halt this new one.
         self._stop_requested = False
 
-        try:
-            # reply_text ends up as just the *last* model response's own
-            # text, not every response of this turn concatenated -- see
-            # _resolve_pending_approvals's docstring for why joining them
-            # was a real bug (duplicated, glued-together narration on any
-            # model that talks before a gated tool call). Overwritten
-            # below only if approvals actually resolved something; None
-            # means nothing was pending, so the initial call's own text
-            # already *is* the whole (single-segment) reply.
-            reply_text = await self._stream_turn(turn_input, websocket)
-            if _can_resolve_approvals(websocket):
-                resolved_text = await self._resolve_pending_approvals(websocket)
-                if resolved_text is not None:
-                    reply_text = resolved_text
-        except asyncio.CancelledError:
-            # request_stop() hard-cancels this task (see its own
-            # docstring) whenever there's no pending approval/question to
-            # resolve instead -- exactly the case where _stream_turn is
-            # stuck inside a raw provider call with no chunk ever yielded
-            # for its cooperative stop-flag check to run against. No
-            # partial reply_text exists at this point (the cancellation
-            # interrupts _stream_turn before it can return one), so this
-            # sends just the marker -- same "agent_message" type and
-            # "[stopped]" convention the cooperative-stop path below
-            # already uses, so the frontend needs no changes to render it.
+        retried_after_grpc_metadata_overflow = False
+        reply_text = ""  # narrowing hint only -- always reassigned before use, see the loop below
+        while True:
             try:
-                await websocket.send_json({"type": "agent_message", "text": "[stopped]"})
-            except Exception:  # noqa: BLE001 -- the client is already gone
-                pass
-            return
-        except Exception as exc:  # noqa: BLE001 -- surface any provider/tool error to the client
-            try:
-                await websocket.send_json({"type": "error", "message": str(exc)})
-            except Exception:  # noqa: BLE001 -- the client is already gone
-                # Live-hit: a client that drops mid-turn (network blip, tab
-                # closed) makes _stream_turn's own websocket.send_json raise
-                # WebSocketDisconnect, landing here -- but the socket is
-                # already closed by then, so THIS send fails too (Starlette
-                # raises RuntimeError('Cannot call "send" once a close
-                # message has been sent.') once it's recorded the close).
-                # Left uncaught, that second exception propagated out of
-                # handle_user_message, which ws_endpoint fires via
-                # asyncio.create_task with nothing ever awaiting/checking
-                # its result -- so it surfaced only as an alarming
-                # "asyncio: Task exception was never retrieved" log, not a
-                # real problem: the turn lock still releases correctly
-                # either way (handle_user_message's `async with
-                # self._turn_lock` runs its __aexit__ on any exception),
-                # and there's no one left to deliver an error message to.
-                pass
-            return
+                # reply_text ends up as just the *last* model response's own
+                # text, not every response of this turn concatenated -- see
+                # _resolve_pending_approvals's docstring for why joining them
+                # was a real bug (duplicated, glued-together narration on any
+                # model that talks before a gated tool call). Overwritten
+                # below only if approvals actually resolved something; None
+                # means nothing was pending, so the initial call's own text
+                # already *is* the whole (single-segment) reply.
+                reply_text = await self._stream_turn(turn_input, websocket)
+                if _can_resolve_approvals(websocket):
+                    resolved_text = await self._resolve_pending_approvals(websocket)
+                    if resolved_text is not None:
+                        reply_text = resolved_text
+                break
+            except asyncio.CancelledError:
+                # request_stop() hard-cancels this task (see its own
+                # docstring) whenever there's no pending approval/question to
+                # resolve instead -- exactly the case where _stream_turn is
+                # stuck inside a raw provider call with no chunk ever yielded
+                # for its cooperative stop-flag check to run against. No
+                # partial reply_text exists at this point (the cancellation
+                # interrupts _stream_turn before it can return one), so this
+                # sends just the marker -- same "agent_message" type and
+                # "[stopped]" convention the cooperative-stop path below
+                # already uses, so the frontend needs no changes to render it.
+                try:
+                    await websocket.send_json({"type": "agent_message", "text": "[stopped]"})
+                except Exception:  # noqa: BLE001 -- the client is already gone
+                    pass
+                return
+            except Exception as exc:  # noqa: BLE001 -- surface any provider/tool error to the client
+                is_grpc_metadata_overflow = _GRPC_METADATA_OVERFLOW_SIGNATURE in str(exc)
+                if not retried_after_grpc_metadata_overflow and is_grpc_metadata_overflow:
+                    retried_after_grpc_metadata_overflow = True
+                    try:
+                        self.model = resolve_chat_model(
+                            self._model_string, self._custom_providers
+                        )
+                        lg_tools = self._build_lg_tools(self.model)
+                        self.lg_agent = self._build_lg_agent(
+                            self.model, self._model_string, lg_tools
+                        )
+                        self._lg_tools = lg_tools
+                    except Exception:  # noqa: BLE001 -- rebuild failure falls through to the original error below
+                        pass
+                    else:
+                        continue
+                try:
+                    await websocket.send_json({"type": "error", "message": str(exc)})
+                except Exception:  # noqa: BLE001 -- the client is already gone
+                    # Live-hit: a client that drops mid-turn (network blip,
+                    # tab closed) makes _stream_turn's own websocket.send_json
+                    # raise WebSocketDisconnect, landing here -- but the
+                    # socket is already closed by then, so THIS send fails
+                    # too (Starlette raises RuntimeError('Cannot call "send"
+                    # once a close message has been sent.') once it's
+                    # recorded the close). Left uncaught, that second
+                    # exception propagated out of handle_user_message, which
+                    # ws_endpoint fires via asyncio.create_task with nothing
+                    # ever awaiting/checking its result -- so it surfaced
+                    # only as an alarming "asyncio: Task exception was never
+                    # retrieved" log, not a real problem: the turn lock still
+                    # releases correctly either way (handle_user_message's
+                    # `async with self._turn_lock` runs its __aexit__ on any
+                    # exception), and there's no one left to deliver an error
+                    # message to.
+                    pass
+                return
 
         if self._stop_requested:
             # Mirrors ChatSession's _format_agent_reply for status ==
