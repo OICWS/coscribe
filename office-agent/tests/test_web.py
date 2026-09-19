@@ -164,6 +164,59 @@ class HangingChatModel(BaseChatModel):
         return "hanging-chat-model"
 
 
+class GrpcMetadataOverflowThenSuccessModel(BaseChatModel):
+    """Simulates the real langchain_google_genai gRPC-metadata-overflow
+    failure mode (see session.py's own _GRPC_METADATA_OVERFLOW_SIGNATURE
+    comment): raises that exact error signature on its first call, then
+    behaves like a normal FakeToolCallingChatModel from the second call
+    onward -- standing in for "a fresh client/channel doesn't have the
+    problem," since _client_lg's resolve_chat_model stub returns this
+    same instance again on the retry (a real fresh ChatGoogleGenerativeAI
+    would be a genuinely different object, but what this test needs to
+    prove is that session.py's retry loop fires and a client that works
+    on the second attempt succeeds, not that this fake actually
+    reconnects anything)."""
+
+    responses: list[AIMessage]
+    i: int = 0
+    calls: int = 0
+
+    def bind_tools(self, tools: Any, *, tool_choice: str | None = None, **kwargs: Any) -> Any:
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise NotImplementedError("only the async streaming path is exercised by this test")
+
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        self.calls += 1
+        if self.calls == 1:
+            raise Exception(
+                "429 Stream removed (received metadata size exceeds soft limit "
+                "(15093 vs. 8192); grpc-status:44B grpc-message:15049B"
+            )
+        message = self.responses[self.i]
+        self.i += 1
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(content=message.content or "", tool_calls=message.tool_calls)
+        )
+
+    @property
+    def _llm_type(self) -> str:
+        return "grpc-metadata-overflow-then-success-model"
+
+
 class ConcurrentSpawnFakeModel(BaseChatModel):
     """Routes each call by inspecting the conversation's own content rather
     than an index counter -- needed only for the concurrent-spawn_agent
@@ -2096,6 +2149,32 @@ def test_rewind_message_rejects_an_out_of_range_index(
 
     assert error["type"] == "error"
     assert "No such message to rewind" in error["message"]
+
+
+def test_grpc_metadata_overflow_recovers_by_rebuilding_the_agent_and_retrying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for a real, live-reported bug: a long-lived Gemini
+    session's gRPC channel accumulates something into its own metadata
+    until a call fails with "429 ... Stream removed (received metadata
+    size exceeds soft limit ...)" -- session.py's own
+    _GRPC_METADATA_OVERFLOW_SIGNATURE comment has the full explanation.
+    The turn must recover by rebuilding self.model/self.lg_agent and
+    retrying once, not surface that error to the user on the first hit."""
+    fake_model = GrpcMetadataOverflowThenSuccessModel(
+        responses=[AIMessage(content="recovered")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_grpc_overflow") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    agent_message = next(m for m in messages if m["type"] == "agent_message")
+    assert agent_message["text"] == "recovered"
+    assert not any(m["type"] == "error" for m in messages)
+    assert fake_model.calls == 2
 
 
 def test_pretool_use_hook_denial_blocks_a_call_even_in_accept_edits_mode(
