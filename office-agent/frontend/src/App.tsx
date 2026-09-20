@@ -8,6 +8,7 @@ import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
 import { NavRail, type NavMode, type RunTab } from "./components/NavRail";
 import type { PptxShapeCapture } from "./components/PptxShapeOverlay";
 import { RunPanel } from "./components/RunPanel";
+import { ScheduledTaskModal } from "./components/ScheduledTaskModal";
 import { DirBrowserModal } from "./components/settings/DirBrowserModal";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
@@ -18,6 +19,7 @@ import { getCommands, getThreads, getWorkflowRuns } from "./lib/rest";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState } from "./state/reducer";
 import type { CommandInfo, ThreadSummary } from "./types/session";
+import type { ScheduledTask } from "./types/settings";
 
 function App() {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
@@ -43,7 +45,28 @@ function App() {
   // composer's own text (not an image) -- see onCreateSkill below.
   const [pendingComposerText, setPendingComposerText] = useState<string | null>(null);
   const [navMode, setNavMode] = useState<NavMode>("create");
-  const [runTab, setRunTab] = useState<RunTab>("workflows");
+  // Defaults to "scheduled", not "workflows" -- clicking the nav rail's
+  // clock icon (see NavRail.tsx) must land directly on the existing
+  // Scheduled Tasks list, not the unrelated saved-Workflow-definitions tab.
+  const [runTab, setRunTab] = useState<RunTab>("scheduled");
+  // Which task RunPanel's "scheduled" tab shows the detail page for (null
+  // = the portal grid) -- lives here, not in RunPanel/NavRail, since a
+  // sidebar row click (NavRail) and a card click (RunPanel) both need to
+  // drive the same selection.
+  const [selectedScheduledTask, setSelectedScheduledTask] = useState<ScheduledTask | null>(null);
+  // null = closed. { task: null } = create. { task } = editing that task.
+  // One modal instance for both, opened from three places (RunPanel's "New
+  // task" menu, either sidebar/card "..." menu's Edit item, or the detail
+  // page's pencil icon) -- see ScheduledTaskModal's own docstring.
+  const [scheduledTaskModal, setScheduledTaskModal] = useState<{ task: ScheduledTask | null } | null>(null);
+  // Bumped after any scheduled-task mutation (create/edit/delete/pause/
+  // resume/run-now) from *any* of those three surfaces, so the other two
+  // (which each fetch their own copy of the list) refetch and stay in
+  // sync -- REST mutations don't flow through the websocket/reducer the
+  // way a chat turn's own state changes do, so nothing else refreshes
+  // them automatically.
+  const [scheduledTasksVersion, setScheduledTasksVersion] = useState(0);
+  const bumpScheduledTasks = () => setScheduledTasksVersion((v) => v + 1);
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
@@ -249,6 +272,9 @@ function App() {
           workflowRuns={state.workflowRuns}
           onRunWorkflow={onRunWorkflow}
           onStop={onStop}
+          scheduledTasksVersion={scheduledTasksVersion}
+          onSelectScheduledTask={setSelectedScheduledTask}
+          onEditScheduledTask={(task) => setScheduledTaskModal({ task })}
         />
         {/* pl-12 lives here, not on the page-level wrapper above -- it only
          * needs to clear NavRail's own collapsed footprint (a 48px-square
@@ -259,12 +285,22 @@ function App() {
          * it just pushed their own mx-auto-centered content off-center
          * from the window's true center for no reason. */}
         <div className="flex items-center gap-1 py-2.5 pl-12 pr-4">
-          <ThreadHeader
-            sessionLabel={sessionLabel}
-            workspaceRoot={state.workspaceRoot || null}
-            workspaceExplicit={state.workspaceExplicit}
-            onPickWorkspace={() => setWorkspacePickerOpen(true)}
-          />
+          {/* Only in Chat mode -- a chat thread's own label/workspace
+           * badge has no meaning while Run mode's Scheduled portal/
+           * detail page is showing instead (a real, previously-confirmed
+           * bug: this used to render unconditionally). A flex-1 spacer
+           * keeps the icon buttons right-aligned either way, matching
+           * ThreadHeader's own flex-1 when it is shown. */}
+          {navMode === "create" ? (
+            <ThreadHeader
+              sessionLabel={sessionLabel}
+              workspaceRoot={state.workspaceRoot || null}
+              workspaceExplicit={state.workspaceExplicit}
+              onPickWorkspace={() => setWorkspacePickerOpen(true)}
+            />
+          ) : (
+            <div className="min-w-0 flex-1" />
+          )}
           <button
             type="button"
             title="Browser"
@@ -354,7 +390,23 @@ function App() {
             />
           </>
         ) : (
-          <RunPanel runTab={runTab} onRunWorkflow={onRunWorkflow} refreshKey={state.workflowEventTick} />
+          <RunPanel
+            runTab={runTab}
+            onRunWorkflow={onRunWorkflow}
+            refreshKey={state.workflowEventTick}
+            scheduledTasksVersion={scheduledTasksVersion}
+            onScheduledTasksChanged={bumpScheduledTasks}
+            selectedScheduledTask={selectedScheduledTask}
+            onSelectScheduledTask={setSelectedScheduledTask}
+            onEditScheduledTask={(task) => setScheduledTaskModal({ task })}
+          />
+        )}
+        {scheduledTaskModal && (
+          <ScheduledTaskModal
+            task={scheduledTaskModal.task}
+            onClose={() => setScheduledTaskModal(null)}
+            onSaved={bumpScheduledTasks}
+          />
         )}
         <SettingsModal
           open={settingsOpen}

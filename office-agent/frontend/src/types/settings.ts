@@ -268,11 +268,20 @@ export type WorkflowRunDeleteResult = { deleted: string } | { error: string };
 // Scheduled Tasks tab
 // ---------------------------------------------------------------------
 
+// "once" predates the six-value Manual/Hourly/Daily/Weekdays/Weekly/Monthly
+// frequency picker the Edit/Create modal offers -- kept in the union so an
+// already-created "once" trigger's schedule still type-checks, but the
+// modal never lets you pick it for a new/edited task.
+export type ScheduleKind = "manual" | "once" | "hourly" | "daily" | "weekdays" | "weekly" | "monthly";
+
+export type ApprovalMode = "manual" | "auto" | "skip";
+
 export interface ScheduleRule {
-  kind: "once" | "daily" | "weekly" | "monthly";
+  kind: ScheduleKind;
   at: string;
   weekday: number | null;
   day_of_month: number | null;
+  start_date: string | null;
 }
 
 export interface ScheduledTask {
@@ -287,16 +296,21 @@ export interface ScheduledTask {
   prompt: string | null;
   last_run_at: string | null;
   last_run_status: string | null;
+  model: string | null;
+  approval_mode: ApprovalMode;
 }
 
 export interface CreateScheduledTaskPayload {
   name: string;
-  kind: ScheduleRule["kind"];
+  kind: ScheduleKind;
   at: string;
   prompt?: string;
   workflow_name?: string;
   weekday?: number;
   day_of_month?: number;
+  start_date?: string;
+  model?: string;
+  approval_mode?: ApprovalMode;
 }
 
 export type ScheduledTaskResult = ScheduledTask | { error: string };
