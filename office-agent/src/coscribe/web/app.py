@@ -94,6 +94,7 @@ from ..runtime import (
 from ..runtime.types import get_tool_metadata
 from ..runtime_lg import (
     extract_text,
+    fire_trigger_now,
     poll_due_scheduled_tasks,
     poll_due_wakes,
     strip_mode_note,
@@ -111,7 +112,12 @@ from ..tools.memory import load_memory
 from ..tools.node_env import install_package as install_node_package
 from ..tools.node_env import list_packages as list_node_packages
 from ..tools.node_env import uninstall_package as uninstall_node_package
-from ..tools.scheduled_tasks import ScheduledTriggerStore, compute_next_run_at, create_trigger
+from ..tools.scheduled_tasks import (
+    ScheduledTriggerStore,
+    compute_next_run_at,
+    create_trigger,
+    update_trigger,
+)
 from ..tools.script_env import (
     fallbacks_for_platform,
     get_interpreter_override,
@@ -903,6 +909,9 @@ class ScheduledTaskCreate(BaseModel):
     workflow_name: str | None = None
     weekday: int | None = None
     day_of_month: int | None = None
+    start_date: str | None = None
+    model: str | None = None
+    approval_mode: str = "manual"
 
 
 # Plain name ("mcp-server-fetch") or scoped ("@playwright/mcp") npm package
@@ -1664,9 +1673,53 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 workflow_name=payload.workflow_name,
                 weekday=payload.weekday,
                 day_of_month=payload.day_of_month,
+                start_date=payload.start_date,
+                model=payload.model,
+                approval_mode=payload.approval_mode,
             )
         except (ValueError, KeyError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(trigger.to_dict())
+
+    @app.put("/api/scheduled-tasks/{trigger_id}")
+    async def update_scheduled_task_endpoint(
+        trigger_id: str, payload: ScheduledTaskCreate
+    ) -> JSONResponse:
+        try:
+            trigger = update_trigger(
+                ScheduledTriggerStore(settings.state_dir),
+                WorkflowStore(settings.state_dir),
+                trigger_id,
+                name=payload.name,
+                kind=payload.kind,
+                at=payload.at,
+                prompt=payload.prompt,
+                workflow_name=payload.workflow_name,
+                weekday=payload.weekday,
+                day_of_month=payload.day_of_month,
+                start_date=payload.start_date,
+                model=payload.model,
+                approval_mode=payload.approval_mode,
+            )
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(trigger.to_dict())
+
+    @app.post("/api/scheduled-tasks/{trigger_id}/run")
+    async def run_scheduled_task_now_endpoint(trigger_id: str) -> JSONResponse:
+        # A real, live turn (not a background poll) -- deliberately not
+        # asyncio.create_task'd the way ws_endpoint's user_message handling
+        # is, since there's no websocket here for a stuck call to block;
+        # this request's own response *is* "did it work," so it waits for
+        # the real answer.
+        try:
+            trigger = await fire_trigger_now(settings.state_dir, trigger_id, _get_session_async)
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:  # noqa: BLE001 -- surface a real firing failure to the caller
+            return JSONResponse({"error": str(exc)}, status_code=500)
         return JSONResponse(trigger.to_dict())
 
     @app.post("/api/scheduled-tasks/{trigger_id}/pause")
