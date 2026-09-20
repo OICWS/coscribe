@@ -5699,6 +5699,115 @@ a concrete reason to prioritize a new surface.
     and `README.md`'s existing proxy note ("have to be set in the shell
     before the process starts") predated the `override=True` fix above
     and was misleading by that point -- `.env` works too.
+- [ ] **Workflow/Scheduled Tasks UI: full redesign to match Claude
+  Cowork's own layout** -- not started; recorded here per your request
+  after real-usage testing surfaced both bugs in the current UI and a
+  concrete target design. Reference screenshots: `docs/ui-references/
+  sheduled-main-portal.png`, `sheduled-edit-tasks.png`, `sheduled-
+  display-tasks.png`, `sheduled-sidebar-workflow-display.png`, `sheduled-
+  siderbar-workflow-display-settings.png` (private repo only, per this
+  file's own `docs/ui-references/` convention -- read them directly
+  before touching this).
+
+  **Bugs in the current implementation** (not yet fixed): switching to
+  the Workflow view carries over the active chat session's own name/
+  workspace instead of showing workflow-specific state; clicking "New"
+  does nothing; reaching the scheduled-workflow view needs an extra click
+  onto "Scheduled" first rather than being the direct destination.
+
+  **Target design** (from the reference screenshots + your own walkthrough):
+  - **Sidebar** (where the session list normally lives): switching to
+    Workflow mode replaces it with the list of created workflows/
+    scheduled tasks (`sheduled-sidebar-workflow-display.png`) --
+    clicking one jumps straight to its detail page
+    (`sheduled-display-tasks.png`): name, Active/Inactive toggle, next-
+    run time, Run/Edit/Delete actions, Instructions/Repeats/Permissions
+    shown read-only. Edit jumps to the edit modal below. The sidebar
+    row's own "..." menu (`sheduled-siderbar-workflow-display-settings.png`)
+    offers Run now/Edit/Delete -- not the rename/delete-conversation
+    semantics a chat session's own "..." menu has, a genuinely different
+    menu for this mode.
+  - **Main Workflow page** (not the chat view -- `sheduled-main-
+    portal.png`): a "New task" button opens two choices -- "Create with
+    coscribe" (switches to chat mode with a short prefilled prompt in the
+    composer, same `pendingComposerText` mechanism `onCreateSkill`/
+    `onRunWorkflow` already use, not sent automatically) and "Set up
+    manually" (opens the edit modal directly). Below that, existing tasks
+    render as cards in a grid (name, instructions preview, a schedule
+    pill for periodic ones, no pill for manual) -- both a periodic and a
+    manual example are in the reference screenshot. A curated-template
+    gallery section (Daily briefing/Inbox triage/Meeting prep/Weekly
+    review/etc., icon + title + description + schedule) sits below a
+    divider -- lower priority than the rest of this item, include only
+    if the rest lands cleanly.
+  - **Edit modal** (`sheduled-edit-tasks.png`): Name, Instructions
+    (textarea with a model picker docked in its own bottom-right corner),
+    Frequency (a dropdown, not free text -- exactly these six values:
+    Manual/Hourly/Daily/Weekdays/Weekly/Monthly, "starts on" date+time
+    pickers appearing for every value except Manual), Permissions (a
+    dropdown with three modes, see below), an inline info banner
+    explaining the selected permission's consequence, Cancel/Save.
+  - **Permissions, three modes** (replacing whatever the current
+    scheduled-task permission model is -- confirm against `tools/
+    scheduled_tasks.py`'s real current options before implementing, this
+    may already partially exist under different names): **Manually
+    approve** (pauses for every action, strongest/most conservative --
+    "全靠你"), **Automatically approve** (runs without asking, only pauses
+    if something looks genuinely unsafe), **Skip all approvals** (never
+    pauses, even for unsafe actions -- coscribe handles everything on its
+    own).
+
+  **Scope note**: this is a real frontend rewrite (new main page, new
+  modal, sidebar mode switch, detail page) plus likely backend API
+  surface changes (a friendlier Frequency enum over whatever `ScheduleRule`
+  currently models, if it doesn't already match). Investigate the current
+  `tools/scheduled_tasks.py`/`runtime_lg/scheduled_tasks.py`/
+  `ScheduledTasksTab.tsx`/`RunPanel.tsx` implementation against this
+  target before estimating further, and sequence as its own multi-step
+  pass rather than one sitting.
+- [ ] **Office Agent Runtime + Coding Agent Runtime: two separate agent
+  runtimes behind an adapter, not one runtime with a coding node bolted
+  on** -- not started, architecture direction only, recorded per your
+  request. Your framing: coscribe's own runtime stays focused on the
+  office-document specialty it's actually good at; a *separate* Codex
+  (`openai/codex`) process handles coding/workflow/test-running tasks,
+  reached through an adapter -- "two agent runtimes, each with its own
+  specialty," not "two agents" and not a new LangGraph node trying to
+  reimplement what Codex already solved.
+
+  **My recommendation, given real verification (not assumed)**: this
+  framing is right, and better than embedding a coding agent inside
+  `runtime_lg` -- Codex has already solved real, hard problems (sandboxing,
+  patch/diff application, test-fix loops, session rollout) that
+  reimplementing inside coscribe would take real effort to match, and an
+  external-process boundary means coscribe inherits Codex's own upstream
+  improvements for free. Two facts verified live before recommending
+  this, not assumed: **Apache-2.0** (a fork is legally clean if one is
+  ever needed), and Codex already supports **non-OpenAI model providers**
+  via its own TOML profile config (not hard-coupled to OpenAI's API the
+  way a naive assumption might expect) -- both de-risk the idea.
+  **`codex exec`** is a real non-interactive, single-instruction mode
+  "ideal for CI," exactly the shape an adapter would call.
+
+  **One pushback on your own framing**: fork the source only if Codex's
+  internals genuinely need modifying (e.g. embedding its UI directly into
+  the Electron shell beyond what its own CLI surface offers). Otherwise
+  depend on it as an external installed binary invoked via `codex exec`
+  -- the same pattern coscribe already uses for LibreOffice/Node/uv, and
+  the same "external process, not vendored source" choice this file's
+  own Workstream-F rejection (Phase 8au above) and every vendoring
+  decision in this project has made when there was a choice. Forking
+  means owning an indefinite rebase burden against a fast-moving OpenAI
+  project for no benefit if the CLI surface alone is enough.
+
+  **Next step, not yet done**: a real spike -- install `codex`, run
+  `codex exec` against a genuine multi-step coding task, and see what the
+  adapter boundary actually needs to carry (how it reports progress, how
+  approval/sandbox policy maps onto coscribe's own `ToolMetadata`/
+  `risk_level` model, whether its session/rollout format is something
+  coscribe's own thread model can wrap cleanly) -- before committing to
+  an implementation shape. Scope this as its own dedicated pass, not
+  something to start alongside unrelated work.
 
 ---
 

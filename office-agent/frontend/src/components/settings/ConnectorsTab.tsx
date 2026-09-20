@@ -12,7 +12,7 @@ import {
   removeMcpServer,
 } from "../../lib/rest";
 import type { McpCatalogEntry, McpServerInfo, McpServersResponse } from "../../types/settings";
-import { ArrowLeftIcon, CheckIcon, SearchIcon, TrashIcon } from "../icons";
+import { ArrowLeftIcon, SearchIcon } from "../icons";
 import { FetchRetry } from "./FetchRetry";
 import { useFetchOnActive } from "../../lib/useFetchOnActive";
 
@@ -168,7 +168,17 @@ function ConnectorRowView({ row, isPending, updateCheck, onConnect, onRemove, on
       <td className="py-2.5 pr-4">
         {row.isAdded ? (
           row.connected ? (
-            <CheckIcon className="h-4 w-4 text-[var(--accent)]" />
+            // Explicit correction: a bare checkmark with no click target
+            // left "disconnect" reachable only via the separate trash-can
+            // column (now removed) -- one status-column button per state
+            // instead, same as the not-connected branches below.
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm text-[var(--muted)] hover:border-red-500 hover:text-red-500"
+              onClick={onRemove}
+            >
+              Disconnect
+            </button>
           ) : (
             // Real gap this replaces: a failed/never-connected server used
             // to be a dead-end static "Not connected" label -- the only
@@ -199,13 +209,6 @@ function ConnectorRowView({ row, isPending, updateCheck, onConnect, onRemove, on
             onClick={onConnect}
           >
             {isPending ? "Connecting…" : "Connect"}
-          </button>
-        )}
-      </td>
-      <td className="w-8 py-2.5 text-right">
-        {row.isAdded && (
-          <button type="button" aria-label={`Remove ${row.name}`} className="text-[var(--muted)] hover:text-red-500" onClick={onRemove}>
-            <TrashIcon className="h-3.5 w-3.5" />
           </button>
         )}
       </td>
@@ -674,8 +677,7 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
             <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
               <th className="w-[55%] pb-2 pr-4 font-medium">Connector</th>
               <th className="w-[15%] pb-2 pr-4 font-medium">Type</th>
-              <th className="w-[20%] pb-2 pr-4 font-medium">Status</th>
-              <th className="w-8 pb-2"></th>
+              <th className="w-[30%] pb-2 font-medium">Status</th>
             </tr>
           </thead>
           <tbody>

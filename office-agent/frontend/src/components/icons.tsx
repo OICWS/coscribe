@@ -310,6 +310,20 @@ export function RewindIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** A genuinely different pictogram from RewindIcon (two arrowheads, a
+ * full refresh cycle) rather than that icon mirrored -- explicit
+ * correction: a single arc flipped horizontally still reads as "the same
+ * arrow, some direction" at 14px, not as a clearly different action. */
+export function RetryIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <polyline points="23 4 23 10 17 10" />
+      <polyline points="1 20 1 14 7 14" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </Icon>
+  );
+}
+
 export function BrowserIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>
