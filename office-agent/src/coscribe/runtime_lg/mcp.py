@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -94,6 +95,47 @@ logger = logging.getLogger(__name__)
 # initialize handshake can legitimately take tens of seconds on a slow
 # connection.
 _CONNECT_TIMEOUT_SECONDS = 60.0
+
+
+def _forwarded_network_env() -> dict[str, str]:
+    """Real, confirmed gap this closes: the `mcp` SDK's stdio client
+    (`mcp.client.stdio.get_default_environment`) deliberately passes a
+    spawned server only a small OS-essentials allowlist (on Windows:
+    APPDATA/HOMEDRIVE/HOMEPATH/LOCALAPPDATA/PATH/PATHEXT/
+    PROCESSOR_ARCHITECTURE/SYSTEMDRIVE/SYSTEMROOT/TEMP/USERNAME/
+    USERPROFILE -- confirmed by reading that function's actual source),
+    not the coscribe-web process's own environment -- so a corporate
+    HTTP_PROXY/HTTPS_PROXY, or the extra CA-trust env vars a TLS-
+    intercepting proxy needs (Node and uv each have their own separate
+    certificate store, neither of which reads the OS trust store by
+    default), never reaches `npx`/`uvx` regardless of what's set in
+    coscribe's own `.env` or real Windows system environment variables.
+    Every catalog entry hits this the same way (npx- and uvx-based
+    alike), matching the real, live-reported symptom: every connector on
+    a corporate network fails to connect, not just one.
+
+    Forwards only these specific, known-relevant vars (both cases, since
+    different tools check different casing) rather than the whole
+    process environment -- the SDK's own curated allowlist is a
+    deliberate security choice for arbitrary third-party MCP servers,
+    and this isn't the place to override that wholesale."""
+    names = (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "UV_NATIVE_TLS",
+    )
+    forwarded: dict[str, str] = {}
+    for name in names:
+        for key in (name, name.lower()):
+            value = os.environ.get(key)
+            if value is not None:
+                forwarded[key] = value
+    return forwarded
 
 
 def _to_lg_connection(config: Mapping[str, Any]) -> Connection:
@@ -144,8 +186,11 @@ def _to_lg_connection(config: Mapping[str, Any]) -> Connection:
             "command": command,
             "args": config.get("args", []),
         }
-        if "env" in config:
-            connection["env"] = config["env"]
+        # Always set, even if empty -- a server-specific env (e.g.
+        # Slack's SLACK_BOT_TOKEN) wins on overlap, but the network vars
+        # above apply to every stdio server, not just ones that happen to
+        # already declare their own env in mcp.json.
+        connection["env"] = {**_forwarded_network_env(), **config.get("env", {})}
         if "cwd" in config:
             connection["cwd"] = config["cwd"]
         return cast("Connection", connection)

@@ -242,6 +242,11 @@ def test_to_lg_connection_stdio_resolves_command_via_shutil_which(
         "coscribe.runtime_lg.mcp.shutil.which",
         lambda name: "C:\\Program Files\\nodejs\\npx.cmd" if name == "npx" else None,
     )
+    # Deterministic regardless of what's actually set in the environment
+    # this test happens to run in -- see the dedicated
+    # test_to_lg_connection_forwards_corporate_network_env below for the
+    # forwarding behavior itself.
+    monkeypatch.setattr("coscribe.runtime_lg.mcp._forwarded_network_env", dict)
 
     connection = _to_lg_connection(
         {"command": "npx", "args": ["@scope/pkg"], "env": {"FOO": "bar"}, "cwd": "/tmp"}
@@ -254,6 +259,56 @@ def test_to_lg_connection_stdio_resolves_command_via_shutil_which(
         "env": {"FOO": "bar"},
         "cwd": "/tmp",
     }
+
+
+def test_to_lg_connection_forwards_corporate_network_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for a real, confirmed gap: the underlying `mcp`
+    SDK's stdio client only passes a spawned server a small OS-essentials
+    allowlist (confirmed by reading mcp.client.stdio.
+    get_default_environment's actual source) -- HTTP_PROXY/HTTPS_PROXY
+    and the CA-trust env vars a corporate TLS-intercepting proxy needs
+    never reached npx/uvx regardless of what coscribe's own .env set,
+    explaining a real, live-reported symptom: every MCP connector failing
+    on a corporate network, not just one. Also confirms an explicit
+    per-server env (e.g. Slack's token) still wins over a same-named
+    forwarded var."""
+    monkeypatch.setattr("coscribe.runtime_lg.mcp.shutil.which", lambda name: name)
+    # This sandbox's own outbound HTTPS setup already sets several of
+    # these (SSL_CERT_FILE/REQUESTS_CA_BUNDLE/UV_NATIVE_TLS/lowercase
+    # https_proxy/no_proxy) -- clear every name this function forwards,
+    # both cases, so the test is deterministic regardless of ambient
+    # environment.
+    for name in (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "UV_NATIVE_TLS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp.example:8080")
+    monkeypatch.setenv("NODE_EXTRA_CA_CERTS", "C:\\corp-ca.pem")
+    monkeypatch.setenv("SOME_UNRELATED_VAR", "should-not-be-forwarded")
+
+    connection = _to_lg_connection({"command": "npx", "args": []})
+
+    assert connection["env"] == {
+        "HTTPS_PROXY": "http://proxy.corp.example:8080",
+        "NODE_EXTRA_CA_CERTS": "C:\\corp-ca.pem",
+    }
+
+    # An explicit per-server env wins over a same-named forwarded var.
+    monkeypatch.setenv("NODE_EXTRA_CA_CERTS", "C:\\corp-ca.pem")
+    connection = _to_lg_connection(
+        {"command": "npx", "args": [], "env": {"NODE_EXTRA_CA_CERTS": "C:\\overridden.pem"}}
+    )
+    assert connection["env"]["NODE_EXTRA_CA_CERTS"] == "C:\\overridden.pem"
 
 
 def test_to_lg_connection_raises_a_clear_error_when_the_command_is_missing(
