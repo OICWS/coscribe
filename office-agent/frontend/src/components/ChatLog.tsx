@@ -12,7 +12,7 @@ import {
 import type { LogItem } from "../state/reducer";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
-import { ChevronDownIcon, PencilIcon, RewindIcon } from "./icons";
+import { ChevronDownIcon, PencilIcon, RetryIcon, RewindIcon } from "./icons";
 import { ImageLightbox } from "./ImageLightbox";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { QuestionCard } from "./QuestionCard";
@@ -225,9 +225,11 @@ export function ChatLog({
  * question (onEditMessage with unedited text) -- same question, new
  * answer. Rewind truncates and stops there, handing the original
  * question text back to the composer instead (onRewindMessage) -- an
- * undo, with no new answer generated. Retry's icon is Rewind's own icon
- * mirrored (scale-x-[-1]), not a new one -- they're inverse operations of
- * the same "go back" shape.
+ * undo, with no new answer generated. Retry gets its own RetryIcon (a
+ * two-arrowhead refresh cycle) rather than RewindIcon mirrored --
+ * explicit correction: a single arc flipped horizontally still read as
+ * "the same arrow, unclear which way" at 14px and was mistaken for
+ * Rewind in real use, not a clear inverse.
  *
  * Both restricted to `isLastTurn` -- explicit correction: every past turn
  * used to offer this, but reaching back to an earlier turn while later
@@ -293,7 +295,7 @@ function TurnView({
               className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
               onClick={() => onEditMessage(userItem.turnIndex, userItem.text)}
             >
-              <RewindIcon className="h-3.5 w-3.5 scale-x-[-1]" />
+              <RetryIcon className="h-3.5 w-3.5" />
             </button>
           )}
           {onRewindMessage && isLastTurn && (
