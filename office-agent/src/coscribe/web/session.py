@@ -1669,6 +1669,20 @@ class ChatSessionLG:
             )
             return _denied(hook_reason)
         if is_question:
+            if not _can_resolve_approvals(websocket):
+                message = (
+                    "No one is available to answer this question -- this is an unattended run."
+                )
+                record_decision(
+                    audit_log,
+                    thread_id=self.thread_id,
+                    tool_name=name,
+                    arguments=args,
+                    decision="reject",
+                    reason="unattended",
+                    detail=message,
+                )
+                return _denied(message)
             return await self._decide_question_request(args, websocket)
         if name not in self._approval_required_names:
             return {"type": "approve"}
@@ -1725,6 +1739,32 @@ class ChatSessionLG:
                 reason="accept_edits",
             )
             return {"type": "approve"}
+        if not _can_resolve_approvals(websocket):
+            # Reached only when this call is genuinely gated and neither
+            # exec_policy nor accept_edits already decided it above --
+            # creating the Future below would await a real approval nobody
+            # is present to give. Unreachable for a normal turn/agent-mode
+            # workflow (their callers already skip calling into
+            # _resolve_pending_approvals at all when unattended, see
+            # _can_resolve_approvals's own docstring, preserving "leave it
+            # durably paused in the checkpointer"). Chain mode's `decide()`
+            # (_run_workflow_chain_mode) has no such outer gate -- it calls
+            # this method directly for every step, since chain mode never
+            # runs inside a graph's own interrupt() and has no pause-and-
+            # resume-later state to fall back on, so a clean rejection here
+            # is the only alternative to hanging that step (and the whole
+            # background poller) forever.
+            message = "No one is available to approve this -- this is an unattended run."
+            record_decision(
+                audit_log,
+                thread_id=self.thread_id,
+                tool_name=name,
+                arguments=args,
+                decision="reject",
+                reason="unattended",
+                detail=message,
+            )
+            return _denied(message)
 
         request_id = uuid.uuid4().hex
         future: Future[bool] = get_running_loop().create_future()
@@ -2662,7 +2702,14 @@ class ChatSessionLG:
         summary_text = await self._stream_turn(
             turn_input, websocket, agent=sub_agent, config=run_config
         )
-        if _can_resolve_approvals(websocket):
+        if _can_resolve_approvals(websocket) or self.accept_edits:
+            # self.accept_edits also opens this path when unattended (a
+            # Scheduled Task's approval_mode="auto"/"skip") -- safe because
+            # _decide_action_request's own unattended guard means every
+            # interrupt this reaches either auto-approves via accept_edits
+            # or, for the narrow cases accept_edits doesn't cover (e.g. an
+            # ask_user_question call), gets cleanly declined rather than
+            # ever creating a Future nothing will resolve.
             resolved_text = await self._resolve_pending_approvals(
                 websocket, agent=sub_agent, config=run_config
             )
@@ -2671,10 +2718,11 @@ class ChatSessionLG:
         else:
             # See _can_resolve_approvals's docstring: resolving here would
             # hang forever awaiting a real approval that a silent caller
-            # (an unattended Scheduled Task run) can never send. The
-            # interrupt is left durably paused in the checkpointer instead
-            # -- report it as a failed run rather than silently claiming
-            # "completed" when the intended action never actually ran.
+            # (an unattended, approval_mode="manual" Scheduled Task run) can
+            # never send. The interrupt is left durably paused in the
+            # checkpointer instead -- report it as a failed run rather than
+            # silently claiming "completed" when the intended action never
+            # actually ran.
             state = await sub_agent.aget_state(run_config)
             if state.next:
                 return {
@@ -2924,7 +2972,10 @@ class ChatSessionLG:
                 # means nothing was pending, so the initial call's own text
                 # already *is* the whole (single-segment) reply.
                 reply_text = await self._stream_turn(turn_input, websocket)
-                if _can_resolve_approvals(websocket):
+                # self.accept_edits also opens this when unattended -- see
+                # _run_workflow_agent_mode's identical condition for why
+                # that's safe (an approval_mode="auto"/"skip" Scheduled Task).
+                if _can_resolve_approvals(websocket) or self.accept_edits:
                     resolved_text = await self._resolve_pending_approvals(websocket)
                     if resolved_text is not None:
                         reply_text = resolved_text

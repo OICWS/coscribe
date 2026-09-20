@@ -31,12 +31,38 @@ async def _fire_trigger_once(trigger: ScheduledTrigger, session: Any) -> str:
     (poll_due_scheduled_tasks, so one broken trigger doesn't block every
     other due one) or surfaced (fire_trigger_now, a live REST caller
     that wants to know a manual run actually failed, not have it
-    silently logged and skipped)."""
-    if trigger.workflow_name is not None:
-        result = await session.run_saved_workflow(trigger.workflow_name, _SilentSocket())
-        return str(result.get("status", "completed"))
-    await session.handle_user_message(trigger.prompt, _SilentSocket())
-    return "completed"
+    silently logged and skipped).
+
+    Applies trigger.model to the session before firing (a one-way switch,
+    not restored after -- this thread is this trigger's own dedicated
+    conversation, per this module's docstring, so trigger.model *is* its
+    real model, not a temporary override of something else). approval_mode
+    IS restored after, since accept_edits is a broader safety toggle and
+    the cost of restoring it is a single attribute set, not a graph
+    rebuild. "manual" needs no session change at all: _SilentSocket
+    already makes any gated call durably park in the checkpointer rather
+    than block on an approval nobody's there to give, which is exactly
+    what "manual" means for an unattended fire. "auto"/"skip" both map to
+    accept_edits today -- this codebase has no third gating tier between
+    "ask a human" and "auto-approve like accept-edits does"; a hook
+    veto/exec-policy-forbidden/plan_mode rejection still applies in
+    either case, unchanged, since those are categorical safety rails
+    independent of accept_edits."""
+    current_model = getattr(session, "_model_string", None)
+    if trigger.model is not None and trigger.model != current_model:
+        await session.switch_model(trigger.model, _SilentSocket())
+
+    previous_accept_edits = session.accept_edits
+    if trigger.approval_mode in ("auto", "skip"):
+        session.accept_edits = True
+    try:
+        if trigger.workflow_name is not None:
+            result = await session.run_saved_workflow(trigger.workflow_name, _SilentSocket())
+            return str(result.get("status", "completed"))
+        await session.handle_user_message(trigger.prompt, _SilentSocket())
+        return "completed"
+    finally:
+        session.accept_edits = previous_accept_edits
 
 
 async def poll_due_scheduled_tasks(
