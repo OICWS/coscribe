@@ -5727,6 +5727,48 @@ a concrete reason to prioritize a new surface.
     detection; `_handle_user_message_locked`'s own turn loop never grew
     the equivalent check.
 
+  **Follow-up precision pass, also shipped**: the Edit/Create modal
+  widened to match `sheduled-edit-tasks.png`'s real proportions (720px,
+  was 560px); Frequency/Permissions labels given a fixed `w-24` so their
+  dropdowns' left edges align despite the label text differing in length;
+  copy fixed to say "coscribe," not a verbatim "Claude" copied from the
+  reference (Claude Cowork's own wording) -- both the modal's banners and
+  the detail page's Permissions description; the "manual"-mode banner
+  removed entirely (no reference screenshot ever shows one for it, only
+  "auto" does). The Frequency row's own fields were redesigned per your
+  literal walkthrough of 3 more reference screenshots (Daily/Weekly/
+  Monthly, both now in `docs/ui-references/`, unnamed in this repo since
+  they were inline chat images, not uploaded files) to depend on kind:
+  manual/hourly show the bare dropdown only (hourly always fires on the
+  hour, `at` hardcoded to "00:00" -- the backend itself supports an
+  arbitrary minute, this UI just never exposes it); daily/weekdays add a
+  time field only; weekly adds a time field plus a plain weekday dropdown
+  (Sunday-first display order, mapped to `ScheduleRule.weekday`'s own
+  0=Monday..6=Sunday convention via a lookup table, not a formula);
+  monthly alone keeps the original "starts on" date+time pair, since only
+  a real calendar date can name both a day-of-month and a floor at once.
+
+  **Deferred, recorded per your explicit request not to build it now**:
+  the "task running" view -- clicking "Run now" (or reopening a task
+  that's running/has run) should land on a *chat-like* thread view for
+  that trigger's own dedicated thread_id, not `ScheduledTaskDetail`.
+  Reference: `docs/ui-references/scheduled-siderbar-task-running.png`.
+  Per your own framing: running a scheduled task really is just a
+  conversation -- the task's own instructions are the first message fed
+  to the model, one task = one thread with real memory across runs, same
+  as any other coscribe chat thread. The reference shows: a breadcrumb
+  header ("Scheduled / <task name>", replacing ThreadHeader), an ordinary
+  chat log with a collapsible "Ran scheduled task" summary card, a normal
+  message composer (so the user can keep chatting with it after a run
+  finishes), and a right-side info panel (its own sidebar-toggle icon,
+  top right) with three collapsible sections: **Progress** (a row of
+  step-status circles, "See task progress for longer tasks."), **Outputs**
+  (file cards, "View and open files created during this task."), and
+  **Context** (tool/file cards, "Track tools and referenced files used in
+  this task."). This is a real, sizable piece (new route/view, a live
+  progress feed wired to the turn's own tool-call stream, an outputs/
+  context extraction pass) -- explicitly not started.
+
   Original spec, recorded here per your request, kept below as the
   design record:
   after real-usage testing surfaced both bugs in the current UI and a
