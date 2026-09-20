@@ -194,10 +194,10 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
                 <button
                   type="button"
                   disabled
-                  title="Projects are not available in coscribe yet"
+                  title="Not available yet"
                   className="flex items-center gap-1.5 text-[var(--muted)] opacity-60"
                 >
-                  <FolderIcon className="h-3.5 w-3.5" /> Work in a project
+                  <FolderIcon className="h-3.5 w-3.5" /> Select workspace
                 </button>
                 <select
                   aria-label="Model"

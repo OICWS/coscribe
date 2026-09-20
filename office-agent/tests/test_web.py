@@ -5404,6 +5404,39 @@ def test_get_threads_endpoint_strips_mode_note_and_sorts_by_recency_lg(
     assert "second thread" in newer["preview"]
 
 
+def test_get_threads_endpoint_excludes_scheduled_task_threads_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fired Scheduled Task's own dedicated conversation (thread_id
+    "scheduled-<trigger_id>", see tools/scheduled_tasks.py's
+    SCHEDULED_THREAD_PREFIX) has its own surface in the frontend's
+    Scheduled section -- it must not also show up in the ordinary chat
+    sidebar's session list once its first turn writes a checkpoint,
+    per an explicit request that the two stay separate."""
+    # One response per turn -- two separate websocket connections below
+    # each run their own turn against the same fake_model.
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="hi"), AIMessage(content="hi again")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_ordinary") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+
+        with client.websocket_connect("/ws/scheduled-abc123") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "do it"})
+            _receive_until(ws, "tasks_changed")
+
+        thread_ids = {t["thread_id"] for t in client.get("/api/threads").json()}
+
+    assert "t_ordinary" in thread_ids
+    assert "scheduled-abc123" not in thread_ids
+
+
 def test_date_note_is_per_turn_message_content_not_baked_into_the_system_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

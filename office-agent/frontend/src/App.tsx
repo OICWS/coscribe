@@ -15,7 +15,8 @@ import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { SubAgentsPanel } from "./components/SubAgentsPanel";
 import { BrowserIcon, HelpIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
-import { getCommands, getThreads, getWorkflowRuns } from "./lib/rest";
+import { getCommands, getScheduledTasks, getThreads, getWorkflowRuns } from "./lib/rest";
+import { goToThread, SCHEDULED_THREAD_PREFIX } from "./lib/nav";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState } from "./state/reducer";
 import type { CommandInfo, ThreadSummary } from "./types/session";
@@ -144,6 +145,38 @@ function App() {
 
   const sessionLabel = threads.find((t) => t.thread_id === threadId)?.preview || "New session";
 
+  // True for a Scheduled Task's own dedicated conversation (thread_id
+  // "scheduled-<trigger_id>", see tools/scheduled_tasks.py's
+  // SCHEDULED_THREAD_PREFIX) -- landed on directly by goToThread after a
+  // Run now, or by reopening an already-run task from the Scheduled
+  // portal/sidebar (see openScheduledTask below). Swaps ThreadHeader for
+  // a "Scheduled / <task name>" breadcrumb instead (see the header row
+  // below) -- this thread's own name/workspace badge means nothing here.
+  const isScheduledTaskThread = threadId.startsWith(SCHEDULED_THREAD_PREFIX);
+  const [scheduledTaskForThread, setScheduledTaskForThread] = useState<ScheduledTask | null>(null);
+  useEffect(() => {
+    if (!isScheduledTaskThread) return;
+    getScheduledTasks().then((tasks) => {
+      setScheduledTaskForThread(tasks.find((t) => t.thread_id === threadId) ?? null);
+    });
+  }, [isScheduledTaskThread, threadId, state.workflowEventTick]);
+
+  /** A sidebar row / portal card click's "open" behavior -- an already-
+   * run (or currently-running) task goes straight to its own
+   * conversation instead of the read-only detail page, per an explicit
+   * request ("否则根本测试不了任务"): a never-run task still shows
+   * ScheduledTaskDetail in place, since there's no conversation to show
+   * yet. Distinct from the plain setSelectedScheduledTask setter (passed
+   * to NavRail/RunPanel separately) -- that one is for internal state
+   * sync/clearing, which must never force-navigate. */
+  const openScheduledTask = (task: ScheduledTask) => {
+    if (task.last_run_at) {
+      goToThread(task.thread_id);
+      return;
+    }
+    setSelectedScheduledTask(task);
+  };
+
   /** Sends a bare user_message with no chat-log bubble -- for commands the
    * UI issues on the user's behalf (the mode pill toggling /plan or
    * /accept-edits), mirroring app.js's sendRaw(). */
@@ -267,13 +300,12 @@ function App() {
           threadId={threadId}
           mode={navMode}
           onModeChange={setNavMode}
-          runTab={runTab}
           onRunTabChange={setRunTab}
           workflowRuns={state.workflowRuns}
-          onRunWorkflow={onRunWorkflow}
           onStop={onStop}
           scheduledTasksVersion={scheduledTasksVersion}
           onSelectScheduledTask={setSelectedScheduledTask}
+          onOpenScheduledTask={openScheduledTask}
           onEditScheduledTask={(task) => setScheduledTaskModal({ task })}
         />
         {/* pl-12 lives here, not on the page-level wrapper above -- it only
@@ -291,7 +323,35 @@ function App() {
            * bug: this used to render unconditionally). A flex-1 spacer
            * keeps the icon buttons right-aligned either way, matching
            * ThreadHeader's own flex-1 when it is shown. */}
-          {navMode === "create" ? (
+          {navMode === "create" && isScheduledTaskThread ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
+              <button
+                type="button"
+                className="text-[var(--muted)] hover:text-[var(--fg)] hover:underline"
+                onClick={() => {
+                  setNavMode("run");
+                  setRunTab("scheduled");
+                  setSelectedScheduledTask(null);
+                }}
+              >
+                Scheduled
+              </button>
+              <span className="text-[var(--muted)]">/</span>
+              <button
+                type="button"
+                disabled={!scheduledTaskForThread}
+                className="min-w-0 truncate font-medium hover:underline disabled:no-underline"
+                onClick={() => {
+                  if (!scheduledTaskForThread) return;
+                  setNavMode("run");
+                  setRunTab("scheduled");
+                  setSelectedScheduledTask(scheduledTaskForThread);
+                }}
+              >
+                {scheduledTaskForThread?.name ?? "…"}
+              </button>
+            </div>
+          ) : navMode === "create" ? (
             <ThreadHeader
               sessionLabel={sessionLabel}
               workspaceRoot={state.workspaceRoot || null}
@@ -398,6 +458,7 @@ function App() {
             onScheduledTasksChanged={bumpScheduledTasks}
             selectedScheduledTask={selectedScheduledTask}
             onSelectScheduledTask={setSelectedScheduledTask}
+            onOpenScheduledTask={openScheduledTask}
             onEditScheduledTask={(task) => setScheduledTaskModal({ task })}
           />
         )}

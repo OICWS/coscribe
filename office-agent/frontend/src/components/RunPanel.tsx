@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { deleteScheduledTask, deleteWorkflowRun, getScheduledTasks, getWorkflowRuns, getWorkflows, pauseScheduledTask, resumeScheduledTask, runScheduledTaskNow } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
+import { goToThread } from "../lib/nav";
 import { describeSchedule } from "../lib/scheduleLabels";
 import type { ScheduledTask, Workflow, WorkflowRun, WorkflowRunStepStatus } from "../types/settings";
 import { ScheduledTaskDetail } from "./ScheduledTaskDetail";
@@ -43,7 +44,7 @@ function TaskCardMenu({ task, onEdit, onChanged }: TaskCardMenuProps) {
     e.stopPropagation();
     setOpen(false);
     await runScheduledTaskNow(task.trigger_id);
-    onChanged();
+    goToThread(task.thread_id);
   };
 
   const togglePause = async (e: MouseEvent) => {
@@ -130,7 +131,12 @@ interface RunPanelProps {
   scheduledTasksVersion: number;
   onScheduledTasksChanged: () => void;
   selectedScheduledTask: ScheduledTask | null;
+  // Plain state sync (the auto-refresh effect below, and clearing
+  // selection when a run navigates away) vs. the "smart open" a card
+  // click gets (goToThread if the task has already run) -- see
+  // App.tsx's openScheduledTask and NavRail.tsx's identical split.
   onSelectScheduledTask: (task: ScheduledTask | null) => void;
+  onOpenScheduledTask: (task: ScheduledTask) => void;
   onEditScheduledTask: (task: ScheduledTask | null) => void;
 }
 
@@ -152,6 +158,7 @@ export function RunPanel({
   onScheduledTasksChanged,
   selectedScheduledTask,
   onSelectScheduledTask,
+  onOpenScheduledTask,
   onEditScheduledTask,
 }: RunPanelProps) {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -286,7 +293,7 @@ export function RunPanel({
               <div
                 key={task.trigger_id}
                 className="group cursor-pointer rounded-lg border border-[var(--border)] p-4 hover:border-[var(--muted)]"
-                onClick={() => onSelectScheduledTask(task)}
+                onClick={() => onOpenScheduledTask(task)}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="font-medium">{task.name}</div>

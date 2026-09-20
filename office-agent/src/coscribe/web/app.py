@@ -113,6 +113,7 @@ from ..tools.node_env import install_package as install_node_package
 from ..tools.node_env import list_packages as list_node_packages
 from ..tools.node_env import uninstall_package as uninstall_node_package
 from ..tools.scheduled_tasks import (
+    SCHEDULED_THREAD_PREFIX,
     ScheduledTriggerStore,
     compute_next_run_at,
     create_trigger,
@@ -1477,6 +1478,12 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id"
         )
         rows = await cursor.fetchall()
+        # A fired Scheduled Task's own dedicated conversation has its own
+        # surface (the frontend's Scheduled portal/detail/chat view) --
+        # excluded here so it doesn't also show up in the ordinary chat
+        # sidebar's session list, which would otherwise happen the moment
+        # a trigger's first turn writes a checkpoint under its thread_id.
+        rows = [row for row in rows if not row[0].startswith(SCHEDULED_THREAD_PREFIX)]
         # Real per-thread metadata (Phase 2 of ROADMAP.md), not just bare
         # ids -- aget_tuple(thread_id) fetches each thread's *latest*
         # checkpoint directly off the checkpointer, without needing a
