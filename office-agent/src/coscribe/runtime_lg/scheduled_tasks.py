@@ -24,6 +24,21 @@ from .selfwake import _SilentSocket
 logger = logging.getLogger(__name__)
 
 
+async def _fire_trigger_once(trigger: ScheduledTrigger, session: Any) -> str:
+    """Actually run one trigger's workflow/prompt against an already-
+    constructed session, returning its status string. Raises on failure
+    -- callers decide for themselves whether that should be swallowed
+    (poll_due_scheduled_tasks, so one broken trigger doesn't block every
+    other due one) or surfaced (fire_trigger_now, a live REST caller
+    that wants to know a manual run actually failed, not have it
+    silently logged and skipped)."""
+    if trigger.workflow_name is not None:
+        result = await session.run_saved_workflow(trigger.workflow_name, _SilentSocket())
+        return str(result.get("status", "completed"))
+    await session.handle_user_message(trigger.prompt, _SilentSocket())
+    return "completed"
+
+
 async def poll_due_scheduled_tasks(
     state_dir: str | Path,
     get_session: Callable[[str], Awaitable[Any]],
@@ -46,12 +61,7 @@ async def poll_due_scheduled_tasks(
     for trigger in store.list_due(now):
         try:
             session = await get_session(trigger.thread_id)
-            if trigger.workflow_name is not None:
-                result = await session.run_saved_workflow(trigger.workflow_name, _SilentSocket())
-                status = str(result.get("status", "completed"))
-            else:
-                await session.handle_user_message(trigger.prompt, _SilentSocket())
-                status = "completed"
+            status = await _fire_trigger_once(trigger, session)
         except Exception:
             logger.exception(
                 "scheduled_tasks: failed to fire trigger %s (%r)",
@@ -70,3 +80,31 @@ async def poll_due_scheduled_tasks(
         store.save(trigger)
         fired.append(trigger)
     return fired
+
+
+async def fire_trigger_now(
+    state_dir: str | Path,
+    trigger_id: str,
+    get_session: Callable[[str], Awaitable[Any]],
+) -> ScheduledTrigger:
+    """The Scheduled Tasks detail page's "Run now" action -- an explicit,
+    out-of-band execution that never touches the trigger's regular
+    schedule (`next_run_at`/`enabled` untouched, only `last_run_at`/
+    `last_run_status` recorded): running a daily 9am task by hand at 2pm
+    must not make it skip tomorrow's real 9am fire, and a paused task
+    stays paused afterward. Unlike poll_due_scheduled_tasks, a firing
+    failure here is *not* swallowed -- a live REST caller explicitly
+    asking to run it now wants to know it failed, not have that silently
+    logged and skipped like an unattended poll would."""
+    store = ScheduledTriggerStore(state_dir)
+    trigger = store.load(trigger_id)
+    if trigger is None:
+        raise KeyError(f"No scheduled task with id {trigger_id!r}")
+
+    session = await get_session(trigger.thread_id)
+    status = await _fire_trigger_once(trigger, session)
+
+    trigger.last_run_at = datetime.now().isoformat()
+    trigger.last_run_status = status
+    store.save(trigger)
+    return trigger

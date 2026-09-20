@@ -25,7 +25,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from coscribe.config import Settings
-from coscribe.runtime_lg.scheduled_tasks import poll_due_scheduled_tasks
+from coscribe.runtime_lg.scheduled_tasks import fire_trigger_now, poll_due_scheduled_tasks
 from coscribe.tools.scheduled_tasks import ScheduledTrigger, ScheduledTriggerStore, ScheduleRule
 from coscribe.tools.workflows import Workflow, WorkflowStore
 
@@ -329,3 +329,131 @@ async def test_disabled_trigger_is_never_due_even_if_next_run_at_is_past(
 
     assert fired == []
     assert fake_model.i == 0
+
+
+# -- fire_trigger_now --
+
+
+async def test_fire_trigger_now_runs_immediately_without_touching_the_schedule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The detail page's "Run now" action must not disturb the trigger's
+    regular schedule -- next_run_at and enabled stay exactly as they were,
+    only last_run_at/last_run_status get recorded, so running a daily 9am
+    task by hand at 2pm doesn't make it skip tomorrow's real 9am fire."""
+    settings = _settings(tmp_path)
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="ran on demand")])
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        store = ScheduledTriggerStore(settings.state_dir)
+        original_next_run = (datetime.now() + timedelta(hours=6)).isoformat()
+        store.save(
+            ScheduledTrigger(
+                trigger_id="trig-7",
+                name="Run me now",
+                thread_id="scheduled-trig-7",
+                schedule=ScheduleRule(kind="daily", at="09:00"),
+                enabled=True,
+                created_at=datetime.now().isoformat(),
+                next_run_at=original_next_run,
+                prompt="Do it now",
+            )
+        )
+
+        result = await fire_trigger_now(settings.state_dir, "trig-7", get_session)
+
+    assert fake_model.i == 1  # a real turn ran
+    assert result.last_run_status == "completed"
+    assert result.last_run_at is not None
+    # Untouched -- this is the whole point of run-now vs. a real poll fire.
+    assert result.next_run_at == original_next_run
+    assert result.enabled is True
+    resolved = store.load("trig-7")
+    assert resolved is not None
+    assert resolved.next_run_at == original_next_run
+
+
+async def test_fire_trigger_now_preserves_paused_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="ran while paused")])
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        store = ScheduledTriggerStore(settings.state_dir)
+        store.save(
+            ScheduledTrigger(
+                trigger_id="trig-8",
+                name="Paused but runnable",
+                thread_id="scheduled-trig-8",
+                schedule=ScheduleRule(kind="manual", at=""),
+                enabled=False,
+                created_at=datetime.now().isoformat(),
+                next_run_at=None,
+                prompt="Do it now",
+            )
+        )
+
+        result = await fire_trigger_now(settings.state_dir, "trig-8", get_session)
+
+    assert result.enabled is False  # run-now doesn't implicitly resume it
+    assert result.last_run_status == "completed"
+
+
+async def test_fire_trigger_now_unknown_id_raises_keyerror(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    fake_model = FakeToolCallingChatModel(responses=[])
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        with pytest.raises(KeyError):
+            await fire_trigger_now(settings.state_dir, "does-not-exist", get_session)
+
+
+async def test_fire_trigger_now_propagates_a_real_failure_instead_of_swallowing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike poll_due_scheduled_tasks (which logs and skips a failing
+    trigger so one broken task can't block every other due one),
+    fire_trigger_now is a live REST caller explicitly asking "run this
+    now" -- it must see the real failure, not a silent no-op."""
+    from langchain_core.messages import ToolCall
+
+    settings = _settings(tmp_path)
+    call = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="", tool_calls=[call])])
+    WorkflowStore(settings.state_dir).save(
+        Workflow(name="writes-a-file-2", mode="agent", summary="Write hi to note.txt")
+    )
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        store = ScheduledTriggerStore(settings.state_dir)
+        store.save(
+            ScheduledTrigger(
+                trigger_id="trig-9",
+                name="Needs approval, run now",
+                thread_id="scheduled-trig-9",
+                schedule=ScheduleRule(kind="manual", at=""),
+                enabled=True,
+                created_at=datetime.now().isoformat(),
+                next_run_at=None,
+                workflow_name="writes-a-file-2",
+            )
+        )
+
+        # run_saved_workflow itself resolves to a "failed" *status*, not a
+        # raised exception (same as poll_due_scheduled_tasks's own
+        # approval-hang regression test above) -- fire_trigger_now's own
+        # "don't swallow" contract is about exceptions escaping
+        # _fire_trigger_once, so this confirms the status still comes
+        # through untouched rather than being coerced to "completed".
+        result = await asyncio.wait_for(
+            fire_trigger_now(settings.state_dir, "trig-9", get_session), timeout=5
+        )
+
+    assert result.last_run_status == "failed"

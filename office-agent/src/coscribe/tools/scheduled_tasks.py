@@ -42,7 +42,8 @@ from typing import Any, Optional
 from ..runtime.types import tool_metadata
 from .workflows import WorkflowStore
 
-VALID_KINDS = ("once", "daily", "weekly", "monthly")
+VALID_KINDS = ("manual", "once", "hourly", "daily", "weekdays", "weekly", "monthly")
+VALID_APPROVAL_MODES = ("manual", "auto", "skip")
 
 
 def _now_iso() -> str:
@@ -84,12 +85,22 @@ def _clamp_day(year: int, month: int, day: int) -> int:
 
 @dataclass
 class ScheduleRule:
-    kind: str  # "once" | "daily" | "weekly" | "monthly" -- plain str, same
-    # Literal-avoidance reasoning as tools/workflows.py's Workflow.mode.
-    at: str  # "once": a full ISO-8601 timestamp. Otherwise: "HH:MM".
+    kind: str  # "manual" | "once" | "hourly" | "daily" | "weekdays" |
+    # "weekly" | "monthly" -- plain str, same Literal-avoidance reasoning as
+    # tools/workflows.py's Workflow.mode. "once" predates the six-value
+    # Manual/Hourly/Daily/Weekdays/Weekly/Monthly frequency picker the
+    # frontend now offers for new tasks -- kept valid here so an
+    # already-created "once" trigger keeps working, not exposed as a
+    # creatable choice going forward.
+    at: str  # "once": a full ISO-8601 timestamp. "manual": unused, may be
+    # "". "hourly": "HH:MM" but only the minute is used (fires every hour
+    # at that minute; the hour is ignored). Otherwise: "HH:MM".
     weekday: int | None = None  # 0=Monday..6=Sunday, required for "weekly"
     day_of_month: int | None = None  # 1-31, required for "monthly" --
     # clamped to a given month's real last day if it doesn't have that many.
+    start_date: str | None = None  # "YYYY-MM-DD" -- the schedule produces
+    # no occurrence before this date; None means "starting now." Unused
+    # (and meaningless) for "manual"/"once".
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +108,7 @@ class ScheduleRule:
             "at": self.at,
             "weekday": self.weekday,
             "day_of_month": self.day_of_month,
+            "start_date": self.start_date,
         }
 
     @classmethod
@@ -106,26 +118,56 @@ class ScheduleRule:
             at=data["at"],
             weekday=data.get("weekday"),
             day_of_month=data.get("day_of_month"),
+            start_date=data.get("start_date"),
         )
 
 
 def compute_next_run_at(rule: ScheduleRule, after: datetime) -> str | None:
     """The next real occurrence strictly after `after`, as a naive local
-    ISO string. None only for a "once" rule whose `at` is already in the
-    past -- create_scheduled_task rejects that case up front (same
+    ISO string. None for a "manual" rule (never fires on its own -- only
+    via an explicit run-now), and for a "once" rule whose `at` is already
+    in the past -- create_trigger rejects the latter case up front (same
     "reject a past timestamp" posture sleep_until already has); pause/
     resume_scheduled_task never re-run this against a "once" rule that
-    already fired (it disables itself instead, see poll_due_scheduled_tasks)."""
+    already fired (it disables itself instead, see poll_due_scheduled_tasks).
+
+    `rule.start_date`, if set, floors the search: no occurrence before
+    that date is ever returned, by raising the effective `after` to just
+    before start_date's own start-of-day when that's later than the real
+    `after` -- a no-op once the schedule's actual occurrences have caught
+    up to or passed start_date."""
     after = _to_local_naive(after)
+    if rule.kind == "manual":
+        return None
+    if rule.start_date is not None:
+        floor = datetime.fromisoformat(rule.start_date) - timedelta(microseconds=1)
+        if floor > after:
+            after = floor
     if rule.kind == "once":
         candidate = _parse_local(rule.at)
         return candidate.isoformat() if candidate > after else None
 
     hour, minute = _parse_hhmm(rule.at)
 
+    if rule.kind == "hourly":
+        # Only the minute matters -- fires every hour at that minute,
+        # regardless of what hour `at` itself names.
+        candidate = after.replace(minute=minute, second=0, microsecond=0)
+        if candidate <= after:
+            candidate += timedelta(hours=1)
+        return candidate.isoformat()
+
     if rule.kind == "daily":
         candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if candidate <= after:
+            candidate += timedelta(days=1)
+        return candidate.isoformat()
+
+    if rule.kind == "weekdays":
+        candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= after:
+            candidate += timedelta(days=1)
+        while candidate.weekday() >= 5:  # 5=Saturday, 6=Sunday
             candidate += timedelta(days=1)
         return candidate.isoformat()
 
@@ -167,11 +209,22 @@ class ScheduledTrigger:
     schedule: ScheduleRule
     enabled: bool
     created_at: str
-    next_run_at: str | None  # None only once a "once" trigger has fired
+    next_run_at: str | None  # None only once a "once" trigger has fired,
+    # or always for a "manual" schedule (see ScheduleRule.kind)
     workflow_name: str | None = None  # exactly one of workflow_name/prompt
     prompt: str | None = None
     last_run_at: str | None = None
     last_run_status: str | None = None  # "completed" | "failed" | "stopped"
+    model: str | None = None  # "provider:model", e.g. "anthropic:claude-
+    # opus-5" -- None means the app's own configured default model, same
+    # meaning None already has wherever a per-thread model override is
+    # optional elsewhere in this codebase.
+    approval_mode: str = "manual"  # one of VALID_APPROVAL_MODES. Default
+    # "manual" matches this field's real pre-existing behavior for every
+    # trigger created before this field existed (ChatSessionLG.
+    # accept_edits itself defaults to False) -- loading an old on-disk
+    # trigger with no "approval_mode" key via from_dict must not silently
+    # change its real behavior.
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -186,6 +239,8 @@ class ScheduledTrigger:
             "prompt": self.prompt,
             "last_run_at": self.last_run_at,
             "last_run_status": self.last_run_status,
+            "model": self.model,
+            "approval_mode": self.approval_mode,
         }
 
     @classmethod
@@ -202,6 +257,8 @@ class ScheduledTrigger:
             prompt=data.get("prompt"),
             last_run_at=data.get("last_run_at"),
             last_run_status=data.get("last_run_status"),
+            model=data.get("model"),
+            approval_mode=data.get("approval_mode", "manual"),
         )
 
 
@@ -253,6 +310,45 @@ class ScheduledTriggerStore:
         return self.root / f"{trigger_id}.json"
 
 
+def _validate_and_build_schedule(
+    workflow_store: WorkflowStore,
+    *,
+    kind: str,
+    at: str,
+    prompt: str | None,
+    workflow_name: str | None,
+    weekday: int | None,
+    day_of_month: int | None,
+    start_date: str | None,
+    approval_mode: str,
+) -> tuple[ScheduleRule, str | None]:
+    """Shared validation + ScheduleRule construction for create_trigger
+    and update_trigger -- kept as one function so the two paths can never
+    silently drift out of sync with each other, same reasoning
+    create_trigger's own docstring already gives for being shared between
+    the model tool and the REST endpoint."""
+    if kind not in VALID_KINDS:
+        raise ValueError(f"kind must be one of {VALID_KINDS}, got {kind!r}")
+    if approval_mode not in VALID_APPROVAL_MODES:
+        raise ValueError(
+            f"approval_mode must be one of {VALID_APPROVAL_MODES}, got {approval_mode!r}"
+        )
+    if bool(prompt) == bool(workflow_name):
+        raise ValueError("exactly one of prompt or workflow_name must be given")
+    if workflow_name is not None and workflow_store.load(workflow_name) is None:
+        raise ValueError(f"No workflow named {workflow_name!r}")
+
+    rule = ScheduleRule(
+        kind=kind, at=at, weekday=weekday, day_of_month=day_of_month, start_date=start_date
+    )
+    next_run_at = compute_next_run_at(rule, datetime.now())
+    # "manual" never has a next_run_at by design (see ScheduleRule.kind) --
+    # only every other kind treats a None result as "at was in the past."
+    if next_run_at is None and kind != "manual":
+        raise ValueError(f"at must be in the future, got {at!r}")
+    return rule, next_run_at
+
+
 def create_trigger(
     store: ScheduledTriggerStore,
     workflow_store: WorkflowStore,
@@ -264,6 +360,9 @@ def create_trigger(
     workflow_name: str | None = None,
     weekday: int | None = None,
     day_of_month: int | None = None,
+    start_date: str | None = None,
+    model: str | None = None,
+    approval_mode: str = "manual",
 ) -> ScheduledTrigger:
     """Validate and persist a new ScheduledTrigger -- shared by
     build_scheduled_task_tools' model-callable create_scheduled_task and
@@ -271,17 +370,17 @@ def create_trigger(
     which needs the exact same validation without going through a live
     conversation), so the two creation paths can never silently drift out
     of sync with each other."""
-    if kind not in VALID_KINDS:
-        raise ValueError(f"kind must be one of {VALID_KINDS}, got {kind!r}")
-    if bool(prompt) == bool(workflow_name):
-        raise ValueError("exactly one of prompt or workflow_name must be given")
-    if workflow_name is not None and workflow_store.load(workflow_name) is None:
-        raise ValueError(f"No workflow named {workflow_name!r}")
-
-    rule = ScheduleRule(kind=kind, at=at, weekday=weekday, day_of_month=day_of_month)
-    next_run_at = compute_next_run_at(rule, datetime.now())
-    if next_run_at is None:
-        raise ValueError(f"at must be in the future, got {at!r}")
+    rule, next_run_at = _validate_and_build_schedule(
+        workflow_store,
+        kind=kind,
+        at=at,
+        prompt=prompt,
+        workflow_name=workflow_name,
+        weekday=weekday,
+        day_of_month=day_of_month,
+        start_date=start_date,
+        approval_mode=approval_mode,
+    )
 
     trigger_id = uuid.uuid4().hex[:12]
     trigger = ScheduledTrigger(
@@ -294,7 +393,62 @@ def create_trigger(
         next_run_at=next_run_at,
         workflow_name=workflow_name,
         prompt=prompt,
+        model=model,
+        approval_mode=approval_mode,
     )
+    store.save(trigger)
+    return trigger
+
+
+def update_trigger(
+    store: ScheduledTriggerStore,
+    workflow_store: WorkflowStore,
+    trigger_id: str,
+    *,
+    name: str,
+    kind: str,
+    at: str,
+    prompt: str | None = None,
+    workflow_name: str | None = None,
+    weekday: int | None = None,
+    day_of_month: int | None = None,
+    start_date: str | None = None,
+    model: str | None = None,
+    approval_mode: str = "manual",
+) -> ScheduledTrigger:
+    """Edit an existing trigger in place -- the Edit modal's Save action.
+    Same validation as create_trigger (via _validate_and_build_schedule),
+    so an edited task can never end up in a state a *new* task couldn't
+    also be created in. Preserves trigger_id/thread_id/created_at/enabled/
+    last_run_at/last_run_status; recomputes next_run_at from now against
+    the (possibly changed) schedule, same as resume_scheduled_task already
+    does when re-enabling a paused trigger -- editing a currently-paused
+    task's schedule doesn't un-pause it, but next_run_at still reflects
+    what it *would* run next if resumed, not a stale value from before
+    the edit."""
+    trigger = store.load(trigger_id)
+    if trigger is None:
+        raise KeyError(f"No scheduled task with id {trigger_id!r}")
+
+    rule, next_run_at = _validate_and_build_schedule(
+        workflow_store,
+        kind=kind,
+        at=at,
+        prompt=prompt,
+        workflow_name=workflow_name,
+        weekday=weekday,
+        day_of_month=day_of_month,
+        start_date=start_date,
+        approval_mode=approval_mode,
+    )
+
+    trigger.name = name
+    trigger.schedule = rule
+    trigger.next_run_at = next_run_at
+    trigger.workflow_name = workflow_name
+    trigger.prompt = prompt
+    trigger.model = model
+    trigger.approval_mode = approval_mode
     store.save(trigger)
     return trigger
 
@@ -326,20 +480,27 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
         workflow_name: Optional[str] = None,  # noqa: UP045
         weekday: Optional[int] = None,  # noqa: UP045
         day_of_month: Optional[int] = None,  # noqa: UP045
+        start_date: Optional[str] = None,  # noqa: UP045
+        model: Optional[str] = None,  # noqa: UP045
+        approval_mode: str = "manual",
     ) -> dict[str, Any]:
         """Create a scheduled task -- runs once at a specific time, or
-        repeatedly on a daily/weekly/monthly schedule, independent of
-        whether any conversation or browser tab is open. Runs in its own
-        dedicated, persistent conversation (not this one), so it never
-        interrupts whatever you're doing when it fires.
+        repeatedly on an hourly/daily/weekdays/weekly/monthly schedule
+        ("manual" never fires on its own, only via a future explicit
+        run), independent of whether any conversation or browser tab is
+        open. Runs in its own dedicated, persistent conversation (not
+        this one), so it never interrupts whatever you're doing when it
+        fires.
 
         Args:
             name: short, human-readable name, e.g. "Weekly sales report".
-            kind: "once", "daily", "weekly", or "monthly".
-            at: for kind="once", a full ISO-8601 timestamp in the future,
-                e.g. "2026-08-20T09:00:00". Otherwise, a 24-hour "HH:MM"
-                time of day, e.g. "09:00" -- interpreted in this machine's
-                own local timezone.
+            kind: "manual", "hourly", "daily", "weekdays", "weekly", or
+                "monthly".
+            at: unused for kind="manual". For kind="hourly", "HH:MM" but
+                only the minute is used (fires every hour at that
+                minute). Otherwise a 24-hour "HH:MM" time of day, e.g.
+                "09:00" -- interpreted in this machine's own local
+                timezone.
             prompt: what to do when it fires, in plain language. Exactly
                 one of prompt/workflow_name must be given.
             workflow_name: instead of a freeform prompt, run this
@@ -348,6 +509,19 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
             weekday: required for kind="weekly" -- 0=Monday .. 6=Sunday.
             day_of_month: required for kind="monthly" -- 1-31 (clamped to
                 the real last day of a shorter month).
+            start_date: "YYYY-MM-DD" -- the schedule produces no
+                occurrence before this date. Optional; defaults to
+                starting immediately.
+            model: "provider:model" to run this task with, e.g.
+                "anthropic:claude-opus-5". Optional; defaults to the
+                app's own configured default model.
+            approval_mode: "manual" (pauses for every action needing
+                approval -- the default, and the only option that
+                behaves safely if nobody is watching when it fires),
+                "auto" (auto-approves like accept-edits mode, still
+                pausing if something looks genuinely unsafe), or "skip"
+                (never pauses, even for unsafe actions -- use with real
+                caution for an unattended task).
         """
         trigger = create_trigger(
             store,
@@ -359,6 +533,9 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
             workflow_name=workflow_name,
             weekday=weekday,
             day_of_month=day_of_month,
+            start_date=start_date,
+            model=model,
+            approval_mode=approval_mode,
         )
         return trigger.to_dict()
 

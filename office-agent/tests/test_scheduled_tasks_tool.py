@@ -5,11 +5,13 @@ import pytest
 
 from coscribe.runtime.types import get_tool_metadata
 from coscribe.tools.scheduled_tasks import (
+    ScheduledTrigger,
     ScheduledTriggerStore,
     ScheduleRule,
     build_scheduled_task_tools,
     compute_next_run_at,
     create_trigger,
+    update_trigger,
 )
 from coscribe.tools.workflows import Workflow, WorkflowStore
 
@@ -87,6 +89,56 @@ def test_compute_next_run_at_unknown_kind_raises() -> None:
         compute_next_run_at(ScheduleRule(kind="yearly", at="09:00"), datetime.now())
 
 
+def test_compute_next_run_at_manual_is_always_none() -> None:
+    # "at" is unused/meaningless for "manual" -- confirms it's never even
+    # parsed (an invalid "at" would raise inside _parse_hhmm if it were).
+    rule = ScheduleRule(kind="manual", at="not a real time")
+    assert compute_next_run_at(rule, datetime.now()) is None
+
+
+def test_compute_next_run_at_hourly_uses_only_the_minute() -> None:
+    now = datetime(2026, 1, 1, 10, 20, 0)
+    # "at"'s hour (14) is irrelevant -- only :45 matters, and 10:45 is
+    # still ahead of 10:20 today.
+    rule = ScheduleRule(kind="hourly", at="14:45")
+    assert compute_next_run_at(rule, now) == "2026-01-01T10:45:00"
+
+
+def test_compute_next_run_at_hourly_rolls_to_the_next_hour_if_minute_passed() -> None:
+    now = datetime(2026, 1, 1, 10, 50, 0)
+    rule = ScheduleRule(kind="hourly", at="00:20")
+    assert compute_next_run_at(rule, now) == "2026-01-01T11:20:00"
+
+
+def test_compute_next_run_at_weekdays_skips_saturday_and_sunday() -> None:
+    now = datetime(2026, 1, 30, 10, 0, 0)  # Friday, target time already passed
+    assert now.weekday() == 4
+    rule = ScheduleRule(kind="weekdays", at="09:00")
+    # Saturday 31st and Sunday Feb 1st both skipped -> Monday Feb 2nd.
+    assert compute_next_run_at(rule, now) == "2026-02-02T09:00:00"
+
+
+def test_compute_next_run_at_weekdays_stays_within_the_same_week() -> None:
+    now = datetime(2026, 1, 28, 10, 0, 0)  # Wednesday, target time not yet passed
+    assert now.weekday() == 2
+    rule = ScheduleRule(kind="weekdays", at="11:00")
+    assert compute_next_run_at(rule, now) == "2026-01-28T11:00:00"
+
+
+def test_compute_next_run_at_start_date_floors_the_first_occurrence() -> None:
+    now = datetime(2026, 1, 1, 10, 0, 0)
+    rule = ScheduleRule(kind="daily", at="09:00", start_date="2026-01-10")
+    # Without start_date this would be tomorrow (Jan 2); start_date pushes
+    # the very first occurrence out to Jan 10 instead.
+    assert compute_next_run_at(rule, now) == "2026-01-10T09:00:00"
+
+
+def test_compute_next_run_at_start_date_in_the_past_is_a_no_op() -> None:
+    now = datetime(2026, 1, 15, 10, 0, 0)
+    rule = ScheduleRule(kind="daily", at="09:00", start_date="2026-01-01")
+    assert compute_next_run_at(rule, now) == "2026-01-16T09:00:00"
+
+
 # -- create_trigger / create_scheduled_task validation --
 
 
@@ -143,6 +195,152 @@ def test_create_trigger_mints_its_own_dedicated_thread_id(tmp_path: Path) -> Non
     workflow_store = WorkflowStore(tmp_path)
     trigger = create_trigger(store, workflow_store, name="x", kind="daily", at="09:00", prompt="p")
     assert trigger.thread_id == f"scheduled-{trigger.trigger_id}"
+
+
+def test_create_trigger_manual_kind_has_no_next_run_at_and_does_not_raise(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    workflow_store = WorkflowStore(tmp_path)
+    trigger = create_trigger(store, workflow_store, name="x", kind="manual", at="", prompt="p")
+    assert trigger.next_run_at is None
+    assert trigger.enabled is True  # created enabled, just never auto-fires
+
+
+def test_create_trigger_rejects_unknown_approval_mode(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    workflow_store = WorkflowStore(tmp_path)
+    with pytest.raises(ValueError, match="approval_mode must be one of"):
+        create_trigger(
+            store,
+            workflow_store,
+            name="x",
+            kind="daily",
+            at="09:00",
+            prompt="p",
+            approval_mode="yolo",
+        )
+
+
+def test_create_trigger_persists_model_and_approval_mode(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    workflow_store = WorkflowStore(tmp_path)
+    trigger = create_trigger(
+        store,
+        workflow_store,
+        name="x",
+        kind="daily",
+        at="09:00",
+        prompt="p",
+        model="anthropic:claude-opus-5",
+        approval_mode="skip",
+    )
+    assert trigger.model == "anthropic:claude-opus-5"
+    assert trigger.approval_mode == "skip"
+
+    reloaded = store.load(trigger.trigger_id)
+    assert reloaded is not None
+    assert reloaded.model == "anthropic:claude-opus-5"
+    assert reloaded.approval_mode == "skip"
+
+
+def test_scheduled_trigger_from_dict_defaults_approval_mode_for_old_records(tmp_path: Path) -> None:
+    """A trigger persisted before approval_mode existed has no such key on
+    disk -- from_dict must default it to "manual", the real pre-existing
+    behavior (ChatSessionLG.accept_edits itself defaults to False), not
+    silently change what an old trigger does."""
+    trigger = ScheduledTrigger.from_dict(
+        {
+            "trigger_id": "old-1",
+            "name": "Pre-existing task",
+            "thread_id": "scheduled-old-1",
+            "schedule": {"kind": "daily", "at": "09:00", "weekday": None, "day_of_month": None},
+            "enabled": True,
+            "created_at": datetime.now().isoformat(),
+            "next_run_at": None,
+            "workflow_name": None,
+            "prompt": "p",
+        }
+    )
+    assert trigger.approval_mode == "manual"
+    assert trigger.model is None
+    assert trigger.schedule.start_date is None
+
+
+# -- update_trigger --
+
+
+def test_update_trigger_changes_name_schedule_and_permission_fields(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    workflow_store = WorkflowStore(tmp_path)
+    created = create_trigger(
+        store, workflow_store, name="Old name", kind="daily", at="09:00", prompt="old prompt"
+    )
+
+    updated = update_trigger(
+        store,
+        workflow_store,
+        created.trigger_id,
+        name="New name",
+        kind="weekly",
+        at="10:00",
+        weekday=2,
+        prompt="new prompt",
+        model="anthropic:claude-opus-5",
+        approval_mode="auto",
+    )
+
+    assert updated.trigger_id == created.trigger_id  # identity preserved
+    assert updated.thread_id == created.thread_id
+    assert updated.created_at == created.created_at
+    assert updated.name == "New name"
+    assert updated.schedule.kind == "weekly"
+    assert updated.schedule.weekday == 2
+    assert updated.prompt == "new prompt"
+    assert updated.model == "anthropic:claude-opus-5"
+    assert updated.approval_mode == "auto"
+
+    reloaded = store.load(created.trigger_id)
+    assert reloaded is not None
+    assert reloaded.name == "New name"
+
+
+def test_update_trigger_preserves_enabled_state(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    workflow_store = WorkflowStore(tmp_path)
+    created = create_trigger(store, workflow_store, name="x", kind="daily", at="09:00", prompt="p")
+    created.enabled = False
+    store.save(created)
+
+    updated = update_trigger(
+        store, workflow_store, created.trigger_id, name="x", kind="daily", at="10:00", prompt="p"
+    )
+
+    assert updated.enabled is False
+
+
+def test_update_trigger_unknown_id_raises_keyerror(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    workflow_store = WorkflowStore(tmp_path)
+    with pytest.raises(KeyError):
+        update_trigger(
+            store, workflow_store, "does-not-exist", name="x", kind="daily", at="09:00", prompt="p"
+        )
+
+
+def test_update_trigger_same_validation_as_create(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    workflow_store = WorkflowStore(tmp_path)
+    created = create_trigger(store, workflow_store, name="x", kind="daily", at="09:00", prompt="p")
+    with pytest.raises(ValueError, match="exactly one"):
+        update_trigger(
+            store,
+            workflow_store,
+            created.trigger_id,
+            name="x",
+            kind="daily",
+            at="09:00",
+            prompt="p",
+            workflow_name="also-given",
+        )
 
 
 # -- model-callable tools --

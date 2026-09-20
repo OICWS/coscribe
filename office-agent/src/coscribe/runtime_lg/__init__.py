@@ -13,7 +13,7 @@ from .messages import (
     tool_result_value,
 )
 from .providers import resolve_chat_model
-from .scheduled_tasks import poll_due_scheduled_tasks
+from .scheduled_tasks import fire_trigger_now, poll_due_scheduled_tasks
 from .selfwake import poll_due_wakes
 from .skill_authoring import SkillSaveProposal, propose_skill_save_lg, write_skill_lg
 from .subagents import (
@@ -40,6 +40,7 @@ __all__ = [
     "build_spawn_agent_tool",
     "connect_mcp_tools_lg",
     "extract_text",
+    "fire_trigger_now",
     "infer_step_assertions_lg",
     "load_exec_policy",
     "poll_due_scheduled_tasks",
