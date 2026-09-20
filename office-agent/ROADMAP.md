@@ -5699,8 +5699,36 @@ a concrete reason to prioritize a new surface.
     and `README.md`'s existing proxy note ("have to be set in the shell
     before the process starts") predated the `override=True` fix above
     and was misleading by that point -- `.env` works too.
-- [ ] **Workflow/Scheduled Tasks UI: full redesign to match Claude
-  Cowork's own layout** -- not started; recorded here per your request
+- [x] **Workflow/Scheduled Tasks UI: full redesign to match Claude
+  Cowork's own layout** -- **shipped** (backend: schema/approval-mode/
+  model threading + update/run-now endpoints; frontend: sidebar, portal,
+  detail page, Create/Edit modal, all verified live via Playwright
+  screenshots against the reference images). Real deviations from the
+  spec below, not yet resolved:
+  - **"Automatically approve" and "Skip all approvals" behave
+    identically** -- both map to `accept_edits`-style auto-approval
+    (`_decide_action_request` has no third gating tier between "ask a
+    human" and that). Making "Skip" a genuinely stronger tier (e.g.
+    bypassing hook vetoes/plan_mode too) is an open design question, not
+    decided.
+  - **"Create with coscribe"** (the New-task menu's second option) is a
+    disabled stub -- only "Set up manually" is wired up.
+  - **The curated-template gallery** (Daily briefing/Inbox triage/etc.)
+    was explicitly deferred, not built.
+  - **The Edit modal's Instructions field is prompt-only** -- no way to
+    pick a saved workflow from it (the reference screenshot has no such
+    control); editing an existing workflow-backed trigger through this
+    modal converts it to a plain prompt.
+  - **A pre-existing, unrelated gap noticed while wiring approval_mode**:
+    a plain-prompt (non-workflow) Scheduled Task in "manual" mode that
+    hits a gated call while unattended still reports `last_run_status:
+    "completed"` instead of "failed" -- only the workflow-run path
+    (`_run_workflow_agent_mode`) has the "durably paused, report failed"
+    detection; `_handle_user_message_locked`'s own turn loop never grew
+    the equivalent check.
+
+  Original spec, recorded here per your request, kept below as the
+  design record:
   after real-usage testing surfaced both bugs in the current UI and a
   concrete target design. Reference screenshots: `docs/ui-references/
   sheduled-main-portal.png`, `sheduled-edit-tasks.png`, `sheduled-
