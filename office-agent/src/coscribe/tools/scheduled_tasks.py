@@ -45,6 +45,13 @@ from .workflows import WorkflowStore
 VALID_KINDS = ("manual", "once", "hourly", "daily", "weekdays", "weekly", "monthly")
 VALID_APPROVAL_MODES = ("manual", "auto", "skip")
 
+# A trigger's own dedicated conversation is keyed off this prefix (see
+# create_trigger below) -- shared with web/app.py's list_threads, which
+# filters threads by it so a fired trigger's conversation doesn't also
+# show up in the ordinary chat sidebar (the frontend's own Scheduled
+# section is the one place to find it, per an explicit request).
+SCHEDULED_THREAD_PREFIX = "scheduled-"
+
 
 def _now_iso() -> str:
     return datetime.now().isoformat()
@@ -386,7 +393,7 @@ def create_trigger(
     trigger = ScheduledTrigger(
         trigger_id=trigger_id,
         name=name,
-        thread_id=f"scheduled-{trigger_id}",
+        thread_id=f"{SCHEDULED_THREAD_PREFIX}{trigger_id}",
         schedule=rule,
         enabled=True,
         created_at=_now_iso(),
