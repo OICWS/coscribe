@@ -1,17 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { deleteThread, deleteWorkflowRun, getScheduledTasks, getThreads, getWorkflows, renameThread } from "../lib/rest";
+import {
+  deleteScheduledTask,
+  deleteThread,
+  deleteWorkflowRun,
+  getScheduledTasks,
+  getThreads,
+  getWorkflows,
+  renameThread,
+  runScheduledTaskNow,
+} from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
+import { scheduleKindLabel } from "../lib/scheduleLabels";
 import type { ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
 import type { Workflow } from "../types/settings";
 import type { WorkflowRun } from "../types/wire";
 import { ConfirmDialog } from "./ConfirmDialog";
 import {
-  CalendarIcon,
   ClockIcon,
   MessageCircleIcon,
   MoreIcon,
   PencilIcon,
+  PlayIcon,
   PlusIcon,
   SidebarIcon,
   TrashIcon,
@@ -147,6 +157,108 @@ function ThreadRow({ thread, isCurrent, onRenamed, onDeleteRequest }: ThreadRowP
   );
 }
 
+interface ScheduledTaskRowProps {
+  task: ScheduledTask;
+  onSelect: () => void;
+  onEdit: () => void;
+  onChanged: () => void;
+}
+
+/** One Scheduled sidebar row -- matches
+ * docs/ui-references/sheduled-sidebar-workflow-display.png: a leading
+ * bullet, the name, and (until hovered) the schedule kind right-aligned
+ * in muted text; hovering swaps that label for a "..." menu (Run now/
+ * Edit/Delete -- no Pause, see sheduled-siderbar-workflow-display-
+ * settings.png, unlike the portal card's own menu which keeps it).
+ * Clicking the row itself opens ScheduledTaskDetail in RunPanel's main
+ * area, one of the three confirmed entry points into the Edit modal
+ * (via this row's own "Edit" item, or the detail page's pencil icon). */
+function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useClickOutside(menuRef, () => setMenuOpen(false), menuOpen);
+
+  const runNow = async () => {
+    setMenuOpen(false);
+    await runScheduledTaskNow(task.trigger_id);
+    onChanged();
+  };
+
+  const confirmDelete = async () => {
+    setDeleteConfirm(false);
+    await deleteScheduledTask(task.trigger_id);
+    onChanged();
+  };
+
+  return (
+    <div
+      className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--card-bg)]"
+      onClick={onSelect}
+    >
+      <span className="shrink-0 text-[var(--muted)]">○</span>
+      <span className="min-w-0 flex-1 truncate" title={task.name}>
+        {task.name}
+      </span>
+      <span className="shrink-0 text-xs text-[var(--muted)] group-hover:hidden">{scheduleKindLabel(task.schedule.kind)}</span>
+      <div className="relative hidden shrink-0 group-hover:block" ref={menuRef}>
+        <button
+          type="button"
+          aria-label={`Options for ${task.name}`}
+          className="rounded-md p-1 text-[var(--muted)] hover:bg-[var(--border)]"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+        >
+          <MoreIcon className="h-3.5 w-3.5" />
+        </button>
+        {menuOpen && (
+          <div
+            className="absolute right-0 top-full z-10 mt-1 min-w-32 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] py-1 shadow-[var(--shadow)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button type="button" className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]" onClick={runNow}>
+              <PlayIcon className="h-3.5 w-3.5" /> Run now
+            </button>
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                onEdit();
+              }}
+            >
+              <PencilIcon className="h-3.5 w-3.5" /> Edit
+            </button>
+            <div className="my-1 border-t border-[var(--border)]" />
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--danger)] hover:bg-[var(--card-bg)]"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(false);
+                setDeleteConfirm(true);
+              }}
+            >
+              <TrashIcon className="h-3.5 w-3.5" /> Delete
+            </button>
+          </div>
+        )}
+      </div>
+      {deleteConfirm && (
+        <ConfirmDialog
+          title="Delete scheduled task?"
+          description={`"${task.name}" will be permanently removed.`}
+          onCancel={() => setDeleteConfirm(false)}
+          onConfirm={confirmDelete}
+        />
+      )}
+    </div>
+  );
+}
+
 interface NavRailProps {
   threadId: string;
   mode: NavMode;
@@ -156,6 +268,9 @@ interface NavRailProps {
   workflowRuns: WorkflowRun[];
   onRunWorkflow: (name: string) => void;
   onStop: () => void;
+  scheduledTasksVersion: number;
+  onSelectScheduledTask: (task: ScheduledTask | null) => void;
+  onEditScheduledTask: (task: ScheduledTask | null) => void;
 }
 
 /** Replaces the old top-bar "Sessions" dropdown -- a narrow icon-only
@@ -186,6 +301,9 @@ export function NavRail({
   workflowRuns,
   onRunWorkflow,
   onStop,
+  scheduledTasksVersion,
+  onSelectScheduledTask,
+  onEditScheduledTask,
 }: NavRailProps) {
   // Not persisted (no localStorage) -- explicit call: pin is a per-page-
   // load convenience, not a remembered setting.
@@ -203,7 +321,7 @@ export function NavRail({
     getThreads().then(setThreads);
     getWorkflows().then(setWorkflows);
     getScheduledTasks().then(setScheduledTasks);
-  }, [expanded]);
+  }, [expanded, scheduledTasksVersion]);
 
   const currentRun = workflowRuns.find((run) => run.status === "running");
   const recentRuns = [...workflowRuns].sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 8);
@@ -266,13 +384,16 @@ export function NavRail({
               </button>
               <button
                 type="button"
-                title="Workflow"
+                title="Scheduled"
                 className={`flex h-8 w-8 items-center justify-center rounded-md ${
                   mode === "run" ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
                 }`}
-                onClick={() => onModeChange("run")}
+                onClick={() => {
+                  onModeChange("run");
+                  onRunTabChange("scheduled");
+                }}
               >
-                <ZapIcon className="h-[16px] w-[16px]" />
+                <ClockIcon className="h-[16px] w-[16px]" />
               </button>
             </div>
           )}
@@ -366,21 +487,24 @@ export function NavRail({
                   className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)] ${
                     runTab === "scheduled" ? "text-[var(--accent)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
                   }`}
-                  onClick={() => onRunTabChange("scheduled")}
+                  onClick={() => {
+                    onRunTabChange("scheduled");
+                    onSelectScheduledTask(null);
+                  }}
                 >
-                  <CalendarIcon className="h-3.5 w-3.5" /> Scheduled
+                  <ClockIcon className="h-3.5 w-3.5" /> Scheduled
                 </button>
                 {runTab === "scheduled" && (
                   <div className="flex-1 overflow-y-auto">
                     {scheduledTasks.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No scheduled tasks yet.</div>}
                     {scheduledTasks.map((task) => (
-                      <div key={task.trigger_id} className="flex items-start gap-1.5 rounded-md px-2 py-1.5 text-sm">
-                        <CalendarIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
-                        <div className="min-w-0">
-                          <div className="truncate">{task.name}</div>
-                          <div className="truncate text-xs text-[var(--muted)]">{task.enabled ? "enabled" : "paused"}</div>
-                        </div>
-                      </div>
+                      <ScheduledTaskRow
+                        key={task.trigger_id}
+                        task={task}
+                        onSelect={() => onSelectScheduledTask(task)}
+                        onEdit={() => onEditScheduledTask(task)}
+                        onChanged={() => getScheduledTasks().then(setScheduledTasks)}
+                      />
                     ))}
                     {/* "History" (recent runs) has no flat-nav slot of its
                      * own -- folded in here under Scheduled, per explicit

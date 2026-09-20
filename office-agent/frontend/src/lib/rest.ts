@@ -89,6 +89,16 @@ async function del<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function putJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  await checkOk(res);
+  return res.json() as Promise<T>;
+}
+
 // -- Config (General + Workspace) -------------------------------------
 
 export const getConfig = () => getJson<ConfigResponse>("/api/config");
@@ -210,6 +220,10 @@ export const resumeScheduledTask = (triggerId: string) =>
   postJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/resume`, {});
 export const deleteScheduledTask = (triggerId: string) =>
   del<ScheduledTaskDeleteResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`);
+export const updateScheduledTask = (triggerId: string, payload: CreateScheduledTaskPayload) =>
+  putJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`, payload);
+export const runScheduledTaskNow = (triggerId: string) =>
+  postJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/run`, {});
 
 // -- Threads --------------------------------------------------------------
 

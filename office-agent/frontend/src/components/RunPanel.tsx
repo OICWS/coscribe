@@ -1,20 +1,12 @@
-import { useEffect, useState } from "react";
-import {
-  createScheduledTask,
-  deleteScheduledTask,
-  deleteWorkflowRun,
-  getScheduledTasks,
-  getWorkflowRuns,
-  getWorkflows,
-  pauseScheduledTask,
-  resumeScheduledTask,
-} from "../lib/rest";
-import type { ScheduledTask, ScheduleRule, Workflow, WorkflowRun, WorkflowRunStepStatus } from "../types/settings";
-import { CalendarIcon, CheckCircleIcon, ClockIcon, PlusIcon, XCircleIcon, ZapIcon } from "./icons";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { deleteScheduledTask, deleteWorkflowRun, getScheduledTasks, getWorkflowRuns, getWorkflows, pauseScheduledTask, resumeScheduledTask, runScheduledTaskNow } from "../lib/rest";
+import { useClickOutside } from "../lib/useClickOutside";
+import { describeSchedule } from "../lib/scheduleLabels";
+import type { ScheduledTask, Workflow, WorkflowRun, WorkflowRunStepStatus } from "../types/settings";
+import { ScheduledTaskDetail } from "./ScheduledTaskDetail";
+import { CheckCircleIcon, ChevronDownIcon, ClockIcon, MoreIcon, PauseIcon, PencilIcon, PlayIcon, SearchIcon, TrashIcon, XCircleIcon, ZapIcon } from "./icons";
 import type { RunTab } from "./NavRail";
-import { ToggleSwitch } from "./ToggleSwitch";
-
-const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+import { ConfirmDialog } from "./ConfirmDialog";
 
 const STEP_STATUS_ICON: Record<WorkflowRunStepStatus["status"], string> = {
   pending: "·",
@@ -24,21 +16,6 @@ const STEP_STATUS_ICON: Record<WorkflowRunStepStatus["status"], string> = {
   stopped: "■",
 };
 
-function describeSchedule(schedule: ScheduleRule): string {
-  switch (schedule.kind) {
-    case "once":
-      return `Once, ${new Date(schedule.at).toLocaleString()}`;
-    case "daily":
-      return `Daily at ${schedule.at}`;
-    case "weekly":
-      return `Weekly on ${WEEKDAYS[schedule.weekday ?? 0]} at ${schedule.at}`;
-    case "monthly":
-      return `Monthly on day ${schedule.day_of_month} at ${schedule.at}`;
-    default:
-      return schedule.kind;
-  }
-}
-
 function RunStatusIcon({ status }: { status: WorkflowRun["status"] }) {
   const className = "h-4 w-4 shrink-0";
   if (status === "completed") return <CheckCircleIcon className={`${className} text-[var(--accent)]`} />;
@@ -46,36 +23,143 @@ function RunStatusIcon({ status }: { status: WorkflowRun["status"] }) {
   return <XCircleIcon className={`${className} text-[var(--danger)]`} />;
 }
 
+interface TaskCardMenuProps {
+  task: ScheduledTask;
+  onEdit: () => void;
+  onChanged: () => void;
+}
+
+/** The hover "..." menu on a portal card -- Run now/Pause-Resume/Edit/
+ * Delete, matching the first user-pasted screenshot's card menu (Run
+ * now/Pause/Edit/Delete; the sidebar's own menu, a separate component,
+ * drops Pause -- see sheduled-siderbar-workflow-display-settings.png). */
+function TaskCardMenu({ task, onEdit, onChanged }: TaskCardMenuProps) {
+  const [open, setOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useClickOutside(menuRef, () => setOpen(false), open);
+
+  const runNow = async (e: MouseEvent) => {
+    e.stopPropagation();
+    setOpen(false);
+    await runScheduledTaskNow(task.trigger_id);
+    onChanged();
+  };
+
+  const togglePause = async (e: MouseEvent) => {
+    e.stopPropagation();
+    setOpen(false);
+    if (task.enabled) await pauseScheduledTask(task.trigger_id);
+    else await resumeScheduledTask(task.trigger_id);
+    onChanged();
+  };
+
+  const confirmDelete = async () => {
+    setDeleteConfirm(false);
+    await deleteScheduledTask(task.trigger_id);
+    onChanged();
+  };
+
+  return (
+    <div className="relative shrink-0" ref={menuRef}>
+      <button
+        type="button"
+        aria-label={`Options for ${task.name}`}
+        className={`flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--border)] ${
+          open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        }`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        <MoreIcon className="h-4 w-4" />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full z-10 mt-1 min-w-36 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] py-1 shadow-[var(--shadow)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]" onClick={runNow}>
+            <PlayIcon className="h-3.5 w-3.5" /> Run now
+          </button>
+          <button type="button" className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]" onClick={togglePause}>
+            <PauseIcon className="h-3.5 w-3.5" /> {task.enabled ? "Pause" : "Resume"}
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              onEdit();
+            }}
+          >
+            <PencilIcon className="h-3.5 w-3.5" /> Edit
+          </button>
+          <div className="my-1 border-t border-[var(--border)]" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--danger)] hover:bg-[var(--card-bg)]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(false);
+              setDeleteConfirm(true);
+            }}
+          >
+            <TrashIcon className="h-3.5 w-3.5" /> Delete
+          </button>
+        </div>
+      )}
+      {deleteConfirm && (
+        <ConfirmDialog
+          title="Delete scheduled task?"
+          description={`"${task.name}" will be permanently removed.`}
+          onCancel={() => setDeleteConfirm(false)}
+          onConfirm={confirmDelete}
+        />
+      )}
+    </div>
+  );
+}
+
 interface RunPanelProps {
   runTab: RunTab;
   onRunWorkflow: (name: string) => void;
   refreshKey: number;
+  scheduledTasksVersion: number;
+  onScheduledTasksChanged: () => void;
+  selectedScheduledTask: ScheduledTask | null;
+  onSelectScheduledTask: (task: ScheduledTask | null) => void;
+  onEditScheduledTask: (task: ScheduledTask | null) => void;
 }
 
-/** The Run mode's main content -- Workflows/Scheduled/History, merging
- * SessionMenu.tsx's old "Workflows"/"Recent Workflow Runs" sections with
- * settings/ScheduledTasksTab.tsx (no longer reachable from Settings, see
- * SettingsModal.tsx) into one place, since all three are "things coscribe
- * runs without you typing a message" -- see the "Nav rail, Create/Run
- * split" design pass this restructuring implements. NavRail.tsx renders a
- * compact mirror of the same data for quick access while hovered; this is
- * the full-detail view underneath it. */
-export function RunPanel({ runTab, onRunWorkflow, refreshKey }: RunPanelProps) {
+/** The Run mode's main content. runTab === "workflows" is unrelated to
+ * Scheduled Tasks -- it's SessionMenu.tsx's old saved-Workflow-definition
+ * list (chain/agent-mode macros you replay by name), left as-is here.
+ * runTab === "scheduled" is the redesigned Scheduled Tasks surface: a
+ * card-grid portal (docs/ui-references/sheduled-main-portal.png) by
+ * default, or ScheduledTaskDetail for whichever task is selected (from a
+ * card click here or a sidebar row click in NavRail -- selection state
+ * lives in App.tsx since both components need to drive it). The old
+ * inline create form is gone, replaced by ScheduledTaskModal (also
+ * App-level, so it can be opened from NavRail's sidebar menu too). */
+export function RunPanel({
+  runTab,
+  onRunWorkflow,
+  refreshKey,
+  scheduledTasksVersion,
+  onScheduledTasksChanged,
+  selectedScheduledTask,
+  onSelectScheduledTask,
+  onEditScheduledTask,
+}: RunPanelProps) {
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
-  const [showTaskForm, setShowTaskForm] = useState(false);
-  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
-
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<ScheduleRule["kind"]>("daily");
-  const [time, setTime] = useState("09:00");
-  const [onceAt, setOnceAt] = useState("");
-  const [weekday, setWeekday] = useState(0);
-  const [dayOfMonth, setDayOfMonth] = useState(1);
-  const [actionType, setActionType] = useState<"prompt" | "workflow">("prompt");
-  const [prompt, setPrompt] = useState("");
-  const [workflowName, setWorkflowName] = useState("");
+  const [newTaskMenuOpen, setNewTaskMenuOpen] = useState(false);
+  const newTaskMenuRef = useRef<HTMLDivElement>(null);
+  useClickOutside(newTaskMenuRef, () => setNewTaskMenuOpen(false), newTaskMenuOpen);
 
   const refresh = () => {
     getWorkflows().then(setWorkflows);
@@ -83,72 +167,39 @@ export function RunPanel({ runTab, onRunWorkflow, refreshKey }: RunPanelProps) {
     getWorkflowRuns().then(setRuns);
   };
 
-  useEffect(refresh, [refreshKey]);
+  useEffect(refresh, [refreshKey, scheduledTasksVersion]);
 
-  const resetForm = () => {
-    setName("");
-    setKind("daily");
-    setTime("09:00");
-    setOnceAt("");
-    setWeekday(0);
-    setDayOfMonth(1);
-    setActionType("prompt");
-    setPrompt("");
-    setWorkflowName("");
-  };
-
-  const submitTask = async () => {
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setStatus({ text: "Name is required.", error: true });
-      return;
-    }
-    if (kind === "once" && !onceAt) {
-      setStatus({ text: "Pick a date and time.", error: true });
-      return;
-    }
-    if (actionType === "prompt" && !prompt.trim()) {
-      setStatus({ text: "Enter what it should do.", error: true });
-      return;
-    }
-    if (actionType === "workflow" && !workflowName) {
-      setStatus({ text: "Pick a saved workflow.", error: true });
-      return;
-    }
-    const result = await createScheduledTask({
-      name: trimmedName,
-      kind,
-      at: kind === "once" ? new Date(onceAt).toISOString() : time,
-      ...(actionType === "prompt" ? { prompt: prompt.trim() } : { workflow_name: workflowName }),
-      ...(kind === "weekly" ? { weekday } : {}),
-      ...(kind === "monthly" ? { day_of_month: dayOfMonth } : {}),
-    });
-    if ("error" in result) {
-      setStatus({ text: result.error, error: true });
-      return;
-    }
-    setStatus({ text: "Created.", error: false });
-    resetForm();
-    setShowTaskForm(false);
-    refresh();
-  };
-
-  const toggleTask = async (task: ScheduledTask) => {
-    if (task.enabled) await pauseScheduledTask(task.trigger_id);
-    else await resumeScheduledTask(task.trigger_id);
-    refresh();
-  };
-
-  const removeTask = async (task: ScheduledTask) => {
-    if (!window.confirm(`Delete scheduled task "${task.name}"?`)) return;
-    await deleteScheduledTask(task.trigger_id);
-    refresh();
-  };
+  // The currently-selected task's own object can go stale the moment
+  // something elsewhere changes it (e.g. NavRail's sidebar menu pausing
+  // it) -- refresh from the freshly-fetched list rather than trusting the
+  // possibly-stale prop, so ScheduledTaskDetail's toggle/next-run always
+  // reflect the latest save.
+  useEffect(() => {
+    if (!selectedScheduledTask) return;
+    const fresh = tasks.find((t) => t.trigger_id === selectedScheduledTask.trigger_id);
+    if (fresh && fresh !== selectedScheduledTask) onSelectScheduledTask(fresh);
+    if (!fresh) onSelectScheduledTask(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks]);
 
   const removeRun = (runId: string) => {
     if (!window.confirm("Delete this run record?")) return;
     deleteWorkflowRun(runId).then(refresh);
   };
+
+  if (runTab === "scheduled" && selectedScheduledTask) {
+    return (
+      <ScheduledTaskDetail
+        task={selectedScheduledTask}
+        onEdit={() => onEditScheduledTask(selectedScheduledTask)}
+        onDeleted={() => {
+          onSelectScheduledTask(null);
+          onScheduledTasksChanged();
+        }}
+        onChanged={onScheduledTasksChanged}
+      />
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -173,159 +224,90 @@ export function RunPanel({ runTab, onRunWorkflow, refreshKey }: RunPanelProps) {
       )}
 
       {runTab === "scheduled" && (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col">
-            {tasks.length === 0 && <div className="py-2 text-sm text-[var(--muted)]">No scheduled tasks yet.</div>}
-            {tasks.map((task) => (
-              <div key={task.trigger_id} className="flex items-center justify-between gap-3 border-b border-[var(--border)] py-3">
-                <div className="flex min-w-0 items-start gap-2">
-                  <CalendarIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--muted)]" />
-                  <div className="min-w-0">
-                    <div className="font-medium">{task.name}</div>
-                    <div className="text-sm text-[var(--muted)]">{describeSchedule(task.schedule)}</div>
-                    <div className="text-sm text-[var(--muted)]">
-                      {task.workflow_name ? `Runs workflow: ${task.workflow_name}` : task.prompt}
-                    </div>
+        <div className="mx-auto max-w-5xl">
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
+                Scheduled tasks
+              </h1>
+              <p className="mt-1 text-sm text-[var(--muted)]">Run tasks on a schedule or whenever you need them.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label="Search"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)]"
+              >
+                <SearchIcon className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-1 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--muted)]"
+              >
+                Sort by <span className="font-medium text-[var(--fg)]">Next run</span> <ChevronDownIcon className="h-3.5 w-3.5" />
+              </button>
+              <div className="relative" ref={newTaskMenuRef}>
+                <button
+                  type="button"
+                  className="flex items-center gap-1 rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-fg)]"
+                  onClick={() => setNewTaskMenuOpen((v) => !v)}
+                >
+                  New task <ChevronDownIcon className="h-3.5 w-3.5" />
+                </button>
+                {newTaskMenuOpen && (
+                  <div className="absolute right-0 top-full z-10 mt-1 min-w-44 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] py-1 shadow-[var(--shadow)]">
+                    <button
+                      type="button"
+                      className="flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
+                      onClick={() => {
+                        setNewTaskMenuOpen(false);
+                        onEditScheduledTask(null);
+                      }}
+                    >
+                      Set up manually
+                    </button>
+                    <button
+                      type="button"
+                      disabled
+                      title="Not available yet"
+                      className="flex w-full items-center px-3 py-1.5 text-left text-sm text-[var(--muted)] opacity-60"
+                    >
+                      Create with coscribe
+                    </button>
                   </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {tasks.length === 0 && <div className="text-sm text-[var(--muted)]">No scheduled tasks yet.</div>}
+            {tasks.map((task) => (
+              <div
+                key={task.trigger_id}
+                className="group cursor-pointer rounded-lg border border-[var(--border)] p-4 hover:border-[var(--muted)]"
+                onClick={() => onSelectScheduledTask(task)}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-medium">{task.name}</div>
+                  <TaskCardMenu task={task} onEdit={() => onEditScheduledTask(task)} onChanged={onScheduledTasksChanged} />
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  {task.next_run_at && (
-                    <span className="text-sm text-[var(--muted)]">
-                      Next: {new Date(task.next_run_at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-                    </span>
-                  )}
-                  <ToggleSwitch on={task.enabled} onClick={() => toggleTask(task)} />
-                  <button type="button" className="text-[var(--muted)] hover:text-[var(--danger)]" onClick={() => removeTask(task)}>
-                    &times;
-                  </button>
+                <p className="mt-1 line-clamp-2 text-sm text-[var(--muted)]">
+                  {task.workflow_name ? `Runs workflow: ${task.workflow_name}` : task.prompt}
+                </p>
+                <div className="mt-3">
+                  <span className="inline-block rounded-md bg-green-500/15 px-2 py-1 text-xs font-medium text-green-700 dark:text-green-400">
+                    {describeSchedule(task.schedule)}
+                  </span>
                 </div>
               </div>
             ))}
           </div>
 
-          {!showTaskForm ? (
-            <button
-              type="button"
-              className="flex items-center gap-1.5 self-start text-sm font-medium text-[var(--accent)]"
-              onClick={() => setShowTaskForm(true)}
-            >
-              <PlusIcon className="h-3.5 w-3.5" /> New scheduled task
-            </button>
-          ) : (
-            <div className="flex flex-col gap-2 rounded-lg bg-[var(--card-bg)] p-4">
-              <input
-                className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-                placeholder="Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <div className="flex gap-2">
-                <select
-                  className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm"
-                  value={kind}
-                  onChange={(e) => setKind(e.target.value as ScheduleRule["kind"])}
-                >
-                  <option value="once">Once</option>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-                {kind === "once" ? (
-                  <input
-                    type="datetime-local"
-                    className="flex-1 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-                    value={onceAt}
-                    onChange={(e) => setOnceAt(e.target.value)}
-                  />
-                ) : (
-                  <input
-                    type="time"
-                    className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-                    value={time}
-                    onChange={(e) => setTime(e.target.value)}
-                  />
-                )}
-                {kind === "weekly" && (
-                  <select
-                    className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm"
-                    value={weekday}
-                    onChange={(e) => setWeekday(Number(e.target.value))}
-                  >
-                    {WEEKDAYS.map((label, i) => (
-                      <option key={label} value={i}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {kind === "monthly" && (
-                  <input
-                    type="number"
-                    min={1}
-                    max={31}
-                    className="w-16 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-                    value={dayOfMonth}
-                    onChange={(e) => setDayOfMonth(Number(e.target.value))}
-                  />
-                )}
-              </div>
-              <div className="flex gap-1 border-b border-[var(--border)]">
-                {(["prompt", "workflow"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    className={`px-3 py-1.5 text-sm ${actionType === tab ? "border-b-2 border-[var(--accent)] font-medium" : "text-[var(--muted)]"}`}
-                    onClick={() => setActionType(tab)}
-                  >
-                    {tab === "prompt" ? "Freeform instruction" : "Saved workflow"}
-                  </button>
-                ))}
-              </div>
-              {actionType === "prompt" ? (
-                <textarea
-                  className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-                  placeholder="What should it do each time?"
-                  rows={3}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                />
-              ) : (
-                <select
-                  className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm"
-                  value={workflowName}
-                  onChange={(e) => setWorkflowName(e.target.value)}
-                >
-                  <option value="">Select a workflow...</option>
-                  {workflows.map((wf) => (
-                    <option key={wf.name} value={wf.name}>
-                      {wf.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <div className="flex items-center gap-3">
-                <button type="button" className="self-start rounded-md bg-[var(--accent)] px-3 py-1 text-sm font-medium text-[var(--accent-fg)]" onClick={submitTask}>
-                  Create
-                </button>
-                <button
-                  type="button"
-                  className="self-start text-sm text-[var(--muted)]"
-                  onClick={() => {
-                    setShowTaskForm(false);
-                    resetForm();
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-          {status && <span className={`text-sm ${status.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>{status.text}</span>}
-
           {/* "History" folded into "Scheduled" -- see NavRail.tsx's own
            * RunTab comment; both are "things that ran without you typing
            * a message right now." */}
-          <div className="mt-2 border-t border-[var(--border)] pt-4 text-sm font-medium uppercase tracking-wide text-[var(--muted)]">
+          <div className="mt-8 border-t border-[var(--border)] pt-4 text-sm font-medium uppercase tracking-wide text-[var(--muted)]">
             Recent runs
           </div>
           {runs.length === 0 && <div className="py-2 text-sm text-[var(--muted)]">No runs yet.</div>}
