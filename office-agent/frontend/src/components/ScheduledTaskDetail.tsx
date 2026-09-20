@@ -13,9 +13,9 @@ const APPROVAL_LABEL: Record<ScheduledTask["approval_mode"], string> = {
 };
 
 const APPROVAL_DESCRIPTION: Record<ScheduledTask["approval_mode"], string> = {
-  manual: "Claude pauses and waits for your approval before any action that needs it.",
-  auto: "Claude runs on its own and uses connectors without pausing for approval.",
-  skip: "Claude never pauses for approval, even for actions that would otherwise need a second look.",
+  manual: "coscribe pauses and waits for your approval before any action that needs it.",
+  auto: "coscribe runs on its own and uses connectors without pausing for approval.",
+  skip: "coscribe never pauses for approval, even for actions that would otherwise need a second look.",
 };
 
 function formatNextRun(nextRunAt: string | null): string {

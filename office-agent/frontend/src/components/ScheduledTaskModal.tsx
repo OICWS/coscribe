@@ -19,32 +19,32 @@ const APPROVAL_OPTIONS: { value: ApprovalMode; label: string }[] = [
   { value: "skip", label: "Never ask" },
 ];
 
-// Copy matches docs/ui-references/sheduled-edit-tasks.png's info banner
-// exactly for "auto" (the only mode the reference screenshot shows); the
-// other two are this app's own wording -- no reference screenshot covers
-// them, see the PR description for the open question this leaves.
-const APPROVAL_BANNER: Record<ApprovalMode, string> = {
-  manual: "For this task, Claude will pause and wait for your approval before any action that needs it.",
-  auto: "For this task, Claude will work and use connectors without pausing for approval.",
-  skip: "For this task, Claude will never pause for approval, even for actions that would otherwise need a second look. Use with caution.",
+// Display order matches the reference screenshot (Sunday first, JS
+// Date.getDay() order); `value` is ScheduleRule.weekday's own convention
+// (0=Monday..6=Sunday, see tools/scheduled_tasks.py) -- the two orders
+// differ, so this table (not a formula) is what bridges them.
+const WEEKDAY_OPTIONS: { label: string; value: number }[] = [
+  { label: "Sunday", value: 6 },
+  { label: "Monday", value: 0 },
+  { label: "Tuesday", value: 1 },
+  { label: "Wednesday", value: 2 },
+  { label: "Thursday", value: 3 },
+  { label: "Friday", value: 4 },
+  { label: "Saturday", value: 5 },
+];
+
+// No banner for "manual" -- it's the safe default, and no reference
+// screenshot shows one for it (only "auto" does). "coscribe," not
+// "Claude" -- this app's own product name, not a verbatim copy of the
+// reference's own wording (that screenshot is Claude Cowork's own UI).
+const APPROVAL_BANNER: Partial<Record<ApprovalMode, string>> = {
+  auto: "For this task, coscribe will work and use connectors without pausing for approval.",
+  skip: "For this task, coscribe will never pause for approval, even for actions that would otherwise need a second look. Use with caution.",
 };
 
 function todayIso(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
-/** JS Date.getDay() is 0=Sunday..6=Saturday; ScheduleRule.weekday is
- * 0=Monday..6=Sunday (see tools/scheduled_tasks.py) -- this converts. */
-function isoWeekday(date: Date): number {
-  return (date.getDay() + 6) % 7;
-}
-
-function dateForWeekday(weekday: number): string {
-  const today = new Date();
-  const diff = (weekday - isoWeekday(today) + 7) % 7;
-  today.setDate(today.getDate() + diff);
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
 function dateForDayOfMonth(day: number): string {
@@ -54,16 +54,17 @@ function dateForDayOfMonth(day: number): string {
   return `${candidate.getFullYear()}-${String(candidate.getMonth() + 1).padStart(2, "0")}-${String(candidate.getDate()).padStart(2, "0")}`;
 }
 
-/** Best-effort reconstruction of a calendar date to show in the "starts
- * on" picker when editing -- ScheduleRule itself only stores a bare
- * weekday/day_of_month number, not a specific date, so this picks the
- * nearest real date matching it (or start_date, if the trigger has one)
- * for display purposes only; submitting the form re-derives
- * weekday/day_of_month/start_date from whatever date ends up picked. */
+/** Best-effort reconstruction of the "starts on" date to show when
+ * editing a monthly task -- the only kind that still uses a date picker
+ * (weekly uses a plain weekday dropdown instead, see WEEKDAY_OPTIONS).
+ * ScheduleRule itself only stores a bare day_of_month number, not a
+ * specific date, so this picks the nearest real date matching it (or
+ * start_date, if the trigger has one) for display purposes only;
+ * submitting the form re-derives day_of_month/start_date from whatever
+ * date ends up picked. */
 function initialDateFor(task: ScheduledTask | null): string {
   if (!task) return todayIso();
   if (task.schedule.start_date) return task.schedule.start_date;
-  if (task.schedule.kind === "weekly") return dateForWeekday(task.schedule.weekday ?? 0);
   if (task.schedule.kind === "monthly") return dateForDayOfMonth(task.schedule.day_of_month ?? 1);
   return todayIso();
 }
@@ -98,6 +99,7 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
   const [kind, setKind] = useState<ScheduleKind>(task?.schedule.kind === "once" ? "manual" : (task?.schedule.kind ?? "manual"));
   const [date, setDate] = useState(initialDateFor(task));
   const [time, setTime] = useState(task?.schedule.at && task.schedule.kind !== "manual" ? task.schedule.at : "09:00");
+  const [weekday, setWeekday] = useState(task?.schedule.weekday ?? 0);
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>(task?.approval_mode ?? "manual");
   const [providers, setProviders] = useState<[string, ProviderInfo][]>([]);
   const [saving, setSaving] = useState(false);
@@ -126,11 +128,10 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
     const payload = {
       name: trimmedName,
       kind,
-      at: kind === "manual" ? "" : time,
+      at: kind === "manual" ? "" : kind === "hourly" ? "00:00" : time,
       prompt: trimmedInstructions,
-      ...(kind === "weekly" ? { weekday: isoWeekday(new Date(`${date}T00:00:00`)) } : {}),
-      ...(kind === "monthly" ? { day_of_month: Number(date.split("-")[2]) } : {}),
-      ...(kind !== "manual" ? { start_date: date } : {}),
+      ...(kind === "weekly" ? { weekday } : {}),
+      ...(kind === "monthly" ? { day_of_month: Number(date.split("-")[2]), start_date: date } : {}),
       ...(model ? { model } : {}),
       approval_mode: approvalMode,
     };
@@ -149,7 +150,7 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="flex max-h-[90vh] w-[min(560px,100vw-2rem)] flex-col rounded-[16px] border border-[var(--border)] bg-[var(--panel-bg)] p-6 shadow-[var(--shadow)]"
+        className="flex max-h-[90vh] w-[min(720px,100vw-2rem)] flex-col rounded-[16px] border border-[var(--border)] bg-[var(--panel-bg)] p-6 shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -199,6 +200,7 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
                   <FolderIcon className="h-3.5 w-3.5" /> Work in a project
                 </button>
                 <select
+                  aria-label="Model"
                   className="bg-transparent text-[var(--muted)] outline-none"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
@@ -217,9 +219,14 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
             </div>
           </div>
 
+          {/* w-24 on both labels is load-bearing, not decorative -- it's
+           * what keeps the Frequency/Permissions dropdowns' left edges
+           * aligned despite the two labels being different lengths,
+           * matching sheduled-edit-tasks.png's layout. */}
           <div className="flex flex-wrap items-center gap-2">
-            <label className="text-sm font-medium">Frequency</label>
+            <label className="w-24 shrink-0 text-sm font-medium">Frequency</label>
             <select
+              aria-label="Frequency"
               className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm"
               value={kind}
               onChange={(e) => setKind(e.target.value as ScheduleKind)}
@@ -230,7 +237,39 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
                 </option>
               ))}
             </select>
-            {kind !== "manual" && (
+            {/* manual/hourly show no further controls at all -- hourly
+             * always fires on the hour (:00), not user-configurable from
+             * here (the backend itself supports an arbitrary minute, see
+             * tools/scheduled_tasks.py's compute_next_run_at, but the
+             * reference screenshots never expose that). daily/weekdays
+             * add just a time; weekly adds a time + a weekday dropdown
+             * (not a date -- ScheduleRule.weekday is a bare 0-6, no
+             * specific calendar date involved); monthly alone gets the
+             * "starts on" date+time pair, since a specific date is the
+             * only way to name both a day-of-month and a floor. */}
+            {(kind === "daily" || kind === "weekdays" || kind === "weekly") && (
+              <input
+                type="time"
+                className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm outline-none"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+              />
+            )}
+            {kind === "weekly" && (
+              <select
+                aria-label="Weekday"
+                className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm"
+                value={weekday}
+                onChange={(e) => setWeekday(Number(e.target.value))}
+              >
+                {WEEKDAY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            )}
+            {kind === "monthly" && (
               <>
                 <span className="text-sm text-[var(--muted)]">starts on</span>
                 <input
@@ -250,8 +289,9 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <label className="text-sm font-medium">Permissions</label>
+            <label className="w-24 shrink-0 text-sm font-medium">Permissions</label>
             <select
+              aria-label="Permissions"
               className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm"
               value={approvalMode}
               onChange={(e) => setApprovalMode(e.target.value as ApprovalMode)}
@@ -264,9 +304,11 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
             </select>
           </div>
 
-          <div className="rounded-md border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)]">
-            {APPROVAL_BANNER[approvalMode]}
-          </div>
+          {APPROVAL_BANNER[approvalMode] && (
+            <div className="rounded-md border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)]">
+              {APPROVAL_BANNER[approvalMode]}
+            </div>
+          )}
 
           {error && <div className="text-sm text-[var(--danger)]">{error}</div>}
         </div>
