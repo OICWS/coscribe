@@ -4,12 +4,11 @@ import {
   deleteThread,
   deleteWorkflowRun,
   getScheduledTasks,
-  getThreads,
   renameThread,
   runScheduledTaskNow,
 } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
-import { goToThread } from "../lib/nav";
+import { goToThread, startNewThread } from "../lib/nav";
 import { scheduleKindLabel } from "../lib/scheduleLabels";
 import type { ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
@@ -31,10 +30,6 @@ export type NavMode = "create" | "run";
 // you typing a message right now," and the flat New/Scheduled nav shape
 // (see NavRail's own docstring below) has no third slot for it.
 export type RunTab = "workflows" | "scheduled";
-
-function startNewSession() {
-  window.location.href = window.location.pathname;
-}
 
 interface ThreadRowProps {
   thread: ThreadSummary;
@@ -174,9 +169,7 @@ function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRo
   const runNow = async () => {
     setMenuOpen(false);
     await runScheduledTaskNow(task.trigger_id);
-    // Land on the fired trigger's own conversation -- see goToThread's
-    // own docstring for why "just show a status and make the user go
-    // find it in chat" isn't good enough here.
+    onChanged();
     goToThread(task.thread_id);
   };
 
@@ -254,8 +247,15 @@ function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRo
   );
 }
 
+export const NAV_RAIL_EXPANDED_WIDTH = 272;
+
 interface NavRailProps {
   threadId: string;
+  pinned: boolean;
+  onPinnedChange: (pinned: boolean) => void;
+  threads: ThreadSummary[];
+  onThreadsChanged: () => void;
+  onThreadRenamed: (threadId: string, title: string) => void;
   mode: NavMode;
   onModeChange: (mode: NavMode) => void;
   // Only the setter is needed now -- the sidebar always shows the
@@ -298,6 +298,11 @@ interface NavRailProps {
  * row as the sidebar toggle it's paired with. */
 export function NavRail({
   threadId,
+  pinned,
+  onPinnedChange,
+  threads,
+  onThreadsChanged,
+  onThreadRenamed,
   mode,
   onModeChange,
   onRunTabChange,
@@ -308,34 +313,29 @@ export function NavRail({
   onOpenScheduledTask,
   onEditScheduledTask,
 }: NavRailProps) {
-  // Not persisted (no localStorage) -- explicit call: pin is a per-page-
-  // load convenience, not a remembered setting.
-  const [pinned, setPinned] = useState(false);
   const [hovering, setHovering] = useState(false);
   const expanded = pinned || hovering;
-  const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
   const [runDeleteTarget, setRunDeleteTarget] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!expanded) return;
-    getThreads().then(setThreads);
+    if (expanded) onThreadsChanged();
+  }, [expanded, onThreadsChanged]);
+
+  useEffect(() => {
     getScheduledTasks().then(setScheduledTasks);
   }, [expanded, scheduledTasksVersion]);
 
   const currentRun = workflowRuns.find((run) => run.status === "running");
   const recentRuns = [...workflowRuns].sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 8);
 
-  const renameThreadLocally = (id: string, title: string) => {
-    setThreads((prev) => prev.map((t) => (t.thread_id === id ? { ...t, preview: title } : t)));
-  };
 
   const confirmDelete = () => {
     if (!deleteTarget) return;
     const id = deleteTarget.thread_id;
     setDeleteTarget(null);
-    deleteThread(id).then(() => getThreads().then(setThreads));
+    deleteThread(id).then(onThreadsChanged);
   };
 
   const confirmRemoveRun = () => {
@@ -351,7 +351,7 @@ export function NavRail({
         className={`absolute left-0 top-0 z-30 flex flex-col transition-[width] duration-150 ease-out ${
           expanded ? "h-full border-r border-[var(--border)] bg-[var(--panel-bg)]" : "h-12"
         }`}
-        style={{ width: expanded ? 272 : 48 }}
+        style={{ width: expanded ? NAV_RAIL_EXPANDED_WIDTH : 48 }}
         onMouseEnter={() => setHovering(true)}
         onMouseLeave={() => setHovering(false)}
       >
@@ -367,7 +367,7 @@ export function NavRail({
             className={`flex h-9 w-9 items-center justify-center rounded-md hover:bg-[var(--card-bg)] ${
               pinned ? "text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
             }`}
-            onClick={() => setPinned((v) => !v)}
+            onClick={() => onPinnedChange(!pinned)}
           >
             <SidebarIcon className="h-[18px] w-[18px]" />
           </button>
@@ -421,7 +421,7 @@ export function NavRail({
                 <button
                   type="button"
                   className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)]"
-                  onClick={startNewSession}
+                  onClick={startNewThread}
                 >
                   {/* Solid black "add" treatment (see index.css's palette
                    * comment) -- a filled --primary badge stays visible on
@@ -439,7 +439,7 @@ export function NavRail({
                     key={thread.thread_id}
                     thread={thread}
                     isCurrent={thread.thread_id === threadId}
-                    onRenamed={(title) => renameThreadLocally(thread.thread_id, title)}
+                    onRenamed={(title) => onThreadRenamed(thread.thread_id, title)}
                     onDeleteRequest={() => setDeleteTarget(thread)}
                   />
                 ))}

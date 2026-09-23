@@ -45,12 +45,12 @@ const MAX_BACKOFF_MS = 15000;
  * off the socket) lands after the optimistic local bubble was added, it
  * wholesale-replaces items and wipes that bubble back out, while the
  * turn itself keeps running server-side with no visible trace of what
- * was asked. Caught live: EmptyState's suggestion cards are clickable
- * the instant the page paints, which routinely beats a real "history"
- * round trip even on localhost. Fixed by queueing here and flushing only
- * once this connection's own first "history" event has actually been
- * seen -- not on `open`, and reset on every reconnect, since a fresh
- * reconnect gets its own fresh state+history pair to wait for. */
+ * was asked. Caught live: a send fired the instant the page painted
+ * routinely beat a real "history" round trip even on localhost. Fixed by
+ * queueing here and flushing only once this connection's own first
+ * "history" event has actually been seen -- not on `open`, and reset on
+ * every reconnect, since a fresh reconnect gets its own fresh
+ * state+history pair to wait for. */
 export function connect(
   threadId: string,
   onEvent: (event: WsServerEvent) => void,
@@ -75,6 +75,9 @@ export function connect(
     });
 
     ws.addEventListener("message", (ev) => {
+      // Frames already buffered on a socket being closed for a thread
+      // switch belong to the old thread.
+      if (deliberatelyClosed) return;
       let parsed: WsServerEvent;
       try {
         parsed = JSON.parse(ev.data);

@@ -9,6 +9,10 @@
   no longer polls anything, it only ever needs to *display* a failure,
   pushed via the preload bridge's onSidecarStatus() (mirrors the Tauri
   version's "sidecar-status" event listener).
+
+  Colors match office-agent/frontend/src/index.css's tokens, and the web
+  app shows an identical splash (StartupSplash.tsx) until its own data
+  has loaded, so the handoff between the two is seamless.
 -->
 <html>
   <head>
@@ -17,17 +21,18 @@
     <style>
       :root {
         color-scheme: light dark;
-        --bg: #f3f2f2;
+        --bg: #fcfcfb;
         --fg: #201e1d;
         --muted: #7d7979;
-        --accent: #ec3013;
+        --accent: #de6f90;
         --danger: #dd2b0f;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg: #201e1d;
-          --fg: #f3f2f2;
-          --muted: #a39f9e;
+          --bg: #232120;
+          --fg: #f7f5f3;
+          --muted: #a19d9b;
+          --accent: #ef92ab;
           --danger: #ff6b52;
         }
       }

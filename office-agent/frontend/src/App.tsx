@@ -1,22 +1,23 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ChatLog } from "./components/ChatLog";
 import { Composer, type ComposerSendPayload } from "./components/Composer";
 import { ContextRing } from "./components/ContextRing";
 import { ModePill } from "./components/ModePill";
 import { ModelPicker } from "./components/ModelPicker";
 import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
-import { NavRail, type NavMode, type RunTab } from "./components/NavRail";
+import { NAV_RAIL_EXPANDED_WIDTH, NavRail, type NavMode, type RunTab } from "./components/NavRail";
 import type { PptxShapeCapture } from "./components/PptxShapeOverlay";
 import { RunPanel } from "./components/RunPanel";
 import { ScheduledTaskModal } from "./components/ScheduledTaskModal";
 import { DirBrowserModal } from "./components/settings/DirBrowserModal";
 import { SettingsModal } from "./components/settings/SettingsModal";
+import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { SubAgentsPanel } from "./components/SubAgentsPanel";
 import { BrowserIcon, HelpIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
 import { getCommands, getScheduledTasks, getThreads, getWorkflowRuns } from "./lib/rest";
-import { goToThread, SCHEDULED_THREAD_PREFIX } from "./lib/nav";
+import { goToThread, SCHEDULED_THREAD_PREFIX, THREAD_CHANGE_EVENT } from "./lib/nav";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState } from "./state/reducer";
 import type { CommandInfo, ThreadSummary } from "./types/session";
@@ -25,7 +26,7 @@ import type { ScheduledTask } from "./types/settings";
 function App() {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const socketRef = useRef<AgentSocket | null>(null);
-  const threadId = useRef(resolveThreadId()).current;
+  const [threadId, setThreadId] = useState(resolveThreadId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
@@ -46,6 +47,11 @@ function App() {
   // composer's own text (not an image) -- see onCreateSkill below.
   const [pendingComposerText, setPendingComposerText] = useState<string | null>(null);
   const [navMode, setNavMode] = useState<NavMode>("create");
+  // Not persisted -- a per-page-load convenience, not a remembered
+  // setting. Pinned, the rail takes layout space instead of overlaying
+  // the header (see the column's paddingLeft below); hover-expanded it
+  // still floats over the content.
+  const [navPinned, setNavPinned] = useState(false);
   // Defaults to "scheduled", not "workflows" -- clicking the nav rail's
   // clock icon (see NavRail.tsx) must land directly on the existing
   // Scheduled Tasks list, not the unrelated saved-Workflow-definitions tab.
@@ -70,7 +76,21 @@ function App() {
   const bumpScheduledTasks = () => setScheduledTasksVersion((v) => v + 1);
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
-  const [threads, setThreads] = useState<ThreadSummary[]>([]);
+  const [threads, setThreads] = useState<ThreadSummary[] | null>(null);
+  const refreshThreads = useCallback(() => {
+    getThreads()
+      .then(setThreads)
+      // An empty list rather than null on failure, so a bad fetch can't
+      // leave the startup splash below up forever.
+      .catch(() => setThreads((prev) => prev ?? []));
+  }, []);
+  const renameThreadLocally = useCallback((id: string, title: string) => {
+    setThreads((prev) => prev?.map((t) => (t.thread_id === id ? { ...t, preview: title } : t)) ?? prev);
+  }, []);
+  // Latches true once, so the startup splash below never comes back on a
+  // later thread switch -- that case only swaps the chat area.
+  const [bootstrapped, setBootstrapped] = useState(false);
+  if (!bootstrapped && state.historyReceived && threads !== null) setBootstrapped(true);
   // Actions queued by runOrQueueSend below while state.historyReceived is
   // still false -- see its own comment, and historyReceived's in
   // reducer.ts, for why a locally-echoed user bubble can't be dispatched
@@ -91,6 +111,26 @@ function App() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const threadIdRef = useRef(threadId);
+  threadIdRef.current = threadId;
+  useEffect(() => {
+    const syncFromUrl = () => {
+      const id = resolveThreadId();
+      setNavMode("create");
+      setSelectedScheduledTask(null);
+      if (id === threadIdRef.current) return;
+      pendingLocalSendsRef.current = [];
+      dispatch({ type: "local_switch_thread" });
+      setThreadId(id);
+    };
+    window.addEventListener(THREAD_CHANGE_EVENT, syncFromUrl);
+    window.addEventListener("popstate", syncFromUrl);
+    return () => {
+      window.removeEventListener(THREAD_CHANGE_EVENT, syncFromUrl);
+      window.removeEventListener("popstate", syncFromUrl);
+    };
   }, []);
 
   useEffect(() => {
@@ -140,10 +180,10 @@ function App() {
   // has no ThreadSummary/preview yet until its first turn completes, so
   // the header label below needs this to pick that up once it exists.
   useEffect(() => {
-    getThreads().then(setThreads);
-  }, [state.workflowEventTick]);
+    refreshThreads();
+  }, [state.workflowEventTick, refreshThreads]);
 
-  const sessionLabel = threads.find((t) => t.thread_id === threadId)?.preview || "New session";
+  const sessionLabel = threads?.find((t) => t.thread_id === threadId)?.preview || "New session";
 
   // True for a Scheduled Task's own dedicated conversation (thread_id
   // "scheduled-<trigger_id>", see tools/scheduled_tasks.py's
@@ -281,23 +321,21 @@ function App() {
     });
   };
 
-  /** EmptyState's suggestion chips -- same shape as onSend/onRunWorkflow
-   * above, just with no composer text to clear first (nothing was ever
-   * typed). Routing this through runOrQueueSend is what actually matters
-   * here: these cards are clickable the instant the page paints, well
-   * before this connection's own history round trip can complete. */
-  const onSuggestion = (prompt: string) => {
-    runOrQueueSend(() => {
-      dispatch({ type: "local_user_message", text: prompt, instant: false });
-      socketRef.current?.send({ type: "user_message", text: prompt });
-    });
-  };
+  if (!bootstrapped) return <StartupSplash />;
 
   return (
     <div className="relative flex h-full">
-      <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div
+        className="flex h-full min-w-0 flex-1 flex-col"
+        style={navPinned ? { paddingLeft: NAV_RAIL_EXPANDED_WIDTH } : undefined}
+      >
         <NavRail
           threadId={threadId}
+          pinned={navPinned}
+          onPinnedChange={setNavPinned}
+          threads={threads ?? []}
+          onThreadsChanged={refreshThreads}
+          onThreadRenamed={renameThreadLocally}
           mode={navMode}
           onModeChange={setNavMode}
           onRunTabChange={setRunTab}
@@ -316,7 +354,7 @@ function App() {
          * row below (ChatLog/Composer) had no such collision to avoid --
          * it just pushed their own mx-auto-centered content off-center
          * from the window's true center for no reason. */}
-        <div className="flex items-center gap-1 py-2.5 pl-12 pr-4">
+        <div className={`flex items-center gap-1 py-2.5 pr-4 ${navPinned ? "pl-4" : "pl-12"}`}>
           {/* Only in Chat mode -- a chat thread's own label/workspace
            * badge has no meaning while Run mode's Scheduled portal/
            * detail page is showing instead (a real, previously-confirmed
@@ -407,7 +445,7 @@ function App() {
               onAnswerQuestion={onAnswerQuestion}
               onEditMessage={state.turnInFlight ? undefined : onEditMessage}
               onRewindMessage={state.turnInFlight ? undefined : onRewindMessage}
-              onSuggestion={onSuggestion}
+              loading={!state.historyReceived}
               onPptxShapePicked={onPptxShapePicked}
               olderItems={state.olderItems}
               olderStatus={state.olderStatus}
