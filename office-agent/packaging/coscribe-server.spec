@@ -106,6 +106,9 @@ for pkg in (
     "websockets",
     "mammoth",
     "pdfplumber",
+    # Ships PDFium itself as a native library in pypdfium2_raw.
+    "pypdfium2",
+    "pypdfium2_raw",
     "docx",
     "markdownify",
     "reportlab",

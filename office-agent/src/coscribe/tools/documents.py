@@ -16,12 +16,11 @@ need, since each tool already knows its own format). Its output is real
 markdown -- a superset of the writers' subset (arbitrary heading depth,
 links, bold/italic) -- rather than an exact mirror of what the writers
 accept, so round-tripping a generated file through read_docx won't be
-byte-for-byte identical, just semantically equivalent. ``read_pdf`` uses
-``pdfplumber`` (built on ``pdfminer.six``) for the same reason -- better
-real-world text extraction than a lower-level PDF library, no hand-rolled
-layout logic.
+byte-for-byte identical, just semantically equivalent. ``read_pdf``/
+``search_pdf`` extract text with ``pypdfium2`` (Chrome's PDFium) -- see
+``_pdf_page_texts`` for why not ``pdfplumber``.
 
-``mammoth``/``pdfplumber``/``docx``/``markdownify``/``reportlab`` are all
+``mammoth``/``pypdfium2``/``docx``/``markdownify``/``reportlab`` are all
 imported lazily, inside each method that actually needs them, rather than
 at module level -- a real, measured startup-time cost (see
 runtime_lg/README.md's startup-time section): every one of these tools is
@@ -80,6 +79,7 @@ from __future__ import annotations
 
 import random
 import re
+import threading
 import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -139,6 +139,38 @@ class Block:
     ordinal: int = 1
     rows: list[list[str]] = field(default_factory=list)
     comment: str | None = None
+
+
+_PDFIUM_LOCK = threading.Lock()
+
+
+def _pdf_page_texts(
+    file_path: Path, start_page: int = 1, end_page: int = 0
+) -> list[tuple[int, str]]:
+    """(1-based page number, text) pairs, via pdfium rather than
+    pdfplumber: ~100x faster (650 pages in ~1.6s vs ~130s measured), and
+    pdfplumber's pure-Python parsing holds the GIL for that whole time,
+    stalling the web server's event loop along with it. PDFium itself is
+    not thread-safe, hence the lock -- tool calls can run concurrently."""
+    import pypdfium2 as pdfium
+
+    pages: list[tuple[int, str]] = []
+    with _PDFIUM_LOCK:
+        document = pdfium.PdfDocument(str(file_path))
+        try:
+            last = len(document) if end_page <= 0 else min(end_page, len(document))
+            for index in range(max(start_page, 1), last + 1):
+                page = document[index - 1]
+                textpage = page.get_textpage()
+                try:
+                    text = textpage.get_text_range()
+                finally:
+                    textpage.close()
+                    page.close()
+                pages.append((index, text.replace("\r\n", "\n")))
+        finally:
+            document.close()
+    return pages
 
 
 def _split_table_row(line: str) -> list[str] | None:
@@ -958,46 +990,52 @@ class DocumentToolkit:
         result.update(self._save_tracked_edit(file_path, document))
         return result
 
-    def read_pdf(self, path: str) -> str:
-        import pdfplumber
-
+    def read_pdf(self, path: str, start_page: int = 1, end_page: int = 0) -> str:
         file_path = self._check_readable(path)
         pages = []
-        with pdfplumber.open(str(file_path)) as pdf:
-            for index, page in enumerate(pdf.pages, start=1):
-                text = (page.extract_text() or "").strip()
-                pages.append(f"--- Page {index} ---\n{text}")
+        for index, text in _pdf_page_texts(file_path, start_page, end_page):
+            pages.append(f"--- Page {index} ---\n{text.strip()}")
         return "\n\n".join(pages)
 
     def search_pdf(
-        self, query: str, path: str = ".", pattern: str = "*.pdf"
+        self, query: str, path: str = ".", pattern: str = "*.pdf", regex: bool = False
     ) -> list[dict[str, object]]:
-        import pdfplumber
-
         base = self._scope.resolve(path)
         if not base.exists():
             raise ValueError(f"Path does not exist: {path}")
+        if regex:
+            try:
+                compiled = re.compile(query)
+            except re.error as exc:
+                raise ValueError(f"Invalid regular expression {query!r}: {exc}") from exc
+
+            def is_match(line: str) -> bool:
+                return compiled.search(line) is not None
+        else:
+
+            def is_match(line: str) -> bool:
+                return query in line
+
+        candidates = [base] if base.is_file() else sorted(base.rglob(pattern))
         matches: list[dict[str, object]] = []
-        for item in sorted(base.rglob(pattern)):
+        for item in candidates:
             if not item.is_file():
                 continue
             relative_parts = item.relative_to(self._scope.root).parts
             if any(part in DEFAULT_IGNORES for part in relative_parts):
                 continue
-            with pdfplumber.open(str(item)) as pdf:
-                for page_number, page in enumerate(pdf.pages, start=1):
-                    text = page.extract_text() or ""
-                    for line in text.splitlines():
-                        if query in line:
-                            matches.append(
-                                {
-                                    "path": self._scope.relative(item),
-                                    "page": page_number,
-                                    "text": line,
-                                }
-                            )
-                        if len(matches) >= 100:
-                            return matches
+            for page_number, text in _pdf_page_texts(item):
+                for line in text.splitlines():
+                    if is_match(line):
+                        matches.append(
+                            {
+                                "path": self._scope.relative(item),
+                                "page": page_number,
+                                "text": line,
+                            }
+                        )
+                    if len(matches) >= 100:
+                        return matches
         return matches
 
     def write_pdf(self, path: str, content: str, overwrite: bool = True) -> dict[str, object]:
@@ -1342,13 +1380,18 @@ def build_document_tools(
         """
         return toolkit.reject_docx_tracked_changes(path=path, author=author)
 
-    def read_pdf(path: str) -> str:
+    def read_pdf(path: str, start_page: int = 1, end_page: int = 0) -> str:
         """Extract the text contents of a PDF file under the workspace, page by page.
+
+        For a long PDF, find the relevant pages with `search_pdf` first and
+        read only that range, rather than the whole document.
 
         Args:
             path: file to read, relative to the workspace root
+            start_page: first page to read (1-based)
+            end_page: last page to read, inclusive; 0 means through the last page
         """
-        return toolkit.read_pdf(path=path)
+        return toolkit.read_pdf(path=path, start_page=start_page, end_page=end_page)
 
     def write_pdf(path: str, content: str, overwrite: bool = True) -> dict[str, object]:
         """Create a PDF file under the workspace from structured text.
@@ -1368,19 +1411,21 @@ def build_document_tools(
         return toolkit.write_pdf(path=path, content=content, overwrite=overwrite)
 
     def search_pdf(
-        query: str, path: str = ".", pattern: str = "*.pdf"
+        query: str, path: str = ".", pattern: str = "*.pdf", regex: bool = False
     ) -> list[dict[str, object]]:
-        """Search for a literal substring across PDF files under the workspace.
+        """Search PDF files under the workspace line by line, returning each
+        matching line with its page number (at most 100 matches).
 
         Finds matches without needing to read_pdf an entire (possibly large)
         document into context first.
 
         Args:
-            query: substring to search for
-            path: directory to search under, relative to the workspace root
-            pattern: glob pattern to filter PDF files by, e.g. "report*.pdf"
+            query: substring to search for, or a Python regular expression when regex is true
+            path: a PDF file, or a directory to search under, relative to the workspace root
+            pattern: glob pattern to filter PDF files by when path is a directory
+            regex: treat query as a regular expression instead of a literal substring
         """
-        return toolkit.search_pdf(query=query, path=path, pattern=pattern)
+        return toolkit.search_pdf(query=query, path=path, pattern=pattern, regex=regex)
 
     return [
         tool_metadata(read_docx, risk_category="READ", category="documents"),

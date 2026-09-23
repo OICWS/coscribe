@@ -66,6 +66,7 @@ from langchain_core.messages import (
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.types import Command
 
@@ -163,6 +164,66 @@ def _format_reply(text: str) -> str:
 
 def _now_iso_lg() -> str:
     return datetime.now(UTC).isoformat()
+
+
+_ORPHANED_TOOL_CALL_NOTE = "Stopped before this tool finished -- it produced no result."
+
+
+async def _close_orphaned_tool_calls(agent: Any, config: dict[str, Any]) -> bool:
+    """Give every tool call that never got a ToolMessage (a turn cancelled
+    mid-tool: Stop, a dropped socket, a killed process) a placeholder one,
+    and end the graph there. Every OpenAI-compatible provider rejects the
+    whole history with a 400 otherwise, and a leftover pending "tools"
+    node would re-run the cancelled call on the next resume.
+
+    Skipped while an approval/question interrupt is pending: that tool
+    call is legitimately unanswered and gets resumed, not patched.
+    Rewrites the whole message list rather than appending, since a thread
+    already corrupted by this bug has a newer HumanMessage after the
+    orphan and the placeholder has to sit directly after its AIMessage.
+
+    Also runs when leftover tasks exist but nothing needs a placeholder:
+    aget_state folds in the pending writes of a tool that finished inside
+    a superstep that never committed, but a fresh input restarts from the
+    last *committed* checkpoint and drops those writes -- so the model
+    would still see the orphan unless they're committed here."""
+    state = await agent.aget_state(config)
+    if not state.values or any(task.interrupts for task in state.tasks):
+        return False
+    messages = list(state.values.get("messages", []))
+    answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
+    rebuilt: list[Any] = []
+    patched = False
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        rebuilt.append(message)
+        index += 1
+        if not isinstance(message, AIMessage) or not message.tool_calls:
+            continue
+        # Placeholders go after any ToolMessages that did arrive (a
+        # partially finished parallel batch), still before whatever
+        # non-tool message follows.
+        while index < len(messages) and isinstance(messages[index], ToolMessage):
+            rebuilt.append(messages[index])
+            index += 1
+        for call in message.tool_calls:
+            if call["id"] not in answered:
+                patched = True
+                rebuilt.append(
+                    ToolMessage(
+                        content=_ORPHANED_TOOL_CALL_NOTE,
+                        tool_call_id=call["id"],
+                        name=call["name"],
+                    )
+                )
+    if not patched and not state.tasks:
+        return False
+    await agent.aupdate_state(
+        config, {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *rebuilt]}, as_node="tools"
+    )
+    await agent.aupdate_state(config, None, as_node=END)
+    return True
 
 
 def _build_instructions(agent_instructions: str | None, *, defer_tools: bool) -> str:
@@ -1300,6 +1361,8 @@ class ChatSessionLG:
         updating once the whole turn is over."""
         agent = agent if agent is not None else self.lg_agent
         config = config if config is not None else self.config
+        if not isinstance(turn_input, Command):
+            await _close_orphaned_tool_calls(agent, config)
         text_parts: list[str] = []
         accumulated: AIMessageChunk | None = None
         segment: AIMessageChunk | None = None
@@ -1931,6 +1994,11 @@ class ChatSessionLG:
         handle_user_message calls would."""
         async with self._turn_lock:
             self._current_turn_task = asyncio.current_task()
+            # A turn hard-cancelled mid-tool also leaves state.next set, but
+            # with no interrupt to redeliver -- resuming it would silently
+            # re-run that tool (possibly minutes of work the user just
+            # stopped), so close it off instead.
+            await _close_orphaned_tool_calls(self.lg_agent, self.config)
             state = await self.lg_agent.aget_state(self.config)
             if not state.next:
                 return
@@ -2108,6 +2176,7 @@ class ChatSessionLG:
         path _handle_user_message_locked already uses for a freshly typed
         message -- an edit is not a special kind of turn, just one that
         starts from a rewound history."""
+        await _close_orphaned_tool_calls(self.lg_agent, self.config)
         state = await self.lg_agent.aget_state(self.config)
         messages = list(state.values.get("messages", [])) if state.values else []
         if state.next:
@@ -2120,6 +2189,13 @@ class ChatSessionLG:
         if index < 0 or index >= len(human_positions):
             await websocket.send_json(
                 {"type": "error", "message": f"No such message to edit (index {index})."}
+            )
+            return
+        # Editing an older message would silently discard every turn after
+        # it, including work the agent already did on files.
+        if index != len(human_positions) - 1:
+            await websocket.send_json(
+                {"type": "error", "message": "Only your most recent message can be edited."}
             )
             return
 
@@ -2150,6 +2226,7 @@ class ChatSessionLG:
         mechanism and guards as _handle_edit_message_locked (pending-
         approval check, index range check), just without the rerun step
         at the end."""
+        await _close_orphaned_tool_calls(self.lg_agent, self.config)
         state = await self.lg_agent.aget_state(self.config)
         messages = list(state.values.get("messages", [])) if state.values else []
         if state.next:
