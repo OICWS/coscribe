@@ -135,7 +135,6 @@ from ..tools.subagent_tasks import (
     resume_subagent_task,
 )
 from ..tools.tasks import TaskToolkit
-from ..tools.workflows import WorkflowRunStore, WorkflowStore, reconcile_interrupted_runs
 from .background_events import BackgroundEvent, BackgroundEventBus
 from .browser_detect import find_windows_browser
 from .browser_panel import BrowserPanelError, BrowserPanelSession
@@ -906,8 +905,7 @@ class ScheduledTaskCreate(BaseModel):
     name: str
     kind: str
     at: str
-    prompt: str | None = None
-    workflow_name: str | None = None
+    prompt: str
     weekday: int | None = None
     day_of_month: int | None = None
     start_date: str | None = None
@@ -963,24 +961,9 @@ FIXED_COMMANDS = [
     {"name": "clear", "description": "Wipe this thread's conversation history and start fresh"},
     {"name": "stop", "description": "Stop the current in-progress run"},
     {"name": "init", "description": "Explore the workspace and write OVERVIEW.md"},
-    {"name": "startworkflow", "description": "Start recording a chain workflow"},
-    {
-        "name": "endworkflow",
-        "description": "Stop recording and save the chain workflow (usage: /endworkflow <name>)",
-    },
-    {
-        "name": "saveworkflow",
-        "description": "Save this conversation as an agent-mode workflow "
-        "(usage: /saveworkflow <name>)",
-    },
-    {
-        "name": "runworkflow",
-        "description": "Run a saved workflow now (usage: /runworkflow <name>)",
-    },
     {
         "name": "saveskill",
-        "description": "Save this conversation as a reusable Skill, not a replayable "
-        "workflow (usage: /saveskill <name>)",
+        "description": "Save this conversation as a reusable Skill (usage: /saveskill <name>)",
     },
 ]
 
@@ -1004,19 +987,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     load_dotenv(dotenv_path, override=True)
     resolve_env_keyring_refs()
     settings = settings or Settings(_env_file=dotenv_path)  # type: ignore[call-arg]
-
-    # Same reconciliation web/app.py's create_app already does, same
-    # shared state_dir/workflow_runs storage (see this module's docstring
-    # for why sharing it with the old runtime is harmless) -- a
-    # WorkflowRun left at status="running" means a previous process died
-    # mid-run before ever finalizing it; nothing else will ever revisit it.
-    interrupted = reconcile_interrupted_runs(settings.state_dir)
-    if interrupted:
-        logging.getLogger(__name__).warning(
-            "Marked %d workflow run(s) as failed -- still 'running' at startup, "
-            "left over from a previous process that didn't shut down cleanly.",
-            interrupted,
-        )
 
     hooks_config: dict[str, list[str]] = empty_hooks_config()
     if settings.hooks_config_path is not None:
@@ -1622,43 +1592,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         except (ValueError, RuntimeError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
 
-    # -- /api/workflows, /api/workflow-runs -- direct ports of web/app.py's
-    # identical endpoints (see this module's docstring for the general
-    # "next new session only" caveat, which doesn't apply here: these are
-    # pure WorkflowStore/WorkflowRunStore reads/writes, nothing session- or
-    # graph-specific about them).
-
-    @app.get("/api/workflows")
-    async def list_workflows_endpoint() -> list[dict[str, Any]]:
-        return [w.to_dict() for w in WorkflowStore(settings.state_dir).list_all()]
-
-    @app.delete("/api/workflows/{name}")
-    async def delete_workflow_endpoint(name: str) -> JSONResponse:
-        if not WorkflowStore(settings.state_dir).delete(name):
-            return JSONResponse({"error": f"No workflow named {name!r}"}, status_code=404)
-        return JSONResponse({"deleted": name})
-
-    @app.get("/api/workflow-runs")
-    async def list_workflow_runs(limit: int = 20) -> list[dict[str, Any]]:
-        return [r.to_dict() for r in WorkflowRunStore(settings.state_dir).list_recent(limit)]
-
-    @app.get("/api/workflow-runs/{run_id}")
-    async def get_workflow_run(run_id: str) -> JSONResponse:
-        run = WorkflowRunStore(settings.state_dir).load(run_id)
-        if run is None:
-            return JSONResponse({"error": f"No run {run_id!r}"}, status_code=404)
-        return JSONResponse(run.to_dict())
-
-    @app.delete("/api/workflow-runs/{run_id}")
-    async def delete_workflow_run_endpoint(run_id: str) -> JSONResponse:
-        if not WorkflowRunStore(settings.state_dir).delete(run_id):
-            return JSONResponse({"error": f"No run {run_id!r}"}, status_code=404)
-        return JSONResponse({"deleted": run_id})
-
     # -- /api/scheduled-tasks -- the Settings > Scheduled Tasks panel's
     # create-without-a-conversation entry point; direct ScheduledTriggerStore
-    # reads/writes, same "no session/graph involved" shape as the
-    # /api/workflows endpoints just above. POST reuses create_trigger
+    # reads/writes, no session/graph involved. POST reuses create_trigger
     # (tools/scheduled_tasks.py) -- the exact same validation
     # create_scheduled_task (the model tool) uses, so the two creation
     # paths can't silently drift apart.
@@ -1672,12 +1608,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         try:
             trigger = create_trigger(
                 ScheduledTriggerStore(settings.state_dir),
-                WorkflowStore(settings.state_dir),
                 name=payload.name,
                 kind=payload.kind,
                 at=payload.at,
                 prompt=payload.prompt,
-                workflow_name=payload.workflow_name,
                 weekday=payload.weekday,
                 day_of_month=payload.day_of_month,
                 start_date=payload.start_date,
@@ -1695,13 +1629,11 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         try:
             trigger = update_trigger(
                 ScheduledTriggerStore(settings.state_dir),
-                WorkflowStore(settings.state_dir),
                 trigger_id,
                 name=payload.name,
                 kind=payload.kind,
                 at=payload.at,
                 prompt=payload.prompt,
-                workflow_name=payload.workflow_name,
                 weekday=payload.weekday,
                 day_of_month=payload.day_of_month,
                 start_date=payload.start_date,

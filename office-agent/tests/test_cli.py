@@ -244,42 +244,6 @@ def test_message_flag_exits_nonzero_on_llm_error(
     assert result.exit_code == 1
 
 
-def test_workflow_record_save_and_run_through_the_real_cli(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    call = _tool_call("call_1", "write_file", {"path": "wf.txt", "content": "hi"})
-    fake_model = FakeToolCallingChatModel(
-        responses=[
-            AIMessage(content="", tool_calls=[call]),
-            AIMessage(content="done"),
-        ]
-    )
-    _patch_model(monkeypatch, fake_model)
-    runner = CliRunner()
-
-    result = runner.invoke(
-        app,
-        ["--thread", "t10", "--accept-edits"],
-        input=(
-            "/startworkflow\n"
-            "write hi to wf.txt\n"
-            "/endworkflow greet_wf a demo workflow\n"
-            "/runworkflow greet_wf\n"
-            "exit\n"
-        ),
-        env=_env(tmp_path),
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "Recording started" in result.output
-    assert "Saved workflow 'greet_wf'" in result.output
-    assert "Running workflow 'greet_wf'" in result.output
-    # First run wrote it via the model's tool call; /runworkflow replays
-    # the exact same recorded call with no LLM involved, so the file
-    # should exist regardless of which pass actually produced it.
-    assert (tmp_path / "workspace" / "wf.txt").read_text() == "hi"
-
-
 def test_reconnecting_with_the_same_thread_replays_history(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

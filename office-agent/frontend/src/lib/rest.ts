@@ -27,9 +27,6 @@ import type {
   SkillsResponse,
   ToolsResponse,
   UploadSkillResult,
-  Workflow,
-  WorkflowDeleteResult,
-  WorkflowRunDeleteResult,
 } from "../types/settings";
 import type {
   CommandsResponse,
@@ -42,13 +39,6 @@ import type {
   ThreadsResponse,
   UploadResult,
 } from "../types/session";
-// wire.ts's WorkflowRun (mode: "chain"|"agent" literal union) is the
-// stricter of the two structurally-near-identical WorkflowRun types --
-// settings.ts's own copy (mode: string) exists for the settings-panel
-// REST types file to stay self-contained, but the app-level reducer
-// state (workflowRuns, hydrated via this same endpoint) needs the wire.ts
-// one, so this function returns that instead of settings.ts's.
-import type { WorkflowRun } from "../types/wire";
 
 // Every settings tab does `someGetter().then(setState)` with no .catch --
 // a rejected promise there just leaves that tab's state at its initial
@@ -201,13 +191,6 @@ export const installNodeEnvPackage = (packageName: string) =>
   postJson<ScriptEnvInstallResult>("/api/node-env/packages", { package: packageName });
 export const removeNodeEnvPackage = (packageName: string) =>
   del<ScriptEnvInstallResult>(`/api/node-env/packages/${encodeURIComponent(packageName)}`);
-
-// -- Workflows --------------------------------------------------------------
-
-export const getWorkflows = () => getJson<Workflow[]>("/api/workflows");
-export const deleteWorkflow = (name: string) => del<WorkflowDeleteResult>(`/api/workflows/${encodeURIComponent(name)}`);
-export const getWorkflowRuns = (limit = 20) => getJson<WorkflowRun[]>(`/api/workflow-runs?limit=${limit}`);
-export const deleteWorkflowRun = (runId: string) => del<WorkflowRunDeleteResult>(`/api/workflow-runs/${encodeURIComponent(runId)}`);
 
 // -- Scheduled Tasks --------------------------------------------------------
 

@@ -85,12 +85,7 @@ interface ScheduledTaskModalProps {
  * from RunPanel's "New task" menu, a task card/sidebar row's "Edit"
  * action, and the detail page's pencil icon (all pass a different `task`
  * prop into the same component rather than duplicating the form three
- * times). Deliberately drops the old inline form's prompt-vs-saved-
- * workflow tab -- the reference has no such control, just one
- * "Instructions" field, and an explicit ask was to match the form's shape
- * first, real content/behavior gaps later. A workflow-backed trigger
- * created before this modal existed still runs fine; editing it through
- * here switches it to a plain prompt (workflow_name is never sent). */
+ * times). */
 export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModalProps) {
   const isEdit = task !== null;
   const [name, setName] = useState(task?.name ?? "");

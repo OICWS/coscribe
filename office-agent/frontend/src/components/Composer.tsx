@@ -9,17 +9,8 @@ import { RunStatus } from "./RunStatus";
 import { TextLightbox } from "./TextLightbox";
 
 /** Commands that get an instant "state" reply and never run an agent
- * turn -- mirrors app.js's INSTANT_COMMANDS (session.py's FIXED_COMMANDS
- * plus /endworkflow and /saveworkflow). */
-const INSTANT_COMMANDS = new Set([
-  "/plan",
-  "/accept-edits",
-  "/compact",
-  "/clear",
-  "/startworkflow",
-  "/endworkflow",
-  "/saveworkflow",
-]);
+ * turn (see session.py's _handle_user_message_locked). */
+const INSTANT_COMMANDS = new Set(["/plan", "/accept-edits", "/compact", "/clear"]);
 
 export interface ComposerSendPayload {
   /** What the chat-log bubble shows. The raw typed text, plus any pasted

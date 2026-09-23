@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     """
 
     state_dir: Path = Path(".coscribe/state")
-    """Directory task/workflow state and (via runtime_lg's own checkpointer)
+    """Directory task/scheduled-task state and (via runtime_lg's own checkpointer)
     conversation history are persisted to."""
 
     mcp_config_path: Path | None = None

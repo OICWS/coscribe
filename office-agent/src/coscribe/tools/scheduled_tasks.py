@@ -5,13 +5,12 @@ initiated, one-off, thread-scoped pauses only callable from inside an
 existing conversation. A ScheduledTrigger is the opposite shape: global,
 named, persisted, creatable either mid-conversation (create_scheduled_task)
 or from the Settings > Scheduled Tasks panel with no conversation needed
-at all -- much closer in spirit to tools/workflows.py's Workflow (global,
-named, persisted) than to selfwake's WakeRequest, so it's its own concept
-rather than a new WakeRequest kind. See ARCHITECTURE.md's 范围边界 section
+at all -- global, named, and persisted, so it's its own concept rather
+than a new WakeRequest kind. See ARCHITECTURE.md's 范围边界 section
 for the fuller reasoning.
 
-Split the same way tools/workflows.py and tools/selfwake.py split their
-own data model/storage/tools from the runtime-specific resume logic: this
+Split the same way tools/selfwake.py splits its own data model/storage/
+tools from the runtime-specific resume logic: this
 module holds ScheduleRule/ScheduledTrigger/ScheduledTriggerStore and the
 model-callable tools (no live LLM client or checkpointer needed for any of
 that); actually firing a due trigger lives in runtime_lg/scheduled_tasks.py
@@ -40,7 +39,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..runtime.types import tool_metadata
-from .workflows import WorkflowStore
 
 VALID_KINDS = ("manual", "once", "hourly", "daily", "weekdays", "weekly", "monthly")
 VALID_APPROVAL_MODES = ("manual", "auto", "skip")
@@ -93,8 +91,8 @@ def _clamp_day(year: int, month: int, day: int) -> int:
 @dataclass
 class ScheduleRule:
     kind: str  # "manual" | "once" | "hourly" | "daily" | "weekdays" |
-    # "weekly" | "monthly" -- plain str, same Literal-avoidance reasoning as
-    # tools/workflows.py's Workflow.mode. "once" predates the six-value
+    # "weekly" | "monthly" -- plain str rather than Literal: aisuite's
+    # schema inference has broken on exotic annotations before. "once" predates the six-value
     # Manual/Hourly/Daily/Weekdays/Weekly/Monthly frequency picker the
     # frontend now offers for new tasks -- kept valid here so an
     # already-created "once" trigger keeps working, not exposed as a
@@ -218,8 +216,7 @@ class ScheduledTrigger:
     created_at: str
     next_run_at: str | None  # None only once a "once" trigger has fired,
     # or always for a "manual" schedule (see ScheduleRule.kind)
-    workflow_name: str | None = None  # exactly one of workflow_name/prompt
-    prompt: str | None = None
+    prompt: str = ""
     last_run_at: str | None = None
     last_run_status: str | None = None  # "completed" | "failed" | "stopped"
     model: str | None = None  # "provider:model", e.g. "anthropic:claude-
@@ -242,7 +239,6 @@ class ScheduledTrigger:
             "enabled": self.enabled,
             "created_at": self.created_at,
             "next_run_at": self.next_run_at,
-            "workflow_name": self.workflow_name,
             "prompt": self.prompt,
             "last_run_at": self.last_run_at,
             "last_run_status": self.last_run_status,
@@ -260,8 +256,7 @@ class ScheduledTrigger:
             enabled=data["enabled"],
             created_at=data["created_at"],
             next_run_at=data.get("next_run_at"),
-            workflow_name=data.get("workflow_name"),
-            prompt=data.get("prompt"),
+            prompt=data.get("prompt") or "",
             last_run_at=data.get("last_run_at"),
             last_run_status=data.get("last_run_status"),
             model=data.get("model"),
@@ -318,12 +313,10 @@ class ScheduledTriggerStore:
 
 
 def _validate_and_build_schedule(
-    workflow_store: WorkflowStore,
     *,
     kind: str,
     at: str,
-    prompt: str | None,
-    workflow_name: str | None,
+    prompt: str,
     weekday: int | None,
     day_of_month: int | None,
     start_date: str | None,
@@ -340,10 +333,8 @@ def _validate_and_build_schedule(
         raise ValueError(
             f"approval_mode must be one of {VALID_APPROVAL_MODES}, got {approval_mode!r}"
         )
-    if bool(prompt) == bool(workflow_name):
-        raise ValueError("exactly one of prompt or workflow_name must be given")
-    if workflow_name is not None and workflow_store.load(workflow_name) is None:
-        raise ValueError(f"No workflow named {workflow_name!r}")
+    if not prompt.strip():
+        raise ValueError("prompt cannot be blank")
 
     rule = ScheduleRule(
         kind=kind, at=at, weekday=weekday, day_of_month=day_of_month, start_date=start_date
@@ -358,13 +349,11 @@ def _validate_and_build_schedule(
 
 def create_trigger(
     store: ScheduledTriggerStore,
-    workflow_store: WorkflowStore,
     *,
     name: str,
     kind: str,
     at: str,
-    prompt: str | None = None,
-    workflow_name: str | None = None,
+    prompt: str,
     weekday: int | None = None,
     day_of_month: int | None = None,
     start_date: str | None = None,
@@ -378,11 +367,9 @@ def create_trigger(
     conversation), so the two creation paths can never silently drift out
     of sync with each other."""
     rule, next_run_at = _validate_and_build_schedule(
-        workflow_store,
         kind=kind,
         at=at,
         prompt=prompt,
-        workflow_name=workflow_name,
         weekday=weekday,
         day_of_month=day_of_month,
         start_date=start_date,
@@ -398,7 +385,6 @@ def create_trigger(
         enabled=True,
         created_at=_now_iso(),
         next_run_at=next_run_at,
-        workflow_name=workflow_name,
         prompt=prompt,
         model=model,
         approval_mode=approval_mode,
@@ -409,14 +395,12 @@ def create_trigger(
 
 def update_trigger(
     store: ScheduledTriggerStore,
-    workflow_store: WorkflowStore,
     trigger_id: str,
     *,
     name: str,
     kind: str,
     at: str,
-    prompt: str | None = None,
-    workflow_name: str | None = None,
+    prompt: str,
     weekday: int | None = None,
     day_of_month: int | None = None,
     start_date: str | None = None,
@@ -438,11 +422,9 @@ def update_trigger(
         raise KeyError(f"No scheduled task with id {trigger_id!r}")
 
     rule, next_run_at = _validate_and_build_schedule(
-        workflow_store,
         kind=kind,
         at=at,
         prompt=prompt,
-        workflow_name=workflow_name,
         weekday=weekday,
         day_of_month=day_of_month,
         start_date=start_date,
@@ -452,7 +434,6 @@ def update_trigger(
     trigger.name = name
     trigger.schedule = rule
     trigger.next_run_at = next_run_at
-    trigger.workflow_name = workflow_name
     trigger.prompt = prompt
     trigger.model = model
     trigger.approval_mode = approval_mode
@@ -464,13 +445,12 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
     """Return the Scheduled Tasks tool callables. Every tool here operates
     globally, not scoped to the calling thread (unlike tools/selfwake.py's
     list_wakes/cancel_wake) -- same global-by-design scope as
-    list_workflows/delete_workflow, matching ScheduledTrigger's own
+    list_scheduled_tasks being global, matching ScheduledTrigger's own
     "independent entity, not tied to the conversation that created it"
     nature (each trigger mints its own new, independent thread id, never
     reusing whatever thread called create_scheduled_task).
     """
     store = ScheduledTriggerStore(state_dir)
-    workflow_store = WorkflowStore(state_dir)
 
     # Optional[X], not X | None: aisuite's Tools.__infer_from_signature
     # only unwraps typing.Optional (checks `get_origin(t) is Union`), and
@@ -483,8 +463,7 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
         name: str,
         kind: str,
         at: str,
-        prompt: Optional[str] = None,  # noqa: UP045
-        workflow_name: Optional[str] = None,  # noqa: UP045
+        prompt: str,
         weekday: Optional[int] = None,  # noqa: UP045
         day_of_month: Optional[int] = None,  # noqa: UP045
         start_date: Optional[str] = None,  # noqa: UP045
@@ -508,11 +487,7 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
                 minute). Otherwise a 24-hour "HH:MM" time of day, e.g.
                 "09:00" -- interpreted in this machine's own local
                 timezone.
-            prompt: what to do when it fires, in plain language. Exactly
-                one of prompt/workflow_name must be given.
-            workflow_name: instead of a freeform prompt, run this
-                already-saved workflow (see list_workflows) each time.
-                Exactly one of prompt/workflow_name must be given.
+            prompt: what to do when it fires, in plain language.
             weekday: required for kind="weekly" -- 0=Monday .. 6=Sunday.
             day_of_month: required for kind="monthly" -- 1-31 (clamped to
                 the real last day of a shorter month).
@@ -532,12 +507,10 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
         """
         trigger = create_trigger(
             store,
-            workflow_store,
             name=name,
             kind=kind,
             at=at,
             prompt=prompt,
-            workflow_name=workflow_name,
             weekday=weekday,
             day_of_month=day_of_month,
             start_date=start_date,

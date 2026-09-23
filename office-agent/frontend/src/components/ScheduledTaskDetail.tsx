@@ -118,7 +118,7 @@ export function ScheduledTaskDetail({ task, onEdit, onDeleted, onChanged }: Sche
           <div>
             <div className="mb-1 text-sm text-[var(--muted)]">Instructions</div>
             <div className="whitespace-pre-wrap text-sm">
-              {task.workflow_name ? `Runs workflow: ${task.workflow_name}` : task.prompt}
+              {task.prompt}
             </div>
           </div>
           <div>

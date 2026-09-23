@@ -11,7 +11,6 @@ import {
   SettingsIcon,
   TerminalIcon,
   ToolIcon,
-  ZapIcon,
 } from "../icons";
 import { ConnectorsTab } from "./ConnectorsTab";
 import {
@@ -30,7 +29,6 @@ import { GeneralTab } from "./GeneralTab";
 import { ProvidersTab } from "./ProvidersTab";
 import { SkillsTab } from "./SkillsTab";
 import { ToolsTab } from "./ToolsTab";
-import { WorkflowsTab } from "./WorkflowsTab";
 import { WorkspaceTab } from "./WorkspaceTab";
 
 export type SettingsCategory =
@@ -40,7 +38,6 @@ export type SettingsCategory =
   | "tools"
   | "skills"
   | "connectors"
-  | "workflows"
   | "environment";
 
 interface CategoryDef {
@@ -71,7 +68,6 @@ const GROUPS: { label: string; categories: CategoryDef[] }[] = [
       { id: "workspace", label: "Workspace", icon: FolderIcon },
       { id: "providers", label: "Providers", icon: KeyIcon },
       { id: "tools", label: "Tools", icon: ToolIcon },
-      { id: "workflows", label: "Workflows", icon: ZapIcon },
       { id: "environment", label: "Environment", icon: TerminalIcon },
     ],
   },
@@ -94,7 +90,6 @@ const CONFIG_KEYS = [
 interface SettingsModalProps {
   open: boolean;
   initialCategory?: SettingsCategory;
-  workflowEventTick: number;
   enabledSkills: string[];
   onToggleSkill: (name: string, enabled: boolean) => void;
   onCreateSkill: () => void;
@@ -104,7 +99,6 @@ interface SettingsModalProps {
 export function SettingsModal({
   open,
   initialCategory,
-  workflowEventTick,
   enabledSkills,
   onToggleSkill,
   onCreateSkill,
@@ -261,9 +255,6 @@ export function SettingsModal({
               />
             )}
             {category === "connectors" && <ConnectorsTab active={category === "connectors"} />}
-            {category === "workflows" && (
-              <WorkflowsTab active={category === "workflows"} workflowEventTick={workflowEventTick} />
-            )}
             {category === "environment" && <EnvironmentTab active={category === "environment"} />}
           </div>
           {showSaveBar && (

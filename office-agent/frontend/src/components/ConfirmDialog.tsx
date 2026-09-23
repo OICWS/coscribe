@@ -13,8 +13,7 @@ interface ConfirmDialogProps {
 /** Shared styled confirm dialog -- matches SettingsModal's overlay/card
  * convention. Replaces the mix of window.confirm() (unstyled, looks like
  * the browser interrupted the app) and, in one case, no confirmation at
- * all that had accumulated across Thread/Workflow/Workflow-run/Provider
- * delete before this was unified. */
+ * all that had accumulated across the various delete actions. */
 export function ConfirmDialog({
   title,
   description,

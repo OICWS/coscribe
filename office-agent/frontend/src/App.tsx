@@ -5,7 +5,7 @@ import { ContextRing } from "./components/ContextRing";
 import { ModePill } from "./components/ModePill";
 import { ModelPicker } from "./components/ModelPicker";
 import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
-import { NAV_RAIL_EXPANDED_WIDTH, NavRail, type NavMode, type RunTab } from "./components/NavRail";
+import { NAV_RAIL_EXPANDED_WIDTH, NavRail, type NavMode } from "./components/NavRail";
 import type { PptxShapeCapture } from "./components/PptxShapeOverlay";
 import { RunPanel } from "./components/RunPanel";
 import { ScheduledTaskModal } from "./components/ScheduledTaskModal";
@@ -16,7 +16,7 @@ import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { SubAgentsPanel } from "./components/SubAgentsPanel";
 import { BrowserIcon, HelpIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
-import { getCommands, getScheduledTasks, getThreads, getWorkflowRuns } from "./lib/rest";
+import { getCommands, getScheduledTasks, getThreads } from "./lib/rest";
 import { goToThread, SCHEDULED_THREAD_PREFIX, THREAD_CHANGE_EVENT } from "./lib/nav";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState } from "./state/reducer";
@@ -52,10 +52,6 @@ function App() {
   // the header (see the column's paddingLeft below); hover-expanded it
   // still floats over the content.
   const [navPinned, setNavPinned] = useState(false);
-  // Defaults to "scheduled", not "workflows" -- clicking the nav rail's
-  // clock icon (see NavRail.tsx) must land directly on the existing
-  // Scheduled Tasks list, not the unrelated saved-Workflow-definitions tab.
-  const [runTab, setRunTab] = useState<RunTab>("scheduled");
   // Which task RunPanel's "scheduled" tab shows the detail page for (null
   // = the portal grid) -- lives here, not in RunPanel/NavRail, since a
   // sidebar row click (NavRail) and a card click (RunPanel) both need to
@@ -172,16 +168,15 @@ function App() {
 
   useEffect(() => {
     getCommands().then(setCommands);
-    getWorkflowRuns().then((runs) => dispatch({ type: "local_hydrate_workflow_runs", runs }));
   }, []);
 
-  // Refetched whenever a turn finishes (workflowEventTick, same signal
+  // Refetched whenever a turn finishes (turnTick, same signal
   // RunPanel's refreshKey uses), not just on mount -- a brand-new thread
   // has no ThreadSummary/preview yet until its first turn completes, so
   // the header label below needs this to pick that up once it exists.
   useEffect(() => {
     refreshThreads();
-  }, [state.workflowEventTick, refreshThreads]);
+  }, [state.turnTick, refreshThreads]);
 
   const sessionLabel = threads?.find((t) => t.thread_id === threadId)?.preview || "New session";
 
@@ -199,7 +194,7 @@ function App() {
     getScheduledTasks().then((tasks) => {
       setScheduledTaskForThread(tasks.find((t) => t.thread_id === threadId) ?? null);
     });
-  }, [isScheduledTaskThread, threadId, state.workflowEventTick]);
+  }, [isScheduledTaskThread, threadId, state.turnTick]);
 
   /** A sidebar row / portal card click's "open" behavior -- an already-
    * run (or currently-running) task goes straight to its own
@@ -299,26 +294,13 @@ function App() {
   };
 
   /** Settings > Skills > Add > Create a skill -- closes Settings, switches
-   * to Create mode (same reason onRunWorkflow below does: Composer only
-   * renders there), and prefills "/skill-creator " into the composer via
-   * pendingComposerText/Composer's externalText prop -- not sent, unlike
-   * onRunWorkflow's own /runworkflow, so the user can review or add
-   * context before hitting Enter themselves. */
+   * to Create mode (Composer only renders there), and prefills
+   * "/skill-creator " into the composer via pendingComposerText -- not
+   * sent, so the user can review or add context before hitting Enter. */
   const onCreateSkill = () => {
     setSettingsOpen(false);
     setNavMode("create");
     setPendingComposerText("/skill-creator ");
-  };
-
-  const onRunWorkflow = (name: string) => {
-    // Switch back to Create so the running turn's messages are actually
-    // visible -- ChatLog only renders while navMode === "create".
-    setNavMode("create");
-    const text = `/runworkflow ${name}`;
-    runOrQueueSend(() => {
-      dispatch({ type: "local_user_message", text, instant: false });
-      socketRef.current?.send({ type: "user_message", text });
-    });
   };
 
   if (!bootstrapped) return <StartupSplash />;
@@ -338,9 +320,6 @@ function App() {
           onThreadRenamed={renameThreadLocally}
           mode={navMode}
           onModeChange={setNavMode}
-          onRunTabChange={setRunTab}
-          workflowRuns={state.workflowRuns}
-          onStop={onStop}
           scheduledTasksVersion={scheduledTasksVersion}
           onSelectScheduledTask={setSelectedScheduledTask}
           onOpenScheduledTask={openScheduledTask}
@@ -368,7 +347,6 @@ function App() {
                 className="text-[var(--muted)] hover:text-[var(--fg)] hover:underline"
                 onClick={() => {
                   setNavMode("run");
-                  setRunTab("scheduled");
                   setSelectedScheduledTask(null);
                 }}
               >
@@ -382,7 +360,6 @@ function App() {
                 onClick={() => {
                   if (!scheduledTaskForThread) return;
                   setNavMode("run");
-                  setRunTab("scheduled");
                   setSelectedScheduledTask(scheduledTaskForThread);
                 }}
               >
@@ -489,9 +466,7 @@ function App() {
           </>
         ) : (
           <RunPanel
-            runTab={runTab}
-            onRunWorkflow={onRunWorkflow}
-            refreshKey={state.workflowEventTick}
+            refreshKey={state.turnTick}
             scheduledTasksVersion={scheduledTasksVersion}
             onScheduledTasksChanged={bumpScheduledTasks}
             selectedScheduledTask={selectedScheduledTask}
@@ -509,7 +484,6 @@ function App() {
         )}
         <SettingsModal
           open={settingsOpen}
-          workflowEventTick={state.workflowEventTick}
           enabledSkills={state.enabledSkills}
           onToggleSkill={onToggleSkill}
           onCreateSkill={onCreateSkill}

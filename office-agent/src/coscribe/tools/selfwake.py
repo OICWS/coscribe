@@ -1,39 +1,25 @@
 """Suspend/resume primitives (ROADMAP.md Phase 4): sleep_for/sleep_until,
-wake_on, wake_on_event -- let the model end a turn saying "check back later"
-instead of the *user* having to hand-configure an external cron entry per
-scheduled task (today's only unattended-run mechanism, still true --
-see README.md's "Scheduled / unattended runs").
+wake_on_task, wake_on_subagent, wake_on_event -- let the model end a turn
+saying "check back later" instead of the *user* having to schedule
+anything. Distinct from tools/scheduled_tasks.py: a wake resumes *this*
+conversation once; a scheduled task runs on its own schedule in fresh
+conversations of its own.
 
-Split the same way tools/workflows.py splits Workflow/WorkflowStore from
-record_*_lg/run_*_lg: this module holds the data model, on-disk storage
-(WakeStore/SignalStore), and the model-callable tools -- all of which are
-plain, synchronous state mutations needing no live LLM client or
-checkpointer. The *resume* half -- actually waking a thread back up, which
-needs a live checkpointer and a way to construct/reuse a ChatSessionLG --
-lives in runtime_lg/selfwake.py instead, same reasoning workflows.py's
-docstring gives for its own record_*/run_* split.
+This module holds the data model, on-disk storage (WakeStore/
+SignalStore), and the model-callable tools -- all plain, synchronous state
+mutations needing no live LLM client or checkpointer. The *resume* half --
+actually waking a thread back up, which needs a live checkpointer and a
+way to construct/reuse a ChatSessionLG -- lives in runtime_lg/selfwake.py.
 
-Four kinds of wake, deliberately scoped to backing that's real today,
-not hypothetical:
+Kinds of wake, deliberately scoped to backing that's real today, not
+hypothetical:
 - "timer": sleep_for/sleep_until -- wake at a wall-clock time.
-- "job": wake_on(job_id) -- job_id is a tools/workflows.py WorkflowRun.run_id,
-  the one existing pollable "job" concept in this codebase. wake_on
-  validates job_id against WorkflowRunStore up front and raises if it
-  doesn't resolve to a real run, rather than silently registering a wake
-  nothing will ever be able to resolve.
 - "task": wake_on_task(task_id) -- task_id is a tools/background_tasks.py
-  BackgroundTask.task_id, the second (newer) pollable "background thing"
-  concept, added alongside "job" rather than folded into it: a workflow
-  run and a background script are different stores with different id
-  spaces, and wake_on's existing validate-against-WorkflowRunStore-only
-  behavior would either need to guess which store an id belongs to or
-  silently accept an id from either -- a new kind keeps each one's
-  validation and _is_due check (runtime_lg/selfwake.py) unambiguous,
-  same reasoning "job" itself didn't try to reuse "timer"'s shape.
+  BackgroundTask.task_id. Validated against that store up front, so a
+  wake nothing could ever resolve is never registered.
 - "subagent": wake_on_subagent(task_id) -- task_id is a tools/
   subagent_tasks.py SubAgentTask.task_id, a background spawn_agent_
-  background run. Same "new kind, new id space" reasoning as "task"
-  above, one step further: unlike a background script (only ever
+  background run -- a separate id space from "task". Unlike a background script (only ever
   "running" or a terminal status), a sub-agent task can also be
   "paused" or "blocked_on_approval" -- both non-"running", so _is_due
   treats them as due too, same as any other terminal status (see
@@ -61,9 +47,8 @@ from urllib.parse import quote
 from ..runtime.types import tool_metadata
 from .background_tasks import BackgroundTaskStore
 from .subagent_tasks import SubAgentTaskStore
-from .workflows import WorkflowRunStore
 
-VALID_KINDS = ("timer", "job", "task", "subagent", "event")
+VALID_KINDS = ("timer", "task", "subagent", "event")
 VALID_STATUSES = ("pending", "woken", "cancelled")
 
 
@@ -85,14 +70,12 @@ def _parse_iso(value: str, *, field_name: str) -> datetime:
 class WakeRequest:
     wake_id: str
     thread_id: str
-    kind: str  # "timer" | "job" | "event" -- plain str, same reasoning
-    # tools/workflows.py's Workflow.mode gives for not using Literal (aisuite's
-    # schema inference has broken on exotic type annotations before).
+    kind: str  # one of VALID_KINDS -- plain str rather than Literal:
+    # aisuite's schema inference has broken on exotic annotations before.
     reason: str
     created_at: str
     status: str = "pending"  # "pending" | "woken" | "cancelled"
     wake_at: str | None = None  # kind="timer": ISO timestamp to fire at
-    job_id: str | None = None  # kind="job": a WorkflowRun.run_id
     task_id: str | None = None  # kind="task": a BackgroundTask.task_id
     subagent_task_id: str | None = None  # kind="subagent": a SubAgentTask.task_id
     event_key: str | None = None  # kind="event"
@@ -107,7 +90,6 @@ class WakeRequest:
             "created_at": self.created_at,
             "status": self.status,
             "wake_at": self.wake_at,
-            "job_id": self.job_id,
             "task_id": self.task_id,
             "subagent_task_id": self.subagent_task_id,
             "event_key": self.event_key,
@@ -124,7 +106,6 @@ class WakeRequest:
             created_at=data["created_at"],
             status=data.get("status", "pending"),
             wake_at=data.get("wake_at"),
-            job_id=data.get("job_id"),
             task_id=data.get("task_id"),
             subagent_task_id=data.get("subagent_task_id"),
             event_key=data.get("event_key"),
@@ -133,9 +114,8 @@ class WakeRequest:
 
 
 class WakeStore:
-    """One JSON file per wake *request* (like WorkflowRunStore, not
-    WorkflowStore -- a wake is a single pending request, not a reusable
-    named definition)."""
+    """One JSON file per wake *request* -- a wake is a single pending
+    request, not a reusable named definition."""
 
     def __init__(self, state_dir: str | Path) -> None:
         self.root = Path(state_dir) / "wakes"
@@ -203,7 +183,7 @@ class SignalStore:
 def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable[..., Any]]:
     """Return the selfwake tool callables, bound to one conversation thread.
 
-    Wired into coordinator.py next to build_task_tools/build_workflow_tools.
+    Wired into coordinator.py next to build_task_tools.
     The actual resume -- reading these pending requests back and restarting
     a sleeping thread -- happens out-of-band in runtime_lg/selfwake.py's
     poll_due_wakes, driven by web/app.py's background poll loop (while the
@@ -212,7 +192,6 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
     """
     wake_store = WakeStore(state_dir)
     signal_store = SignalStore(state_dir)
-    run_store = WorkflowRunStore(state_dir)
     task_store = BackgroundTaskStore(state_dir)
     subagent_task_store = SubAgentTaskStore(state_dir)
 
@@ -267,24 +246,6 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
             raise ValueError(f"seconds must be positive, got {seconds}")
         wake_at = (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat()
         return _create("timer", reason, wake_at=wake_at)
-
-    def wake_on(job_id: str, reason: str) -> dict[str, Any]:
-        """Pause this conversation and automatically resume it once a
-        background workflow run finishes -- for "let me know when that
-        run_workflow call is done" style requests, when the run is expected
-        to take a while. job_id must be a real, currently-running workflow
-        run id (see run_workflow's own return value, or list_workflows/
-        Recent Workflow in the UI) -- there is no other kind of "background
-        job" this can watch yet.
-
-        Args:
-            job_id: the run_id of an in-progress workflow run.
-            reason: what to do or check when you wake up.
-        """
-        run = run_store.load(job_id)
-        if run is None:
-            raise ValueError(f"No workflow run with id {job_id!r}")
-        return _create("job", reason, job_id=job_id)
 
     def wake_on_task(task_id: str, reason: str) -> dict[str, Any]:
         """Pause this conversation and automatically resume it once a
@@ -358,8 +319,7 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
         return signal_store.signal(event_key, payload)
 
     def list_wakes() -> list[dict[str, Any]]:
-        """List this conversation's own pending sleep_until/sleep_for/
-        wake_on/wake_on_event requests -- use this to check what you're
+        """List this conversation's own pending sleep/wake requests -- use this to check what you're
         currently waiting on."""
         return [
             w.to_dict()
@@ -373,7 +333,7 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
 
         Args:
             wake_id: id of the wake to cancel, as returned by sleep_until/
-                sleep_for/wake_on/wake_on_event/list_wakes.
+                a sleep/wake tool or list_wakes.
         """
         wake = wake_store.load(wake_id)
         if wake is None or wake.thread_id != thread_id:
@@ -391,7 +351,6 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
         # disposable, thread-scoped bookkeeping tool like task_create.
         tool_metadata(sleep_until, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(sleep_for, risk_category="WRITE_LOCAL", category="selfwake"),
-        tool_metadata(wake_on, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on_task, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on_subagent, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on_event, risk_category="WRITE_LOCAL", category="selfwake"),

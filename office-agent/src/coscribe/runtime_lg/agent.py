@@ -66,7 +66,7 @@ class _CatchToolErrorsMiddleware(AgentMiddleware):
     message -- no `agent_message`, no `tasks_changed`, nothing further, which
     looks exactly like the turn hanging forever from the user's side. Live-
     reported: `read_file("sap_login.md")` on a file that doesn't exist
-    stopped an in-progress `/startworkflow` recording dead, mid-turn.
+    stopped a turn dead, mid-task.
 
     Fixed here as `wrap_tool_call`/`awrap_tool_call` middleware (LangChain's
     documented interception point for this -- `create_agent` itself has no

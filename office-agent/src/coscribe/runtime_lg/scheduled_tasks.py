@@ -1,6 +1,6 @@
 """Scheduled Tasks resume side for runtime_lg -- the LangGraph-native
 counterpart to tools/scheduled_tasks.py, same split runtime_lg/selfwake.py
-and runtime_lg/workflows.py already use: storage + model-callable tools
+already uses: storage + model-callable tools
 live in tools/scheduled_tasks.py (no live client/checkpointer needed
 there); actually firing a due trigger does need one, so it lives here.
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _fire_trigger_once(trigger: ScheduledTrigger, session: Any) -> str:
-    """Actually run one trigger's workflow/prompt against an already-
+    """Actually run one trigger's prompt against an already-
     constructed session, returning its status string. Raises on failure
     -- callers decide for themselves whether that should be swallowed
     (poll_due_scheduled_tasks, so one broken trigger doesn't block every
@@ -56,9 +56,6 @@ async def _fire_trigger_once(trigger: ScheduledTrigger, session: Any) -> str:
     if trigger.approval_mode in ("auto", "skip"):
         session.accept_edits = True
     try:
-        if trigger.workflow_name is not None:
-            result = await session.run_saved_workflow(trigger.workflow_name, _SilentSocket())
-            return str(result.get("status", "completed"))
         await session.handle_user_message(trigger.prompt, _SilentSocket())
         return "completed"
     finally:
@@ -69,10 +66,9 @@ async def poll_due_scheduled_tasks(
     state_dir: str | Path,
     get_session: Callable[[str], Awaitable[Any]],
 ) -> list[ScheduledTrigger]:
-    """Find every due ScheduledTrigger, fire it (a saved workflow via
-    run_saved_workflow, or a freeform prompt via handle_user_message),
-    record the result, and advance its schedule (or disable it, for a
-    one-time trigger). Returns what fired, for a caller to log/print.
+    """Find every due ScheduledTrigger, fire its prompt, record the result,
+    and advance its schedule (or disable it, for a one-time trigger).
+    Returns what fired, for a caller to log/print.
 
     A trigger whose session fails to construct or whose turn raises is
     logged and left untouched (not marked run, not rescheduled) so it

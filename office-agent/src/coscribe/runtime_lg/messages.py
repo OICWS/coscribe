@@ -1,9 +1,7 @@
 """Small LangGraph-message-shape helpers shared between web/session.py
-(a live turn's own streaming) and runtime_lg/workflows.py (workflow save/
-replay, which needs the identical logic for its curator/assertion prompts
-and recorded-step extraction). Split out here rather than duplicated in
-both, or left only in session.py where workflows.py couldn't reach them
-without a circular import (session.py already imports from runtime_lg).
+(a live turn's own streaming) and the curator prompts in runtime_lg/
+(e.g. skill_authoring.py), kept here so runtime_lg modules can use them
+without importing session.py (which already imports from runtime_lg).
 """
 
 from __future__ import annotations
@@ -143,9 +141,8 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
     cache) -- not a runtime_lg regression, just never noticed there before
     this session's thread-switcher work made it easy to reach.
 
-    Skips a tool call with no matching ToolMessage yet -- same reasoning as
-    workflows.py's recorded_tool_call_steps_lg: an in-flight/still-pending
-    call (most commonly a not-yet-answered approval from before a
+    Skips a tool call with no matching ToolMessage yet: an in-flight/
+    still-pending call (most commonly a not-yet-answered approval from before a
     disconnect) hasn't produced anything to show yet, and
     resume_after_reconnect already redelivers its own live
     "approval_required" event for that separately -- showing it here too
@@ -194,8 +191,7 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
     rendered pre-compaction transcript, folded into one message) -- it
     replays as one large "user" entry rather than being specially
     unpacked. Same trade-off render_transcript_lg's own callers (the
-    workflow curator prompt) already accept for that message; not solved
-    here either."""
+    /saveskill curator prompt) already accept for that message."""
     results_by_id: dict[str, tuple[Any, bool]] = {}
     for message in messages:
         if message.type == "tool" and getattr(message, "tool_call_id", None):

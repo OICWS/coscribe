@@ -47,11 +47,8 @@ def slugify_skill_name(name: str) -> str:
 
 
 # /saveskill's curator call (runtime_lg/skill_authoring.py's
-# propose_skill_save_lg) -- the alternative to tools/workflows.py's own
-# /saveworkflow, deciding what to write into a NEW skill's description/
-# body instead of a workflow's mode/steps. See that module's own
-# docstring for why this is a separate mechanism, not unified with
-# workflow-save's own curator.
+# propose_skill_save_lg) -- decides what to write into a NEW skill's
+# description/body.
 SKILL_SAVE_CURATOR_INSTRUCTIONS = """\
 You are deciding what to write when the user asks to save the
 conversation below as a reusable Skill named "<name>" (a SKILL.md
@@ -66,8 +63,8 @@ answered an earlier question from you about this same save.
 A Skill is generalized, reusable KNOWLEDGE OR PROCEDURE -- how to do a
 kind of task -- not a literal transcript of this one conversation, and
 not a fixed sequence of tool calls replayed with the same exact
-arguments every time (that's what a saved *workflow* already does --
-don't write another one of those under a different name). Write the
+arguments every time (that's what a scheduled task is for -- don't
+write one of those under a different name). Write the
 body as direct instructions to a future agent picking this up cold,
 generalized from what actually happened here: what the task is, what to
 watch out for (a real mistake made and corrected in this conversation is

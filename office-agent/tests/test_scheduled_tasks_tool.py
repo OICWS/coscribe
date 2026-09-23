@@ -13,7 +13,6 @@ from coscribe.tools.scheduled_tasks import (
     create_trigger,
     update_trigger,
 )
-from coscribe.tools.workflows import Workflow, WorkflowStore
 
 
 def _tools_by_name(state_dir: Path) -> dict[str, object]:
@@ -142,76 +141,30 @@ def test_compute_next_run_at_start_date_in_the_past_is_a_no_op() -> None:
 # -- create_trigger / create_scheduled_task validation --
 
 
-def test_create_trigger_requires_exactly_one_of_prompt_or_workflow_name(tmp_path: Path) -> None:
-    store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
-    with pytest.raises(ValueError, match="exactly one"):
-        create_trigger(store, workflow_store, name="x", kind="daily", at="09:00")
-    with pytest.raises(ValueError, match="exactly one"):
-        create_trigger(
-            store,
-            workflow_store,
-            name="x",
-            kind="daily",
-            at="09:00",
-            prompt="p",
-            workflow_name="wf",
-        )
-
-
-def test_create_trigger_rejects_unknown_workflow_name(tmp_path: Path) -> None:
-    store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
-    with pytest.raises(ValueError, match="No workflow named"):
-        create_trigger(
-            store, workflow_store, name="x", kind="daily", at="09:00", workflow_name="missing"
-        )
-
-
-def test_create_trigger_accepts_a_real_workflow_name(tmp_path: Path) -> None:
-    store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
-    workflow_store.save(
-        Workflow(name="nightly-report", mode="agent", summary="Generate the nightly report")
-    )
-
-    trigger = create_trigger(
-        store, workflow_store, name="x", kind="daily", at="09:00", workflow_name="nightly-report"
-    )
-
-    assert trigger.workflow_name == "nightly-report"
-    assert trigger.prompt is None
-
-
 def test_create_trigger_rejects_unknown_kind(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
     with pytest.raises(ValueError, match="kind must be one of"):
-        create_trigger(store, workflow_store, name="x", kind="yearly", at="09:00", prompt="p")
+        create_trigger(store, name="x", kind="yearly", at="09:00", prompt="p")
 
 
 def test_create_trigger_mints_its_own_dedicated_thread_id(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
-    trigger = create_trigger(store, workflow_store, name="x", kind="daily", at="09:00", prompt="p")
+    trigger = create_trigger(store, name="x", kind="daily", at="09:00", prompt="p")
     assert trigger.thread_id == f"scheduled-{trigger.trigger_id}"
 
 
 def test_create_trigger_manual_kind_has_no_next_run_at_and_does_not_raise(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
-    trigger = create_trigger(store, workflow_store, name="x", kind="manual", at="", prompt="p")
+    trigger = create_trigger(store, name="x", kind="manual", at="", prompt="p")
     assert trigger.next_run_at is None
     assert trigger.enabled is True  # created enabled, just never auto-fires
 
 
 def test_create_trigger_rejects_unknown_approval_mode(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
     with pytest.raises(ValueError, match="approval_mode must be one of"):
         create_trigger(
             store,
-            workflow_store,
             name="x",
             kind="daily",
             at="09:00",
@@ -222,10 +175,8 @@ def test_create_trigger_rejects_unknown_approval_mode(tmp_path: Path) -> None:
 
 def test_create_trigger_persists_model_and_approval_mode(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
     trigger = create_trigger(
         store,
-        workflow_store,
         name="x",
         kind="daily",
         at="09:00",
@@ -256,7 +207,6 @@ def test_scheduled_trigger_from_dict_defaults_approval_mode_for_old_records(tmp_
             "enabled": True,
             "created_at": datetime.now().isoformat(),
             "next_run_at": None,
-            "workflow_name": None,
             "prompt": "p",
         }
     )
@@ -270,14 +220,10 @@ def test_scheduled_trigger_from_dict_defaults_approval_mode_for_old_records(tmp_
 
 def test_update_trigger_changes_name_schedule_and_permission_fields(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
-    created = create_trigger(
-        store, workflow_store, name="Old name", kind="daily", at="09:00", prompt="old prompt"
-    )
+    created = create_trigger(store, name="Old name", kind="daily", at="09:00", prompt="old prompt")
 
     updated = update_trigger(
         store,
-        workflow_store,
         created.trigger_id,
         name="New name",
         kind="weekly",
@@ -305,13 +251,12 @@ def test_update_trigger_changes_name_schedule_and_permission_fields(tmp_path: Pa
 
 def test_update_trigger_preserves_enabled_state(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
-    created = create_trigger(store, workflow_store, name="x", kind="daily", at="09:00", prompt="p")
+    created = create_trigger(store, name="x", kind="daily", at="09:00", prompt="p")
     created.enabled = False
     store.save(created)
 
     updated = update_trigger(
-        store, workflow_store, created.trigger_id, name="x", kind="daily", at="10:00", prompt="p"
+        store, created.trigger_id, name="x", kind="daily", at="10:00", prompt="p"
     )
 
     assert updated.enabled is False
@@ -319,28 +264,15 @@ def test_update_trigger_preserves_enabled_state(tmp_path: Path) -> None:
 
 def test_update_trigger_unknown_id_raises_keyerror(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
     with pytest.raises(KeyError):
-        update_trigger(
-            store, workflow_store, "does-not-exist", name="x", kind="daily", at="09:00", prompt="p"
-        )
+        update_trigger(store, "does-not-exist", name="x", kind="daily", at="09:00", prompt="p")
 
 
 def test_update_trigger_same_validation_as_create(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
-    workflow_store = WorkflowStore(tmp_path)
-    created = create_trigger(store, workflow_store, name="x", kind="daily", at="09:00", prompt="p")
-    with pytest.raises(ValueError, match="exactly one"):
-        update_trigger(
-            store,
-            workflow_store,
-            created.trigger_id,
-            name="x",
-            kind="daily",
-            at="09:00",
-            prompt="p",
-            workflow_name="also-given",
-        )
+    created = create_trigger(store, name="x", kind="daily", at="09:00", prompt="p")
+    with pytest.raises(ValueError, match="prompt cannot be blank"):
+        update_trigger(store, created.trigger_id, name="x", kind="daily", at="09:00", prompt="  ")
 
 
 # -- model-callable tools --

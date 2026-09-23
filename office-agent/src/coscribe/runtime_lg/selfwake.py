@@ -1,6 +1,5 @@
 """Selfwake resume side for runtime_lg -- the LangGraph-native counterpart
-to tools/selfwake.py, same split tools/workflows.py / runtime_lg/workflows.py
-already use: storage + model-callable tools live in tools/selfwake.py (no
+to tools/selfwake.py: storage + model-callable tools live in tools/selfwake.py (no
 live client/checkpointer needed there); actually resuming a sleeping thread
 does need one, so it lives here instead.
 
@@ -27,7 +26,6 @@ from typing import Any
 from ..tools.background_tasks import BackgroundTaskStore
 from ..tools.selfwake import SignalStore, WakeRequest, WakeStore
 from ..tools.subagent_tasks import SubAgentTaskStore
-from ..tools.workflows import WorkflowRunStore
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +65,6 @@ def _is_due(
     wake: WakeRequest,
     *,
     now: datetime,
-    run_store: WorkflowRunStore,
     task_store: BackgroundTaskStore,
     subagent_task_store: SubAgentTaskStore,
     signal_store: SignalStore,
@@ -79,19 +76,12 @@ def _is_due(
         if wake_at.tzinfo is None:
             wake_at = wake_at.replace(tzinfo=UTC)
         return wake_at <= now
-    if wake.kind == "job":
-        if wake.job_id is None:
-            return False
-        run = run_store.load(wake.job_id)
-        # A run that's vanished (deleted) can never resolve any other way,
-        # so treat that as due too rather than leaving the wake stuck
-        # pending forever.
-        return run is None or run.status != "running"
     if wake.kind == "task":
         if wake.task_id is None:
             return False
         task = task_store.load(wake.task_id)
-        # Same "vanished counts as due" reasoning as "job" above.
+        # A task that's vanished (deleted) can never resolve any other
+        # way, so it counts as due rather than leaving the wake stuck.
         return task is None or task.status != "running"
     if wake.kind == "subagent":
         if wake.subagent_task_id is None:
@@ -126,7 +116,6 @@ async def poll_due_wakes(
     """
     wake_store = WakeStore(state_dir)
     signal_store = SignalStore(state_dir)
-    run_store = WorkflowRunStore(state_dir)
     task_store = BackgroundTaskStore(state_dir)
     subagent_task_store = SubAgentTaskStore(state_dir)
     now = datetime.now(UTC)
@@ -136,7 +125,6 @@ async def poll_due_wakes(
         if not _is_due(
             wake,
             now=now,
-            run_store=run_store,
             task_store=task_store,
             subagent_task_store=subagent_task_store,
             signal_store=signal_store,
