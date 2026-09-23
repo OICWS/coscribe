@@ -4,13 +4,24 @@
 // "Scheduled / <name>" breadcrumb instead of the ordinary ThreadHeader.
 export const SCHEDULED_THREAD_PREFIX = "scheduled-";
 
-/** Full-page reload to a different thread -- there is no in-page
- * thread-switching machinery (App.tsx binds its whole WS connection to
- * one thread_id for the page's lifetime), deliberately not ported.
- * Shared by NavRail.tsx's own session-switcher, App.tsx's Scheduled-task
- * "open" handler, and every Run-now action (ScheduledTaskDetail,
- * RunPanel's card menu, NavRail's sidebar row) that needs to land the
- * user on the fired trigger's own conversation afterward. */
+/** Fired on window after ?thread= changes in-page; App.tsx listens for it
+ * (and popstate) and rebinds its socket to the thread now in the URL. */
+export const THREAD_CHANGE_EVENT = "coscribe:threadchange";
+
+/** In-page switch to another thread: the URL stays the single source of
+ * truth for which thread is open, so reload, back/forward, and a pasted
+ * link all keep working. Fires the event even when already on that
+ * thread, so a Run now from the Scheduled portal still lands on its
+ * conversation view. */
 export function goToThread(threadId: string): void {
-  window.location.href = `${window.location.pathname}?thread=${threadId}`;
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("thread") !== threadId) {
+    url.searchParams.set("thread", threadId);
+    window.history.pushState(null, "", url.toString());
+  }
+  window.dispatchEvent(new Event(THREAD_CHANGE_EVENT));
+}
+
+export function startNewThread(): void {
+  goToThread(crypto.randomUUID().slice(0, 8));
 }

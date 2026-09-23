@@ -44,6 +44,7 @@ function TaskCardMenu({ task, onEdit, onChanged }: TaskCardMenuProps) {
     e.stopPropagation();
     setOpen(false);
     await runScheduledTaskNow(task.trigger_id);
+    onChanged();
     goToThread(task.thread_id);
   };
 

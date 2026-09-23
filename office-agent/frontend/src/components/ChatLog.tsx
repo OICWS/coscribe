@@ -63,9 +63,9 @@ interface ChatLogProps {
    * composer) -- same "hidden while a turn is in flight" reasoning as
    * onEditMessage above, and offered on the same footer, see TurnView. */
   onRewindMessage?: (turnIndex: number, text: string) => void;
-  /** Runs a suggested prompt from EmptyState, shown in place of the
-   * (otherwise empty) message list on a brand-new thread. */
-  onSuggestion: (prompt: string) => void;
+  /** True until this thread's history has arrived -- an existing
+   * thread shows a spinner then, not the brand-new-thread greeting. */
+  loading: boolean;
   /** A shape clicked in a pptx preview (PptxShapeOverlay) -- threaded up
    * to App.tsx exactly like BrowserPanel's own onSendToChat. */
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
@@ -97,7 +97,7 @@ export function ChatLog({
   onAnswerQuestion,
   onEditMessage,
   onRewindMessage,
-  onSuggestion,
+  loading,
   onPptxShapePicked,
   olderItems,
   olderStatus,
@@ -164,7 +164,17 @@ export function ChatLog({
   if (items.length === 0) {
     return (
       <div data-testid="chat-log" className="flex-1 overflow-y-auto">
-        <EmptyState onSuggestion={onSuggestion} />
+        {loading ? (
+          <div className="flex h-full items-center justify-center">
+            <div
+              className="h-6 w-6 animate-spin rounded-full border-[3px] border-[color-mix(in_srgb,var(--fg)_15%,transparent)] border-t-[var(--accent)] motion-reduce:animate-none"
+              role="status"
+              aria-label="Loading conversation"
+            />
+          </div>
+        ) : (
+          <EmptyState />
+        )}
       </div>
     );
   }
@@ -278,7 +288,7 @@ function TurnView({
         ) : entry.kind === "question" ? (
           <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
         ) : (
-          <LogItemView key={entry.id} item={entry} onEditMessage={onEditMessage} />
+          <LogItemView key={entry.id} item={entry} onEditMessage={isLastTurn ? onEditMessage : undefined} />
         ),
       )}
       {canFooter && (

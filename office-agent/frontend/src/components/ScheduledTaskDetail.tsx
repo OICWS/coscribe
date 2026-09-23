@@ -54,10 +54,10 @@ export function ScheduledTaskDetail({ task, onEdit, onDeleted, onChanged }: Sche
   const runNow = async () => {
     setRunning(true);
     await runScheduledTaskNow(task.trigger_id);
-    // This task has now run at least once -- land on its own
-    // conversation, same as every other Run-now entry point (see
-    // lib/nav.ts's goToThread docstring). No need to reset `running` or
-    // call onChanged() first: the page is navigating away regardless.
+    // The refreshed last_run_at is what makes the next click on this task
+    // open its conversation rather than this page (App.openScheduledTask).
+    setRunning(false);
+    onChanged();
     goToThread(task.thread_id);
   };
 

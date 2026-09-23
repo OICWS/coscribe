@@ -1647,6 +1647,229 @@ def test_stop_hard_cancels_a_turn_stuck_inside_the_model_call(
     assert agent_message["text"] == "[stopped]"
 
 
+def test_stop_mid_tool_closes_the_orphaned_tool_call_instead_of_breaking_the_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stop hard-cancels a turn while a tool is still running: the
+    checkpoint is left with an AIMessage whose tool_call never got a
+    ToolMessage. The next message must reach the model with that call
+    closed off (OpenAI-compatible providers 400 on the whole history
+    otherwise), and reconnecting must not silently re-run the tool."""
+    from langchain_core.messages import ToolCall
+
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def slow_search_pdf(self: Any, query: str, **kwargs: Any) -> list[dict[str, object]]:
+        calls.append(query)
+        started.set()
+        release.wait(timeout=10)
+        return []
+
+    monkeypatch.setattr("coscribe.tools.documents.DocumentToolkit.search_pdf", slow_search_pdf)
+    call = ToolCall(name="search_pdf", args={"query": "Error code"}, id="call_1")
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="hi")]
+    )
+    try:
+        with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+            with client.websocket_connect("/ws/t_stop_mid_tool") as ws:
+                ws.receive_json()  # state
+                ws.receive_json()  # history
+                ws.send_json({"type": "user_message", "text": "search the manual"})
+                assert started.wait(timeout=5), "tool never started"
+                ws.send_json({"type": "stop"})
+                stopped = _receive_until(ws, "agent_message")[-1]
+                assert stopped["text"] == "[stopped]"
+                release.set()
+
+            with client.websocket_connect("/ws/t_stop_mid_tool") as ws:
+                ws.receive_json()  # state
+                ws.receive_json()  # history
+                ws.send_json({"type": "user_message", "text": "just say hi"})
+                messages = _receive_until(ws, "tasks_changed")
+    finally:
+        release.set()
+
+    assert calls == ["Error code"]
+    assert not any(m["type"] == "error" for m in messages)
+    assert [m for m in messages if m["type"] == "agent_message"][-1]["text"] == "hi"
+    history = fake_model.received[-1]
+    tool_call_index = next(
+        i for i, m in enumerate(history) if isinstance(m, AIMessage) and m.tool_calls
+    )
+    closing = history[tool_call_index + 1]
+    assert isinstance(closing, ToolMessage)
+    assert closing.tool_call_id == "call_1"
+    assert isinstance(history[tool_call_index + 2], HumanMessage)
+
+
+def test_close_orphaned_tool_calls_heals_a_thread_already_corrupted_mid_history() -> None:
+    """A thread broken before the fix has a newer HumanMessage *after*
+    the orphaned tool call -- the placeholder has to be inserted directly
+    after its AIMessage, not appended at the end."""
+    from langchain.agents import create_agent
+    from langchain_core.messages import ToolCall
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from coscribe.web.session import _close_orphaned_tool_calls
+
+    def lookup(q: str) -> str:
+        """Look something up."""
+        return "found"
+
+    calls = [
+        ToolCall(name="lookup", args={"q": "a"}, id="done"),
+        ToolCall(name="lookup", args={"q": "b"}, id="orphan"),
+    ]
+    agent = create_agent(
+        FakeToolCallingChatModel(responses=[]), [lookup], checkpointer=InMemorySaver()
+    )
+    config = {"configurable": {"thread_id": "t"}}
+
+    async def scenario() -> list[BaseMessage]:
+        await agent.aupdate_state(
+            config,
+            {
+                "messages": [
+                    HumanMessage(content="go"),
+                    AIMessage(content="", tool_calls=calls),
+                    ToolMessage(content="found", tool_call_id="done", name="lookup"),
+                    HumanMessage(content="second"),
+                ]
+            },
+            as_node="tools",
+        )
+        assert await _close_orphaned_tool_calls(agent, config) is True
+        assert await _close_orphaned_tool_calls(agent, config) is False
+        state = await agent.aget_state(config)
+        assert state.next == ()
+        return list(state.values["messages"])
+
+    messages = asyncio.run(scenario())
+    assert [type(m).__name__ for m in messages] == [
+        "HumanMessage",
+        "AIMessage",
+        "ToolMessage",
+        "ToolMessage",
+        "HumanMessage",
+    ]
+    assert [m.tool_call_id for m in messages[2:4]] == ["done", "orphan"]
+
+
+def test_close_orphaned_tool_calls_commits_a_finished_parallel_calls_uncommitted_result() -> None:
+    """Parallel tool calls, cancelled while one is still running: the one
+    that finished only has an uncommitted pending write, which aget_state
+    shows but a fresh input would drop. Its real result must survive, and
+    only the unfinished call gets the placeholder."""
+    from langchain.agents import create_agent
+    from langchain_core.messages import ToolCall
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from coscribe.web.session import _ORPHANED_TOOL_CALL_NOTE, _close_orphaned_tool_calls
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def fast(q: str) -> str:
+        """Fast lookup."""
+        return "fast result"
+
+    def slow(q: str) -> str:
+        """Slow lookup."""
+        started.set()
+        release.wait(timeout=10)
+        return "slow result"
+
+    model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    ToolCall(name="fast", args={"q": "a"}, id="fast_call"),
+                    ToolCall(name="slow", args={"q": "b"}, id="slow_call"),
+                ],
+            ),
+            AIMessage(content="hi"),
+        ]
+    )
+    agent = create_agent(model, [fast, slow], checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "t"}}
+
+    async def scenario() -> None:
+        turn = asyncio.create_task(
+            agent.ainvoke({"messages": [HumanMessage(content="go")]}, config)
+        )
+        await asyncio.to_thread(started.wait, 5)
+        await asyncio.sleep(0.2)
+        turn.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await turn
+        release.set()
+        assert await _close_orphaned_tool_calls(agent, config) is True
+        await agent.ainvoke({"messages": [HumanMessage(content="say hi")]}, config)
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
+
+    history = model.received[-1]
+    tool_messages = {m.tool_call_id: m.content for m in history if isinstance(m, ToolMessage)}
+    assert tool_messages == {"fast_call": "fast result", "slow_call": _ORPHANED_TOOL_CALL_NOTE}
+    assert isinstance(history[-1], HumanMessage)
+
+
+def test_close_orphaned_tool_calls_commits_a_finished_tools_uncommitted_write() -> None:
+    """Every tool call finished, but the superstep never committed: the
+    ToolMessage exists only as a pending write, visible through aget_state
+    yet dropped by a fresh input -- the exact state a live DeepSeek thread
+    was found in. Nothing needs a placeholder; the write must still be
+    committed or the model sees the orphan anyway."""
+    from langchain.agents import create_agent
+    from langchain_core.messages import ToolCall
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from coscribe.web.session import _close_orphaned_tool_calls
+
+    def lookup(q: str) -> str:
+        """Look something up."""
+        return "unused"
+
+    checkpointer = InMemorySaver()
+    model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
+    agent = create_agent(model, [lookup], checkpointer=checkpointer)
+    config = {"configurable": {"thread_id": "t"}}
+    call = ToolCall(name="lookup", args={"q": "a"}, id="call_1")
+
+    async def scenario() -> None:
+        await agent.aupdate_state(
+            config,
+            {"messages": [HumanMessage(content="go"), AIMessage(content="", tool_calls=[call])]},
+            as_node="model",
+        )
+        state = await agent.aget_state(config)
+        await checkpointer.aput_writes(
+            state.config,
+            [("messages", [ToolMessage(content="real result", tool_call_id="call_1")])],
+            state.tasks[0].id,
+        )
+        assert await _close_orphaned_tool_calls(agent, config) is True
+        await agent.ainvoke({"messages": [HumanMessage(content="say hi")]}, config)
+
+    asyncio.run(scenario())
+
+    history = model.received[-1]
+    assert [type(m).__name__ for m in history] == [
+        "HumanMessage",
+        "AIMessage",
+        "ToolMessage",
+        "HumanMessage",
+    ]
+    assert history[2].content == "real result"
+
+
 def test_switch_model_rebuilds_the_graph_and_reports_the_new_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2057,11 +2280,10 @@ def test_edit_message_truncates_history_and_regenerates_from_the_edit(
             ws.send_json({"type": "user_message", "text": "how are you"})
             _receive_until(ws, "tasks_changed")
 
-            # index 0 -- the first (and here, only) user turn -- edited.
-            # Everything from that turn onward (the original "hello",
-            # "hi there!", "how are you", "nice to hear") is discarded,
-            # and the edited text runs as a fresh turn.
-            ws.send_json({"type": "edit_message", "index": 0, "text": "hello, edited"})
+            # index 1 -- the latest user turn -- edited. That turn onward
+            # ("how are you", "nice to hear") is discarded, and the edited
+            # text runs as a fresh turn; the earlier turn is untouched.
+            ws.send_json({"type": "edit_message", "index": 1, "text": "how are you, edited"})
             messages = _receive_until(ws, "tasks_changed")
 
         # Reconnecting re-reads straight from the checkpointer -- proves
@@ -2073,8 +2295,42 @@ def test_edit_message_truncates_history_and_regenerates_from_the_edit(
     agent_message = next(m for m in messages if m["type"] == "agent_message")
     assert agent_message["text"] == "edited reply"
     assert history["entries"] == [
-        {"kind": "user", "text": "hello, edited"},
+        {"kind": "user", "text": "hello"},
+        {"kind": "agent", "text": "hi there!"},
+        {"kind": "user", "text": "how are you, edited"},
         {"kind": "agent", "text": "edited reply"},
+    ]
+
+
+def test_edit_message_rejects_anything_but_the_latest_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="hi there!"), AIMessage(content="nice to hear")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_edit_old") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+            ws.send_json({"type": "user_message", "text": "how are you"})
+            _receive_until(ws, "tasks_changed")
+
+            ws.send_json({"type": "edit_message", "index": 0, "text": "hello, edited"})
+            error = ws.receive_json()
+
+        with client.websocket_connect("/ws/t_edit_old") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert "most recent message" in error["message"]
+    assert [e["text"] for e in history["entries"]] == [
+        "hello",
+        "hi there!",
+        "how are you",
+        "nice to hear",
     ]
 
 

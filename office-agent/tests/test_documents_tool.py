@@ -730,6 +730,28 @@ def test_search_pdf_returns_empty_list_when_nothing_matches(tmp_path: Path) -> N
     assert tools["search_pdf"](query="not present anywhere") == []
 
 
+def test_search_pdf_regex_mode_on_a_single_file(tmp_path: Path) -> None:
+    _write_two_page_pdf(tmp_path / "a.pdf", "code E-0097 here", "code E-12 and E-0194")
+    _write_two_page_pdf(tmp_path / "b.pdf", "code E-0001 elsewhere", "nothing")
+    tools = _tools_by_name(tmp_path)
+
+    results = tools["search_pdf"](query=r"E-\d{4}\b", path="a.pdf", regex=True)
+
+    assert [(r["path"], r["page"]) for r in results] == [("a.pdf", 1), ("a.pdf", 2)]
+    assert tools["search_pdf"](query=r"E-\d{4}\b", path="a.pdf") == []
+    with pytest.raises(ValueError, match="Invalid regular expression"):
+        tools["search_pdf"](query="(unclosed", regex=True)
+
+
+def test_read_pdf_reads_only_the_requested_page_range(tmp_path: Path) -> None:
+    _write_two_page_pdf(tmp_path / "report.pdf", "first page text", "second page text")
+    tools = _tools_by_name(tmp_path)
+
+    text = tools["read_pdf"](path="report.pdf", start_page=2, end_page=2)
+
+    assert text == "--- Page 2 ---\nsecond page text"
+
+
 def test_search_pdf_path_cannot_escape_workspace_root(tmp_path: Path) -> None:
     tools = _tools_by_name(tmp_path)
 

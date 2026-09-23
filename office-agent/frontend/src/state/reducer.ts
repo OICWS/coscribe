@@ -108,9 +108,8 @@ export interface ChatState {
    * Gates App.tsx's queued local sends (see pendingLocalSendsRef there):
    * a user_message dispatched optimistically *before* "history" arrives
    * gets wiped right back out the moment "history" lands, since that
-   * case below replaces `items` wholesale -- caught live via
-   * EmptyState's suggestion cards, clickable the instant the page
-   * paints, well before a real history round trip can complete. Reset to
+   * case below replaces `items` wholesale -- a send fired the instant
+   * the page paints routinely beats a real history round trip. Reset to
    * false by App.tsx on every reconnect (a fresh connection gets its own
    * fresh history event to wait for), not by this reducer, since the
    * reducer has no notion of "a new connection started." */
@@ -172,6 +171,7 @@ export type LocalAction =
   | { type: "local_question_answered"; id: string; answer: string }
   | { type: "local_hydrate_workflow_runs"; runs: WorkflowRun[] }
   | { type: "local_connection_reset" }
+  | { type: "local_switch_thread" }
   | { type: "local_request_older_messages" };
 
 export type ChatAction = WsServerEvent | LocalAction;
@@ -222,6 +222,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // (worse) silently duplicate a batch already revealed once the
       // new connection's cursor starts over from its own current state.
       return { ...state, historyReceived: false, olderItems: [], olderStatus: "none" };
+
+    case "local_switch_thread":
+      // model/workspace stay on screen until the new thread's own "state"
+      // event replaces them, instead of flashing blank in between.
+      return {
+        ...initialChatState,
+        model: state.model,
+        contextWindow: state.contextWindow,
+        enabledSkills: state.enabledSkills,
+        workspaceRoot: state.workspaceRoot,
+        workspaceExplicit: state.workspaceExplicit,
+        workflowRuns: state.workflowRuns,
+        workflowEventTick: state.workflowEventTick,
+      };
 
     case "local_request_older_messages":
       return state.olderStatus === "loading" ? state : { ...state, olderStatus: "loading" };
