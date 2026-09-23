@@ -13,7 +13,7 @@ requirement.
 
 Previews are written under `<state_dir>/previews/`, not the user's
 workspace -- they're generated bookkeeping, same category as
-`state_dir`'s existing tasks/workflow-run storage, not a file the user
+`state_dir`'s existing task storage, not a file the user
 asked for. Naming them with a fresh uuid4 (never derived from the
 source path) means `GET /api/previews/{name}` can look one up by a plain
 filename match against that one directory without needing

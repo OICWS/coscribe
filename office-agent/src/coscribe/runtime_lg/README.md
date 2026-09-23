@@ -1481,6 +1481,10 @@ uninterrupted live run of the script was never achieved in this sandbox.
 
 ## Workflows -- closes the rest of the workflows/personas gap
 
+> **Superseded (ROADMAP Phase 8av):** recorded workflows were removed; a
+> workflow is now just a scheduled task with a standalone prompt, each run
+> in its own conversation. Kept below as the record of what was built.
+
 `ChatSession` supports named, reusable workflows (`tools/workflows.py`):
 "chain" mode (a fixed, deterministic sequence of tool calls, replayed
 verbatim) and "agent" mode (a natural-language summary handed to a fresh

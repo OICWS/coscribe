@@ -32,7 +32,6 @@ from .tools import (
     build_subagent_task_tools,
     build_task_tools,
     build_websearch_tools,
-    build_workflow_tools,
     format_memory_section,
     format_skill_listing,
     format_template_listing,
@@ -541,56 +540,32 @@ that includes preview_name resends every listed image in full to a vision \
 model, a real, measured cost (a single real PPTX task ran to ~9.3M tokens \
 partly from exactly this loop going unbounded) -- one extra round catches \
 the large majority of real problems, and a genuinely stubborn one needs the \
-user's own judgment call more than a dozenth automated pass. You cannot \
-save a workflow yourself -- there is no save tool. When the \
-user is happy with a repeating task and wants to reuse it later, tell \
-them how to save it instead of trying to do it for them: for a fixed, \
-predictable sequence of tool calls that shouldn't need to change between \
-runs ("chain" mode), have them type /startworkflow before repeating the \
-steps and /endworkflow <name> once done -- only tool calls made between \
-those two commands are captured, so it's safe even in a long-running or \
-reused thread. For a task that needs judgment or investigation fresh \
-each run ("agent" mode), have them type /saveworkflow <name> once the \
-approach is worked out; this summarizes the conversation into reusable \
-instructions for future runs. Use list_workflows/get_workflow to check \
-what's already saved, and list_recorded_steps if it helps to show the \
-user what's been recorded in this thread so far. When the user wants a \
-saved workflow actually run (e.g. "run FBL5N", "do the export again"), \
-always call run_workflow(name) to do it -- never manually replay the \
-steps yourself from get_workflow's summary as a substitute, even for \
-"agent" mode, where the summary reads like a set of instructions (it's \
-written for run_workflow's own fresh sub-agent, not for you to act on in \
-this turn). Doing both -- acting on the summary yourself, then also \
-calling run_workflow -- runs the workflow twice, with real duplicate \
-side effects for anything beyond reading. If a chain-mode run fails partway through, its result \
-names which step failed ("completed_steps") -- rather than automatically \
-re-running the whole thing from step 0 (earlier steps like a login or \
-navigation may not be safe to redo), tell the user which step failed and \
-ask whether to retry from there with run_workflow(name, \
-resume_from_step=<that step's index>) once whatever caused the failure is \
-addressed. \
+user's own judgment call more than a dozenth automated pass. \
 When a task genuinely needs to wait before continuing *this conversation*, \
 use sleep_until(wake_at, reason) or sleep_for(seconds, reason) to end this \
 turn and automatically resume later at that time -- do not just say \
 "I'll check back then" with nothing actually scheduled, and do not \
 busy-wait by repeatedly calling a tool in a loop. Use \
-wake_on(job_id, reason) instead when what you're actually waiting on is a \
-specific in-progress workflow run finishing (job_id is that run's id), \
-not a fixed amount of time. Use wake_on_event(event_key, reason) to wait \
+wake_on_event(event_key, reason) to wait \
 on a named event instead, and signal_event(event_key) -- from this \
 conversation or another one -- to fire it; this only works if something \
 is actually going to call signal_event with that same key later, so only \
 reach for it when that's true. list_wakes/cancel_wake show and cancel \
 this conversation's own pending sleep/wake requests. \
-When the user instead wants something to run repeatedly (daily/weekly/ \
-monthly) or once at a specific future time, independent of this or any \
-other conversation still being open, use \
-create_scheduled_task(name, kind, at, prompt=..., weekday=..., \
-day_of_month=...) instead of sleep_until/sleep_for -- it runs in its own \
-dedicated conversation, not this one, so it never interrupts whatever the \
-user is doing when it fires. Pass workflow_name instead of prompt to have \
-it run an already-saved workflow each time rather than a freeform \
-instruction. list_scheduled_tasks/pause_scheduled_task/ \
+When the user wants to save what was just done as a reusable workflow, \
+or wants something to run repeatedly (hourly/daily/weekly/monthly) or on \
+demand later, call create_scheduled_task -- a saved workflow and a \
+scheduled task are the same thing here (kind="manual" for one that only \
+runs when the user starts it). The user reviews and can edit your draft \
+before it's saved; the tool result says whether they saved it. Each run \
+starts in a brand-new conversation with none of this one's context, so \
+write `prompt` as a complete, standalone instruction: the goal, the \
+concrete steps and inputs that actually worked (file paths, URLs, which \
+fields to fill, what to click), pitfalls this conversation ran into and \
+how to avoid them, and the expected output. Leave out dead ends, \
+unrelated chatter, and anything specific to one run. Don't use \
+sleep_until/sleep_for for recurring work -- those only resume this \
+conversation once. list_scheduled_tasks/pause_scheduled_task/ \
 resume_scheduled_task/delete_scheduled_task manage every scheduled task, \
 not just ones this conversation created. \
 Use web_search(query) to look things up on the live web -- current events, \
@@ -757,9 +732,8 @@ def build_coordinator_agent(
         + build_task_tools(thread_id, settings.state_dir)
         + build_interaction_tools()
         + build_memory_tools(settings.memory_path)
-        + build_workflow_tools(settings.state_dir)
         + build_selfwake_tools(thread_id, settings.state_dir)
-        + build_scheduled_task_tools(settings.state_dir)
+        + build_scheduled_task_tools(settings.state_dir, thread_id)
         + build_websearch_tools()
         + build_script_tools(root, settings.state_dir)
         + build_node_script_tools(root, settings.state_dir)

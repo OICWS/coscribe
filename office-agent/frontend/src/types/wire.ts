@@ -1,7 +1,7 @@
 /**
  * The exact wire contract coscribe-web speaks, as of this session's
  * full re-read of coscribe/web/app.py, web/session.py,
- * runtime_lg/messages.py, and tools/workflows.py -- not reverse-
+ * and runtime_lg/messages.py -- not reverse-
  * engineered from the old app.js, which could itself have drifted from
  * the real backend. This file is the single source of truth the rest of
  * the frontend is built against; the backend does not change as part of
@@ -30,6 +30,10 @@ export interface StateEvent {
    * Fixed once per thread (see SelectWorkspaceOut), not freely
    * re-toggleable like enabled_skills. */
   workspace_root: string;
+  /** Only on the state sent right after connecting: whether a turn is
+   * already running on this thread (typically a scheduled run executing
+   * in the background), so the page can show it as running. */
+  turn_in_flight?: boolean;
   /** True iff workspace_root above came from a real per-thread choice
    * (a SelectWorkspaceOut that already succeeded), false if it's still
    * just settings.workspace_root's own global default -- the frontend's
@@ -137,6 +141,33 @@ export interface QuestionRequiredEvent {
   multi_select: boolean;
 }
 
+/** A scheduled run just started on this thread; `text` is the run's
+ * prompt (it never came from this tab, so there's no local echo). */
+export interface ScheduledRunStartedEvent {
+  type: "scheduled_run_started";
+  text: string;
+}
+
+/** create_scheduled_task's arguments as the model drafted them -- nothing
+ * is saved until the user reviews it; answered with question_response. */
+export interface TaskDraft {
+  name?: string;
+  kind?: string;
+  at?: string;
+  prompt?: string;
+  weekday?: number | null;
+  day_of_month?: number | null;
+  start_date?: string | null;
+  model?: string | null;
+  approval_mode?: string;
+}
+
+export interface TaskDraftRequiredEvent {
+  type: "task_draft_required";
+  id: string;
+  draft: TaskDraft;
+}
+
 export interface UsageEvent {
   type: "usage";
   total_tokens: number;
@@ -162,8 +193,8 @@ export interface ErrorEvent {
 }
 
 /** A generic "chat bubble from the assistant" event -- not exclusively
- * the final answer to a turn. Also used for workflow save-curator
- * questions/previews and clarification-flow prompts (session.py). */
+ * the final answer to a turn. Also used for /saveskill's curator
+ * questions/previews (session.py). */
 export interface AgentMessageEvent {
   type: "agent_message";
   text: string;
@@ -178,7 +209,6 @@ export interface CompactedEvent {
 
 export interface ClearedEvent {
   type: "cleared";
-  cancelled_recording: boolean;
 }
 
 /** Confirms a rewind_message truncation actually happened -- the frontend
@@ -190,59 +220,8 @@ export interface RewoundEvent {
   index: number;
 }
 
-export interface RecordingStartedEvent {
-  type: "recording_started";
-  discarded_previous: boolean;
-}
-
-/** step_count is present only for mode:"chain" -- absent (not zero, not
- * null) for mode:"agent", matching session.py's own dict construction. */
-export interface WorkflowSavedEvent {
-  type: "workflow_saved";
-  name: string;
-  mode: "chain" | "agent";
-  step_count?: number;
-}
-
-export type WorkflowRunStepStatus = "pending" | "running" | "done" | "failed" | "stopped";
-
-export interface WorkflowRunStep {
-  index: number;
-  tool_name: string;
-  status: WorkflowRunStepStatus;
-  detail: string | null;
-}
-
-export type WorkflowRunStatus = "running" | "completed" | "failed" | "stopped";
-
-export interface WorkflowRun {
-  run_id: string;
-  workflow_name: string;
-  mode: "chain" | "agent";
-  status: WorkflowRunStatus;
-  started_at: string;
-  finished_at: string | null;
-  error: string | null;
-  /** Always [] for mode:"agent" runs -- no per-step progress is tracked
-   * for agent-mode workflows (session.py's deliberate simplification). */
-  steps: WorkflowRunStep[];
-}
-
-export interface WorkflowRunProgressEvent {
-  type: "workflow_run_progress";
-  run: WorkflowRun;
-}
-
-export interface WorkflowRunStartedEvent {
-  type: "workflow_run_started";
-  name: string;
-}
-
-/** /saveskill's own success confirmation -- the reusable-knowledge
- * counterpart to WorkflowSavedEvent above (see runtime_lg/
- * skill_authoring.py's module docstring for why /saveskill is a
- * separate flow from /saveworkflow, not a third mode of it). `slug` is
- * the skill's own directory name -- also the /<slug> force-load token
+/** /saveskill's own success confirmation. `slug` is the skill's own
+ * directory name -- also the /<slug> force-load token
  * (see QuestionRequiredEvent-adjacent skills_by_slug in web/session.py). */
 export interface SkillSavedEvent {
   type: "skill_saved";
@@ -258,6 +237,8 @@ export type WsServerEvent =
   | ToolResultEvent
   | ApprovalRequiredEvent
   | QuestionRequiredEvent
+  | ScheduledRunStartedEvent
+  | TaskDraftRequiredEvent
   | UsageEvent
   | TasksChangedEvent
   | ErrorEvent
@@ -265,19 +246,14 @@ export type WsServerEvent =
   | CompactedEvent
   | ClearedEvent
   | RewoundEvent
-  | RecordingStartedEvent
-  | WorkflowSavedEvent
-  | SkillSavedEvent
-  | WorkflowRunProgressEvent
-  | WorkflowRunStartedEvent;
+  | SkillSavedEvent;
 
 // ---------------------------------------------------------------------
 // Client -> server WebSocket messages (7 types)
 // ---------------------------------------------------------------------
 
 /** Slash commands (/plan, /accept-edits, /compact, /clear,
- * /startworkflow, /endworkflow <name>, /saveworkflow <name>,
- * /saveskill <name>, /runworkflow <name>, /init, /<skill-slug>) are NOT
+ * /saveworkflow <name>, /saveskill <name>, /init, /<skill-slug>) are NOT
  * separate message types -- they're plain `text` here, parsed server-
  * side (session.py's _handle_user_message_locked). `images` are
  * multimodal image_url content parts sent as base64 data URLs, not

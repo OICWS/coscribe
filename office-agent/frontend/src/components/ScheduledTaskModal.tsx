@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { createScheduledTask, updateScheduledTask } from "../lib/rest";
 import type { ApprovalMode, ScheduledTask, ScheduleKind } from "../types/settings";
+import type { TaskDraft } from "../types/wire";
 import { CloseIcon, FolderIcon } from "./icons";
 
 const FREQUENCY_OPTIONS: { value: ScheduleKind; label: string }[] = [
@@ -62,11 +63,43 @@ function dateForDayOfMonth(day: number): string {
  * start_date, if the trigger has one) for display purposes only;
  * submitting the form re-derives day_of_month/start_date from whatever
  * date ends up picked. */
-function initialDateFor(task: ScheduledTask | null): string {
+function initialDateFor(task: ScheduledTask | null, draft: TaskDraft | undefined): string {
+  if (draft?.start_date) return draft.start_date;
+  if (draft?.kind === "monthly") return dateForDayOfMonth(draft.day_of_month ?? 1);
   if (!task) return todayIso();
   if (task.schedule.start_date) return task.schedule.start_date;
   if (task.schedule.kind === "monthly") return dateForDayOfMonth(task.schedule.day_of_month ?? 1);
   return todayIso();
+}
+
+const FREQUENCY_VALUES = new Set<string>(FREQUENCY_OPTIONS.map((o) => o.value));
+const APPROVAL_VALUES = new Set<string>(APPROVAL_OPTIONS.map((o) => o.value));
+
+/** The form's starting values: an existing task being edited, a draft the
+ * model proposed (never trusted blindly -- anything the form can't
+ * represent falls back to a default), or blank. */
+function initialValues(task: ScheduledTask | null, draft: TaskDraft | undefined) {
+  if (draft) {
+    const kind = (FREQUENCY_VALUES.has(draft.kind ?? "") ? draft.kind : "manual") as ScheduleKind;
+    return {
+      name: draft.name ?? "",
+      instructions: draft.prompt ?? "",
+      model: draft.model ?? "",
+      kind,
+      time: kind !== "manual" && /^\d{1,2}:\d{2}$/.test(draft.at ?? "") ? (draft.at as string) : "09:00",
+      weekday: draft.weekday ?? 0,
+      approvalMode: (APPROVAL_VALUES.has(draft.approval_mode ?? "") ? draft.approval_mode : "manual") as ApprovalMode,
+    };
+  }
+  return {
+    name: task?.name ?? "",
+    instructions: task?.prompt ?? "",
+    model: task?.model ?? "",
+    kind: (task?.schedule.kind === "once" ? "manual" : (task?.schedule.kind ?? "manual")) as ScheduleKind,
+    time: task?.schedule.at && task.schedule.kind !== "manual" ? task.schedule.at : "09:00",
+    weekday: task?.schedule.weekday ?? 0,
+    approvalMode: task?.approval_mode ?? "manual",
+  };
 }
 
 interface ProviderInfo {
@@ -75,8 +108,10 @@ interface ProviderInfo {
 
 interface ScheduledTaskModalProps {
   task: ScheduledTask | null; // null = create; otherwise editing this task
+  /** Prefills a new task from what the model drafted in a conversation. */
+  draft?: TaskDraft;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (task: ScheduledTask) => void;
 }
 
 /** The Create/Edit scheduled task form -- matches
@@ -85,22 +120,18 @@ interface ScheduledTaskModalProps {
  * from RunPanel's "New task" menu, a task card/sidebar row's "Edit"
  * action, and the detail page's pencil icon (all pass a different `task`
  * prop into the same component rather than duplicating the form three
- * times). Deliberately drops the old inline form's prompt-vs-saved-
- * workflow tab -- the reference has no such control, just one
- * "Instructions" field, and an explicit ask was to match the form's shape
- * first, real content/behavior gaps later. A workflow-backed trigger
- * created before this modal existed still runs fine; editing it through
- * here switches it to a plain prompt (workflow_name is never sent). */
-export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModalProps) {
+ * times). */
+export function ScheduledTaskModal({ task, draft, onClose, onSaved }: ScheduledTaskModalProps) {
   const isEdit = task !== null;
-  const [name, setName] = useState(task?.name ?? "");
-  const [instructions, setInstructions] = useState(task?.prompt ?? "");
-  const [model, setModel] = useState(task?.model ?? "");
-  const [kind, setKind] = useState<ScheduleKind>(task?.schedule.kind === "once" ? "manual" : (task?.schedule.kind ?? "manual"));
-  const [date, setDate] = useState(initialDateFor(task));
-  const [time, setTime] = useState(task?.schedule.at && task.schedule.kind !== "manual" ? task.schedule.at : "09:00");
-  const [weekday, setWeekday] = useState(task?.schedule.weekday ?? 0);
-  const [approvalMode, setApprovalMode] = useState<ApprovalMode>(task?.approval_mode ?? "manual");
+  const [initial] = useState(() => initialValues(task, draft));
+  const [name, setName] = useState(initial.name);
+  const [instructions, setInstructions] = useState(initial.instructions);
+  const [model, setModel] = useState(initial.model);
+  const [kind, setKind] = useState<ScheduleKind>(initial.kind);
+  const [date, setDate] = useState(() => initialDateFor(task, draft));
+  const [time, setTime] = useState(initial.time);
+  const [weekday, setWeekday] = useState(initial.weekday);
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>(initial.approvalMode);
   const [providers, setProviders] = useState<[string, ProviderInfo][]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,6 +165,7 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
       ...(kind === "monthly" ? { day_of_month: Number(date.split("-")[2]), start_date: date } : {}),
       ...(model ? { model } : {}),
       approval_mode: approvalMode,
+      notes_enabled: task?.notes_enabled ?? true,
     };
     setSaving(true);
     setError(null);
@@ -143,7 +175,7 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
       setError(result.error);
       return;
     }
-    onSaved();
+    onSaved(result);
     onClose();
   };
 
@@ -153,8 +185,17 @@ export function ScheduledTaskModal({ task, onClose, onSaved }: ScheduledTaskModa
         className="flex max-h-[90vh] w-[min(720px,100vw-2rem)] flex-col rounded-[16px] border border-[var(--border)] bg-[var(--panel-bg)] p-6 shadow-[var(--shadow)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{isEdit ? "Edit scheduled task" : "Create scheduled task"}</h2>
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {isEdit ? "Edit scheduled task" : draft ? "Review scheduled task" : "Create scheduled task"}
+            </h2>
+            {draft && (
+              <p className="mt-0.5 text-sm text-[var(--muted)]">
+                Drafted from your conversation -- adjust anything before saving.
+              </p>
+            )}
+          </div>
           <button
             type="button"
             aria-label="Close"

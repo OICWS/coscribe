@@ -1,19 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  deleteScheduledTask,
-  deleteThread,
-  deleteWorkflowRun,
-  getScheduledTasks,
-  renameThread,
-  runScheduledTaskNow,
-} from "../lib/rest";
+import { deleteScheduledTask, deleteThread, renameThread } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
 import { goToThread, startNewThread } from "../lib/nav";
+import { latestRun } from "../lib/runLabels";
 import { scheduleKindLabel } from "../lib/scheduleLabels";
 import type { ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
-import type { WorkflowRun } from "../types/wire";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { RunStatusIcon } from "./RunStatusIcon";
 import {
   ClockIcon,
   MessageCircleIcon,
@@ -26,10 +20,6 @@ import {
 } from "./icons";
 
 export type NavMode = "create" | "run";
-// "history" folded into "scheduled" -- both are "things that ran without
-// you typing a message right now," and the flat New/Scheduled nav shape
-// (see NavRail's own docstring below) has no third slot for it.
-export type RunTab = "workflows" | "scheduled";
 
 interface ThreadRowProps {
   thread: ThreadSummary;
@@ -146,8 +136,10 @@ function ThreadRow({ thread, isCurrent, onRenamed, onDeleteRequest }: ThreadRowP
 
 interface ScheduledTaskRowProps {
   task: ScheduledTask;
+  active: boolean;
   onSelect: () => void;
   onEdit: () => void;
+  onRunNow: () => void;
   onChanged: () => void;
 }
 
@@ -157,21 +149,21 @@ interface ScheduledTaskRowProps {
  * in muted text; hovering swaps that label for a "..." menu (Run now/
  * Edit/Delete -- no Pause, see sheduled-siderbar-workflow-display-
  * settings.png, unlike the portal card's own menu which keeps it).
- * Clicking the row itself opens ScheduledTaskDetail in RunPanel's main
- * area, one of the three confirmed entry points into the Edit modal
- * (via this row's own "Edit" item, or the detail page's pencil icon). */
-function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRowProps) {
+ * Clicking the row opens its latest run (or the task's page, before it
+ * has run). A running or stalled latest run replaces the bullet with its
+ * status, so it's visible without opening anything. */
+function ScheduledTaskRow({ task, active, onSelect, onEdit, onRunNow, onChanged }: ScheduledTaskRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useClickOutside(menuRef, () => setMenuOpen(false), menuOpen);
 
-  const runNow = async () => {
+  const runNow = () => {
     setMenuOpen(false);
-    await runScheduledTaskNow(task.trigger_id);
-    onChanged();
-    goToThread(task.thread_id);
+    onRunNow();
   };
+  const run = latestRun(task);
+  const showStatus = run !== null && (run.status === "running" || run.status === "needs_approval" || run.status === "failed");
 
   const confirmDelete = async () => {
     setDeleteConfirm(false);
@@ -181,10 +173,18 @@ function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRo
 
   return (
     <div
-      className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--card-bg)]"
+      className={`group flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--card-bg)] ${
+        active ? "bg-[var(--card-bg)] font-medium" : ""
+      }`}
       onClick={onSelect}
     >
-      <span className="shrink-0 text-[var(--muted)]">○</span>
+      {showStatus ? (
+        <span className="flex w-3 shrink-0 justify-center">
+          <RunStatusIcon status={run.status} className="h-3 w-3" />
+        </span>
+      ) : (
+        <span className="w-3 shrink-0 text-center text-[var(--muted)]">○</span>
+      )}
       <span className="min-w-0 flex-1 truncate" title={task.name}>
         {task.name}
       </span>
@@ -238,7 +238,7 @@ function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRo
       {deleteConfirm && (
         <ConfirmDialog
           title="Delete scheduled task?"
-          description={`"${task.name}" will be permanently removed.`}
+          description={`"${task.name}" and the conversations of its runs will be permanently removed.`}
           onCancel={() => setDeleteConfirm(false)}
           onConfirm={confirmDelete}
         />
@@ -258,44 +258,20 @@ interface NavRailProps {
   onThreadRenamed: (threadId: string, title: string) => void;
   mode: NavMode;
   onModeChange: (mode: NavMode) => void;
-  // Only the setter is needed now -- the sidebar always shows the
-  // Scheduled task list unconditionally (see the removed +New/Scheduled
-  // toggle pair's own docstring below), it just still needs to *set*
-  // runTab to "scheduled" when the outer clock icon is clicked.
-  onRunTabChange: (tab: RunTab) => void;
-  workflowRuns: WorkflowRun[];
-  onStop: () => void;
-  scheduledTasksVersion: number;
-  // Plain state clear (the "Scheduled" button's own reset-to-portal
-  // click) vs. the "smart open" a row click gets (goToThread if the task
-  // has already run, otherwise the same select) -- see App.tsx's
-  // openScheduledTask for why these can't be the same function: a row
-  // click always wants "open," but nothing here ever wants to force-
-  // navigate on a plain clear.
-  onSelectScheduledTask: (task: ScheduledTask | null) => void;
+  scheduledTasks: ScheduledTask[];
+  onScheduledTasksChanged: () => void;
+  /** The task whose page or run is currently open, highlighted. */
+  activeTaskId: string | null;
   onOpenScheduledTask: (task: ScheduledTask) => void;
   onEditScheduledTask: (task: ScheduledTask | null) => void;
+  onRunScheduledTaskNow: (task: ScheduledTask) => void;
+  onNewScheduledTask: () => void;
 }
 
-/** Replaces the old top-bar "Sessions" dropdown -- a narrow icon-only
- * rail that expands into a full nav panel on hover (matching the "Nav
- * rail" reference screenshot, docs/ui-references/nav-rail.png), rather
- * than a click-to-open dropdown or the old Create/Run pill-button-inside-
- * the-panel shape. Collapsed, it shows the pin toggle plus two always-
- * visible mode icons (chat/workflow -- switches `mode` directly, no need
- * to expand first); expanded, it adds a flat nav-item list below them:
- * just "New" in chat mode (ported from SessionMenu.tsx's session list),
- * or "New" + "Scheduled" in workflow mode (ported from
- * SessionMenu.tsx's Workflows/Recent Runs sections plus
- * settings/ScheduledTasksTab.tsx -- "history" folded into "Scheduled",
- * see RunTab's own comment). Each flat item is its own little accordion
- * within the rail: click to expand/collapse its list in place, which
- * also drives RunPanel's own main-content view via onRunTabChange (today
- * that's the *only* way to switch RunPanel's section -- RunPanel itself
- * renders no tab UI of its own). Settings itself is reachable from the
- * header row (App.tsx), not from here -- it used to live at the bottom of
- * this rail, but the user pointed out that put it out of the same visual
- * row as the sidebar toggle it's paired with. */
+/** A narrow icon-only rail that expands into a full nav panel on hover
+ * or when pinned (docs/ui-references/nav-rail.png). Collapsed, it shows
+ * the pin toggle and the two mode icons (chat / scheduled); expanded, it
+ * lists either chat sessions or scheduled tasks, depending on mode. */
 export function NavRail({
   threadId,
   pinned,
@@ -305,30 +281,21 @@ export function NavRail({
   onThreadRenamed,
   mode,
   onModeChange,
-  onRunTabChange,
-  workflowRuns,
-  onStop,
-  scheduledTasksVersion,
-  onSelectScheduledTask,
+  scheduledTasks,
+  onScheduledTasksChanged,
+  activeTaskId,
   onOpenScheduledTask,
   onEditScheduledTask,
+  onRunScheduledTaskNow,
+  onNewScheduledTask,
 }: NavRailProps) {
   const [hovering, setHovering] = useState(false);
   const expanded = pinned || hovering;
-  const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
-  const [runDeleteTarget, setRunDeleteTarget] = useState<string | null>(null);
 
   useEffect(() => {
     if (expanded) onThreadsChanged();
   }, [expanded, onThreadsChanged]);
-
-  useEffect(() => {
-    getScheduledTasks().then(setScheduledTasks);
-  }, [expanded, scheduledTasksVersion]);
-
-  const currentRun = workflowRuns.find((run) => run.status === "running");
-  const recentRuns = [...workflowRuns].sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, 8);
 
 
   const confirmDelete = () => {
@@ -336,13 +303,6 @@ export function NavRail({
     const id = deleteTarget.thread_id;
     setDeleteTarget(null);
     deleteThread(id).then(onThreadsChanged);
-  };
-
-  const confirmRemoveRun = () => {
-    if (!runDeleteTarget) return;
-    const runId = runDeleteTarget;
-    setRunDeleteTarget(null);
-    deleteWorkflowRun(runId);
   };
 
   return (
@@ -389,14 +349,7 @@ export function NavRail({
                 className={`flex h-8 w-8 items-center justify-center rounded-md ${
                   mode === "run" ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
                 }`}
-                onClick={() => {
-                  onModeChange("run");
-                  onRunTabChange("scheduled");
-                  // Always lands on the portal grid, never a stale
-                  // detail-page selection left over from before the user
-                  // switched away to Chat mode and back.
-                  onSelectScheduledTask(null);
-                }}
+                onClick={() => onModeChange("run")}
               >
                 <ClockIcon className="h-[16px] w-[16px]" />
               </button>
@@ -408,16 +361,6 @@ export function NavRail({
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2">
             {mode === "create" && (
               <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
-                {currentRun && (
-                  <div className="mb-2 rounded-md border border-[var(--border)] p-2">
-                    <div className="flex min-w-0 items-center justify-between text-sm">
-                      <span className="min-w-0 truncate font-medium">{currentRun.workflow_name} running...</span>
-                      <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-xs" onClick={onStop}>
-                        Stop
-                      </button>
-                    </div>
-                  </div>
-                )}
                 <button
                   type="button"
                   className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)]"
@@ -448,75 +391,29 @@ export function NavRail({
   
             {mode === "run" && (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                {currentRun && (
-                  <div className="mb-2 rounded-md border border-[var(--border)] p-2">
-                    <div className="flex min-w-0 items-center justify-between text-sm">
-                      <span className="min-w-0 truncate font-medium">{currentRun.workflow_name} running...</span>
-                      <button type="button" className="rounded-md border border-[var(--border)] px-2 py-0.5 text-xs" onClick={onStop}>
-                        Stop
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {/* The old flat "+New" (saved Workflow-defs)/"Scheduled"
-                 * toggle pair is gone -- the outer mode-icon button (the
-                 * clock icon above) already jumps straight here, so a
-                 * second "Scheduled" toggle inside the panel was pure
-                 * redundancy, and the saved-Workflow-defs list it toggled
-                 * was an unrelated, unused feature per explicit request.
-                 * "+ New task" replaces both -- same visual treatment as
-                 * Chat mode's own "New session" button above, but a stub
-                 * for now (equivalent to the portal's own disabled
-                 * "Create with coscribe" item, not yet built: see
-                 * RunPanel.tsx's identical stub for why). The task list
-                 * below is unconditional now -- nothing left to toggle. */}
                 <button
                   type="button"
-                  disabled
-                  title="Not available yet -- see the portal's New task menu"
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium opacity-60"
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)]"
+                  onClick={onNewScheduledTask}
                 >
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-fg)]">
                     <PlusIcon className="h-3 w-3" />
                   </span>
                   New task
                 </button>
-                <div className="mt-1 flex-1 overflow-y-auto">
+                <div className="mb-1 mt-2 px-2 text-xs font-medium tracking-wide text-[var(--muted)]">TASKS</div>
+                <div className="flex-1 overflow-y-auto">
                   {scheduledTasks.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No scheduled tasks yet.</div>}
                   {scheduledTasks.map((task) => (
                     <ScheduledTaskRow
                       key={task.trigger_id}
                       task={task}
+                      active={task.trigger_id === activeTaskId}
                       onSelect={() => onOpenScheduledTask(task)}
                       onEdit={() => onEditScheduledTask(task)}
-                      onChanged={() => getScheduledTasks().then(setScheduledTasks)}
+                      onRunNow={() => onRunScheduledTaskNow(task)}
+                      onChanged={onScheduledTasksChanged}
                     />
-                  ))}
-                  {/* "History" (recent runs) has no flat-nav slot of its
-                   * own -- folded in here under Scheduled, per explicit
-                   * call: both are "ran without you typing a message
-                   * right now." */}
-                  {recentRuns.length > 0 && (
-                    <div className="mb-1 mt-2 px-2 text-xs font-medium tracking-wide text-[var(--muted)]">RECENT RUNS</div>
-                  )}
-                  {recentRuns.map((run) => (
-                    <div key={run.run_id} className="group flex items-center justify-between gap-1 rounded-md px-2 py-1.5 text-sm">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <ClockIcon className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
-                        <span className="truncate">{run.workflow_name}</span>
-                        <span className="shrink-0 text-xs text-[var(--muted)]">({run.status})</span>
-                      </div>
-                      {run.status !== "running" && (
-                        <button
-                          type="button"
-                          aria-label="Delete run record"
-                          className="shrink-0 rounded-md px-1 text-[var(--muted)] opacity-0 hover:bg-[var(--border)] group-hover:opacity-100"
-                          onClick={() => setRunDeleteTarget(run.run_id)}
-                        >
-                          &times;
-                        </button>
-                      )}
-                    </div>
                   ))}
                 </div>
               </div>
@@ -534,14 +431,6 @@ export function NavRail({
           }
           onCancel={() => setDeleteTarget(null)}
           onConfirm={confirmDelete}
-        />
-      )}
-      {runDeleteTarget && (
-        <ConfirmDialog
-          title="Delete run record?"
-          description="This only removes the history entry -- it does not affect any files the run created."
-          onCancel={() => setRunDeleteTarget(null)}
-          onConfirm={confirmRemoveRun}
         />
       )}
     </>

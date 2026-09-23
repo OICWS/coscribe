@@ -268,7 +268,6 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   spawn_agent: () => ({ verb: "Delegated to a sub-agent", object: null }),
   review_work: () => ({ verb: "Asked a reviewer to check the work", object: null }),
   load_skill: (a) => ({ verb: "Loaded skill", object: str(a, "name") ?? null }),
-  run_workflow: (a) => ({ verb: "Ran workflow", object: str(a, "name") ?? null }),
 };
 
 const PREFIX_VERBS: [prefix: string, verb: string][] = [

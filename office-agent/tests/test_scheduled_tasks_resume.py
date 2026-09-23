@@ -25,9 +25,19 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from coscribe.config import Settings
-from coscribe.runtime_lg.scheduled_tasks import fire_trigger_now, poll_due_scheduled_tasks
-from coscribe.tools.scheduled_tasks import ScheduledTrigger, ScheduledTriggerStore, ScheduleRule
-from coscribe.tools.workflows import Workflow, WorkflowStore
+from coscribe.runtime_lg.scheduled_tasks import (
+    _run_in_session,
+    fire_trigger_now,
+    poll_due_scheduled_tasks,
+    reconcile_interrupted_runs,
+)
+from coscribe.tools.scheduled_tasks import (
+    ScheduledRun,
+    ScheduledTrigger,
+    ScheduledTriggerStore,
+    ScheduleRule,
+    run_thread_id,
+)
 
 # Import order matters here -- see test_selfwake_resume.py's identical
 # comment for why coscribe.web.app must be imported before ChatSessionLG
@@ -40,6 +50,7 @@ class FakeToolCallingChatModel(BaseChatModel):
 
     responses: list[AIMessage]
     i: int = 0
+    received: list[list[BaseMessage]] = []
 
     def bind_tools(self, tools: Any, *, tool_choice: str | None = None, **kwargs: Any) -> Any:
         return self
@@ -51,6 +62,7 @@ class FakeToolCallingChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> ChatResult:
+        self.received.append(list(messages))
         message = self.responses[self.i]
         self.i += 1
         return ChatResult(generations=[ChatGeneration(message=message)])
@@ -62,6 +74,7 @@ class FakeToolCallingChatModel(BaseChatModel):
         run_manager: Any = None,
         **kwargs: Any,
     ) -> Any:
+        self.received.append(list(messages))
         message = self.responses[self.i]
         self.i += 1
         chunk = AIMessageChunk(content=message.content or "", tool_calls=message.tool_calls)
@@ -106,6 +119,24 @@ async def _make_get_session(
     return get_session
 
 
+def _trigger(trigger_id: str, **overrides: Any) -> ScheduledTrigger:
+    fields: dict[str, Any] = {
+        "trigger_id": trigger_id,
+        "name": f"Task {trigger_id}",
+        "schedule": ScheduleRule(kind="manual", at=""),
+        "enabled": True,
+        "created_at": datetime.now().isoformat(),
+        "next_run_at": None,
+        "prompt": "Do it",
+    }
+    fields.update(overrides)
+    return ScheduledTrigger(**fields)
+
+
+def _human_texts(messages: list[BaseMessage]) -> list[str]:
+    return [str(m.content) for m in messages if m.type == "human"]
+
+
 async def test_due_recurring_prompt_trigger_fires_and_advances(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -117,13 +148,9 @@ async def test_due_recurring_prompt_trigger_fires_and_advances(
         store = ScheduledTriggerStore(settings.state_dir)
         stale_next_run = (datetime.now() - timedelta(minutes=5)).isoformat()
         store.save(
-            ScheduledTrigger(
-                trigger_id="trig-1",
-                name="Daily summary",
-                thread_id="scheduled-trig-1",
+            _trigger(
+                "trig-1",
                 schedule=ScheduleRule(kind="daily", at="09:00"),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
                 next_run_at=stale_next_run,
                 prompt="Summarize yesterday",
             )
@@ -138,8 +165,38 @@ async def test_due_recurring_prompt_trigger_fires_and_advances(
     assert resolved.enabled is True  # recurring -- stays enabled
     assert resolved.next_run_at is not None
     assert resolved.next_run_at > stale_next_run  # advanced forward, not left stale
+    [run] = resolved.runs
+    assert run.source == "scheduled"
+    assert run.status == "completed"
+    assert run.finished_at is not None
+    assert run.thread_id == run_thread_id("trig-1", run.run_id)
     assert resolved.last_run_status == "completed"
-    assert resolved.last_run_at is not None
+
+
+async def test_each_run_starts_a_fresh_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runs never share a thread -- the second run's model input must not
+    contain anything from the first."""
+    settings = _settings(tmp_path)
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="first answer"), AIMessage(content="second answer")]
+    )
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        store = ScheduledTriggerStore(settings.state_dir)
+        store.save(_trigger("trig-fresh", notes_enabled=False))
+
+        await fire_trigger_now(settings.state_dir, "trig-fresh", get_session)
+        await fire_trigger_now(settings.state_dir, "trig-fresh", get_session)
+
+    resolved = store.load("trig-fresh")
+    assert resolved is not None
+    assert len({run.thread_id for run in resolved.runs}) == 2
+    second_input = fake_model.received[-1]
+    assert len(_human_texts(second_input)) == 1
+    assert not any("first answer" in str(m.content) for m in second_input)
 
 
 async def test_due_one_time_trigger_fires_and_disables_itself(
@@ -152,13 +209,9 @@ async def test_due_one_time_trigger_fires_and_disables_itself(
         get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
         store = ScheduledTriggerStore(settings.state_dir)
         store.save(
-            ScheduledTrigger(
-                trigger_id="trig-2",
-                name="One-off reminder",
-                thread_id="scheduled-trig-2",
+            _trigger(
+                "trig-2",
                 schedule=ScheduleRule(kind="once", at="2020-01-01T00:00:00"),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
                 next_run_at=(datetime.now() - timedelta(minutes=5)).isoformat(),
                 prompt="Remind me",
             )
@@ -173,103 +226,6 @@ async def test_due_one_time_trigger_fires_and_disables_itself(
     assert resolved.next_run_at is None
 
 
-async def test_workflow_backed_trigger_invokes_run_saved_workflow(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = _settings(tmp_path)
-    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="workflow ran")])
-    WorkflowStore(settings.state_dir).save(
-        Workflow(name="nightly-report", mode="agent", summary="Generate the nightly report")
-    )
-    checkpoint_path = tmp_path / "checkpoints.sqlite"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
-        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
-        store = ScheduledTriggerStore(settings.state_dir)
-        store.save(
-            ScheduledTrigger(
-                trigger_id="trig-3",
-                name="Nightly report trigger",
-                thread_id="scheduled-trig-3",
-                schedule=ScheduleRule(kind="daily", at="09:00"),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
-                next_run_at=(datetime.now() - timedelta(minutes=5)).isoformat(),
-                workflow_name="nightly-report",
-            )
-        )
-
-        fired = await poll_due_scheduled_tasks(settings.state_dir, get_session)
-
-    assert [t.trigger_id for t in fired] == ["trig-3"]
-    assert fake_model.i == 1  # the workflow's own agent-mode sub-agent actually ran
-    resolved = store.load("trig-3")
-    assert resolved is not None
-    assert resolved.last_run_status == "completed"
-    # run_saved_workflow's own side effect: the Workflow record itself
-    # tracks its last run too, same as an interactive /runworkflow would.
-    workflow = WorkflowStore(settings.state_dir).load("nightly-report")
-    assert workflow is not None
-    assert workflow.last_run_status == "completed"
-
-
-async def test_workflow_trigger_needing_approval_fails_promptly_not_hangs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Regression test for a real bug found via live testing against a
-    real running coscribe-web + real Gemini: a workflow-backed scheduled
-    task whose agent-mode run hits an approval-gated tool call (write_file
-    is WRITE_LOCAL, requires approval) used to hang the calling coroutine
-    forever -- _resolve_pending_approvals would create a real
-    asyncio.Future and await it, resolved only by a genuine incoming WS
-    message that _SilentSocket (nobody is watching) can never send. Since
-    poll_due_scheduled_tasks fires are awaited sequentially inside
-    web/app.py's single shared background poll loop, this wedged the
-    *entire* poller -- every other scheduled task and wake, not just this
-    one trigger -- on the very first unattended run that happened to
-    touch a gated tool. Fixed by _can_resolve_approvals's check in
-    web/session.py: a silent-socket run now reports status="failed" with
-    an explanatory error instead of hanging, leaving the interrupt
-    durably paused in the checkpointer for a human to resolve later by
-    opening the trigger's own thread. Wrapped in asyncio.wait_for so a
-    regression fails loudly with a TimeoutError instead of hanging the
-    test suite itself."""
-    from langchain_core.messages import ToolCall
-
-    settings = _settings(tmp_path)
-    call = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
-    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="", tool_calls=[call])])
-    WorkflowStore(settings.state_dir).save(
-        Workflow(name="writes-a-file", mode="agent", summary="Write hi to note.txt")
-    )
-    checkpoint_path = tmp_path / "checkpoints.sqlite"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
-        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
-        store = ScheduledTriggerStore(settings.state_dir)
-        store.save(
-            ScheduledTrigger(
-                trigger_id="trig-6",
-                name="Needs approval",
-                thread_id="scheduled-trig-6",
-                schedule=ScheduleRule(kind="daily", at="09:00"),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
-                next_run_at=(datetime.now() - timedelta(minutes=5)).isoformat(),
-                workflow_name="writes-a-file",
-            )
-        )
-
-        fired = await asyncio.wait_for(
-            poll_due_scheduled_tasks(settings.state_dir, get_session), timeout=5
-        )
-
-    assert [t.trigger_id for t in fired] == ["trig-6"]
-    resolved = store.load("trig-6")
-    assert resolved is not None
-    assert resolved.last_run_status == "failed"
-    # The gated write_file call was never approved -- the file must not exist.
-    assert not (tmp_path / "workspace" / "note.txt").exists()
-
-
 async def test_not_yet_due_trigger_stays_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -281,15 +237,10 @@ async def test_not_yet_due_trigger_stays_untouched(
         store = ScheduledTriggerStore(settings.state_dir)
         future_next_run = (datetime.now() + timedelta(hours=1)).isoformat()
         store.save(
-            ScheduledTrigger(
-                trigger_id="trig-4",
-                name="Not due yet",
-                thread_id="scheduled-trig-4",
+            _trigger(
+                "trig-4",
                 schedule=ScheduleRule(kind="daily", at="09:00"),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
                 next_run_at=future_next_run,
-                prompt="p",
             )
         )
 
@@ -300,7 +251,7 @@ async def test_not_yet_due_trigger_stays_untouched(
     resolved = store.load("trig-4")
     assert resolved is not None
     assert resolved.next_run_at == future_next_run
-    assert resolved.last_run_at is None
+    assert resolved.runs == []
 
 
 async def test_disabled_trigger_is_never_due_even_if_next_run_at_is_past(
@@ -313,15 +264,11 @@ async def test_disabled_trigger_is_never_due_even_if_next_run_at_is_past(
         get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
         store = ScheduledTriggerStore(settings.state_dir)
         store.save(
-            ScheduledTrigger(
-                trigger_id="trig-5",
-                name="Paused",
-                thread_id="scheduled-trig-5",
+            _trigger(
+                "trig-5",
                 schedule=ScheduleRule(kind="daily", at="09:00"),
                 enabled=False,
-                created_at=datetime.now().isoformat(),
                 next_run_at=(datetime.now() - timedelta(days=1)).isoformat(),
-                prompt="p",
             )
         )
 
@@ -329,6 +276,36 @@ async def test_disabled_trigger_is_never_due_even_if_next_run_at_is_past(
 
     assert fired == []
     assert fake_model.i == 0
+
+
+async def test_a_failing_run_is_recorded_and_not_retried_every_poll(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The schedule advances when a run starts, so a run whose session
+    can't even be built is recorded as failed once -- not left due and
+    re-attempted on every 30-second poll."""
+    settings = _settings(tmp_path)
+    store = ScheduledTriggerStore(settings.state_dir)
+    store.save(
+        _trigger(
+            "trig-broken",
+            schedule=ScheduleRule(kind="daily", at="09:00"),
+            next_run_at=(datetime.now() - timedelta(minutes=1)).isoformat(),
+        )
+    )
+
+    async def broken_get_session(thread_id: str) -> Any:
+        raise RuntimeError("provider misconfigured")
+
+    await poll_due_scheduled_tasks(settings.state_dir, broken_get_session)
+    again = await poll_due_scheduled_tasks(settings.state_dir, broken_get_session)
+
+    assert again == []
+    resolved = store.load("trig-broken")
+    assert resolved is not None
+    [run] = resolved.runs
+    assert run.status == "failed"
+    assert run.error == "provider misconfigured"
 
 
 # -- fire_trigger_now --
@@ -339,8 +316,8 @@ async def test_fire_trigger_now_runs_immediately_without_touching_the_schedule(
 ) -> None:
     """The detail page's "Run now" action must not disturb the trigger's
     regular schedule -- next_run_at and enabled stay exactly as they were,
-    only last_run_at/last_run_status get recorded, so running a daily 9am
-    task by hand at 2pm doesn't make it skip tomorrow's real 9am fire."""
+    so running a daily 9am task by hand at 2pm doesn't make it skip
+    tomorrow's real 9am fire."""
     settings = _settings(tmp_path)
     fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="ran on demand")])
     checkpoint_path = tmp_path / "checkpoints.sqlite"
@@ -349,29 +326,25 @@ async def test_fire_trigger_now_runs_immediately_without_touching_the_schedule(
         store = ScheduledTriggerStore(settings.state_dir)
         original_next_run = (datetime.now() + timedelta(hours=6)).isoformat()
         store.save(
-            ScheduledTrigger(
-                trigger_id="trig-7",
-                name="Run me now",
-                thread_id="scheduled-trig-7",
+            _trigger(
+                "trig-7",
                 schedule=ScheduleRule(kind="daily", at="09:00"),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
                 next_run_at=original_next_run,
                 prompt="Do it now",
             )
         )
 
-        result = await fire_trigger_now(settings.state_dir, "trig-7", get_session)
+        run = await fire_trigger_now(settings.state_dir, "trig-7", get_session)
 
     assert fake_model.i == 1  # a real turn ran
-    assert result.last_run_status == "completed"
-    assert result.last_run_at is not None
-    # Untouched -- this is the whole point of run-now vs. a real poll fire.
-    assert result.next_run_at == original_next_run
-    assert result.enabled is True
+    assert run is not None
+    assert run.status == "completed"
+    assert run.source == "manual"
     resolved = store.load("trig-7")
     assert resolved is not None
+    # Untouched -- this is the whole point of run-now vs. a real poll fire.
     assert resolved.next_run_at == original_next_run
+    assert resolved.enabled is True
 
 
 async def test_fire_trigger_now_preserves_paused_state(
@@ -383,23 +356,14 @@ async def test_fire_trigger_now_preserves_paused_state(
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
         store = ScheduledTriggerStore(settings.state_dir)
-        store.save(
-            ScheduledTrigger(
-                trigger_id="trig-8",
-                name="Paused but runnable",
-                thread_id="scheduled-trig-8",
-                schedule=ScheduleRule(kind="manual", at=""),
-                enabled=False,
-                created_at=datetime.now().isoformat(),
-                next_run_at=None,
-                prompt="Do it now",
-            )
-        )
+        store.save(_trigger("trig-8", enabled=False))
 
-        result = await fire_trigger_now(settings.state_dir, "trig-8", get_session)
+        run = await fire_trigger_now(settings.state_dir, "trig-8", get_session)
 
-    assert result.enabled is False  # run-now doesn't implicitly resume it
-    assert result.last_run_status == "completed"
+    resolved = store.load("trig-8")
+    assert resolved is not None
+    assert resolved.enabled is False  # run-now doesn't implicitly resume it
+    assert run is not None and run.status == "completed"
 
 
 async def test_fire_trigger_now_unknown_id_raises_keyerror(
@@ -414,114 +378,82 @@ async def test_fire_trigger_now_unknown_id_raises_keyerror(
             await fire_trigger_now(settings.state_dir, "does-not-exist", get_session)
 
 
-async def test_fire_trigger_now_propagates_a_real_failure_instead_of_swallowing_it(
+# -- notes --
+
+
+async def test_notes_are_in_the_run_prompt_and_the_run_can_update_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Unlike poll_due_scheduled_tasks (which logs and skips a failing
-    trigger so one broken task can't block every other due one),
-    fire_trigger_now is a live REST caller explicitly asking "run this
-    now" -- it must see the real failure, not a silent no-op."""
     from langchain_core.messages import ToolCall
 
     settings = _settings(tmp_path)
-    call = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
-    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="", tool_calls=[call])])
-    WorkflowStore(settings.state_dir).save(
-        Workflow(name="writes-a-file-2", mode="agent", summary="Write hi to note.txt")
+    call = ToolCall(
+        name="update_task_notes", args={"notes": "Processed through invoice 1043."}, id="n1"
+    )
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
     )
     checkpoint_path = tmp_path / "checkpoints.sqlite"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
         store = ScheduledTriggerStore(settings.state_dir)
-        store.save(
-            ScheduledTrigger(
-                trigger_id="trig-9",
-                name="Needs approval, run now",
-                thread_id="scheduled-trig-9",
-                schedule=ScheduleRule(kind="manual", at=""),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
-                next_run_at=None,
-                workflow_name="writes-a-file-2",
-            )
+        store.save(_trigger("trig-notes", prompt="Reconcile new invoices"))
+        store.write_notes("trig-notes", "Processed through invoice 1000.")
+
+        run = await asyncio.wait_for(
+            fire_trigger_now(settings.state_dir, "trig-notes", get_session), timeout=5
         )
 
-        # run_saved_workflow itself resolves to a "failed" *status*, not a
-        # raised exception (same as poll_due_scheduled_tasks's own
-        # approval-hang regression test above) -- fire_trigger_now's own
-        # "don't swallow" contract is about exceptions escaping
-        # _fire_trigger_once, so this confirms the status still comes
-        # through untouched rather than being coerced to "completed".
-        result = await asyncio.wait_for(
-            fire_trigger_now(settings.state_dir, "trig-9", get_session), timeout=5
-        )
-
-    assert result.last_run_status == "failed"
+    assert run is not None and run.status == "completed"  # READ tier: never parks on approval
+    [prompt] = _human_texts(fake_model.received[0])
+    assert "Reconcile new invoices" in prompt
+    assert "Processed through invoice 1000." in prompt
+    assert "update_task_notes" in prompt
+    assert store.read_notes("trig-notes") == "Processed through invoice 1043."
 
 
-# -- approval_mode / model threading (Workstream C) --
+async def test_notes_disabled_leaves_them_out_of_the_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="done")])
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        store = ScheduledTriggerStore(settings.state_dir)
+        store.save(_trigger("trig-nonotes", notes_enabled=False))
+        store.write_notes("trig-nonotes", "stale secret")
+
+        await fire_trigger_now(settings.state_dir, "trig-nonotes", get_session)
+
+    [prompt] = _human_texts(fake_model.received[0])
+    assert "stale secret" not in prompt
+    assert "update_task_notes" not in prompt
+
+
+def test_reconcile_interrupted_runs_marks_leftover_running_runs_failed(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    store.save(_trigger("trig-left"))
+    store.start_run("trig-left", "manual")
+
+    assert reconcile_interrupted_runs(tmp_path) == 1
+    resolved = store.load("trig-left")
+    assert resolved is not None
+    assert resolved.runs[0].status == "failed"
+    assert reconcile_interrupted_runs(tmp_path) == 0
+
+
+# -- approval_mode / model threading --
 
 
 @pytest.mark.parametrize("approval_mode", ["auto", "skip"])
-async def test_approval_mode_auto_or_skip_auto_approves_a_gated_agent_mode_call(
+async def test_approval_mode_auto_or_skip_auto_approves_a_gated_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approval_mode: str
 ) -> None:
-    """Unlike the default "manual" mode (see
-    test_workflow_trigger_needing_approval_fails_promptly_not_hangs just
-    above, which reports status="failed" for the exact same shape of
-    call), an "auto"/"skip" trigger must actually get the gated write_file
-    call approved and executed -- session.accept_edits is set for the
-    duration of the fire, which _decide_action_request's own accept_edits
-    branch auto-approves before ever reaching the Future-creation code
-    that would otherwise need a real approver."""
-    from langchain_core.messages import ToolCall
-
-    settings = _settings(tmp_path)
-    call = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
-    fake_model = FakeToolCallingChatModel(
-        responses=[
-            AIMessage(content="", tool_calls=[call]),
-            AIMessage(content="done"),
-        ]
-    )
-    WorkflowStore(settings.state_dir).save(
-        Workflow(name="writes-a-file-3", mode="agent", summary="Write hi to note.txt")
-    )
-    checkpoint_path = tmp_path / "checkpoints.sqlite"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
-        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
-        store = ScheduledTriggerStore(settings.state_dir)
-        store.save(
-            ScheduledTrigger(
-                trigger_id="trig-10",
-                name="Auto-approved write",
-                thread_id="scheduled-trig-10",
-                schedule=ScheduleRule(kind="manual", at=""),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
-                next_run_at=None,
-                workflow_name="writes-a-file-3",
-                approval_mode=approval_mode,
-            )
-        )
-
-        result = await asyncio.wait_for(
-            fire_trigger_now(settings.state_dir, "trig-10", get_session), timeout=5
-        )
-
-    assert result.last_run_status == "completed"
-    assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
-
-
-async def test_approval_mode_auto_does_not_leak_into_a_later_manual_fire(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """_fire_trigger_once restores session.accept_edits after firing --
-    two separate ScheduledTrigger records sharing nothing don't interact,
-    but this also guards the case where the *same* thread_id's session
-    object were ever reused across fires (a future in-process session
-    cache): approval_mode="auto" on one trigger must not silently leave
-    accept_edits on for anyone else driving that same thread afterward."""
+    """Unlike the default "manual" mode (where the call parks, awaiting an
+    approval nobody is there to give), an "auto"/"skip" trigger must
+    actually get the gated write_file call approved and executed --
+    session.accept_edits is set for the duration of the run."""
     from langchain_core.messages import ToolCall
 
     settings = _settings(tmp_path)
@@ -529,13 +461,67 @@ async def test_approval_mode_auto_does_not_leak_into_a_later_manual_fire(
     fake_model = FakeToolCallingChatModel(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
     )
-    WorkflowStore(settings.state_dir).save(
-        Workflow(name="writes-a-file-4", mode="agent", summary="Write hi to note.txt")
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        store = ScheduledTriggerStore(settings.state_dir)
+        store.save(
+            _trigger(
+                "trig-10",
+                prompt="Write hi to note.txt",
+                approval_mode=approval_mode,
+                notes_enabled=False,
+            )
+        )
+
+        run = await asyncio.wait_for(
+            fire_trigger_now(settings.state_dir, "trig-10", get_session), timeout=5
+        )
+
+    assert run is not None and run.status == "completed"
+    assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
+
+
+async def test_approval_mode_manual_parks_the_run_as_needs_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nobody is there to approve a gated call during a run -- it must
+    park durably (reported as needs_approval) rather than hang the poller
+    or pretend it completed."""
+    from langchain_core.messages import ToolCall
+
+    settings = _settings(tmp_path)
+    call = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="", tool_calls=[call])])
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        store = ScheduledTriggerStore(settings.state_dir)
+        store.save(_trigger("trig-manual", prompt="Write hi to note.txt"))
+
+        run = await asyncio.wait_for(
+            fire_trigger_now(settings.state_dir, "trig-manual", get_session), timeout=5
+        )
+
+    assert run is not None and run.status == "needs_approval"
+    assert not (tmp_path / "workspace" / "note.txt").exists()
+
+
+async def test_approval_mode_auto_is_restored_after_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """accept_edits is a broader safety toggle than one run: an "auto"
+    run must not leave it on for anyone driving that session afterward."""
+    from langchain_core.messages import ToolCall
+
+    settings = _settings(tmp_path)
+    call = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
     )
     checkpoint_path = tmp_path / "checkpoints.sqlite"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         monkeypatch.setattr("coscribe.web.session.resolve_chat_model", lambda *a, **k: fake_model)
-
         session = ChatSessionLG(
             thread_id="reused-thread",
             settings=settings,
@@ -544,21 +530,15 @@ async def test_approval_mode_auto_does_not_leak_into_a_later_manual_fire(
             extra_tools=[],
             checkpointer=checkpointer,
         )
-        trigger = ScheduledTrigger(
-            trigger_id="trig-11",
-            name="Auto-approved write",
+        trigger = _trigger("trig-11", prompt="Write hi to note.txt", approval_mode="auto")
+        run = ScheduledRun(
+            run_id="r1",
             thread_id="reused-thread",
-            schedule=ScheduleRule(kind="manual", at=""),
-            enabled=True,
-            created_at=datetime.now().isoformat(),
-            next_run_at=None,
-            workflow_name="writes-a-file-4",
-            approval_mode="auto",
+            started_at=datetime.now().isoformat(),
+            source="manual",
         )
 
-        from coscribe.runtime_lg.scheduled_tasks import _fire_trigger_once
-
-        await asyncio.wait_for(_fire_trigger_once(trigger, session), timeout=5)
+        await asyncio.wait_for(_run_in_session(trigger, run, "", session), timeout=5)
         assert session.accept_edits is False
 
 
@@ -571,19 +551,7 @@ async def test_trigger_model_override_switches_the_session_before_firing(
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
         store = ScheduledTriggerStore(settings.state_dir)
-        store.save(
-            ScheduledTrigger(
-                trigger_id="trig-12",
-                name="Model override",
-                thread_id="scheduled-trig-12",
-                schedule=ScheduleRule(kind="manual", at=""),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
-                next_run_at=None,
-                prompt="Do it",
-                model="fake:other-model",
-            )
-        )
+        store.save(_trigger("trig-12", model="fake:other-model"))
 
         captured: list[Any] = []
 
@@ -592,113 +560,125 @@ async def test_trigger_model_override_switches_the_session_before_firing(
             captured.append(session)
             return session
 
-        result = await fire_trigger_now(settings.state_dir, "trig-12", get_session_and_capture)
+        run = await fire_trigger_now(settings.state_dir, "trig-12", get_session_and_capture)
 
-    assert result.last_run_status == "completed"
+    assert run is not None and run.status == "completed"
     assert captured[0]._model_string == "fake:other-model"
 
 
-async def test_chain_mode_trigger_needing_approval_fails_promptly_not_hangs(
+async def test_a_run_streams_live_to_a_tab_watching_its_thread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Companion to test_workflow_trigger_needing_approval_fails_promptly_
-    not_hangs, but for a chain-mode workflow -- _run_workflow_chain_mode's
-    own decide() calls _decide_action_request directly, with no outer
-    _can_resolve_approvals gate at all (chain mode never runs inside a
-    graph's own interrupt(), see runtime_lg/workflows.py's module
-    docstring), so before _decide_action_request grew its own internal
-    "can't resolve, don't hang" guard this awaited a Future nothing would
-    ever complete -- wedging the whole background poller exactly like the
-    agent-mode bug this session already found and fixed once. Wrapped in
-    asyncio.wait_for so a regression fails loudly instead of hanging the
-    suite."""
-    from coscribe.tools.workflows import WorkflowStep
-
     settings = _settings(tmp_path)
-    fake_model = FakeToolCallingChatModel(responses=[])
-    WorkflowStore(settings.state_dir).save(
-        Workflow(
-            name="chain-writes-a-file",
-            mode="chain",
-            summary="Write hi to note.txt",
-            steps=[
-                WorkflowStep(
-                    tool_name="write_file", arguments={"path": "note.txt", "content": "hi"}
-                )
-            ],
-        )
-    )
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="all done")])
+
+    class _WatchingTab:
+        def __init__(self) -> None:
+            self.events: list[dict[str, Any]] = []
+
+        async def send_json(self, data: dict[str, Any]) -> None:
+            self.events.append(data)
+
+    tab = _WatchingTab()
     checkpoint_path = tmp_path / "checkpoints.sqlite"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
         store = ScheduledTriggerStore(settings.state_dir)
-        store.save(
-            ScheduledTrigger(
-                trigger_id="trig-13",
-                name="Chain, needs approval",
-                thread_id="scheduled-trig-13",
-                schedule=ScheduleRule(kind="daily", at="09:00"),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
-                next_run_at=(datetime.now() - timedelta(minutes=5)).isoformat(),
-                workflow_name="chain-writes-a-file",
-            )
-        )
+        store.save(_trigger("trig-live", notes_enabled=False))
 
-        fired = await asyncio.wait_for(
-            poll_due_scheduled_tasks(settings.state_dir, get_session), timeout=5
-        )
+        async def get_watched_session(thread_id: str) -> Any:
+            session = await get_session(thread_id)
+            session._live_websocket = tab
+            return session
 
-    assert [t.trigger_id for t in fired] == ["trig-13"]
-    resolved = store.load("trig-13")
-    assert resolved is not None
-    assert resolved.last_run_status == "failed"
-    assert not (tmp_path / "workspace" / "note.txt").exists()
+        await fire_trigger_now(settings.state_dir, "trig-live", get_watched_session)
+
+    types = [event["type"] for event in tab.events]
+    assert types[0] == "scheduled_run_started"
+    assert tab.events[0]["text"].startswith('[Scheduled run of "Task trig-live"')
+    assert {"type": "agent_message", "text": "all done"} in tab.events
+    assert types[-1] == "tasks_changed"
 
 
-async def test_chain_mode_trigger_with_approval_mode_auto_actually_writes(
+async def test_history_shows_a_starting_runs_prompt_exactly_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from coscribe.tools.workflows import WorkflowStep
+    """A tab can connect to a run just before or just after its prompt is
+    checkpointed -- either way the history must show it exactly once."""
+    settings = _settings(tmp_path)
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="done")])
+
+    class _Tab:
+        def __init__(self) -> None:
+            self.events: list[dict[str, Any]] = []
+
+        async def send_json(self, data: dict[str, Any]) -> None:
+            self.events.append(data)
+
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        session = await get_session(run_thread_id("trig-h", "r1"))
+        prompt = '[Scheduled run of "T" · started manually · 2026-09-23 09:00. x]\n\nDo it'
+        session.active_run_prompt = prompt
+
+        before = _Tab()
+        await session.send_history(before)
+        await session.handle_user_message(prompt, _Tab())
+        after = _Tab()
+        await session.send_history(after)
+
+    for tab in (before, after):
+        [history] = tab.events
+        assert [e["text"] for e in history["entries"] if e["kind"] == "user"] == [prompt]
+
+
+async def test_a_run_parked_on_approval_offers_it_to_a_watching_tab(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from langchain_core.messages import ToolCall
 
     settings = _settings(tmp_path)
-    fake_model = FakeToolCallingChatModel(responses=[])
-    WorkflowStore(settings.state_dir).save(
-        Workflow(
-            name="chain-writes-a-file-2",
-            mode="chain",
-            summary="Write hi to note.txt",
-            steps=[
-                WorkflowStep(
-                    tool_name="write_file", arguments={"path": "note.txt", "content": "hi"}
-                )
-            ],
-        )
+    call = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="Skipped.")]
     )
+
+    class _WatchingTab:
+        def __init__(self) -> None:
+            self.events: list[dict[str, Any]] = []
+
+        async def send_json(self, data: dict[str, Any]) -> None:
+            self.events.append(data)
+
+    tab = _WatchingTab()
+    sessions: list[Any] = []
     checkpoint_path = tmp_path / "checkpoints.sqlite"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
         store = ScheduledTriggerStore(settings.state_dir)
-        store.save(
-            ScheduledTrigger(
-                trigger_id="trig-14",
-                name="Chain, auto-approved",
-                thread_id="scheduled-trig-14",
-                schedule=ScheduleRule(kind="daily", at="09:00"),
-                enabled=True,
-                created_at=datetime.now().isoformat(),
-                next_run_at=(datetime.now() - timedelta(minutes=5)).isoformat(),
-                workflow_name="chain-writes-a-file-2",
-                approval_mode="auto",
-            )
-        )
+        store.save(_trigger("trig-offer", prompt="Write hi to note.txt", notes_enabled=False))
 
-        fired = await asyncio.wait_for(
-            poll_due_scheduled_tasks(settings.state_dir, get_session), timeout=5
-        )
+        async def get_watched_session(thread_id: str) -> Any:
+            session = await get_session(thread_id)
+            session._live_websocket = tab
+            sessions.append(session)
+            return session
 
-    assert [t.trigger_id for t in fired] == ["trig-14"]
-    resolved = store.load("trig-14")
-    assert resolved is not None
-    assert resolved.last_run_status == "completed"
-    assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
+        run = await fire_trigger_now(settings.state_dir, "trig-offer", get_watched_session)
+        # The offer runs in the background; let it deliver, then deny so
+        # the pending approval future doesn't outlive the test.
+        for _ in range(50):
+            if any(e["type"] == "approval_required" for e in tab.events):
+                break
+            await asyncio.sleep(0.02)
+        approval = next(e for e in tab.events if e["type"] == "approval_required")
+        sessions[0].resolve_approval(approval["id"], False)
+        await asyncio.wait_for(sessions[0]._offer_task, timeout=5)
+
+    assert run is not None and run.status == "needs_approval"
+    assert approval["tool_name"] == "write_file"
+    # Resolved from the tab, the run finished -- its record must say so.
+    resumed = store.load("trig-offer")
+    assert resumed is not None
+    assert resumed.find_run(run.run_id).status == "completed"

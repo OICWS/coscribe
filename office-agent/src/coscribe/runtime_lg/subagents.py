@@ -90,6 +90,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, interrupt
 
 from ..tools import QUESTION_TOOL_NAMES
+from ..tools.scheduled_tasks import TASK_DRAFT_TOOL_NAMES
 from ..tools.subagent_tasks import (
     SubAgentTask,
     SubAgentTaskStore,
@@ -152,13 +153,14 @@ def build_spawn_agent_tool(
     # both do), but this guards against unbounded self-recursion even if a
     # caller ever includes it by mistake, same reasoning as tools/
     # subagents.py's _DISALLOWED_SUBAGENT_TOOLS. Also excludes
-    # QUESTION_TOOL_NAMES (ask_user_question) -- this sub-agent's own
-    # graph never registers it in question_tool_names (see
+    # QUESTION_TOOL_NAMES/TASK_DRAFT_TOOL_NAMES (ask_user_question,
+    # create_scheduled_task) -- this sub-agent's own graph never registers
+    # them in question_tool_names (see
     # build_langgraph_agent below, called with no question_tool_names
     # argument), so calling it here would just run its defensive
     # RuntimeError body instead of pausing for a real person the way it
     # does for the top-level Coordinator.
-    excluded_names = {"spawn_agent", *QUESTION_TOOL_NAMES}
+    excluded_names = {"spawn_agent", *QUESTION_TOOL_NAMES, *TASK_DRAFT_TOOL_NAMES}
     tools_by_name = {
         _tool_name(t): t for t in available_tools if _tool_name(t) not in excluded_names
     }
@@ -285,7 +287,12 @@ def build_spawn_agent_background_tool(
     what happens instead (status="blocked_on_approval") when a
     background sub-agent's own tool call needs approval.
     """
-    excluded_names = {"spawn_agent", "spawn_agent_background", *QUESTION_TOOL_NAMES}
+    excluded_names = {
+        "spawn_agent",
+        "spawn_agent_background",
+        *QUESTION_TOOL_NAMES,
+        *TASK_DRAFT_TOOL_NAMES,
+    }
     tools_by_name = {
         _tool_name(t): t for t in available_tools if _tool_name(t) not in excluded_names
     }

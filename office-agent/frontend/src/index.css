@@ -90,6 +90,10 @@
   --gradient-accent: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
   --danger: #c85778;
   --danger-fg: #7c1f34;
+  /* Run-status semantics (RunStatusIcon), deliberately apart from the
+     brand accents so "completed" never reads as decoration. */
+  --success: #3d8f56;
+  --warning: #b87a14;
   --card-bg: #f0f0ef;
   --primary: #171614;
   --primary-hover: #322f2c;
@@ -121,6 +125,8 @@
     --gradient-accent: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
     --danger: #f5aec1;
     --danger-fg: #fbd8e1;
+    --success: #8fd19f;
+    --warning: #e8b85c;
     --card-bg: #322f2e;
     --primary: #f7f5f3;
     --primary-hover: #ffffff;

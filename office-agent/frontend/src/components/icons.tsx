@@ -57,6 +57,24 @@ export function ReturnIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ChevronRightIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M9 6l6 6-6 6" />
+    </Icon>
+  );
+}
+
+export function AlertCircleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v4" />
+      <path d="M12 16h.01" />
+    </Icon>
+  );
+}
+
 export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>
@@ -102,16 +120,7 @@ export function SidebarIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function ZapIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <Icon {...props}>
-      <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />
-    </Icon>
-  );
-}
-
-/** The nav rail's chat-view toggle icon, paired with ZapIcon for the
- * workflow-view toggle. */
+/** The nav rail's chat-view toggle icon. */
 export function MessageCircleIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>
@@ -121,8 +130,8 @@ export function MessageCircleIcon(props: SVGProps<SVGSVGElement>) {
 }
 
 // The following six are SettingsModal.tsx's per-category sidebar icons
-// (Workspace/Providers/Tools/Environment/Skills/Connectors -- General and
-// Workflows reuse SettingsIcon/ZapIcon above instead of new glyphs).
+// (Workspace/Providers/Tools/Environment/Skills/Connectors -- General
+// reuses SettingsIcon above).
 export function FolderIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

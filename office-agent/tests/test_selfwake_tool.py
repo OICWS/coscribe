@@ -6,7 +6,6 @@ import pytest
 from coscribe.runtime.types import get_tool_metadata
 from coscribe.tools.background_tasks import BackgroundTask, BackgroundTaskStore
 from coscribe.tools.selfwake import SignalStore, WakeStore, build_selfwake_tools
-from coscribe.tools.workflows import WorkflowRun, WorkflowRunStore
 
 
 def _tools_by_name(thread_id: str, state_dir: Path) -> dict[str, object]:
@@ -84,32 +83,6 @@ def test_sleep_for_rejects_non_positive_seconds(tmp_path: Path) -> None:
 
 
 # -- wake_on --
-
-
-def test_wake_on_requires_a_real_workflow_run(tmp_path: Path) -> None:
-    tools = _tools_by_name("thread-1", tmp_path)
-
-    with pytest.raises(ValueError, match="No workflow run"):
-        tools["wake_on"](job_id="does-not-exist", reason="x")
-
-
-def test_wake_on_succeeds_for_a_real_run(tmp_path: Path) -> None:
-    run_store = WorkflowRunStore(tmp_path)
-    run_store.save(
-        WorkflowRun(
-            run_id="run-1",
-            workflow_name="nightly-report",
-            mode="chain",
-            status="running",
-            started_at=datetime.now(UTC).isoformat(),
-        )
-    )
-    tools = _tools_by_name("thread-1", tmp_path)
-
-    result = tools["wake_on"](job_id="run-1", reason="tell me when it's done")
-
-    assert result["kind"] == "job"
-    assert result["job_id"] == "run-1"
 
 
 # -- wake_on_task --
@@ -219,7 +192,6 @@ def test_mutating_selfwake_tools_are_write_local_and_gated(tmp_path: Path) -> No
     for name in (
         "sleep_until",
         "sleep_for",
-        "wake_on",
         "wake_on_task",
         "wake_on_event",
         "signal_event",

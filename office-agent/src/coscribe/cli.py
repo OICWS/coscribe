@@ -7,8 +7,8 @@ migration happened at all: the original runtime's vendored Gemini adapter
 shipped three real bugs in a row).
 
 Reuses `web/session.py`'s `ChatSessionLG` directly instead of
-re-implementing /plan, /accept-edits, /compact, /clear, and the workflow
-commands a second time -- every one of those is already built and tested
+re-implementing /plan, /accept-edits, /compact, /clear, and
+/saveworkflow a second time -- every one of those is already built and tested
 against the web transport, and `ChatSessionLG`'s constructor needs
 nothing web-specific (settings, a thread id, a checkpointer, tools --
 all things this CLI already has to build anyway). `_CliSocket` below is
@@ -84,7 +84,7 @@ from .runtime import (
 from .runtime.provider_config import load_custom_providers
 from .runtime_lg import poll_due_scheduled_tasks, poll_due_wakes
 from .tools import load_builtin_skills, load_skills
-from .tools.workflows import reconcile_interrupted_runs
+from .tools.scheduled_tasks import ScheduledTriggerStore, create_trigger
 
 app = typer.Typer(add_completion=False, no_args_is_help=False)
 logger = logging.getLogger(__name__)
@@ -219,6 +219,37 @@ class _CliSocket:
         self._streamed = ""
         self.had_error = False
 
+    def _review_task_draft(self, draft: dict[str, Any]) -> str:
+        typer.echo(
+            f"\n[scheduled task draft] {draft.get('name')} "
+            f"({draft.get('kind')}{' at ' + draft['at'] if draft.get('at') else ''})\n"
+            f"{draft.get('prompt', '')}\n"
+        )
+        if not typer.confirm("Save this scheduled task?", default=False):
+            return "The user dismissed the draft without saving it."
+        fields = {
+            key: draft[key]
+            for key in (
+                "name",
+                "kind",
+                "at",
+                "prompt",
+                "weekday",
+                "day_of_month",
+                "start_date",
+                "model",
+                "approval_mode",
+            )
+            if draft.get(key) is not None
+        }
+        try:
+            store = ScheduledTriggerStore(self._session.settings.state_dir)
+            trigger = create_trigger(store, **fields)
+        except (TypeError, ValueError) as exc:
+            typer.echo(f"Couldn't save it: {exc}", err=True)
+            return f"The draft couldn't be saved: {exc}"
+        return f'Saved as scheduled task "{trigger.name}".'
+
     async def send_json(self, data: dict[str, Any]) -> None:
         kind = data["type"]
         if kind == "agent_delta":
@@ -243,6 +274,8 @@ class _CliSocket:
             typer.echo(f"\n[approval required] {data['tool_name']}({data['arguments']})")
             approved = typer.confirm("Allow this action?", default=False)
             self._session.resolve_approval(data["id"], approved)
+        elif kind == "task_draft_required":
+            self._session.resolve_question(data["id"], self._review_task_draft(data["draft"]))
         elif kind == "history":
             for entry in data["entries"]:
                 if entry["kind"] == "user":
@@ -258,28 +291,6 @@ class _CliSocket:
             typer.echo(f"Compacted {data['before']} messages down to {data['after']}.\n")
         elif kind == "cleared":
             typer.echo("Cleared this thread's conversation history.\n")
-        elif kind == "recording_started":
-            note = (
-                " (discarded a previous in-progress recording)"
-                if data.get("discarded_previous")
-                else ""
-            )
-            typer.echo(
-                f"Recording started{note}. Perform the steps, then /endworkflow <name>.\n"
-            )
-        elif kind == "workflow_saved":
-            typer.echo(f"Saved workflow {data['name']!r} ({data['mode']}).\n")
-        elif kind == "workflow_run_started":
-            typer.echo(f"Running workflow {data['name']!r}...")
-        elif kind == "workflow_run_progress":
-            run = data["run"]
-            steps = run.get("steps") or []
-            running = next((s for s in steps if s.get("status") == "running"), None)
-            if running is not None:
-                step_label = f"{running['index']}: {running['tool_name']}"
-                typer.echo(f"  [{run.get('status')}] step {step_label}")
-            else:
-                typer.echo(f"  [{run.get('status')}]")
         # "state"/"tasks_changed": no terminal equivalent needed -- state is
         # printed once explicitly at startup (see chat() below), and there's
         # no persistent task panel to refresh in a REPL.
@@ -336,14 +347,6 @@ async def _chat_async(
     message: str | None,
     accept_edits: bool,
 ) -> None:
-    interrupted = reconcile_interrupted_runs(settings.state_dir)
-    if interrupted:
-        logger.warning(
-            "Marked %d workflow run(s) as failed -- still 'running' at startup, "
-            "left over from a previous process that didn't shut down cleanly.",
-            interrupted,
-        )
-
     thread_id = thread or uuid.uuid4().hex[:8]
 
     hooks_config: dict[str, list[str]] = empty_hooks_config()
@@ -411,10 +414,8 @@ async def _chat_async(
                 "/plan to toggle plan mode, /accept-edits to toggle auto-accept, "
                 "/compact to summarize this thread down and reclaim context, "
                 "/clear to wipe this thread's history and start fresh, "
-                "/startworkflow and /endworkflow <name> to record a chain "
-                "workflow precisely, /saveworkflow <name> to have the model figure "
-                "out what to save from this conversation, /runworkflow <name> to run "
-                "a saved workflow, /init to write a project overview, or /<skill-name> "
+                "/saveworkflow <name> to save this conversation as a reusable "
+                "scheduled task, /init to write a project overview, or /<skill-name> "
                 "to invoke a skill directly.\n"
             )
 
@@ -440,8 +441,7 @@ async def _chat_async(
                     raise typer.Exit()
 
                 # Every other command -- /plan, /accept-edits, /compact,
-                # /clear, /startworkflow, /endworkflow, /saveworkflow,
-                # /runworkflow, /init, /<skill-name> -- is recognized and
+                # /clear, /saveworkflow, /init, /<skill-name> -- is recognized and
                 # handled entirely inside handle_user_message itself (see
                 # _handle_user_message_locked); nothing left for this loop
                 # to pre-parse.

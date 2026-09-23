@@ -29,7 +29,6 @@ from coscribe.config import Settings
 from coscribe.runtime_lg.selfwake import poll_due_wakes
 from coscribe.tools.background_tasks import BackgroundTask, BackgroundTaskStore
 from coscribe.tools.selfwake import WakeRequest, WakeStore
-from coscribe.tools.workflows import WorkflowRun, WorkflowRunStore
 
 # Import order matters here: web/session.py does `from ..cli import
 # INIT_PROMPT`, and cli.py does `from .web.session import ChatSessionLG` --
@@ -217,80 +216,6 @@ async def test_wake_hitting_a_gated_tool_call_resolves_promptly_not_hangs(
     assert [w.wake_id for w in fired] == ["wake-5"]
     # The gated write_file call was never approved -- the file must not exist.
     assert not (tmp_path / "workspace" / "note.txt").exists()
-
-
-async def test_job_wake_fires_once_the_workflow_run_is_no_longer_running(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = _settings(tmp_path)
-    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="it finished")])
-    run_store = WorkflowRunStore(settings.state_dir)
-    run_store.save(
-        WorkflowRun(
-            run_id="run-1",
-            workflow_name="nightly-report",
-            mode="chain",
-            status="completed",
-            started_at=datetime.now(UTC).isoformat(),
-        )
-    )
-    checkpoint_path = tmp_path / "checkpoints.sqlite"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
-        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
-        wake_store = WakeStore(settings.state_dir)
-        wake_store.save(
-            WakeRequest(
-                wake_id="wake-3",
-                thread_id="thread-1",
-                kind="job",
-                reason="tell me when it's done",
-                created_at=datetime.now(UTC).isoformat(),
-                status="pending",
-                job_id="run-1",
-            )
-        )
-
-        fired = await poll_due_wakes(settings.state_dir, get_session)
-
-    assert [w.wake_id for w in fired] == ["wake-3"]
-    assert fake_model.i == 1
-
-
-async def test_job_wake_stays_pending_while_the_run_is_still_running(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = _settings(tmp_path)
-    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="still going")])
-    run_store = WorkflowRunStore(settings.state_dir)
-    run_store.save(
-        WorkflowRun(
-            run_id="run-2",
-            workflow_name="nightly-report",
-            mode="chain",
-            status="running",
-            started_at=datetime.now(UTC).isoformat(),
-        )
-    )
-    checkpoint_path = tmp_path / "checkpoints.sqlite"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
-        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
-        wake_store = WakeStore(settings.state_dir)
-        wake_store.save(
-            WakeRequest(
-                wake_id="wake-4",
-                thread_id="thread-1",
-                kind="job",
-                reason="tell me when it's done",
-                created_at=datetime.now(UTC).isoformat(),
-                status="pending",
-                job_id="run-2",
-            )
-        )
-
-        fired = await poll_due_wakes(settings.state_dir, get_session)
-
-    assert fired == []
-    assert fake_model.i == 0
 
 
 async def test_task_wake_fires_once_the_background_task_is_no_longer_running(

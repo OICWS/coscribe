@@ -5393,6 +5393,87 @@ full suite green throughout.
 
 ---
 
+## Phase 8av -- Scheduled redesign: a workflow is a scheduled task; one conversation per run; notes as memory; tasks drafted from conversation (shipped)
+
+Decided with you after real use: recorded workflows (`/startworkflow`/
+`/endworkflow`/`/runworkflow`, chain + agent replay, Settings > Workflows)
+were a second, parallel notion of "saved work" that the scheduler then had
+to wrap. Removed outright (`tools/workflows.py`, `runtime_lg/workflows.py`,
+the selfwake `wake_on` job kind, the WorkflowsTab); a **workflow is now
+just a scheduled task** whose standalone prompt describes the work.
+`prompt` is required on every trigger; `workflow_name` is gone.
+
+- [x] **One fresh conversation per run** (your call: "每次运行一个新对话").
+      `ScheduledTrigger.thread_id` replaced by `runs: list[ScheduledRun]`
+      (`run_id`, `thread_id = scheduled-<trigger_id>-<run_id>`, `source`
+      manual/scheduled, `status` running/completed/failed/stopped/
+      needs_approval, timestamps, error). Last 50 kept; pruned runs' and a
+      deleted task's conversations are deleted with them. A pre-existing
+      trigger's single shared thread migrates to one "earlier" run.
+      Bug found writing tests: `parse_run_thread_id` used `partition` and
+      misparsed trigger ids containing dashes -- now `rpartition`.
+- [x] **Notes carry memory between runs, on by default** (your call).
+      `<trigger_id>.notes.md` beside the task, 4000-char cap, injected
+      into every run's prompt with an instruction to rewrite them before
+      finishing via `update_task_notes` -- a tool built only for a run's
+      own thread (it knows its task from the thread id, so a normal chat
+      can't write some task's notes). Per-task "Remember between runs"
+      toggle; notes readable/editable on the task page.
+- [x] **Run status is real now.** The run inspects its own ending: a
+      socket error -> `failed`, `/stop` -> `stopped`, a pending interrupt
+      -> `needs_approval`, else `completed` -- closing Phase 8am's
+      recorded gap where a prompt trigger always said "completed". The
+      schedule advances when a run *starts* (a slow run is never started
+      twice; a failed one isn't retried every poll); due runs execute
+      concurrently. Runs left "running" by a crash are marked failed at
+      web startup.
+- [x] **Run now is live and non-blocking**: the endpoint records the run,
+      returns `{task, run}`, and executes in the background; the browser
+      lands on the run's conversation and streams it through a relay
+      socket to whichever tab has that thread open. Three bugs found live
+      / in tests: a tab connecting mid-start missed the run's first
+      message (fixed by injecting the in-flight run prompt into history,
+      deduped); `/plan`'s state event reported `turn_in_flight: true`
+      because the turn lock is held while it runs (the field is now sent
+      on connect only); and a run that parked on an approval while you
+      were watching never showed the approval until reload (now offered
+      to the live tab immediately; resolving it re-records the run).
+- [x] **Tasks are drafted from conversation.** `create_scheduled_task`
+      no longer saves: it's a respond-only interrupt (the
+      `question_tool_names` path) that the web UI renders as a draft card
+      opening the task form prefilled; save/dismiss is answered back to
+      the model. An unattended turn gets "No one is available to review
+      this draft" instead of a silent save. `/saveworkflow <name>` sends
+      a distillation prompt that ends in the same draft. CLI: y/N.
+      Excluded from sub-agents.
+- [x] **Frontend** (per `docs/ui-references/scheduled-siderbar-task-
+      running.png` et al.): sidebar task list with per-task latest-run
+      status icons (`RunStatusIcon`, new `--success`/`--warning` tokens
+      in both themes); portal cards with a last-run line and an empty
+      state; "Create with coscribe" wired up (was a disabled stub);
+      detail page with collapsible Instructions, Notes (autosave on blur)
+      and Runs sections; a "Ran scheduled task" card at the top of each
+      run's conversation (collapsible Instructions / Notes carried over);
+      a `Scheduled / <task> ⌄` breadcrumb whose menu jumps to the task
+      page or any of its last 15 runs.
+
+**Verified live** (Playwright + `deepseek:deepseek-flash` against a real
+`coscribe-web`): draft card -> prefilled review modal (the model's
+distilled prompt was genuinely standalone) -> saved; Run now streams live
+with the sidebar spinner and header pill; run card + run switcher;
+the run rewrote its notes and they showed on the task page; a
+`needs_approval` run delivered its approval on reopen and approving it
+flipped the record to completed; the legacy task migrated to one
+"earlier" run. `ruff check`/`mypy` clean, frontend `tsc`/lint/build
+clean, full suite green.
+
+**Still open from Phase 8am's list**: "Automatically approve" vs. "Skip
+all approvals" still behave identically; the right-side Progress/
+Outputs/Context panel and the template gallery are not built; the
+portal's Search/Sort are still stubs.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
@@ -5711,15 +5792,16 @@ a concrete reason to prioritize a new surface.
     human" and that). Making "Skip" a genuinely stronger tier (e.g.
     bypassing hook vetoes/plan_mode too) is an open design question, not
     decided.
-  - **"Create with coscribe"** (the New-task menu's second option) is a
-    disabled stub -- only "Set up manually" is wired up.
+  - ~~**"Create with coscribe"** is a disabled stub~~ -- wired up in
+    Phase 8av.
   - **The curated-template gallery** (Daily briefing/Inbox triage/etc.)
     was explicitly deferred, not built.
   - **The Edit modal's Instructions field is prompt-only** -- no way to
     pick a saved workflow from it (the reference screenshot has no such
     control); editing an existing workflow-backed trigger through this
     modal converts it to a plain prompt.
-  - **A pre-existing, unrelated gap noticed while wiring approval_mode**:
+  - ~~Resolved in Phase 8av (runs record their real ending).~~
+    **A pre-existing, unrelated gap noticed while wiring approval_mode**:
     a plain-prompt (non-workflow) Scheduled Task in "manual" mode that
     hits a gated call while unattended still reports `last_run_status:
     "completed"` instead of "failed" -- only the workflow-run path
@@ -5748,8 +5830,10 @@ a concrete reason to prioritize a new surface.
   monthly alone keeps the original "starts on" date+time pair, since only
   a real calendar date can name both a day-of-month and a floor at once.
 
-  **Deferred, recorded per your explicit request not to build it now**:
-  the "task running" view -- clicking "Run now" (or reopening a task
+  **Deferred, recorded per your explicit request not to build it now**
+  (the conversation view, breadcrumb and run card shipped in Phase 8av --
+  one conversation *per run* with notes as memory, not one per task; the
+  right-side panel is still open): the "task running" view -- clicking "Run now" (or reopening a task
   that's running/has run) should land on a *chat-like* thread view for
   that trigger's own dedicated thread_id, not `ScheduledTaskDetail`.
   Reference: `docs/ui-references/scheduled-siderbar-task-running.png`.

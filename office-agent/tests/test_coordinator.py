@@ -172,23 +172,6 @@ def test_remember_tool_present_even_with_no_memory_file_yet(tmp_path: Path) -> N
     assert "Remembered facts" not in agent.instructions
 
 
-def test_workflow_tools_present(tmp_path: Path) -> None:
-    agent = build_coordinator_agent(_settings(tmp_path), "thread-1")
-
-    tool_names = [tool.__name__ for tool in agent.tools]  # type: ignore[attr-defined]
-    # save_workflow is deliberately NOT a model tool -- workflow creation is
-    # gated behind the user-driven /startworkflow+/endworkflow/saveworkflow
-    # slash commands instead (see tools/workflows.py's module docstring).
-    assert "save_workflow" not in tool_names
-    assert "list_workflows" in tool_names
-    assert "get_workflow" in tool_names
-    assert "delete_workflow" in tool_names
-    # run_workflow needs a live client/tool_policy -- wired in cli.py/
-    # web/session.py after build_coordinator_agent returns, same as
-    # spawn_agent/review_work -- so it's deliberately absent here.
-    assert "run_workflow" not in tool_names
-
-
 def test_all_tool_schemas_are_gemini_compatible(tmp_path: Path) -> None:
     """Regression test for a real bug: aisuite's Tools.__infer_from_signature
     (the schema builder every provider's tool spec comes from, including
@@ -225,20 +208,6 @@ def test_remembered_facts_appear_in_instructions_once_file_has_content(tmp_path:
     assert agent.instructions is not None
     assert "Remembered facts from earlier sessions:" in agent.instructions
     assert "The user prefers metric units." in agent.instructions
-
-
-def test_instructions_warn_against_manually_replaying_a_workflow_instead_of_running_it(
-    tmp_path: Path,
-) -> None:
-    # Regression test: caught live -- asked to "run FBL5N" (an agent-mode
-    # workflow), the Coordinator read get_workflow's summary, manually
-    # carried out the described browser steps itself, and *then* also
-    # called run_workflow -- executing the same real-world SAP query twice.
-    agent = build_coordinator_agent(_settings(tmp_path), "thread-1")
-
-    assert agent.instructions is not None
-    assert "never manually replay" in agent.instructions
-    assert "run_workflow(name) to do it" in agent.instructions
 
 
 def test_no_extra_dirs_configured_adds_no_instructions_note(tmp_path: Path) -> None:

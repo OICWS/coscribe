@@ -1538,7 +1538,7 @@ def test_clear_wipes_conversation_history(tmp_path: Path, monkeypatch: pytest.Mo
 
             ws.send_json({"type": "user_message", "text": "/clear"})
             cleared = ws.receive_json()
-            assert cleared == {"type": "cleared", "cancelled_recording": False}
+            assert cleared == {"type": "cleared"}
 
             # Behavioral proof the history is really gone, not just that the
             # event fired -- /compact's own "nothing much to compact" guard
@@ -1583,7 +1583,7 @@ def test_clear_queues_behind_a_pending_turn_instead_of_racing_it(
             first_turn_messages = _receive_until(ws, "tasks_changed")
             cleared = ws.receive_json()
 
-    assert cleared == {"type": "cleared", "cancelled_recording": False}
+    assert cleared == {"type": "cleared"}
     agent_message = next(m for m in first_turn_messages if m["type"] == "agent_message")
     assert agent_message["text"] == "done"
 
@@ -2928,12 +2928,11 @@ def test_wake_poll_loop_publishes_background_events_for_fired_wakes_and_triggers
     async def _fake_poll_due_wakes(state_dir: Any, get_session: Any) -> list[Any]:
         return [types.SimpleNamespace(reason="research done", thread_id="thread-a")]
 
-    async def _fake_poll_due_scheduled_tasks(state_dir: Any, get_session: Any) -> list[Any]:
-        return [
-            types.SimpleNamespace(
-                name="daily digest", thread_id="thread-b", last_run_status="failed"
-            )
-        ]
+    async def _fake_poll_due_scheduled_tasks(
+        state_dir: Any, get_session: Any, on_pruned: Any = None
+    ) -> list[Any]:
+        run = types.SimpleNamespace(thread_id="thread-b", status="failed")
+        return [types.SimpleNamespace(name="daily digest", runs=[run])]
 
     monkeypatch.setattr("coscribe.web.app.poll_due_wakes", _fake_poll_due_wakes)
     monkeypatch.setattr(
@@ -4809,143 +4808,6 @@ def test_get_threads_endpoint_includes_workspace_root(
     assert threads["t_ws_list_b"]["workspace_root"] == str(tmp_path / "workspace")
 
 
-def test_get_workflows_endpoint_lists_saved_workflows_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from coscribe.tools.workflows import Workflow, WorkflowStep, WorkflowStore
-
-    store = WorkflowStore(tmp_path / "state")
-    store.save(
-        Workflow(
-            name="greet-chain",
-            mode="chain",
-            summary="writes hello.txt",
-            steps=[WorkflowStep(tool_name="write_file", arguments={"path": "hello.txt"})],
-        )
-    )
-    store.save(Workflow(name="list-report", mode="agent", summary="investigate and report"))
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        response = client.get("/api/workflows")
-
-    assert response.status_code == 200
-    workflows = {w["name"]: w for w in response.json()}
-    assert workflows["greet-chain"]["mode"] == "chain"
-    assert workflows["greet-chain"]["steps"] == [
-        {"tool_name": "write_file", "arguments": {"path": "hello.txt"}, "expect_contains": None}
-    ]
-    assert workflows["list-report"]["mode"] == "agent"
-
-
-def test_delete_workflow_endpoint_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from coscribe.tools.workflows import Workflow, WorkflowStore
-
-    store = WorkflowStore(tmp_path / "state")
-    store.save(Workflow(name="demo", mode="agent", summary="x"))
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        response = client.delete("/api/workflows/demo")
-
-    assert response.status_code == 200
-    assert response.json() == {"deleted": "demo"}
-    assert store.load("demo") is None
-
-
-def test_delete_workflow_endpoint_unknown_name_404s_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        response = client.delete("/api/workflows/nope")
-
-    assert response.status_code == 404
-
-
-def test_create_app_lg_reconciles_workflow_runs_stuck_running_at_startup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from coscribe.tools.workflows import WorkflowRun, WorkflowRunStore
-
-    WorkflowRunStore(tmp_path / "state").save(
-        WorkflowRun(
-            run_id="stuck-run",
-            workflow_name="demo",
-            mode="agent",
-            status="running",
-            started_at="2026-01-01T00:00:00+00:00",
-        )
-    )
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        response = client.get("/api/workflow-runs/stuck-run")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "failed"
-    assert body["finished_at"] is not None
-
-
-def test_get_workflow_runs_endpoint_lists_recent_runs_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from coscribe.tools.workflows import WorkflowRun, WorkflowRunStore, WorkflowStepStatus
-
-    run_store = WorkflowRunStore(tmp_path / "state")
-    run_store.save(
-        WorkflowRun(
-            run_id="run-1",
-            workflow_name="demo",
-            mode="chain",
-            status="completed",
-            started_at="2026-01-01T00:00:00+00:00",
-            finished_at="2026-01-01T00:01:00+00:00",
-            steps=[WorkflowStepStatus(index=0, tool_name="write_file", status="done")],
-        )
-    )
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        response = client.get("/api/workflow-runs")
-
-    assert response.status_code == 200
-    [run] = response.json()
-    assert run["run_id"] == "run-1"
-    assert run["steps"] == [
-        {"index": 0, "tool_name": "write_file", "status": "done", "detail": None}
-    ]
-
-
-def test_get_workflow_run_detail_endpoint_unknown_run_404s_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        response = client.get("/api/workflow-runs/nope")
-
-    assert response.status_code == 404
-
-
-def test_delete_workflow_run_endpoint_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from coscribe.tools.workflows import WorkflowRun, WorkflowRunStore
-
-    run_store = WorkflowRunStore(tmp_path / "state")
-    run_store.save(
-        WorkflowRun(
-            run_id="run-1",
-            workflow_name="demo",
-            mode="chain",
-            status="completed",
-            started_at="2026-01-01T00:00:00+00:00",
-        )
-    )
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        response = client.delete("/api/workflow-runs/run-1")
-
-    assert response.status_code == 200
-    assert response.json() == {"deleted": "run-1"}
-    assert run_store.load("run-1") is None
-
-
 def test_get_scheduled_tasks_endpoint_lists_saved_triggers_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4956,7 +4818,6 @@ def test_get_scheduled_tasks_endpoint_lists_saved_triggers_lg(
         ScheduledTrigger(
             trigger_id="trig-1",
             name="Daily standup notes",
-            thread_id="scheduled-trig-1",
             schedule=ScheduleRule(kind="daily", at="09:00"),
             enabled=True,
             created_at="2026-01-01T00:00:00",
@@ -4972,6 +4833,180 @@ def test_get_scheduled_tasks_endpoint_lists_saved_triggers_lg(
     [trigger] = response.json()
     assert trigger["trigger_id"] == "trig-1"
     assert trigger["name"] == "Daily standup notes"
+
+
+def _wait_for_run_status(
+    client: Any, trigger_id: str, run_id: str, timeout: float = 5.0
+) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    while True:
+        tasks = client.get("/api/scheduled-tasks").json()
+        [task] = [t for t in tasks if t["trigger_id"] == trigger_id]
+        [run] = [r for r in task["runs"] if r["run_id"] == run_id]
+        if run["status"] != "running" or time.time() > deadline:
+            return run
+        time.sleep(0.05)
+
+
+def test_run_now_returns_at_once_and_the_run_finishes_in_the_background_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="report written")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Report", "kind": "manual", "at": "", "prompt": "Write the report"},
+        ).json()
+        response = client.post(f"/api/scheduled-tasks/{created['trigger_id']}/run")
+        body = response.json()
+        run = _wait_for_run_status(client, created["trigger_id"], body["run"]["run_id"])
+
+        with client.websocket_connect(f"/ws/{body['run']['thread_id']}") as ws:
+            state = ws.receive_json()
+            history = ws.receive_json()
+
+    assert response.status_code == 200
+    assert body["run"]["status"] == "running"
+    assert body["run"]["source"] == "manual"
+    assert run["status"] == "completed"
+    assert state["turn_in_flight"] is False
+    assert history["entries"][0]["kind"] == "user"
+    assert history["entries"][0]["text"].startswith('[Scheduled run of "Report"')
+    assert history["entries"][-1] == {"kind": "agent", "text": "report written"}
+
+
+def test_deleting_a_task_deletes_its_run_conversations_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="done")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Temp", "kind": "manual", "at": "", "prompt": "Do it"},
+        ).json()
+        run = client.post(f"/api/scheduled-tasks/{created['trigger_id']}/run").json()["run"]
+        _wait_for_run_status(client, created["trigger_id"], run["run_id"])
+
+        assert client.delete(f"/api/scheduled-tasks/{created['trigger_id']}").status_code == 200
+        with client.websocket_connect(f"/ws/{run['thread_id']}") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+
+    assert history["entries"] == []
+
+
+def test_startup_sweeps_run_conversations_no_task_lists_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A task deleted without a checkpointer at hand (the model's
+    delete_scheduled_task) leaves its run conversations behind; the next
+    startup removes them and keeps every run a task still lists."""
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
+
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="done"), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        runs = {}
+        for name in ("Keep", "Drop"):
+            created = client.post(
+                "/api/scheduled-tasks",
+                json={"name": name, "kind": "manual", "at": "", "prompt": "Do it"},
+            ).json()
+            run = client.post(f"/api/scheduled-tasks/{created['trigger_id']}/run").json()["run"]
+            _wait_for_run_status(client, created["trigger_id"], run["run_id"])
+            runs[name] = (created["trigger_id"], run["thread_id"])
+    ScheduledTriggerStore(tmp_path / "state").delete(runs["Drop"][0])
+
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        histories = {}
+        for name, (_, thread_id) in runs.items():
+            with client.websocket_connect(f"/ws/{thread_id}") as ws:
+                ws.receive_json()  # state
+                histories[name] = ws.receive_json()["entries"]
+
+    assert histories["Keep"] != []
+    assert histories["Drop"] == []
+
+
+def test_scheduled_task_notes_endpoints_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from coscribe.tools.scheduled_tasks import MAX_NOTES_CHARS
+
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "N", "kind": "manual", "at": "", "prompt": "p"},
+        ).json()
+        url = f"/api/scheduled-tasks/{created['trigger_id']}/notes"
+        empty = client.get(url).json()
+        saved = client.put(url, json={"notes": "  left off at page 3  "}).json()
+        too_long = client.put(url, json={"notes": "x" * (MAX_NOTES_CHARS + 1)})
+        missing = client.get("/api/scheduled-tasks/nope/notes")
+
+    assert created["notes_enabled"] is True
+    assert empty == {"notes": ""}
+    assert saved == {"notes": "left off at page 3"}
+    assert too_long.status_code == 400
+    assert missing.status_code == 404
+
+
+def test_create_scheduled_task_is_a_draft_the_user_reviews_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model's create_scheduled_task call never creates anything
+    itself: the user gets the draft, saves (or dismisses) it from the UI,
+    and their answer becomes the tool's result."""
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
+
+    draft_args = {"name": "Weekly export", "kind": "weekly", "at": "09:00", "prompt": "Export"}
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="", tool_calls=[_tool_call("d1", "create_scheduled_task", draft_args)]
+            ),
+            AIMessage(content="Saved it."),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_draft") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "make this weekly"})
+            draft = _receive_until(ws, "task_draft_required")[-1]
+            ws.send_json(
+                {
+                    "type": "question_response",
+                    "id": draft["id"],
+                    "answer": 'Saved as scheduled task "Weekly export".',
+                }
+            )
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert draft["draft"] == draft_args
+    assert not any(m["type"] == "tool_result" for m in messages)
+    tool_message = next(m for m in fake_model.received[-1] if isinstance(m, ToolMessage))
+    assert tool_message.content == 'Saved as scheduled task "Weekly export".'
+    assert ScheduledTriggerStore(tmp_path / "state").list_all() == []
+
+
+def test_saveworkflow_asks_the_model_to_draft_a_task_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="drafting")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_saveworkflow") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "/saveworkflow"})
+            usage = ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "/saveworkflow Monthly close"})
+            _receive_until(ws, "tasks_changed")
+
+    assert usage == {"type": "error", "message": "Usage: /saveworkflow <name>"}
+    [human] = [m for m in fake_model.received[-1] if isinstance(m, HumanMessage)]
+    assert 'named "Monthly close"' in str(human.content)
+    assert "create_scheduled_task" in str(human.content)
 
 
 def test_create_scheduled_task_endpoint_persists_a_prompt_backed_trigger_lg(
@@ -5005,10 +5040,9 @@ def test_create_scheduled_task_endpoint_rejects_invalid_payload_lg(
 ) -> None:
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        # neither prompt nor workflow_name -- fails create_trigger's
-        # exactly-one-of validation
         response = client.post(
-            "/api/scheduled-tasks", json={"name": "x", "kind": "daily", "at": "09:00"}
+            "/api/scheduled-tasks",
+            json={"name": "x", "kind": "daily", "at": "09:00", "prompt": "  "},
         )
 
     assert response.status_code == 400
@@ -5077,154 +5111,11 @@ def test_delete_scheduled_task_endpoint_unknown_id_404s_lg(
     assert response.status_code == 404
 
 
-def test_startworkflow_endworkflow_only_captures_steps_after_the_marker_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Direct regression test, same as test_web.py's identical test: an
-    # unrelated tool call made *before* /startworkflow must not end up in
-    # the saved workflow -- only steps recorded between /startworkflow and
-    # /endworkflow are ever captured. The /endworkflow call itself triggers
-    # one more model call (record_chain_workflow_lg's assertion-writer
-    # pass) that this fake model has no scripted response left for --
-    # infer_step_assertions_lg fails open to expect_contains=None on any
-    # error, same as tools/workflows.py's own _infer_step_assertions, so
-    # this is a deliberate, not accidental, way to exercise that path too.
-    unrelated_call = _tool_call("call_1", "task_create", {"content": "unrelated earlier task"})
-    relevant_call = _tool_call("call_2", "task_create", {"content": "the real workflow step"})
-    fake_model = FakeToolCallingChatModel(
-        responses=[
-            AIMessage(content="", tool_calls=[unrelated_call]),
-            AIMessage(content="noted"),
-            AIMessage(content="", tool_calls=[relevant_call]),
-            AIMessage(content="noted again"),
-        ]
-    )
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_wf") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "do something unrelated"})
-            _receive_until(ws, "tasks_changed")
-
-            ws.send_json({"type": "user_message", "text": "/startworkflow"})
-            assert ws.receive_json() == {"type": "recording_started", "discarded_previous": False}
-
-            ws.send_json({"type": "user_message", "text": "do the real step"})
-            _receive_until(ws, "tasks_changed")
-
-            ws.send_json({"type": "user_message", "text": "/endworkflow demo"})
-            saved = ws.receive_json()
-
-    assert saved == {"type": "workflow_saved", "name": "demo", "mode": "chain", "step_count": 1}
-    workflow_path = tmp_path / "state" / "workflows" / "demo.json"
-    data = json.loads(workflow_path.read_text())
-    assert [s["arguments"]["content"] for s in data["steps"]] == ["the real workflow step"]
-
-
-def test_endworkflow_without_startworkflow_errors_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_wf2") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "/endworkflow demo"})
-            error = ws.receive_json()
-
-    assert error["type"] == "error"
-    assert "startworkflow" in error["message"]
-
-
-def test_clear_cancels_an_in_progress_workflow_recording_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_wf3") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "/startworkflow"})
-            ws.receive_json()  # recording_started
-
-            ws.send_json({"type": "user_message", "text": "/clear"})
-            cleared = ws.receive_json()
-            assert cleared == {"type": "cleared", "cancelled_recording": True}
-
-            ws.send_json({"type": "user_message", "text": "/endworkflow demo"})
-            error = ws.receive_json()
-
-    assert error["type"] == "error"
-    assert "startworkflow" in error["message"]
-
-
-def test_saveworkflow_produces_an_agent_mode_workflow_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Bare /saveworkflow runs propose_workflow_save_lg's curator first --
-    one scripted response for its JSON decision, then the user confirming
-    with "yes" triggers the actual persist, no further model call needed."""
-    curator_decision = json.dumps(
-        {"decision": "propose", "mode": "agent", "summary": "1. Check X. 2. Report back."}
-    )
-    fake_model = FakeToolCallingChatModel(
-        responses=[
-            AIMessage(content="sure, here's how I'd do it"),
-            AIMessage(content=curator_decision),
-        ]
-    )
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_wf4") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "investigate X every morning"})
-            _receive_until(ws, "tasks_changed")
-
-            ws.send_json({"type": "user_message", "text": "/saveworkflow morning-check"})
-            preview = ws.receive_json()
-            assert preview["type"] == "agent_message"
-            assert "Check X" in preview["text"]
-            ws.send_json({"type": "user_message", "text": "yes"})
-            saved = ws.receive_json()
-
-    assert saved == {"type": "workflow_saved", "name": "morning-check", "mode": "agent"}
-    workflow_path = tmp_path / "state" / "workflows" / "morning-check.json"
-    data = json.loads(workflow_path.read_text())
-    assert data["mode"] == "agent"
-    assert data["steps"] == []
-    assert "Check X" in data["summary"]
-
-
-def test_saveworkflow_asks_a_clarifying_question_when_curator_is_unsure_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The curator can ask instead of guessing -- confirms the clarify path
-    surfaces as a plain agent_message and leaves pending_save_proposal set
-    (nothing saved) rather than persisting a wrong guess."""
-    curator_decision = json.dumps({"decision": "clarify", "question": "Which part should I save?"})
-    fake_model = FakeToolCallingChatModel(
-        responses=[AIMessage(content="ok, done"), AIMessage(content=curator_decision)]
-    )
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_wf5") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "did a bunch of unrelated stuff"})
-            _receive_until(ws, "tasks_changed")
-
-            ws.send_json({"type": "user_message", "text": "/saveworkflow mystery"})
-            question = ws.receive_json()
-
-    assert question == {"type": "agent_message", "text": "Which part should I save?"}
-    assert not (tmp_path / "state" / "workflows" / "mystery.json").exists()
-
-
 def test_saveskill_writes_skill_md_and_makes_it_usable_immediately_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """/saveskill's happy path: one curator call proposes description+body
-    (name always stays whatever the user typed, same convention
-    /saveworkflow already established), "yes" confirms, and the file
+    (name always stays whatever the user typed), "yes" confirms, and the file
     actually lands at <skills_dir>/<slug>/SKILL.md with valid frontmatter.
     Also proves the real point of set_enabled_skills' own skills_by_slug
     refresh: /<slug> force-loads the brand-new skill in this *same*
@@ -5363,201 +5254,6 @@ def test_saveskill_discarded_on_a_non_yes_answer_lg(
     assert discarded["type"] == "agent_message"
     assert "Discarded" in discarded["text"]
     assert not (tmp_path / "skills" / "throwaway").exists()
-
-
-def test_runworkflow_over_websocket_runs_with_zero_llm_calls_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Direct regression test: /runworkflow must invoke the saved chain
-    # workflow directly, never through the model -- proven by an empty
-    # FakeToolCallingChatModel response list (any model call would raise
-    # IndexError inside the fake) and by asserting fake_model.i (its
-    # response-cursor, incremented only on a real call) stays 0.
-    from coscribe.tools.workflows import Workflow, WorkflowStep, WorkflowStore
-
-    store = WorkflowStore(tmp_path / "state")
-    store.save(
-        Workflow(
-            name="demo",
-            mode="chain",
-            summary="writes a note",
-            steps=[WorkflowStep(tool_name="task_create", arguments={"content": "step one"})],
-        )
-    )
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_run1") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "/runworkflow demo"})
-
-            started = ws.receive_json()
-            assert started == {"type": "workflow_run_started", "name": "demo"}
-
-            messages = _receive_until(ws, "tasks_changed")
-
-    assert fake_model.i == 0
-    progress_messages = [m for m in messages if m["type"] == "workflow_run_progress"]
-    assert progress_messages, "expected at least one workflow_run_progress message"
-    assert progress_messages[-1]["run"]["status"] == "completed"
-    assert progress_messages[-1]["run"]["workflow_name"] == "demo"
-    tool_results = [m for m in messages if m["type"] == "tool_result"]
-    assert tool_results[-1]["tool_name"] == "task_create"
-
-
-def test_runworkflow_unknown_name_errors_cleanly_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_run2") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "/runworkflow nope"})
-
-            started = ws.receive_json()
-            assert started == {"type": "workflow_run_started", "name": "nope"}
-
-            error = ws.receive_json()
-
-    assert error["type"] == "error"
-    assert "nope" in error["message"]
-
-
-def test_runworkflow_chain_mode_asks_approval_for_gated_steps_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """runtime_lg-specific: chain-mode replay reuses ChatSessionLG's own
-    _decide_action_request for each step's approval decision (see
-    runtime_lg/workflows.py's module docstring for why no interrupt()
-    bridging is needed) -- proves a gated step (write_file) genuinely
-    pauses for a real approval_required round-trip, not just an
-    auto-approve, and that approving it actually writes the file."""
-    from coscribe.tools.workflows import Workflow, WorkflowStep, WorkflowStore
-
-    store = WorkflowStore(tmp_path / "state")
-    store.save(
-        Workflow(
-            name="write-demo",
-            mode="chain",
-            summary="writes hello.txt",
-            steps=[
-                WorkflowStep(
-                    tool_name="write_file", arguments={"path": "hello.txt", "content": "hi"}
-                )
-            ],
-        )
-    )
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_run3") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "/runworkflow write-demo"})
-            messages_before_approval = _receive_until(ws, "approval_required")
-            approval = messages_before_approval[-1]
-            assert approval["type"] == "approval_required"
-            assert approval["tool_name"] == "write_file"
-            ws.send_json({"type": "approval_response", "id": approval["id"], "approved": True})
-
-            messages = _receive_until(ws, "tasks_changed")
-
-    progress_messages = [m for m in messages if m["type"] == "workflow_run_progress"]
-    assert progress_messages[-1]["run"]["status"] == "completed"
-    assert (tmp_path / "workspace" / "hello.txt").read_text() == "hi"
-
-
-def test_runworkflow_chain_mode_replays_ask_user_question_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Regression test for a real bug: chain-mode replay's own `decide`/
-    `invoke` closures didn't understand ask_user_question's "respond"-only
-    HumanInTheLoopMiddleware contract (see _run_workflow_chain_mode's own
-    docstring) -- decide() read a "respond" outcome as not-approved, and
-    invoke() would have called the tool's real body (a defensive
-    RuntimeError) had it ever gotten that far. A recorded question step
-    re-asks the recorded question/options (arguments replay fixed, same
-    as any other step) and durably waits for a fresh, live human answer,
-    exactly the question_required/question_response round-trip a normal
-    turn gets -- not some stale answer from when the workflow was first
-    recorded."""
-    from coscribe.tools.workflows import Workflow, WorkflowStep, WorkflowStore
-
-    store = WorkflowStore(tmp_path / "state")
-    store.save(
-        Workflow(
-            name="ask-demo",
-            mode="chain",
-            summary="asks which one",
-            steps=[
-                WorkflowStep(
-                    tool_name="ask_user_question",
-                    arguments={"question": "Which one?", "options": "A\nB"},
-                )
-            ],
-        )
-    )
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_run4") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "/runworkflow ask-demo"})
-
-            question = None
-            while question is None:
-                message = ws.receive_json()
-                if message["type"] == "question_required":
-                    question = message
-            assert question["question"] == "Which one?"
-            assert question["options"] == ["A", "B"]
-            ws.send_json({"type": "question_response", "id": question["id"], "answer": "B"})
-
-            messages = _receive_until(ws, "tasks_changed")
-
-    types = [m["type"] for m in messages]
-    # Same suppression as a live turn's own ask_user_question call -- the
-    # question_required/answered round-trip already represents this step,
-    # so no redundant tool_result "Asked: ..." row.
-    assert "tool_result" not in types
-    progress_messages = [m for m in messages if m["type"] == "workflow_run_progress"]
-    assert progress_messages[-1]["run"]["status"] == "completed"
-
-
-def test_list_recorded_steps_reflects_the_real_checkpointed_history_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Regression test for a real, previously-silent gap: build_coordinator_
-    agent's shared list_recorded_steps tool reads FileStateStore, which is
-    always empty for runtime_lg's checkpointer-backed threads -- it would
-    return [] forever, even after real tool calls happened in this exact
-    thread. ChatSessionLG now replaces it with a checkpointed-message-
-    backed version (see _build_list_recorded_steps_tool) -- this proves
-    the model actually sees the real prior tool call, not an empty list."""
-    real_call = _tool_call("call_1", "task_create", {"content": "a real step"})
-    list_steps_call = _tool_call("call_2", "list_recorded_steps", {})
-    fake_model = FakeToolCallingChatModel(
-        responses=[
-            AIMessage(content="", tool_calls=[real_call]),
-            AIMessage(content="noted"),
-            AIMessage(content="", tool_calls=[list_steps_call]),
-            AIMessage(content="done"),
-        ]
-    )
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_list_steps") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-            ws.send_json({"type": "user_message", "text": "make a task"})
-            _receive_until(ws, "tasks_changed")
-
-            ws.send_json({"type": "user_message", "text": "what have you recorded?"})
-            messages = _receive_until(ws, "tasks_changed")
-
-    tool_result = next(m for m in messages if m["tool_name"] == "list_recorded_steps")
-    assert tool_result["result"] == [
-        {"index": 0, "tool_name": "task_create", "arguments": {"content": "a real step"}}
-    ]
 
 
 def test_tool_raising_a_plain_exception_is_reported_to_the_model_not_a_crashed_turn(
@@ -6190,8 +5886,7 @@ def test_history_omits_a_call_still_pending_approval_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A tool call awaiting approval has no ToolMessage result yet --
-    serialize_history_for_ws_lg must skip it (same reasoning as
-    workflows.py's recorded_tool_call_steps_lg fix) rather than show a
+    serialize_history_for_ws_lg must skip it rather than show a
     phantom step with no outcome; resume_after_reconnect already
     redelivers the live approval_required event for it separately."""
     call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})

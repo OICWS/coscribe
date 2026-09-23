@@ -5,8 +5,9 @@ import { ContextRing } from "./components/ContextRing";
 import { ModePill } from "./components/ModePill";
 import { ModelPicker } from "./components/ModelPicker";
 import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
-import { NAV_RAIL_EXPANDED_WIDTH, NavRail, type NavMode, type RunTab } from "./components/NavRail";
+import { NAV_RAIL_EXPANDED_WIDTH, NavRail, type NavMode } from "./components/NavRail";
 import type { PptxShapeCapture } from "./components/PptxShapeOverlay";
+import { RunBreadcrumb } from "./components/RunBreadcrumb";
 import { RunPanel } from "./components/RunPanel";
 import { ScheduledTaskModal } from "./components/ScheduledTaskModal";
 import { DirBrowserModal } from "./components/settings/DirBrowserModal";
@@ -16,12 +17,16 @@ import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { SubAgentsPanel } from "./components/SubAgentsPanel";
 import { BrowserIcon, HelpIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
-import { getCommands, getScheduledTasks, getThreads, getWorkflowRuns } from "./lib/rest";
-import { goToThread, SCHEDULED_THREAD_PREFIX, THREAD_CHANGE_EVENT } from "./lib/nav";
+import { getCommands, getScheduledTasks, getThreads, runScheduledTaskNow } from "./lib/rest";
+import { goToThread, SCHEDULED_THREAD_PREFIX, startNewThread, THREAD_CHANGE_EVENT } from "./lib/nav";
+import { latestRun, taskForThread } from "./lib/runLabels";
+import { describeSchedule } from "./lib/scheduleLabels";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
-import { chatReducer, initialChatState } from "./state/reducer";
+import { chatReducer, initialChatState, TASK_DRAFT_SAVED_PREFIX, type LogItem } from "./state/reducer";
 import type { CommandInfo, ThreadSummary } from "./types/session";
 import type { ScheduledTask } from "./types/settings";
+
+type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
 
 function App() {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
@@ -52,28 +57,25 @@ function App() {
   // the header (see the column's paddingLeft below); hover-expanded it
   // still floats over the content.
   const [navPinned, setNavPinned] = useState(false);
-  // Defaults to "scheduled", not "workflows" -- clicking the nav rail's
-  // clock icon (see NavRail.tsx) must land directly on the existing
-  // Scheduled Tasks list, not the unrelated saved-Workflow-definitions tab.
-  const [runTab, setRunTab] = useState<RunTab>("scheduled");
-  // Which task RunPanel's "scheduled" tab shows the detail page for (null
-  // = the portal grid) -- lives here, not in RunPanel/NavRail, since a
-  // sidebar row click (NavRail) and a card click (RunPanel) both need to
-  // drive the same selection.
-  const [selectedScheduledTask, setSelectedScheduledTask] = useState<ScheduledTask | null>(null);
+  // Which task Scheduled mode shows the page for (null = the portal) --
+  // an id, not a copy of the task, so it always reads the latest list.
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   // null = closed. { task: null } = create. { task } = editing that task.
-  // One modal instance for both, opened from three places (RunPanel's "New
-  // task" menu, either sidebar/card "..." menu's Edit item, or the detail
-  // page's pencil icon) -- see ScheduledTaskModal's own docstring.
-  const [scheduledTaskModal, setScheduledTaskModal] = useState<{ task: ScheduledTask | null } | null>(null);
-  // Bumped after any scheduled-task mutation (create/edit/delete/pause/
-  // resume/run-now) from *any* of those three surfaces, so the other two
-  // (which each fetch their own copy of the list) refetch and stay in
-  // sync -- REST mutations don't flow through the websocket/reducer the
-  // way a chat turn's own state changes do, so nothing else refreshes
-  // them automatically.
-  const [scheduledTasksVersion, setScheduledTasksVersion] = useState(0);
-  const bumpScheduledTasks = () => setScheduledTasksVersion((v) => v + 1);
+  // `draftId` marks a create prefilled from a model's draft in chat,
+  // whose outcome goes back to the model as the tool's answer.
+  const [scheduledTaskModal, setScheduledTaskModal] = useState<{
+    task: ScheduledTask | null;
+    draft?: TaskDraftItem;
+  } | null>(null);
+  // One shared copy for the sidebar, portal, task page and run header --
+  // REST mutations don't flow through the websocket, so every mutation
+  // calls refreshScheduledTasks itself.
+  const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
+  const refreshScheduledTasks = useCallback(() => {
+    getScheduledTasks()
+      .then(setScheduledTasks)
+      .catch(() => {});
+  }, []);
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null);
@@ -119,7 +121,7 @@ function App() {
     const syncFromUrl = () => {
       const id = resolveThreadId();
       setNavMode("create");
-      setSelectedScheduledTask(null);
+      setSelectedTaskId(null);
       if (id === threadIdRef.current) return;
       pendingLocalSendsRef.current = [];
       dispatch({ type: "local_switch_thread" });
@@ -172,49 +174,112 @@ function App() {
 
   useEffect(() => {
     getCommands().then(setCommands);
-    getWorkflowRuns().then((runs) => dispatch({ type: "local_hydrate_workflow_runs", runs }));
   }, []);
 
-  // Refetched whenever a turn finishes (workflowEventTick, same signal
+  // Refetched whenever a turn finishes (turnTick, same signal
   // RunPanel's refreshKey uses), not just on mount -- a brand-new thread
   // has no ThreadSummary/preview yet until its first turn completes, so
   // the header label below needs this to pick that up once it exists.
   useEffect(() => {
     refreshThreads();
-  }, [state.workflowEventTick, refreshThreads]);
+  }, [state.turnTick, refreshThreads]);
 
   const sessionLabel = threads?.find((t) => t.thread_id === threadId)?.preview || "New session";
 
-  // True for a Scheduled Task's own dedicated conversation (thread_id
-  // "scheduled-<trigger_id>", see tools/scheduled_tasks.py's
-  // SCHEDULED_THREAD_PREFIX) -- landed on directly by goToThread after a
-  // Run now, or by reopening an already-run task from the Scheduled
-  // portal/sidebar (see openScheduledTask below). Swaps ThreadHeader for
-  // a "Scheduled / <task name>" breadcrumb instead (see the header row
-  // below) -- this thread's own name/workspace badge means nothing here.
+  // A scheduled run's own conversation (see tools/scheduled_tasks.py's
+  // run_thread_id): gets the "Scheduled / <task>" breadcrumb instead of
+  // ThreadHeader, and the sidebar stays on the task list.
   const isScheduledTaskThread = threadId.startsWith(SCHEDULED_THREAD_PREFIX);
-  const [scheduledTaskForThread, setScheduledTaskForThread] = useState<ScheduledTask | null>(null);
-  useEffect(() => {
-    if (!isScheduledTaskThread) return;
-    getScheduledTasks().then((tasks) => {
-      setScheduledTaskForThread(tasks.find((t) => t.thread_id === threadId) ?? null);
-    });
-  }, [isScheduledTaskThread, threadId, state.workflowEventTick]);
+  const threadTask = isScheduledTaskThread ? taskForThread(scheduledTasks, threadId) : null;
+  const selectedTask = scheduledTasks.find((t) => t.trigger_id === selectedTaskId) ?? null;
+  const showingScheduled = navMode === "run" || isScheduledTaskThread;
 
-  /** A sidebar row / portal card click's "open" behavior -- an already-
-   * run (or currently-running) task goes straight to its own
-   * conversation instead of the read-only detail page, per an explicit
-   * request ("否则根本测试不了任务"): a never-run task still shows
-   * ScheduledTaskDetail in place, since there's no conversation to show
-   * yet. Distinct from the plain setSelectedScheduledTask setter (passed
-   * to NavRail/RunPanel separately) -- that one is for internal state
-   * sync/clearing, which must never force-navigate. */
+  useEffect(() => {
+    refreshScheduledTasks();
+  }, [state.turnTick, refreshScheduledTasks]);
+
+  // Runs start and finish in the background (the poller, or Run now), so
+  // while anything Scheduled is on screen the list is re-read on a timer
+  // -- quickly while a run is in progress, slowly otherwise.
+  const anyRunInProgress = scheduledTasks.some((t) => latestRun(t)?.status === "running");
+  useEffect(() => {
+    if (!showingScheduled) return;
+    const interval = setInterval(refreshScheduledTasks, anyRunInProgress ? 3000 : 15000);
+    return () => clearInterval(interval);
+  }, [showingScheduled, anyRunInProgress, refreshScheduledTasks]);
+
+  /** A sidebar row / portal card click: straight to the task's latest run
+   * (its conversation), or to the task's page if it has never run. */
   const openScheduledTask = (task: ScheduledTask) => {
-    if (task.last_run_at) {
-      goToThread(task.thread_id);
+    const run = latestRun(task);
+    if (run) {
+      goToThread(run.thread_id);
       return;
     }
-    setSelectedScheduledTask(task);
+    setSelectedTaskId(task.trigger_id);
+    setNavMode("run");
+  };
+
+  const showScheduledTaskPage = (task: ScheduledTask | null) => {
+    setSelectedTaskId(task?.trigger_id ?? null);
+    setNavMode("run");
+  };
+
+  const runTaskNow = async (task: ScheduledTask) => {
+    const result = await runScheduledTaskNow(task.trigger_id);
+    if ("error" in result) {
+      dispatch({ type: "error", message: result.error });
+      return;
+    }
+    refreshScheduledTasks();
+    goToThread(result.run.thread_id);
+  };
+
+  /** "Create with coscribe": a fresh chat, pre-seeded so the model knows
+   * the goal is a task -- it drafts one (create_scheduled_task) once it
+   * has what it needs, and the draft comes back here for review. */
+  const createTaskWithCoscribe = () => {
+    startNewThread();
+    setPendingComposerText("I'd like to set up a scheduled task: ");
+  };
+
+  const onReviewTaskDraft = (item: TaskDraftItem) => setScheduledTaskModal({ task: null, draft: item });
+
+  const onDismissTaskDraft = (item: TaskDraftItem) => {
+    dispatch({ type: "local_task_draft_resolved", id: item.id, status: "dismissed" });
+    socketRef.current?.send({
+      type: "question_response",
+      id: item.id,
+      answer: "The user dismissed the draft without saving it.",
+    });
+  };
+
+  const onTaskSaved = (task: ScheduledTask) => {
+    refreshScheduledTasks();
+    const draft = scheduledTaskModal?.draft;
+    if (!draft) return;
+    dispatch({ type: "local_task_draft_resolved", id: draft.id, status: "saved", savedName: task.name });
+    socketRef.current?.send({
+      type: "question_response",
+      id: draft.id,
+      answer: `${TASK_DRAFT_SAVED_PREFIX} as scheduled task "${task.name}" (${describeSchedule(task.schedule)}). They may have edited it before saving.`,
+    });
+  };
+
+  const onNavModeChange = (mode: NavMode) => {
+    if (mode === "run") {
+      showScheduledTaskPage(null);
+      return;
+    }
+    // Leaving Scheduled from a run's conversation goes back to chatting,
+    // not to that run's thread under a different sidebar.
+    if (isScheduledTaskThread) {
+      const recent = threads?.[0];
+      if (recent) goToThread(recent.thread_id);
+      else startNewThread();
+      return;
+    }
+    setNavMode("create");
   };
 
   /** Sends a bare user_message with no chat-log bubble -- for commands the
@@ -299,26 +364,13 @@ function App() {
   };
 
   /** Settings > Skills > Add > Create a skill -- closes Settings, switches
-   * to Create mode (same reason onRunWorkflow below does: Composer only
-   * renders there), and prefills "/skill-creator " into the composer via
-   * pendingComposerText/Composer's externalText prop -- not sent, unlike
-   * onRunWorkflow's own /runworkflow, so the user can review or add
-   * context before hitting Enter themselves. */
+   * to Create mode (Composer only renders there), and prefills
+   * "/skill-creator " into the composer via pendingComposerText -- not
+   * sent, so the user can review or add context before hitting Enter. */
   const onCreateSkill = () => {
     setSettingsOpen(false);
     setNavMode("create");
     setPendingComposerText("/skill-creator ");
-  };
-
-  const onRunWorkflow = (name: string) => {
-    // Switch back to Create so the running turn's messages are actually
-    // visible -- ChatLog only renders while navMode === "create".
-    setNavMode("create");
-    const text = `/runworkflow ${name}`;
-    runOrQueueSend(() => {
-      dispatch({ type: "local_user_message", text, instant: false });
-      socketRef.current?.send({ type: "user_message", text });
-    });
   };
 
   if (!bootstrapped) return <StartupSplash />;
@@ -336,15 +388,15 @@ function App() {
           threads={threads ?? []}
           onThreadsChanged={refreshThreads}
           onThreadRenamed={renameThreadLocally}
-          mode={navMode}
-          onModeChange={setNavMode}
-          onRunTabChange={setRunTab}
-          workflowRuns={state.workflowRuns}
-          onStop={onStop}
-          scheduledTasksVersion={scheduledTasksVersion}
-          onSelectScheduledTask={setSelectedScheduledTask}
+          mode={showingScheduled ? "run" : "create"}
+          onModeChange={onNavModeChange}
+          scheduledTasks={scheduledTasks}
+          onScheduledTasksChanged={refreshScheduledTasks}
+          activeTaskId={navMode === "run" ? selectedTaskId : (threadTask?.trigger_id ?? null)}
           onOpenScheduledTask={openScheduledTask}
           onEditScheduledTask={(task) => setScheduledTaskModal({ task })}
+          onRunScheduledTaskNow={runTaskNow}
+          onNewScheduledTask={createTaskWithCoscribe}
         />
         {/* pl-12 lives here, not on the page-level wrapper above -- it only
          * needs to clear NavRail's own collapsed footprint (a 48px-square
@@ -362,33 +414,12 @@ function App() {
            * keeps the icon buttons right-aligned either way, matching
            * ThreadHeader's own flex-1 when it is shown. */}
           {navMode === "create" && isScheduledTaskThread ? (
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
-              <button
-                type="button"
-                className="text-[var(--muted)] hover:text-[var(--fg)] hover:underline"
-                onClick={() => {
-                  setNavMode("run");
-                  setRunTab("scheduled");
-                  setSelectedScheduledTask(null);
-                }}
-              >
-                Scheduled
-              </button>
-              <span className="text-[var(--muted)]">/</span>
-              <button
-                type="button"
-                disabled={!scheduledTaskForThread}
-                className="min-w-0 truncate font-medium hover:underline disabled:no-underline"
-                onClick={() => {
-                  if (!scheduledTaskForThread) return;
-                  setNavMode("run");
-                  setRunTab("scheduled");
-                  setSelectedScheduledTask(scheduledTaskForThread);
-                }}
-              >
-                {scheduledTaskForThread?.name ?? "…"}
-              </button>
-            </div>
+            <RunBreadcrumb
+              task={threadTask}
+              threadId={threadId}
+              onOpenPortal={() => showScheduledTaskPage(null)}
+              onOpenTask={showScheduledTaskPage}
+            />
           ) : navMode === "create" ? (
             <ThreadHeader
               sessionLabel={sessionLabel}
@@ -446,6 +477,8 @@ function App() {
               onEditMessage={state.turnInFlight ? undefined : onEditMessage}
               onRewindMessage={state.turnInFlight ? undefined : onRewindMessage}
               loading={!state.historyReceived}
+              onReviewTaskDraft={onReviewTaskDraft}
+              onDismissTaskDraft={onDismissTaskDraft}
               onPptxShapePicked={onPptxShapePicked}
               olderItems={state.olderItems}
               olderStatus={state.olderStatus}
@@ -489,27 +522,26 @@ function App() {
           </>
         ) : (
           <RunPanel
-            runTab={runTab}
-            onRunWorkflow={onRunWorkflow}
-            refreshKey={state.workflowEventTick}
-            scheduledTasksVersion={scheduledTasksVersion}
-            onScheduledTasksChanged={bumpScheduledTasks}
-            selectedScheduledTask={selectedScheduledTask}
-            onSelectScheduledTask={setSelectedScheduledTask}
-            onOpenScheduledTask={openScheduledTask}
-            onEditScheduledTask={(task) => setScheduledTaskModal({ task })}
+            tasks={scheduledTasks}
+            onScheduledTasksChanged={refreshScheduledTasks}
+            selectedTask={selectedTask}
+            onSelectTask={showScheduledTaskPage}
+            onOpenTask={openScheduledTask}
+            onEditTask={(task) => setScheduledTaskModal({ task })}
+            onRunNow={runTaskNow}
+            onCreateWithCoscribe={createTaskWithCoscribe}
           />
         )}
         {scheduledTaskModal && (
           <ScheduledTaskModal
             task={scheduledTaskModal.task}
+            draft={scheduledTaskModal.draft?.draft}
             onClose={() => setScheduledTaskModal(null)}
-            onSaved={bumpScheduledTasks}
+            onSaved={onTaskSaved}
           />
         )}
         <SettingsModal
           open={settingsOpen}
-          workflowEventTick={state.workflowEventTick}
           enabledSkills={state.enabledSkills}
           onToggleSkill={onToggleSkill}
           onCreateSkill={onCreateSkill}

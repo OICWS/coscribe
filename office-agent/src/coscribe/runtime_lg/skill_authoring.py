@@ -1,22 +1,11 @@
 """/saveskill's curator + writer -- turns a live conversation into a new
-SKILL.md, the alternative to tools/workflows.py's own /saveworkflow save
-proposal (runtime_lg/workflows.py's propose_workflow_save_lg).
-
-Deliberately a *separate*, parallel mechanism from the workflow-save
-machinery, not unified into it: a workflow captures a fixed, literally-
-replayable sequence (the exact same tool calls, same arguments, every
-time); a Skill captures generalized, reusable KNOWLEDGE -- how to do a
+SKILL.md. A Skill captures generalized, reusable KNOWLEDGE -- how to do a
 kind of task, written as instructions a future agent follows with
-judgment, not a script it executes verbatim. Different enough in what
-gets written (and how much judgment the curator call needs to exercise)
-that sharing one state machine with /saveworkflow would have meant
-threading a third "which shape is this" branch through every step of an
-already-nontrivial flow (see web/session.py's pending_save_proposal),
-for a feature this narrow. Mirrors that flow's *shape* closely on
-purpose (clarify-or-propose one curator call, then a preview + explicit
-yes/no confirm before anything is written) so the UX is instantly
-familiar to anyone who's used /saveworkflow -- see web/session.py's
-_handle_save_skill and _handle_pending_skill_save_proposal.
+judgment -- as opposed to a scheduled task (tools/scheduled_tasks.py),
+which is one concrete job to run again. One curator call decides to
+clarify or propose, then a preview + explicit yes/no confirm happens
+before anything is written -- see web/session.py's _handle_save_skill and
+_handle_pending_skill_save_proposal.
 """
 
 from __future__ import annotations
@@ -36,10 +25,6 @@ __all__ = ["SkillSaveProposal", "propose_skill_save_lg", "write_skill_lg"]
 
 
 def _extract_json_object(text: str) -> str:
-    # Same idea as runtime_lg/workflows.py's private helper of the same
-    # name -- duplicated rather than imported, see that module's own
-    # comment on why (a 4-line pure-string helper, not worth a cross-
-    # module private import).
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1 or end < start:
         return text
@@ -53,7 +38,7 @@ class SkillSaveProposal:
     awaiting the user's answer/confirmation, and only calls
     write_skill_lg once they confirm. `decision` is "clarify" or
     "propose"; description/body are only meaningful when decision ==
-    "propose". Mirrors tools/workflows.py's WorkflowSaveProposal shape."""
+    "propose"."""
 
     decision: str
     question: str | None = None
@@ -68,13 +53,10 @@ async def propose_skill_save_lg(
     model: Any,
     clarification_history: list[tuple[str, str]],
 ) -> SkillSaveProposal:
-    """Same curator judgment call as propose_workflow_save_lg (clarify vs.
-    propose), same fail-open-to-a-clarifying-question behavior -- but
-    deciding a skill's description/body instead of a workflow's mode/
-    steps. `name` is always the user's own typed command argument, never
-    proposed by the model -- same convention /saveworkflow already
-    established (the model decides *how to capture it*, the user decides
-    *what it's called*)."""
+    """One curator call: clarify vs. propose a skill's description/body,
+    failing open to a clarifying question. `name` is always the user's
+    own typed command argument, never proposed by the model (the model
+    decides *how to capture it*, the user decides *what it's called*)."""
     clarification_block = ""
     if clarification_history:
         clarification_block = "\n\nPrevious clarification exchange:\n" + "\n".join(
@@ -132,11 +114,9 @@ def write_skill_lg(
     name: str, description: str, body: str, *, skills_dir: str | Path
 ) -> dict[str, Any]:
     """Writes the confirmed proposal to <skills_dir>/<slug>/SKILL.md --
-    plain filesystem I/O, not the write_file *tool* (same precedent
-    record_chain_workflow_lg/record_agent_workflow_lg already set for
-    /endworkflow's/agent-mode's own save: the user's explicit slash-
-    command confirmation already *is* the approval, no separate
-    WRITE_LOCAL gate on top of it needed). Overwrites in place if the
+    plain filesystem I/O, not the write_file *tool*: the user's explicit
+    slash-command confirmation already *is* the approval, no separate
+    WRITE_LOCAL gate on top of it needed. Overwrites in place if the
     slug already names an existing *user* skill (re-running /saveskill
     with the same name is an update, same as Skill Creator's own "editing
     an existing skill" guidance) -- but web/session.py's caller is

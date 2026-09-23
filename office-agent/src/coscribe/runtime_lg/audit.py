@@ -117,7 +117,7 @@ class AuditLog:
     """One append-only JSONL file, global across every thread (not
     per-thread) under state_dir -- mirrors this codebase's other global
     *Store classes' "one file/directory under state_dir" shape (WakeStore,
-    ScheduledTriggerStore, WorkflowRunStore), but append-only rather than
+    ScheduledTriggerStore), but append-only rather than
     one-file-per-record: an audit trail is inherently a sequence, never
     edited or deleted after the fact the way a wake request or a
     scheduled trigger's own state is."""

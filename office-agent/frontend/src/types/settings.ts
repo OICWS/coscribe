@@ -221,50 +221,6 @@ export interface ScriptEnvInterpreterInfo {
 }
 
 // ---------------------------------------------------------------------
-// Workflows tab
-// ---------------------------------------------------------------------
-
-export interface WorkflowStep {
-  tool_name: string;
-  arguments: Record<string, unknown>;
-  expect_contains: string | null;
-}
-
-export interface Workflow {
-  name: string;
-  mode: "chain" | "agent";
-  summary: string;
-  steps: WorkflowStep[];
-  source_thread_id: string;
-  created_at: string;
-  updated_at: string;
-  last_run_at: string | null;
-  last_run_status: string | null;
-}
-
-export type WorkflowDeleteResult = { deleted: string } | { error: string };
-
-export interface WorkflowRunStepStatus {
-  index: number;
-  tool_name: string;
-  status: "pending" | "running" | "done" | "failed" | "stopped";
-  detail: string | null;
-}
-
-export interface WorkflowRun {
-  run_id: string;
-  workflow_name: string;
-  mode: string;
-  status: "running" | "completed" | "failed" | "stopped";
-  started_at: string;
-  finished_at: string | null;
-  steps: WorkflowRunStepStatus[];
-  error: string | null;
-}
-
-export type WorkflowRunDeleteResult = { deleted: string } | { error: string };
-
-// ---------------------------------------------------------------------
 // Scheduled Tasks tab
 // ---------------------------------------------------------------------
 
@@ -284,35 +240,53 @@ export interface ScheduleRule {
   start_date: string | null;
 }
 
+export type RunStatus = "running" | "completed" | "failed" | "needs_approval" | "stopped";
+
+/** One execution of a task, in its own conversation (thread_id). */
+export interface ScheduledRun {
+  run_id: string;
+  thread_id: string;
+  started_at: string;
+  source: "manual" | "scheduled";
+  status: RunStatus;
+  finished_at: string | null;
+  error: string | null;
+}
+
 export interface ScheduledTask {
   trigger_id: string;
   name: string;
-  thread_id: string;
   schedule: ScheduleRule;
   enabled: boolean;
   created_at: string;
   next_run_at: string | null;
-  workflow_name: string | null;
-  prompt: string | null;
+  prompt: string;
   last_run_at: string | null;
   last_run_status: string | null;
   model: string | null;
   approval_mode: ApprovalMode;
+  notes_enabled: boolean;
+  /** Oldest first. */
+  runs: ScheduledRun[];
 }
 
 export interface CreateScheduledTaskPayload {
   name: string;
   kind: ScheduleKind;
   at: string;
-  prompt?: string;
-  workflow_name?: string;
+  prompt: string;
   weekday?: number;
   day_of_month?: number;
   start_date?: string;
   model?: string;
   approval_mode?: ApprovalMode;
+  notes_enabled?: boolean;
 }
 
 export type ScheduledTaskResult = ScheduledTask | { error: string };
+
+export type RunNowResult = { task: ScheduledTask; run: ScheduledRun } | { error: string };
+
+export type TaskNotesResult = { notes: string } | { error: string };
 
 export type ScheduledTaskDeleteResult = { deleted: string } | { error: string };

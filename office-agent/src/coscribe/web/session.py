@@ -24,14 +24,8 @@ SummarizationMiddleware/ModelCallLimitMiddleware. Still narrower than
 ChatSession in one documented way: Hooks configured on a top-level
 session don't propagate into spawn_agent's/review_work's own nested
 sub-agent graphs -- a sub-agent's own tool calls run without PreToolUse/
-PostToolUse checks. Workflows *are* supported too
-(/startworkflow/endworkflow/saveworkflow/runworkflow -- see
-_handle_start_workflow and friends below, and runtime_lg/README.md's
-"Workflows" section for the design), with one narrower spot of its own:
-there's no model-callable run_workflow tool, only the slash command/picker
--- see _RUN_WORKFLOW_NOTE. spawn_agent/review_work delegation *is* wired in
-(see
-runtime_lg/README.md's "spawn_agent's nested-interrupt bridge" section --
+PostToolUse checks. spawn_agent/review_work delegation *is* wired in
+(see runtime_lg/README.md's "spawn_agent's nested-interrupt bridge" section --
 live-verified against Gemini before being added here, including that a
 nested approval bridges up through _resolve_pending_approvals below with
 zero changes needed, since the bridged interrupt's payload shape matches
@@ -41,7 +35,6 @@ HumanInTheLoopMiddleware's own exactly).
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import shutil
 import tempfile
@@ -65,7 +58,6 @@ from langchain_core.messages import (
 )
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.tools import BaseTool
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.types import Command
@@ -79,7 +71,6 @@ from ..runtime import (
     empty_hooks_config,
     get_tool_metadata,
     run_hook,
-    tool_metadata,
 )
 from ..runtime.provider_config import load_custom_providers
 from ..runtime_lg import (
@@ -89,12 +80,7 @@ from ..runtime_lg import (
     build_spawn_agent_background_tool,
     build_spawn_agent_tool,
     propose_skill_save_lg,
-    propose_workflow_save_lg,
-    record_agent_workflow_lg,
-    record_chain_workflow_lg,
-    recorded_tool_call_steps_lg,
     resolve_chat_model,
-    run_chain_lg,
     serialize_history_for_ws_lg,
     tool_name,
     write_skill_lg,
@@ -121,22 +107,29 @@ from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
 from ..tools.documents import DocumentToolkit
 from ..tools.presentations import PresentationToolkit
-from ..tools.spreadsheets import SpreadsheetToolkit
-from ..tools.workflows import (
-    Workflow,
-    WorkflowRun,
-    WorkflowRunStore,
-    WorkflowSaveProposal,
-    WorkflowStepStatus,
-    WorkflowStore,
+from ..tools.scheduled_tasks import (
+    TASK_DRAFT_TOOL_NAMES,
+    ScheduledTriggerStore,
+    parse_run_thread_id,
 )
+from ..tools.spreadsheets import SpreadsheetToolkit
 from .context_usage import build_context_breakdown
 
 logger = logging.getLogger(__name__)
 
-# Same value as web/session.py's identical constant -- how many rounds of
-# clarifying question/answer bare /saveworkflow will go through before
-# giving up and telling the user to use /startworkflow instead.
+# /saveworkflow <name>: the model distills the conversation into a draft
+# scheduled task via create_scheduled_task, which the user then reviews.
+SAVE_WORKFLOW_PROMPT = (
+    'Save what we did in this conversation as a reusable workflow named "{name}": '
+    'call create_scheduled_task with name="{name}", kind="manual" unless I asked '
+    "for a schedule, and a prompt distilled from this conversation -- the steps and "
+    "inputs that actually worked, pitfalls we ran into and how to avoid them, and "
+    "the expected output. Leave out dead ends and unrelated chatter. If there's no "
+    "repeatable task in this conversation yet, ask me what to save instead."
+)
+
+# How many rounds of clarifying question/answer /saveskill goes through
+# before giving up.
 MAX_SAVE_CLARIFICATION_ROUNDS = 3
 
 # _build_document_edit_preview's dispatch table: which toolkit class
@@ -227,14 +220,14 @@ async def _close_orphaned_tool_calls(agent: Any, config: dict[str, Any]) -> bool
 
 
 def _build_instructions(agent_instructions: str | None, *, defer_tools: bool) -> str:
-    """Appends _RUN_WORKFLOW_NOTE (always) and _SEARCH_TOOLS_NOTE (only
-    when defer_tools is on) to whatever build_coordinator_agent already
+    """Appends _SEARCH_TOOLS_NOTE (only when defer_tools is on) to
+    whatever build_coordinator_agent already
     assembled -- shared by every one of this class's own call sites that
     (re)build self._instructions (__init__, select_workspace,
     set_enabled_skills -- switch_model doesn't, since it never rebuilds
     the coordinator Agent itself), so the search_tools note can never
     end up added in one place and forgotten in another."""
-    notes = [_RUN_WORKFLOW_NOTE]
+    notes: list[str] = []
     if defer_tools:
         notes.append(_SEARCH_TOOLS_NOTE)
     if not agent_instructions:
@@ -318,15 +311,6 @@ def _can_resolve_approvals(websocket: Any) -> bool:
 _GRPC_METADATA_OVERFLOW_SIGNATURE = "metadata size exceeds soft limit"
 
 
-# coordinator.py's shared INSTRUCTIONS (used verbatim by both runtimes) tells
-# the model to call run_workflow(name) to actually run a saved workflow --
-# accurate for ChatSession, but runtime_lg has no model-callable run_workflow
-# tool (see this module's own docstring for the deliberate scope cut): a
-# workflow run here only ever happens via the /runworkflow slash command or
-# the shared frontend's own picker, both of which bypass the model entirely.
-# Appended to this session's own instructions (not coordinator.py's shared
-# constant, which both runtimes still need to read the same way) so the
-# model doesn't try to call a tool that was never bound to this graph.
 # Shared between _handle_compact (which writes it as the first message of
 # a fresh epoch) and send_history (which checks for it, below) -- lets
 # send_history answer "might this thread have older history to page
@@ -337,14 +321,6 @@ _GRPC_METADATA_OVERFLOW_SIGNATURE = "metadata size exceeds soft limit"
 # with nothing to load).
 _COMPACT_NOTE_PREFIX = "[Earlier conversation compacted to save context.]"
 
-_RUN_WORKFLOW_NOTE = (
-    "Note: in this app, a saved workflow is only ever run via the "
-    "/runworkflow <name> command or the workflow picker in the UI -- there "
-    "is no run_workflow tool here. If the user asks you to run a saved "
-    "workflow, tell them to type /runworkflow <name> (or use the picker); "
-    "do not attempt to call a tool named run_workflow."
-)
-
 # Only appended when Settings.defer_tools is on (see _build_instructions
 # below) -- the model has no other way to learn search_tools exists or
 # when to reach for it, since most tools are hidden from its own tool
@@ -352,7 +328,7 @@ _RUN_WORKFLOW_NOTE = (
 _SEARCH_TOOLS_NOTE = (
     "Most tools beyond the basics aren't in your tool list yet -- this "
     "keeps this conversation's context small. If what you need isn't "
-    "there (a PPTX/XLSX edit tool, a background script, a workflow tool, "
+    "there (a PPTX/XLSX edit tool, a background script, a scheduled-task tool, "
     "etc.), call search_tools(query) first -- e.g. search_tools(\"pptx "
     "chart\") -- it makes any match callable by its real name starting "
     "with your very next tool call. Don't assume something can't be done "
@@ -441,36 +417,10 @@ class ChatSessionLG:
         # turn on this thread_id forever, including a genuine reconnect's
         # own attempt to redeliver that same pending approval.
         self._current_turn_task: asyncio.Task[None] | None = None
-        # None = not recording; otherwise the tool-call-step count captured
-        # at the moment /startworkflow was typed (see _handle_start_workflow/
-        # _handle_end_workflow below) -- only steps recorded from this index
-        # onward are ever saved by /endworkflow. Mirrors ChatSession's
-        # identical field.
-        self.workflow_recording_start: int | None = None
-        # None = no bare /saveworkflow curation in progress; otherwise
-        # awaiting the user's answer to a clarifying question or
-        # confirmation of a proposed save -- see _run_save_curation/
-        # _present_save_proposal below. Mirrors ChatSession's identical
-        # field.
-        self.pending_save_proposal: dict[str, Any] | None = None
-        # Same shape and purpose as pending_save_proposal above, but for
-        # /saveskill -- deliberately a separate field rather than one
-        # shared "pending save" slot with a type tag: keeping them apart
-        # means _handle_pending_save_proposal/_handle_pending_skill_save_
-        # proposal each only ever have to reason about their own
-        # proposal shape. See runtime_lg/skill_authoring.py's module
-        # docstring for why /saveskill is a parallel mechanism, not a
-        # third branch bolted onto /saveworkflow's own state machine.
+        # None = no /saveskill curation in progress; otherwise awaiting the
+        # user's answer to a clarifying question or confirmation of a
+        # proposed save -- see _handle_pending_skill_save_proposal.
         self.pending_save_skill_proposal: dict[str, Any] | None = None
-        # Shared across every "agent" mode workflow run this session ever
-        # makes (one InMemorySaver, not one per run) -- same reasoning as
-        # runtime_lg/subagents.py's spawn_agent child_checkpointer: a fresh
-        # thread_id per run (see _run_workflow_agent_mode) means runs never
-        # collide against each other on this one shared checkpointer, and a
-        # workflow run's own progress doesn't need to survive a reconnect
-        # the way the main conversation does, so there's no reason to use
-        # the session's real, persistent self._checkpointer for this.
-        self._workflow_run_checkpointer = InMemorySaver()
 
         self.enabled_skill_names: set[str] = set(enabled_skill_names or ())
         agent = build_coordinator_agent(
@@ -507,27 +457,15 @@ class ChatSessionLG:
         # compiled graph itself against a *new* model, reusing everything
         # else about this session unchanged (same checkpointer/thread_id,
         # same base tools, same instructions).
-        #
-        # Excludes list_recorded_steps -- build_coordinator_agent's shared
-        # tools/workflows.py's build_workflow_tools() call already put one
-        # in agent.tools, but it's backed by FileStateStore, a storage
-        # shape this runtime's checkpointer-backed threads don't have (it
-        # would silently return [] for every runtime_lg thread, forever --
-        # a real, previously-unnoticed gap, since list_workflows/
-        # get_workflow/delete_workflow from that same call are storage-only
-        # and already work correctly here). _build_lg_tools below adds a
-        # replacement backed by the real checkpointed message history.
         self._checkpointer = checkpointer
         self._custom_providers = custom_providers
-        self._base_tools: list[Callable[..., Any] | BaseTool] = [
-            t for t in agent.tools if tool_name(t) != "list_recorded_steps"
-        ]
+        self._base_tools: list[Callable[..., Any] | BaseTool] = list(agent.tools)
         # Kept separate from self._base_tools (not just concatenated once
         # here) because refresh_extra_tools below can replace this list
         # wholesale, independently, whenever an MCP connector connects/
         # disconnects live -- self._base_tools never needs rebuilding for
         # that. Combined back in by _build_lg_tools below (same treatment
-        # spawn_agent/review_work/list_recorded_steps already get).
+        # spawn_agent/review_work already get).
         self._extra_tools: list[Callable[..., Any] | BaseTool] = list(extra_tools)
         self._instructions = _build_instructions(
             agent.instructions, defer_tools=settings.defer_tools
@@ -551,15 +489,6 @@ class ChatSessionLG:
             for t in lg_tools
             if get_tool_metadata(cast(Any, t)).requires_approval
         }
-        # The exact tool objects currently bound to self.lg_agent's compiled
-        # graph, kept for _run_workflow_chain_mode's own direct-invocation
-        # tool registry (see run_chain_lg's docstring for why chain-mode
-        # replay invokes tools directly rather than through the graph).
-        # Reassigned alongside self.lg_agent everywhere it's rebuilt
-        # (switch_model) so a workflow run started after always sees the
-        # currently-active tool set, not a stale one captured only at
-        # __init__ time.
-        self._lg_tools = lg_tools
         self.lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
         self.config = {"configurable": {"thread_id": thread_id}}
         # Pagination cursor for load_older_messages -- lazily set to
@@ -576,6 +505,13 @@ class ChatSessionLG:
         # notify_resync's own docstring for why this one specifically
         # needs a place to live outside any single call's stack).
         self._live_websocket: WebSocket | None = None
+        # The prompt of a scheduled run executing on this thread right now
+        # (set by runtime_lg/scheduled_tasks.py). A tab that opens the run
+        # just after it starts can connect before that prompt is
+        # checkpointed -- send_history fills it in so the run never shows
+        # up without its opening message.
+        self.active_run_prompt: str | None = None
+        self._offer_task: asyncio.Task[None] | None = None
 
     def _build_lg_tools(self, model: Any) -> list[Callable[..., Any] | BaseTool]:
         # self._base_tools ("domain" tools) combined with self._extra_tools
@@ -606,45 +542,12 @@ class ChatSessionLG:
             and not metadata.requires_approval
         ]
         review_work_tool = build_review_work_tool(model, reviewer_tools, self.settings.state_dir)
-        # Added here (not self._base_tools) same reason spawn_agent/
-        # review_work are -- see __init__'s comment on why list_recorded_
-        # steps was stripped out of self._base_tools in the first place.
-        list_recorded_steps_tool = self._build_list_recorded_steps_tool()
         return [
             *combined_tools,
             spawn_agent_tool,
             spawn_agent_background_tool,
             review_work_tool,
-            list_recorded_steps_tool,
         ]
-
-    def _build_list_recorded_steps_tool(self) -> Callable[..., Any]:
-        """runtime_lg-aware replacement for tools/workflows.py's
-        build_workflow_tools()'s list_recorded_steps, which reads
-        FileStateStore -- always empty for this runtime's checkpointer-
-        backed threads (see __init__'s comment). Async (unlike the old
-        one): self.lg_agent's real checkpointer in production is an
-        AsyncSqliteSaver, which only supports the async aget_state -- a
-        sync get_state call against it would raise. Closes over self, not
-        a captured thread_id/state_dir, so it always reads whichever
-        checkpointed thread self.lg_agent/self.config currently point at,
-        even after switch_model rebuilds them."""
-
-        async def list_recorded_steps() -> list[dict[str, Any]]:
-            """List every tool call already recorded in this thread, in
-            order, each tagged with its index. Useful for explaining to the
-            user what's already happened in this thread, or for suggesting
-            they run /startworkflow before repeating a sequence of steps
-            worth saving.
-            """
-            state = await self.lg_agent.aget_state(self.config)
-            messages = list(state.values.get("messages", [])) if state.values else []
-            return [
-                {"index": index, "tool_name": name, "arguments": args}
-                for index, (name, args, _result) in enumerate(recorded_tool_call_steps_lg(messages))
-            ]
-
-        return tool_metadata(list_recorded_steps, risk_category="READ", category="workflows")
 
     def _build_lg_agent(
         self, model: Any, model_string: str, lg_tools: list[Callable[..., Any] | BaseTool]
@@ -679,7 +582,7 @@ class ChatSessionLG:
             self._instructions,
             checkpointer=self._checkpointer,
             extra_interrupt_tool_names=extra_interrupt_names,
-            question_tool_names=QUESTION_TOOL_NAMES,
+            question_tool_names=QUESTION_TOOL_NAMES | TASK_DRAFT_TOOL_NAMES,
             max_turns=self.settings.max_turns,
             auto_compact_tokens=auto_compact_tokens,
             defer_tools=self.settings.defer_tools,
@@ -825,7 +728,6 @@ class ChatSessionLG:
         previous_model = self.model
         previous_lg_agent = self.lg_agent
         previous_model_string = self._model_string
-        previous_lg_tools = self._lg_tools
         self._context_window = None
         try:
             if self.settings.providers_config_path is not None:
@@ -836,13 +738,11 @@ class ChatSessionLG:
             self.model = new_model
             self.lg_agent = new_lg_agent
             self._model_string = model
-            self._lg_tools = lg_tools
             await self.send_state(websocket)
         except Exception as exc:  # noqa: BLE001 -- a bad/misconfigured provider must not corrupt session state
             self.model = previous_model
             self.lg_agent = previous_lg_agent
             self._model_string = previous_model_string
-            self._lg_tools = previous_lg_tools
             self._context_window = None
             await websocket.send_json(
                 {"type": "error", "message": f"Could not switch to {model!r}: {exc}"}
@@ -885,7 +785,6 @@ class ChatSessionLG:
                     self.thread_id,
                 )
                 return
-            self._lg_tools = lg_tools
             self.lg_agent = new_lg_agent
             self._approval_required_names = {
                 tool_name(t)
@@ -929,7 +828,6 @@ class ChatSessionLG:
         previous_base_tools = self._base_tools
         previous_lg_agent = self.lg_agent
         previous_approval_required_names = self._approval_required_names
-        previous_lg_tools = self._lg_tools
         self._context_window = None
         try:
             # Unlike set_enabled_skills, build_coordinator_agent itself is
@@ -948,9 +846,7 @@ class ChatSessionLG:
             self._instructions = _build_instructions(
                 agent.instructions, defer_tools=self.settings.defer_tools
             )
-            self._base_tools = [
-                t for t in agent.tools if tool_name(t) != "list_recorded_steps"
-            ]
+            self._base_tools = list(agent.tools)
             lg_tools = self._build_lg_tools(self.model)
             new_approval_required_names = {
                 tool_name(t)
@@ -964,7 +860,6 @@ class ChatSessionLG:
             self._base_tools = previous_base_tools
             self.lg_agent = previous_lg_agent
             self._approval_required_names = previous_approval_required_names
-            self._lg_tools = previous_lg_tools
             self._context_window = None
             await websocket.send_json(
                 {"type": "error", "message": f"Could not switch to workspace {path!r}: {exc}"}
@@ -972,7 +867,6 @@ class ChatSessionLG:
             return False
         self.lg_agent = new_lg_agent
         self._approval_required_names = new_approval_required_names
-        self._lg_tools = lg_tools
         self._workspace_explicit = True
         await self.send_state(websocket)
         return True
@@ -994,7 +888,6 @@ class ChatSessionLG:
         previous_base_tools = self._base_tools
         previous_lg_agent = self.lg_agent
         previous_approval_required_names = self._approval_required_names
-        previous_lg_tools = self._lg_tools
         previous_enabled_skill_names = self.enabled_skill_names
         self.enabled_skill_names = set(skill_names)
         agent = build_coordinator_agent(
@@ -1003,7 +896,7 @@ class ChatSessionLG:
         self._instructions = _build_instructions(
             agent.instructions, defer_tools=self.settings.defer_tools
         )
-        self._base_tools = [t for t in agent.tools if tool_name(t) != "list_recorded_steps"]
+        self._base_tools = list(agent.tools)
         self._context_window = None
         try:
             lg_tools = self._build_lg_tools(self.model)
@@ -1018,7 +911,6 @@ class ChatSessionLG:
             self._base_tools = previous_base_tools
             self.lg_agent = previous_lg_agent
             self._approval_required_names = previous_approval_required_names
-            self._lg_tools = previous_lg_tools
             self.enabled_skill_names = previous_enabled_skill_names
             self._context_window = None
             await websocket.send_json(
@@ -1027,7 +919,6 @@ class ChatSessionLG:
             return
         self.lg_agent = new_lg_agent
         self._approval_required_names = new_approval_required_names
-        self._lg_tools = lg_tools
         # Also re-scans disk for skills_by_slug (the /<slug> force-load
         # lookup, unrestricted by enabled_skill_names -- see its own
         # comment in __init__) -- cheap, and keeps it correctly in sync
@@ -1042,23 +933,28 @@ class ChatSessionLG:
         }
         await self.send_state(websocket)
 
-    async def send_state(self, websocket: WebSocket) -> None:
+    async def send_state(self, websocket: WebSocket, *, on_connect: bool = False) -> None:
         if self._context_window is None:
             self._context_window = await asyncio.to_thread(
                 self._context_window_client.get_context_window, self._model_string
             )
-        await websocket.send_json(
-            {
-                "type": "state",
-                "plan_mode": self.plan_mode,
-                "accept_edits": self.accept_edits,
-                "model": self._model_string,
-                "context_window": self._context_window,
-                "enabled_skills": sorted(self.enabled_skill_names),
-                "workspace_root": str(self.workspace_root),
-                "workspace_explicit": self._workspace_explicit,
-            }
-        )
+        state: dict[str, Any] = {
+            "type": "state",
+            "plan_mode": self.plan_mode,
+            "accept_edits": self.accept_edits,
+            "model": self._model_string,
+            "context_window": self._context_window,
+            "enabled_skills": sorted(self.enabled_skill_names),
+            "workspace_root": str(self.workspace_root),
+            "workspace_explicit": self._workspace_explicit,
+        }
+        if on_connect:
+            # A tab opening mid-turn (most often: a scheduled run executing
+            # in the background) needs to show that turn as running, with
+            # Stop available. Connect-time only: a state sent from *inside*
+            # a turn (/plan, a model switch) holds the lock itself.
+            state["turn_in_flight"] = self._turn_lock.locked()
+        await websocket.send_json(state)
 
     async def get_context_breakdown(self) -> dict[str, Any]:
         """Where this thread's context-window budget actually goes --
@@ -1161,13 +1057,13 @@ class ChatSessionLG:
         has_older = isinstance(first_message, HumanMessage) and str(
             first_message.content
         ).startswith(_COMPACT_NOTE_PREFIX)
-        await websocket.send_json(
-            {
-                "type": "history",
-                "entries": serialize_history_for_ws_lg(messages),
-                "has_older": has_older,
-            }
-        )
+        entries = serialize_history_for_ws_lg(messages)
+        prompt = self.active_run_prompt
+        if prompt is not None and not any(
+            e["kind"] == "user" and e["text"] == prompt for e in entries
+        ):
+            entries.append({"kind": "user", "text": prompt})
+        await websocket.send_json({"type": "history", "entries": entries, "has_older": has_older})
 
     async def load_older_messages(self, websocket: WebSocket) -> None:
         """Scroll-up pagination for a thread that's been /compact'd: send_
@@ -1261,14 +1157,7 @@ class ChatSessionLG:
             }
         )
 
-    async def _stream_turn(
-        self,
-        turn_input: Any,
-        websocket: WebSocket,
-        *,
-        agent: Any = None,
-        config: dict[str, Any] | None = None,
-    ) -> str:
+    async def _stream_turn(self, turn_input: Any, websocket: WebSocket) -> str:
         """Runs one astream() call, forwarding the model's own narration as
         "agent_delta" events and each tool's return value as "tool_result",
         same wire shape as ChatSession's _on_delta/_post_tool_use. Returns
@@ -1321,17 +1210,6 @@ class ChatSessionLG:
         async generator keeps running in the background instead of
         propagating GeneratorExit into LangGraph's own execution.
 
-        `agent`/`config` default to self.lg_agent/self.config (every
-        ordinary turn) but can be overridden to drive a *different*
-        compiled graph/thread instead -- see _run_workflow_agent_mode,
-        which points these at a temporary, workflow-scoped graph/config
-        rather than mutating self.lg_agent/self.config themselves. Note
-        this means a workflow's nested sub-agent turn briefly overwrites
-        self._last_usage_metadata (below) with its own usage rather than
-        the outer thread's -- accepted, not fixed: same "nice-to-have
-        indicator, never worth extra machinery" reasoning
-        get_context_window's own docstring already applies elsewhere.
-
         Also tracks `self._last_usage_metadata`: a *separate* accumulator
         (`segment`, distinct from `accumulated` above) that resets at each
         ToolMessage boundary, so it only ever sums the chunks of the single
@@ -1359,8 +1237,8 @@ class ChatSessionLG:
         composer's live running-token counter (ContextRing gets the same
         event) across a long, multi-tool-call turn instead of only
         updating once the whole turn is over."""
-        agent = agent if agent is not None else self.lg_agent
-        config = config if config is not None else self.config
+        agent = self.lg_agent
+        config = self.config
         if not isinstance(turn_input, Command):
             await _close_orphaned_tool_calls(agent, config)
         text_parts: list[str] = []
@@ -1437,7 +1315,7 @@ class ChatSessionLG:
                     # pending "tool" item exists, since question tools never got a
                     # "tool_call" one) and add a second, redundant "Asked: ..." row
                     # underneath the card for the same interaction.
-                    if name not in QUESTION_TOOL_NAMES:
+                    if name not in QUESTION_TOOL_NAMES and name not in TASK_DRAFT_TOOL_NAMES:
                         # `args` (recovered above, same value the hook just got)
                         # rides along so a live turn's collapsed row can show the
                         # real filename/query -- without this the frontend only
@@ -1708,7 +1586,8 @@ class ChatSessionLG:
         human's own explicit action with an obvious "why", not the
         was-anyone-watching gap this feature exists to close."""
         name = request["name"]
-        is_question = name in QUESTION_TOOL_NAMES
+        is_draft = name in TASK_DRAFT_TOOL_NAMES
+        is_question = name in QUESTION_TOOL_NAMES or is_draft
 
         def _denied(message: str) -> dict[str, Any]:
             if is_question:
@@ -1734,7 +1613,10 @@ class ChatSessionLG:
         if is_question:
             if not _can_resolve_approvals(websocket):
                 message = (
-                    "No one is available to answer this question -- this is an unattended run."
+                    "No one is available to review this draft -- this is an unattended run, "
+                    "so no task was created."
+                    if is_draft
+                    else "No one is available to answer this question -- this is an unattended run."
                 )
                 record_decision(
                     audit_log,
@@ -1746,6 +1628,8 @@ class ChatSessionLG:
                     detail=message,
                 )
                 return _denied(message)
+            if is_draft:
+                return await self._decide_task_draft_request(args, websocket)
             return await self._decide_question_request(args, websocket)
         if name not in self._approval_required_names:
             return {"type": "approve"}
@@ -1806,17 +1690,11 @@ class ChatSessionLG:
             # Reached only when this call is genuinely gated and neither
             # exec_policy nor accept_edits already decided it above --
             # creating the Future below would await a real approval nobody
-            # is present to give. Unreachable for a normal turn/agent-mode
-            # workflow (their callers already skip calling into
-            # _resolve_pending_approvals at all when unattended, see
-            # _can_resolve_approvals's own docstring, preserving "leave it
-            # durably paused in the checkpointer"). Chain mode's `decide()`
-            # (_run_workflow_chain_mode) has no such outer gate -- it calls
-            # this method directly for every step, since chain mode never
-            # runs inside a graph's own interrupt() and has no pause-and-
-            # resume-later state to fall back on, so a clean rejection here
-            # is the only alternative to hanging that step (and the whole
-            # background poller) forever.
+            # is present to give. A normal unattended turn never gets here
+            # (its caller skips _resolve_pending_approvals entirely, leaving
+            # the interrupt durably paused in the checkpointer); this is the
+            # backstop for an unattended run with accept_edits on, which
+            # does resolve approvals and must not hang the poller forever.
             message = "No one is available to approve this -- this is an unattended run."
             record_decision(
                 audit_log,
@@ -1899,13 +1777,26 @@ class ChatSessionLG:
             self._pending_questions.pop(request_id, None)
         return {"type": "respond", "message": answer}
 
-    async def _resolve_pending_approvals(
-        self,
-        websocket: WebSocket,
-        *,
-        agent: Any = None,
-        config: dict[str, Any] | None = None,
-    ) -> str | None:
+    async def _decide_task_draft_request(
+        self, args: dict[str, Any], websocket: WebSocket
+    ) -> dict[str, Any]:
+        """create_scheduled_task's review flow: the frontend shows the
+        draft, the user edits and saves it (through the ordinary REST
+        create endpoint, with its full validation) or dismisses it, and
+        answers with a sentence saying which -- substituted as the tool's
+        result. Shares the pending-question plumbing, since the answer is
+        likewise a string and stop/reconnect treat it the same way."""
+        request_id = uuid.uuid4().hex
+        future: Future[str] = get_running_loop().create_future()
+        self._pending_questions[request_id] = future
+        await websocket.send_json({"type": "task_draft_required", "id": request_id, "draft": args})
+        try:
+            answer = await future
+        finally:
+            self._pending_questions.pop(request_id, None)
+        return {"type": "respond", "message": answer}
+
+    async def _resolve_pending_approvals(self, websocket: WebSocket) -> str | None:
         """While the graph is paused, decide every pending action request
         and resume -- looping in case a resumed turn immediately hits
         another approval-gated call.
@@ -1925,10 +1816,6 @@ class ChatSessionLG:
         caller needs to tell "nothing to resolve, keep whatever text you
         already had" apart from "resolved, and the model said nothing
         further," which an empty string can't distinguish on its own.
-
-        `agent`/`config` default to self.lg_agent/self.config, same as
-        _stream_turn (and threaded through to it below) -- see that
-        method's docstring.
 
         More than one *task* can be pending at once -- concretely, two
         concurrent spawn_agent calls proposed in the same AIMessage, each
@@ -1955,8 +1842,8 @@ class ChatSessionLG:
         answering either one will deadlock against this method, not
         against LangGraph -- see test_concurrent_spawn_agent_approvals_
         resolve_independently's request/respond/request/respond shape."""
-        agent = agent if agent is not None else self.lg_agent
-        config = config if config is not None else self.config
+        agent = self.lg_agent
+        config = self.config
         latest_text: str | None = None
         state = await agent.aget_state(config)
         while state.next:
@@ -1970,9 +1857,7 @@ class ChatSessionLG:
                     ]
                     resume_map[interrupt.id] = {"decisions": decisions}
 
-            latest_text = await self._stream_turn(
-                Command(resume=resume_map), websocket, agent=agent, config=config
-            )
+            latest_text = await self._stream_turn(Command(resume=resume_map), websocket)
             state = await agent.aget_state(config)
         return latest_text
 
@@ -2008,10 +1893,38 @@ class ChatSessionLG:
             # can't actually happen here; `or ""` only satisfies the type
             # checker, not a real runtime fallback.
             text = await self._resolve_pending_approvals(websocket) or ""
+            await self._record_resumed_run_status()
             await websocket.send_json({"type": "agent_message", "text": _format_reply(text)})
             if self._last_usage_metadata is not None:
                 await websocket.send_json(_usage_event(self._last_usage_metadata))
             await websocket.send_json({"type": "tasks_changed"})
+
+    def offer_pending_approval_to_live_tab(self) -> None:
+        """A background run that parked on an approval while someone was
+        watching: hand the approval to that tab now, the same way a fresh
+        connection would get it, instead of waiting for a reload."""
+        websocket = self._live_websocket
+        if websocket is None:
+            return
+        self._offer_task = asyncio.create_task(self.resume_after_reconnect(websocket))
+
+    async def _record_resumed_run_status(self) -> None:
+        """A scheduled run that parked on an approval ended as
+        "needs_approval"; once someone resolves it here and the turn
+        finishes, the run record should say how it actually ended."""
+        parsed = parse_run_thread_id(self.thread_id)
+        if parsed is None:
+            return
+        trigger_id, run_id = parsed
+        store = ScheduledTriggerStore(self.settings.state_dir)
+        trigger = store.load(trigger_id)
+        run = trigger.find_run(run_id) if trigger is not None else None
+        if run is None or run.status != "needs_approval":
+            return
+        state = await self.lg_agent.aget_state(self.config)
+        if any(task.interrupts for task in state.tasks):
+            return
+        store.finish_run(trigger_id, run_id, "stopped" if self._stop_requested else "completed")
 
     async def _handle_compact(self, websocket: WebSocket) -> None:
         """Summarize this thread's checkpointed message history down to one
@@ -2096,10 +2009,7 @@ class ChatSessionLG:
         /compact (collapses down to a summary note), this discards it
         outright. Doesn't touch plan_mode/accept_edits (session-level UI
         toggles, not conversation content) -- matches ChatSession's
-        _handle_clear. Cancels an in-progress /startworkflow recording, if
-        any -- its step-index bookkeeping refers to state about to be
-        wiped, so it can't meaningfully continue (same as ChatSession's
-        identical cancelled_recording handling).
+        _handle_clear.
         Same pending-approval guard as _handle_compact -- see that
         docstring for why an aupdate_state call shouldn't race a paused
         interrupt task. With _turn_lock now serializing every turn (see
@@ -2115,8 +2025,6 @@ class ChatSessionLG:
         ChatSessionLG's own _turn_lock is unheld, so a /clear racing
         resume_after_reconnect for the lock could in principle win it
         first."""
-        was_recording = self.workflow_recording_start is not None
-        self.workflow_recording_start = None
         state = await self.lg_agent.aget_state(self.config)
         if state.next:
             await websocket.send_json(
@@ -2126,14 +2034,12 @@ class ChatSessionLG:
         await self.lg_agent.aupdate_state(
             self.config, {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
         )
-        await websocket.send_json({"type": "cleared", "cancelled_recording": was_recording})
+        await websocket.send_json({"type": "cleared"})
 
     async def _current_messages(self) -> list[Any]:
         """This thread's checkpointed message history right now -- the
         runtime_lg counterpart to reading state.messages off a
-        FileStateStore-persisted RunState, used everywhere the workflow
-        commands below need "what's been said/called so far" (start-
-        marker step counts, save-curation prompts, chain-mode capture)."""
+        FileStateStore-persisted RunState."""
         state = await self.lg_agent.aget_state(self.config)
         return list(state.values.get("messages", [])) if state.values else []
 
@@ -2249,241 +2155,10 @@ class ChatSessionLG:
             )
         await websocket.send_json({"type": "rewound", "index": index})
 
-    async def _handle_start_workflow(self, websocket: WebSocket) -> None:
-        """Mark the current tool-call-step count as the start of a chain-
-        workflow recording -- /endworkflow later captures only steps from
-        this index onward, never the thread's earlier history. Mirrors
-        ChatSession's identical handler."""
-        discarded_previous = self.workflow_recording_start is not None
-        messages = await self._current_messages()
-        self.workflow_recording_start = len(recorded_tool_call_steps_lg(messages))
-        await websocket.send_json(
-            {"type": "recording_started", "discarded_previous": discarded_previous}
-        )
-
-    async def _handle_end_workflow(self, rest: str, websocket: WebSocket) -> None:
-        if self.workflow_recording_start is None:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": "No recording in progress -- use /startworkflow first.",
-                }
-            )
-            return
-        name, _, summary = rest.partition(" ")
-        name = name.strip()
-        if not name:
-            await websocket.send_json(
-                {"type": "error", "message": "Usage: /endworkflow <name> [summary]"}
-            )
-            return
-        start_index = self.workflow_recording_start
-        self.workflow_recording_start = None
-        messages = await self._current_messages()
-        try:
-            saved = await record_chain_workflow_lg(
-                name,
-                summary.strip(),
-                messages=messages,
-                state_dir=self.settings.state_dir,
-                thread_id=self.thread_id,
-                start_index=start_index,
-                model=self.model,
-            )
-        except ValueError as exc:
-            await websocket.send_json({"type": "error", "message": str(exc)})
-            return
-        await websocket.send_json(
-            {
-                "type": "workflow_saved",
-                "name": saved["name"],
-                "mode": "chain",
-                "step_count": len(saved["steps"]),
-            }
-        )
-
-    async def _run_save_curation(
-        self, wf_name: str, clarification_history: list[tuple[str, str]]
-    ) -> WorkflowSaveProposal:
-        """One round of the curator call bare /saveworkflow runs -- see
-        propose_workflow_save_lg's docstring. Async model.ainvoke call, no
-        need to bridge off the event loop the way ChatSession's identical
-        method does for its synchronous Runner.run_sync."""
-        messages = await self._current_messages()
-        return await propose_workflow_save_lg(
-            wf_name,
-            messages=messages,
-            model=self.model,
-            clarification_history=clarification_history,
-        )
-
-    async def _present_save_proposal(
-        self,
-        wf_name: str,
-        proposal: WorkflowSaveProposal,
-        clarification_history: list[tuple[str, str]],
-        rounds: int,
-        websocket: WebSocket,
-    ) -> dict[str, Any]:
-        """Sends the curator's question/preview as a plain chat bubble
-        ("agent_message") rather than a new WS event type -- same
-        reasoning as ChatSession's identical method."""
-        if proposal.decision == "clarify":
-            await websocket.send_json({"type": "agent_message", "text": proposal.question})
-            return {
-                "wf_name": wf_name,
-                "stage": "clarify",
-                "question": proposal.question,
-                "clarification_history": clarification_history,
-                "rounds": rounds,
-            }
-        if proposal.mode == "chain" and proposal.start_index is not None:
-            messages = await self._current_messages()
-            preview_steps = recorded_tool_call_steps_lg(messages)[proposal.start_index :]
-            preview = "\n".join(
-                f"  {index}. {name}({args})"
-                for index, (name, args, _result) in enumerate(preview_steps)
-            )
-            text = (
-                f"Proposed workflow {wf_name!r} (chain, {len(preview_steps)} step(s)) -- "
-                f"{proposal.summary or 'no description'}:\n{preview}\n"
-                'Save this? Reply "yes" to save, anything else to discard.'
-            )
-        else:
-            text = (
-                f"Proposed workflow {wf_name!r} (agent):\n{proposal.summary}\n"
-                'Save this? Reply "yes" to save, anything else to discard.'
-            )
-        await websocket.send_json({"type": "agent_message", "text": text})
-        return {
-            "wf_name": wf_name,
-            "stage": "confirm",
-            "proposal": proposal,
-            "clarification_history": clarification_history,
-        }
-
-    async def _handle_save_workflow(self, name: str, websocket: WebSocket) -> None:
-        """Kicks off the curator flow (see propose_workflow_save_lg's
-        docstring) instead of unconditionally summarizing the whole thread
-        -- the actual save happens later, once _handle_user_message_locked's
-        pending_save_proposal interception gets a confirmation."""
-        name = name.strip()
-        if not name:
-            await websocket.send_json(
-                {"type": "error", "message": "Usage: /saveworkflow <name>"}
-            )
-            return
-        messages = await self._current_messages()
-        if not messages:
-            await websocket.send_json({"type": "error", "message": "Nothing to save yet."})
-            return
-        proposal = await self._run_save_curation(name, [])
-        self.pending_save_proposal = await self._present_save_proposal(
-            name, proposal, [], 1, websocket
-        )
-
-    async def _handle_pending_save_proposal(self, text: str, websocket: WebSocket) -> None:
-        """While pending_save_proposal is set, every incoming message
-        answers it (clarification or yes/no confirm) instead of being
-        treated as a normal chat turn or slash command -- mirrors
-        ChatSession's identical method."""
-        proposal_state = self.pending_save_proposal
-        assert proposal_state is not None
-        if proposal_state["stage"] == "clarify":
-            answer = text.strip()
-            if not answer:
-                await websocket.send_json(
-                    {
-                        "type": "agent_message",
-                        "text": "(please answer, or say 'cancel' to abandon this save)",
-                    }
-                )
-                return
-            if answer.lower() == "cancel":
-                self.pending_save_proposal = None
-                await websocket.send_json({"type": "agent_message", "text": "Cancelled."})
-                return
-            wf_name = proposal_state["wf_name"]
-            history = [
-                *proposal_state["clarification_history"],
-                (proposal_state["question"], answer),
-            ]
-            rounds = proposal_state["rounds"]
-            if rounds >= MAX_SAVE_CLARIFICATION_ROUNDS:
-                self.pending_save_proposal = None
-                await websocket.send_json(
-                    {
-                        "type": "agent_message",
-                        "text": (
-                            "Still unclear after a few tries -- use /startworkflow to record "
-                            "precisely instead."
-                        ),
-                    }
-                )
-                return
-            proposal = await self._run_save_curation(wf_name, history)
-            self.pending_save_proposal = await self._present_save_proposal(
-                wf_name, proposal, history, rounds + 1, websocket
-            )
-            return
-
-        # stage == "confirm"
-        answer = text.strip().lower()
-        wf_name = proposal_state["wf_name"]
-        proposal = proposal_state["proposal"]
-        self.pending_save_proposal = None
-        if answer not in {"y", "yes"}:
-            await websocket.send_json(
-                {
-                    "type": "agent_message",
-                    "text": (
-                        "Discarded -- refine your request and try /saveworkflow again, "
-                        "or use /startworkflow for precise control."
-                    ),
-                }
-            )
-            return
-        try:
-            if proposal.mode == "chain" and proposal.start_index is not None:
-                messages = await self._current_messages()
-                saved = await record_chain_workflow_lg(
-                    wf_name,
-                    proposal.summary or "",
-                    messages=messages,
-                    state_dir=self.settings.state_dir,
-                    thread_id=self.thread_id,
-                    start_index=proposal.start_index,
-                    model=self.model,
-                )
-                await websocket.send_json(
-                    {
-                        "type": "workflow_saved",
-                        "name": saved["name"],
-                        "mode": "chain",
-                        "step_count": len(saved["steps"]),
-                    }
-                )
-            else:
-                saved = record_agent_workflow_lg(
-                    wf_name,
-                    proposal.summary or "",
-                    thread_id=self.thread_id,
-                    state_dir=self.settings.state_dir,
-                )
-                await websocket.send_json(
-                    {"type": "workflow_saved", "name": saved["name"], "mode": "agent"}
-                )
-        except ValueError as exc:
-            await websocket.send_json({"type": "error", "message": str(exc)})
-
     async def _handle_save_skill(self, name: str, websocket: WebSocket) -> None:
-        """/saveskill's own entry point -- mirrors _handle_save_workflow's
-        shape exactly (validate the name, require a non-empty
-        conversation, run one curator round, present it) but calls
-        propose_skill_save_lg instead of propose_workflow_save_lg. See
-        runtime_lg/skill_authoring.py's module docstring for why this
-        stays a fully separate flow rather than a third mode threaded
-        into /saveworkflow's own state machine."""
+        """/saveskill's own entry point: validate the name, require a
+        non-empty conversation, run one curator round
+        (propose_skill_save_lg), present it."""
         name = name.strip()
         if not name:
             await websocket.send_json({"type": "error", "message": "Usage: /saveskill <name>"})
@@ -2541,9 +2216,9 @@ class ChatSessionLG:
         }
 
     async def _handle_pending_skill_save_proposal(self, text: str, websocket: WebSocket) -> None:
-        """Same clarify-or-confirm interception _handle_pending_save_proposal
-        gives /saveworkflow, for /saveskill's own pending_save_skill_
-        proposal instead."""
+        """While pending_save_skill_proposal is set, every incoming message
+        answers the curator's clarifying question or confirms/discards its
+        proposed save instead of running a normal turn."""
         proposal_state = self.pending_save_skill_proposal
         assert proposal_state is not None
         if proposal_state["stage"] == "clarify":
@@ -2634,281 +2309,6 @@ class ChatSessionLG:
         # which would make "yes" feel like it silently did nothing.
         await self.set_enabled_skills(self.enabled_skill_names | {saved["name"]}, websocket)
 
-    async def _invoke_tool_lg(self, tool: Any, arguments: dict[str, Any]) -> Any:
-        """Call a tool object directly, outside of any compiled graph --
-        used only by chain-mode workflow replay (run_chain_lg's
-        invoke_tool callback). Handles all three tool shapes this runtime
-        ever hands around (see tool_name's own docstring): a LangChain
-        BaseTool (spawn_agent/review_work, or an MCP tool) has its own
-        async ainvoke; a plain async function is awaited directly; a plain
-        sync function is offloaded via asyncio.to_thread so a slow/
-        blocking tool (e.g. a filesystem or subprocess call) doesn't stall
-        the event loop the way a live turn's own tool-node execution
-        already avoids doing."""
-        if isinstance(tool, BaseTool):
-            return await tool.ainvoke(arguments)
-        if inspect.iscoroutinefunction(tool):
-            return await tool(**arguments)
-        return await asyncio.to_thread(tool, **arguments)
-
-    async def _save_and_notify_workflow_run(self, run: WorkflowRun, websocket: WebSocket) -> None:
-        run_store = WorkflowRunStore(self.settings.state_dir)
-        run_store.save(run)
-        await websocket.send_json({"type": "workflow_run_progress", "run": run.to_dict()})
-
-    async def _run_workflow_chain_mode(
-        self, workflow: Workflow, run: WorkflowRun, websocket: WebSocket, *, start_step: int = 0
-    ) -> dict[str, Any]:
-        """Drives run_chain_lg with this session's own approval/hook/
-        invocation machinery -- see runtime_lg/workflows.py's module
-        docstring for why no nested-interrupt bridging is needed here
-        (this never runs inside a graph's own tool node).
-
-        A recorded ask_user_question step is a real, if narrow, exception
-        to that "no nested-interrupt bridging" claim: `decide` below
-        already routes through `_decide_action_request`, the exact method
-        a live turn's own _resolve_pending_approvals uses -- so a question
-        step genuinely re-asks (the recorded question/options, replayed
-        like any other step's fixed arguments) and durably waits for a
-        real person's live answer, the same `question_required`/
-        `question_response` round-trip a normal turn gets, not some
-        stale answer from when the workflow was first recorded (nothing
-        about WorkflowStep stores that anyway). The one thing `decide`
-        alone can't do is hand that answer to `invoke` below -- the two
-        are separate calls in run_chain_lg's own loop, and a "respond"
-        decision is never `approved=True` on its own terms the way
-        `approve` is -- so `pending_question_answer` bridges the two
-        closures' shared scope, mirroring how a live turn's `"respond"`
-        decision substitutes the human's message as the tool's own result
-        without the tool's real body ever running (see
-        tools/interaction.py's docstring)."""
-        tools_by_name = {tool_name(t): t for t in self._lg_tools}
-        pending_question_answer: str | None = None
-
-        async def decide(name: str, args: dict[str, Any]) -> tuple[bool, str | None]:
-            nonlocal pending_question_answer
-            outcome = await self._decide_action_request({"name": name, "args": args}, websocket)
-            if outcome["type"] == "respond":
-                pending_question_answer = outcome["message"]
-                return True, None
-            return outcome["type"] == "approve", outcome.get("message")
-
-        async def invoke(tool: Any, args: dict[str, Any]) -> Any:
-            nonlocal pending_question_answer
-            name = tool_name(tool)
-            if name in QUESTION_TOOL_NAMES:
-                # The tool's own Python body never runs -- same contract a
-                # live turn's "respond" decision gets, see decide() above.
-                result = pending_question_answer
-                pending_question_answer = None
-            else:
-                result = await self._invoke_tool_lg(tool, args)
-            await self._run_post_tool_use_hooks(name, args, result)
-            # Suppressed for question tools, same reason as _stream_turn's
-            # own ToolMessage branch: the question_required/answered card
-            # already fully represents this call, so a normal tool_result
-            # event here would just add a redundant "Asked: ..." row.
-            if name not in QUESTION_TOOL_NAMES:
-                await websocket.send_json(
-                    {"type": "tool_result", "tool_name": name, "arguments": args, "result": result}
-                )
-            return result
-
-        async def on_step(index: int, tool_name_: str, status: str, detail: str | None) -> None:
-            run.steps[index] = WorkflowStepStatus(
-                index=index, tool_name=tool_name_, status=status, detail=detail
-            )
-            await self._save_and_notify_workflow_run(run, websocket)
-
-        return await run_chain_lg(
-            workflow,
-            tools_by_name=tools_by_name,
-            decide=decide,
-            invoke_tool=invoke,
-            start_step=start_step,
-            on_step=on_step,
-            stop_requested=lambda: self._stop_requested,
-        )
-
-    async def _run_workflow_agent_mode(
-        self, workflow: Workflow, run: WorkflowRun, websocket: WebSocket
-    ) -> dict[str, Any]:
-        """Same underlying mechanism as a normal top-level turn: a fresh
-        compiled graph (workflow.summary as its instructions, same call
-        shape as runtime_lg/subagents.py's spawn_agent sub_agent) driven by
-        this session's own _stream_turn/_resolve_pending_approvals -- so a
-        gated tool call inside an agent-mode run surfaces as an ordinary
-        approval_required message, same as any other turn's. Unlike
-        ChatSession's _run_agent_mode, doesn't track granular per-tool-call
-        WorkflowStepStatus progress (run.steps stays empty throughout,
-        only run.status/error change) -- a deliberate simplification: chain
-        mode (the deterministic, pre-declared-step-list case where progress
-        is genuinely meaningful) gets full tracking, and agent mode's own
-        progress is inherently fuzzier anyway (the old runtime tracks it,
-        but only by re-purposing its post_tool_use hook, which here would
-        mean threading a second, workflow-specific callback through
-        _stream_turn -- more machinery than this pass's scope justifies for
-        a "recent runs" panel detail, not a functional gap)."""
-        list_recorded_steps_name = "list_recorded_steps"
-        tools = [t for t in self._lg_tools if tool_name(t) != list_recorded_steps_name]
-        extra_interrupt_names = (
-            [tool_name(t) for t in tools] if self.hooks_config["PreToolUse"] else []
-        )
-        sub_agent = build_langgraph_agent(
-            self.model,
-            tools,
-            workflow.summary,
-            checkpointer=self._workflow_run_checkpointer,
-            extra_interrupt_tool_names=extra_interrupt_names,
-        )
-        run_config = {"configurable": {"thread_id": f"workflow-run-{run.run_id}"}}
-        turn_input = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": (
-                        f"Time to run the recurring workflow '{workflow.name}'. Use the "
-                        "summary above as your context/instructions and carry out this run now."
-                    ),
-                }
-            ]
-        }
-        # summary_text ends up as just the last model response's own text --
-        # see _resolve_pending_approvals's docstring for why joining every
-        # response of the run together was a real bug.
-        summary_text = await self._stream_turn(
-            turn_input, websocket, agent=sub_agent, config=run_config
-        )
-        if _can_resolve_approvals(websocket) or self.accept_edits:
-            # self.accept_edits also opens this path when unattended (a
-            # Scheduled Task's approval_mode="auto"/"skip") -- safe because
-            # _decide_action_request's own unattended guard means every
-            # interrupt this reaches either auto-approves via accept_edits
-            # or, for the narrow cases accept_edits doesn't cover (e.g. an
-            # ask_user_question call), gets cleanly declined rather than
-            # ever creating a Future nothing will resolve.
-            resolved_text = await self._resolve_pending_approvals(
-                websocket, agent=sub_agent, config=run_config
-            )
-            if resolved_text is not None:
-                summary_text = resolved_text
-        else:
-            # See _can_resolve_approvals's docstring: resolving here would
-            # hang forever awaiting a real approval that a silent caller
-            # (an unattended, approval_mode="manual" Scheduled Task run) can
-            # never send. The interrupt is left durably paused in the
-            # checkpointer instead -- report it as a failed run rather than
-            # silently claiming "completed" when the intended action never
-            # actually ran.
-            state = await sub_agent.aget_state(run_config)
-            if state.next:
-                return {
-                    "status": "failed",
-                    "summary": summary_text,
-                    "error": (
-                        "Paused on a tool call that needs approval, with "
-                        "nobody able to answer it -- open this run's thread "
-                        "in the web UI to resolve it."
-                    ),
-                }
-        status = "stopped" if self._stop_requested else "completed"
-        return {"status": status, "summary": summary_text}
-
-    async def _run_workflow_lg(
-        self, name: str, websocket: WebSocket, *, resume_from_step: int = 0
-    ) -> dict[str, Any]:
-        store = WorkflowStore(self.settings.state_dir)
-        workflow = store.load(name)
-        if workflow is None:
-            raise KeyError(f"No workflow named {name!r}")
-        if resume_from_step != 0 and workflow.mode != "chain":
-            raise ValueError("resume_from_step is only meaningful for chain-mode workflows")
-
-        run = WorkflowRun(
-            run_id=uuid.uuid4().hex,
-            workflow_name=name,
-            mode=workflow.mode,
-            status="running",
-            started_at=_now_iso_lg(),
-            steps=[
-                WorkflowStepStatus(
-                    index=index,
-                    tool_name=step.tool_name,
-                    status="pending" if index >= resume_from_step else "done",
-                )
-                for index, step in enumerate(workflow.steps)
-            ]
-            if workflow.mode == "chain"
-            else [],
-        )
-        await self._save_and_notify_workflow_run(run, websocket)
-
-        try:
-            if workflow.mode == "chain":
-                result = await self._run_workflow_chain_mode(
-                    workflow, run, websocket, start_step=resume_from_step
-                )
-            else:
-                result = await self._run_workflow_agent_mode(workflow, run, websocket)
-        except Exception as exc:  # noqa: BLE001 -- a WorkflowRun left at status="running" with
-            # nothing left to ever finalize it is a real bug class (see tools/workflows.py's
-            # reconcile_interrupted_runs docstring) -- converting to "failed" here guarantees
-            # the finalization block below always runs.
-            result = {"status": "failed", "error": f"raised: {exc}"}
-
-        run.status = result["status"]
-        run.finished_at = _now_iso_lg()
-        run.error = result.get("error")
-        await self._save_and_notify_workflow_run(run, websocket)
-
-        workflow.last_run_at = run.finished_at
-        workflow.last_run_status = result["status"]
-        store.save(workflow)
-        return result
-
-    async def run_saved_workflow(self, name: str, websocket: Any) -> dict[str, Any]:
-        """Public entry point for running a saved workflow non-interactively
-        -- unlike _handle_run_workflow (the /runworkflow slash-command
-        handler, which also sends UI-specific workflow_run_started/
-        tasks_changed WS messages), this is the bare _run_workflow_lg
-        result with nothing UI-specific layered on, for a caller with no
-        real WebSocket to send those to. Added for
-        runtime_lg/scheduled_tasks.py's poll_due_scheduled_tasks, which
-        drives this the same way runtime_lg/selfwake.py's poll_due_wakes
-        already drives handle_user_message -- a _SilentSocket in place of
-        a real connection."""
-        return await self._run_workflow_lg(name, websocket)
-
-    async def _handle_run_workflow(self, name: str, websocket: WebSocket) -> None:
-        """Run a saved workflow directly, bypassing the model entirely --
-        the /runworkflow-driven counterpart to how /startworkflow.../
-        endworkflow and /saveworkflow bypass it for *creation*. Also
-        invoked by the shared frontend's New Workflow picker, which sends
-        this same slash command over the wire. Deliberately not a model-
-        callable tool -- see this module's own docstring for the scope cut
-        this implies (no natural-language "run FBL5N" triggering yet)."""
-        name = name.strip()
-        if not name:
-            await websocket.send_json(
-                {"type": "error", "message": "Usage: /runworkflow <name>"}
-            )
-            return
-        # Fresh start for /stop, same as a normal turn.
-        self._stop_requested = False
-        await websocket.send_json({"type": "workflow_run_started", "name": name})
-        try:
-            await self._run_workflow_lg(name, websocket)
-        except Exception as exc:  # noqa: BLE001 -- surface any provider/tool error to the client,
-            # same as a normal turn's error handling (unknown name/bad resume_from_step raise
-            # KeyError/ValueError; a provider/network failure inside agent mode's own run could
-            # raise anything else)
-            await websocket.send_json({"type": "error", "message": str(exc)})
-            return
-        # A run's steps can include task_create/task_update calls, same as
-        # a normal turn -- refresh the Task panel the same way a normal
-        # turn's own end-of-turn tasks_changed does.
-        await websocket.send_json({"type": "tasks_changed"})
-
     async def handle_user_message(
         self,
         text: str,
@@ -2934,10 +2334,6 @@ class ChatSessionLG:
         )
         stripped_lower = text.strip().lower()
 
-        if self.pending_save_proposal is not None:
-            await self._handle_pending_save_proposal(text, websocket)
-            return
-
         if self.pending_save_skill_proposal is not None:
             await self._handle_pending_skill_save_proposal(text, websocket)
             return
@@ -2960,27 +2356,11 @@ class ChatSessionLG:
             await self._handle_clear(websocket)
             return
 
-        if stripped_lower == "/startworkflow":
-            await self._handle_start_workflow(websocket)
-            return
-
         command, _, rest = text.strip().partition(" ")
         command_lower = command.lower()
 
-        if command_lower == "/endworkflow":
-            await self._handle_end_workflow(rest.strip(), websocket)
-            return
-
-        if command_lower == "/saveworkflow":
-            await self._handle_save_workflow(rest.strip(), websocket)
-            return
-
         if command_lower == "/saveskill":
             await self._handle_save_skill(rest.strip(), websocket)
-            return
-
-        if command_lower == "/runworkflow":
-            await self._handle_run_workflow(rest.strip(), websocket)
             return
 
         user_input = text
@@ -2988,6 +2368,13 @@ class ChatSessionLG:
             name = command[1:].lower()
             if name == "init":
                 user_input = INIT_PROMPT
+            elif name == "saveworkflow":
+                if not rest.strip():
+                    await websocket.send_json(
+                        {"type": "error", "message": "Usage: /saveworkflow <name>"}
+                    )
+                    return
+                user_input = SAVE_WORKFLOW_PROMPT.format(name=rest.strip())
             elif name in self.skills_by_slug:
                 skill = self.skills_by_slug[name]
                 fallback = (
@@ -3049,9 +2436,9 @@ class ChatSessionLG:
                 # means nothing was pending, so the initial call's own text
                 # already *is* the whole (single-segment) reply.
                 reply_text = await self._stream_turn(turn_input, websocket)
-                # self.accept_edits also opens this when unattended -- see
-                # _run_workflow_agent_mode's identical condition for why
-                # that's safe (an approval_mode="auto"/"skip" Scheduled Task).
+                # self.accept_edits also opens this when unattended: an
+                # approval_mode="auto"/"skip" Scheduled Task auto-approves
+                # every gated call, so nothing ever waits on a human.
                 if _can_resolve_approvals(websocket) or self.accept_edits:
                     resolved_text = await self._resolve_pending_approvals(websocket)
                     if resolved_text is not None:
@@ -3085,7 +2472,6 @@ class ChatSessionLG:
                         self.lg_agent = self._build_lg_agent(
                             self.model, self._model_string, lg_tools
                         )
-                        self._lg_tools = lg_tools
                     except Exception:  # noqa: BLE001 -- rebuild failure falls through to the original error below
                         pass
                     else:

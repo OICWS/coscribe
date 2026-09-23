@@ -1,4 +1,9 @@
-import type { WorkflowRun, WsServerEvent } from "../types/wire";
+import type { TaskDraft, WsServerEvent } from "../types/wire";
+
+/** The answer the frontend sends for a saved draft starts with this --
+ * also how a replayed create_scheduled_task call tells "saved" apart
+ * from "dismissed". */
+export const TASK_DRAFT_SAVED_PREFIX = "The user reviewed the draft and saved it";
 
 export type LogItem =
   // turnIndex: 0-based count among this thread's "user" items only (its
@@ -52,6 +57,15 @@ export type LogItem =
       status: "pending" | "answered";
       answer?: string;
     }
+  | {
+      id: string;
+      kind: "task_draft";
+      draft: TaskDraft;
+      status: "pending" | "saved" | "dismissed";
+      /** The name it was actually saved under -- the user may have
+       * renamed it while reviewing. */
+      savedName?: string;
+    }
   | { id: string; kind: "system"; text: string };
 
 export interface ChatState {
@@ -88,22 +102,10 @@ export interface ChatState {
   cacheStats: { cacheReadTokens: number; inputTokens: number; hitRate: number } | null;
   turnInFlight: boolean;
   error: string | null;
-  /** Bumped on tasks_changed/workflow_saved/workflow_run_progress -- a
-   * cheap "something workflow-related changed, refetch if you care"
-   * signal the Workflows settings tab watches via useEffect, mirroring
-   * app.js's currentSettingsCategory === "workflows" gate (refetching
-   * only matters while that tab is actually mounted/visible). Not a
-   * full mirrored cache -- Phase C's session-menu "run in progress"
-   * indicator is where hoisting the real WorkflowRun cache into this
-   * app-level state would start to pay for itself. */
-  workflowEventTick: number;
-  /** The real WorkflowRun cache (mirrors app.js's module-level
-   * workflowRunsCache) -- single source of truth for the session menu's
-   * "workflow running" indicator dot and current-workflow view. Hydrated
-   * once via GET /api/workflow-runs right after the WS opens (see
-   * App.tsx), then kept live by upserting on every workflow_run_progress
-   * event -- no refetch needed after that. */
-  workflowRuns: WorkflowRun[];
+  /** Bumped on every tasks_changed (the end of each turn) -- a cheap
+   * "something may have changed server-side, refetch if you care"
+   * signal for REST-backed views (thread list, scheduled tasks). */
+  turnTick: number;
   /** True once this connection's own "history" event has been applied.
    * Gates App.tsx's queued local sends (see pendingLocalSendsRef there):
    * a user_message dispatched optimistically *before* "history" arrives
@@ -152,8 +154,7 @@ export const initialChatState: ChatState = {
   cacheStats: null,
   turnInFlight: false,
   error: null,
-  workflowEventTick: 0,
-  workflowRuns: [],
+  turnTick: 0,
   historyReceived: false,
   olderItems: [],
   olderStatus: "none",
@@ -169,7 +170,7 @@ export type LocalAction =
   | { type: "local_rewind_message"; turnIndex: number }
   | { type: "local_approval_resolved"; id: string; approved: boolean }
   | { type: "local_question_answered"; id: string; answer: string }
-  | { type: "local_hydrate_workflow_runs"; runs: WorkflowRun[] }
+  | { type: "local_task_draft_resolved"; id: string; status: "saved" | "dismissed"; savedName?: string }
   | { type: "local_connection_reset" }
   | { type: "local_switch_thread" }
   | { type: "local_request_older_messages" };
@@ -233,8 +234,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         enabledSkills: state.enabledSkills,
         workspaceRoot: state.workspaceRoot,
         workspaceExplicit: state.workspaceExplicit,
-        workflowRuns: state.workflowRuns,
-        workflowEventTick: state.workflowEventTick,
+        turnTick: state.turnTick,
       };
 
     case "local_request_older_messages":
@@ -294,8 +294,6 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return cutIndex === -1 ? state : { ...state, items: state.items.slice(0, cutIndex) };
     }
 
-    case "local_hydrate_workflow_runs":
-      return { ...state, workflowRuns: action.runs };
 
     case "local_approval_resolved":
       return {
@@ -317,9 +315,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ),
       };
 
+    case "local_task_draft_resolved":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.kind === "task_draft" && item.id === action.id
+            ? { ...item, status: action.status, savedName: action.savedName }
+            : item,
+        ),
+      };
+
     case "state":
       return {
         ...state,
+        turnInFlight: action.turn_in_flight ?? state.turnInFlight,
         planMode: action.plan_mode,
         acceptEdits: action.accept_edits,
         model: action.model,
@@ -354,6 +363,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           }
           if (entry.kind === "agent") {
             return { id: genId(), kind: "agent", text: entry.text, streaming: false } as const;
+          }
+          if (entry.tool_name === "create_scheduled_task") {
+            const saved = typeof entry.result === "string" && entry.result.startsWith(TASK_DRAFT_SAVED_PREFIX);
+            return {
+              id: genId(),
+              kind: "task_draft",
+              draft: entry.arguments as TaskDraft,
+              status: saved ? "saved" : "dismissed",
+            } as const;
           }
           return {
             id: genId(),
@@ -490,6 +508,25 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ],
       };
 
+    case "task_draft_required":
+      return {
+        ...state,
+        items: [
+          ...closeStreamingBubble(state.items),
+          { id: action.id, kind: "task_draft", draft: action.draft, status: "pending" },
+        ],
+      };
+
+    case "scheduled_run_started":
+      return {
+        ...state,
+        turnInFlight: true,
+        items: [
+          ...state.items,
+          { id: genId(), kind: "user", text: action.text, turnIndex: countUserItems(state.items) },
+        ],
+      };
+
     case "question_required":
       return {
         ...state,
@@ -553,9 +590,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           {
             id: genId(),
             kind: "system",
-            text: action.cancelled_recording
-              ? "Cleared this thread's conversation history (cancelled an in-progress recording)."
-              : "Cleared this thread's conversation history.",
+            text: "Cleared this thread's conversation history.",
           },
         ],
       };
@@ -565,55 +600,6 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // (see App.tsx's onRewindMessage) -- this is just the server's own
       // confirmation that the checkpointed history actually matches.
       return state;
-
-    case "workflow_run_progress": {
-      const exists = state.workflowRuns.some((run) => run.run_id === action.run.run_id);
-      const workflowRuns = exists
-        ? state.workflowRuns.map((run) => (run.run_id === action.run.run_id ? action.run : run))
-        : [action.run, ...state.workflowRuns];
-      return { ...state, workflowRuns, workflowEventTick: state.workflowEventTick + 1 };
-    }
-
-    case "workflow_run_started":
-      return {
-        ...state,
-        turnInFlight: true,
-        items: [...state.items, { id: genId(), kind: "system", text: `Running workflow "${action.name}"...` }],
-      };
-
-    case "recording_started":
-      return {
-        ...state,
-        turnInFlight: false,
-        items: [
-          ...state.items,
-          {
-            id: genId(),
-            kind: "system",
-            text: action.discarded_previous
-              ? "Recording started (discarded a previous in-progress recording)."
-              : "Recording started -- perform the steps, then /endworkflow <name>.",
-          },
-        ],
-      };
-
-    case "workflow_saved":
-      return {
-        ...state,
-        turnInFlight: false,
-        workflowEventTick: state.workflowEventTick + 1,
-        items: [
-          ...state.items,
-          {
-            id: genId(),
-            kind: "system",
-            text:
-              action.mode === "chain"
-                ? `Saved workflow "${action.name}" (chain, ${action.step_count} step(s)).`
-                : `Saved workflow "${action.name}" (agent).`,
-          },
-        ],
-      };
 
     case "skill_saved":
       return {
@@ -630,11 +616,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
 
     case "tasks_changed":
-      // Always the final message of a turn or a /runworkflow run -- normal
-      // turns already cleared this via agent_message, so this is a no-op
-      // there; /runworkflow has no agent_message of its own, so this is
-      // its actual completion signal (see web/session.py).
-      return { ...state, turnInFlight: false, workflowEventTick: state.workflowEventTick + 1 };
+      return { ...state, turnInFlight: false, turnTick: state.turnTick + 1 };
 
     default: {
       const _exhaustive: never = action;

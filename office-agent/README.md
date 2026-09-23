@@ -103,7 +103,7 @@ for when you'd rather edit `.env` directly than use the directories list.
 `COSCRIBE_MAX_TURNS` (`.env`, default `20`) caps how many tool-calling
 turns a single agent loop runs before giving up, to bound token/time spend
 from a loop that keeps calling tools without finishing -- applies to a
-normal chat turn and to `run_workflow`'s "agent" mode; `spawn_agent`/
+normal chat turn and to each scheduled-task run; `spawn_agent`/
 `review_work` sub-agents use their own smaller, separate default (6), not
 this setting. Editable from the web UI's Settings > General as well as
 `.env` directly.
@@ -135,18 +135,13 @@ Several commands are typed as a message mid-session (not startup flags):
 - `/clear` -- wipe the current thread's conversation history outright and
   start fresh (unlike `/compact`, which summarizes rather than discards).
   Doesn't touch Plan Mode/Accept Edits Mode (those are session-level
-  toggles, not conversation content) or memory/tasks/saved workflows --
-  it does cancel an in-progress `/startworkflow` recording, if any, since
-  its step-index bookkeeping would otherwise refer to state about to be
-  wiped.
-- `/startworkflow`, `/endworkflow <name> [summary]`, `/saveworkflow <name>`,
-  `/runworkflow <name>` -- record, save, and run named [workflows](#workflows).
-  Bare `/saveworkflow` (no prior `/startworkflow`) has the model figure out
-  what's worth saving from the conversation itself, asking a clarifying
-  question first if it's unclear and always previewing before it actually
-  saves anything -- see [Workflows](#workflows) below.
+  toggles, not conversation content) or memory/tasks/scheduled tasks.
+- `/saveworkflow <name>` -- turn what this conversation just did into a
+  reusable [scheduled task](#scheduled-tasks----a-real-product-level-scheduler):
+  the model distills the steps that worked into a standalone prompt and
+  drafts the task, which you review and edit before anything is saved.
 - `/stop` -- stop the current in-progress run (a runaway tool-calling loop,
-  a workflow stuck retrying, or just a response you no longer need). In the
+  a task stuck retrying, or just a response you no longer need). In the
   web UI, this is also what the composer's send button turns into while a
   run is in flight -- click it (or type `/stop`) to cancel. Unlike the other
   commands here, it doesn't wait its turn behind whatever's currently
@@ -176,16 +171,12 @@ keeps its accumulated context across runs.
 
 ```bash
 coscribe --thread nightly-report --accept-edits \
-  --message "Run workflow 'nightly-report'."
+  --message "Build tonight's sales report from sales/today.xlsx."
 ```
 
-This is also how a scheduler runs a saved [workflow](#workflows): the
-`--message` text just asks the Coordinator to call `run_workflow`, same
-effect as typing `/runworkflow nightly-report` interactively -- no separate
-scheduler-facing entry point exists or is needed. (`--message` mode doesn't
-interpret slash commands, so `/runworkflow` itself isn't available there --
-plain text asking to run it is, since `run_workflow` is still a model tool,
-just no longer a model-callable *creation* tool.)
+(For most repeating tasks, the built-in [Scheduled
+Tasks](#scheduled-tasks----a-real-product-level-scheduler) below is the
+simpler route -- no cron entry, and each run gets its own conversation.)
 
 - `--message`/`-m TEXT` -- send one message non-interactively and exit,
   instead of starting the REPL. Output is exactly the model's final reply
@@ -207,15 +198,13 @@ just no longer a model-callable *creation* tool.)
 
 The pattern above works well for a task that runs on a fixed external
 schedule. For a task where the *agent itself* decides when to check back
--- "wait until 9am tomorrow," "let me know once that workflow run
+-- "wait until 9am tomorrow," "resume once that background script
 finishes," "resume once something else tells you to" -- the Coordinator
 has its own tools instead of you writing a second cron entry per task:
 
 - `sleep_until(wake_at, reason)` / `sleep_for(seconds, reason)` -- pause
   this conversation and automatically resume it at a wall-clock time or
   after a delay.
-- `wake_on(job_id, reason)` -- pause until a specific in-progress
-  [workflow](#workflows) run finishes (`job_id` is that run's id).
 - `wake_on_task(task_id, reason)` -- pause until a specific in-progress
   background script (started via `run_background_script`, see below)
   finishes (`task_id` is that task's id).
@@ -255,56 +244,79 @@ Tasks is the built-in alternative that needs neither -- a named,
 independently-managed trigger that runs once at a future time, or daily/
 weekly/monthly, entirely on its own.
 
-Create one either from chat (the Coordinator has `create_scheduled_task`)
-or from **Settings > Scheduled Tasks**, which has a full form -- name, a
-friendly schedule picker (no cron syntax), and either a freeform
-instruction or a saved [workflow](#workflows) to run each time:
+A scheduled task is also what coscribe calls a **workflow**: a name, a
+standalone prompt describing the work, and a schedule -- hourly, daily,
+weekdays, weekly, monthly, or "manual" (runs only when you click **Run
+now**). There's no separate recording/replay format; the prompt *is* the
+workflow.
 
-- `create_scheduled_task(name, kind, at, prompt=None, workflow_name=None, weekday=None, day_of_month=None)`
-  -- `kind` is `"once"` / `"daily"` / `"weekly"` / `"monthly"`; `at` is a
-  full timestamp for `"once"`, otherwise `"HH:MM"`. Pass exactly one of
-  `prompt` (a freeform instruction, run fresh each time) or `workflow_name`
-  (an existing saved workflow). `weekday` (0=Monday..6=Sunday) is required
-  for `"weekly"`, `day_of_month` for `"monthly"` (clamped to a short
-  month's real last day, e.g. day 31 in February lands on the 28th/29th).
+**Creating one starts in conversation.** Work the task out in chat first,
+then ask for it to be saved (or type `/saveworkflow <name>`). The
+Coordinator calls `create_scheduled_task`, which doesn't save anything by
+itself -- it drafts the task, and the web UI shows a review card that
+opens the task form prefilled with the model's draft: you edit any field,
+then save or dismiss, and the model is told which. An unattended turn
+(nobody to review) never creates a task. The Scheduled page's **New task**
+menu has the same two routes: **Create with coscribe** (a new chat,
+prefilled to describe the task) or **Set up manually** (the blank form).
+
+- `create_scheduled_task(name, kind, at, prompt, weekday=None, day_of_month=None, start_date=None, model=None, approval_mode="manual")`
+  -- drafts a task for review, as above. `kind` is `"manual"` / `"hourly"`
+  / `"daily"` / `"weekdays"` / `"weekly"` / `"monthly"`; `at` is `"HH:MM"`.
+  `weekday` (0=Monday..6=Sunday) is required for `"weekly"`,
+  `day_of_month` for `"monthly"` (clamped to a short month's real last
+  day). The CLI asks `y/N` in place of the review form.
 - `list_scheduled_tasks()` / `pause_scheduled_task(trigger_id)` /
   `resume_scheduled_task(trigger_id)` / `delete_scheduled_task(trigger_id)`
   -- manage every scheduled task, not just ones the current conversation
-  created (unlike `list_wakes`, which only ever shows its own thread's
-  pending wakes). Resuming recomputes the next run time from *now*, so a
-  task paused for a week doesn't fire a backlog of missed runs the moment
-  it's resumed.
+  created. Resuming recomputes the next run time from *now*, so a task
+  paused for a week doesn't fire a backlog of missed runs.
 
-Each trigger gets its own dedicated, persistent conversation
-(`scheduled-<trigger_id>`) -- never the thread it was created from, so a
-recurring fire never interrupts whatever you're doing in your own chat. A
-prompt-backed trigger's history genuinely accumulates in that dedicated
-thread across runs, same `COSCRIBE_AUTO_COMPACT_THRESHOLD` keeping it from
-growing unbounded as the manual cron recipe above.
+**Every run is a fresh conversation** (`scheduled-<trigger_id>-<run_id>`),
+never the thread the task was created from and never a previous run's --
+so runs don't accumulate each other's context, and one run's mess can't
+leak into the next. A run's conversation opens with a "Ran scheduled task"
+card showing the exact instructions it got; the breadcrumb above it
+switches between that task's runs. Each task keeps its last 50 run records
+(older ones are pruned, their conversations deleted with them); deleting a
+task deletes all of its run conversations too.
 
-Firing works exactly like the sleep/wake poll above and shares the same
-mechanism -- `coscribe-web`'s background poll (every
-`COSCRIBE_WAKE_POLL_SECONDS`) and `coscribe --check-wakes` both check for
-due scheduled tasks in the same pass they check for due wakes, no separate
-flag or server to run. `at`/`"HH:MM"` are interpreted in the machine's own
-local wall-clock time -- coscribe is single-user, local-first software
-with no per-user timezone concept, so if it's ever run remotely on a
-machine in a different timezone from you, schedule times will be off by
-that offset.
+**Notes carry memory between runs** (on by default; per task, "Remember
+between runs" on the task page). Every run is shown the task's current
+notes at the start of its prompt and asked to rewrite them before it
+finishes, via `update_task_notes(notes)` -- a tool that only exists inside
+a run's own conversation. Progress markers ("processed through row 480"),
+what changed, pitfalls worth remembering. You can read and edit the notes
+yourself on the task page (`GET`/`PUT /api/scheduled-tasks/{id}/notes`);
+they're stored next to the task as `<trigger_id>.notes.md`, capped at 4000
+characters.
 
-If a fire's action calls a tool that needs approval (any `WRITE_LOCAL`/
-`EXEC`/`EXTERNAL`-risk tool, `write_file`/`write_xlsx` included -- see
-`ARCHITECTURE.md`'s risk taxonomy), there's nobody there to answer it, so
-the gated action never actually runs -- the interrupt is left paused in
-that trigger's thread for you to resolve by opening it in the web UI, and
-firing returns promptly either way, never blocking later fires of other
-scheduled tasks or wakes. A `workflow_name` trigger reports this
-precisely (`last_run_status="failed"`, with an error explaining what
-happened); a `prompt` trigger doesn't currently inspect the turn's
-outcome at all (`last_run_status` is always `"completed"`, same
-simplification `sleep_until`/`sleep_for`'s own wake-up already makes) --
-in both cases, design the prompt/workflow to only need `READ`-risk tools
-if you want it to genuinely complete unattended every time.
+**Run now** starts a manual run and returns immediately -- the browser
+opens the run's conversation and streams it live while it runs in the
+background; closing the tab doesn't stop it. A manual run never touches
+the regular schedule (running a daily 9am task by hand at 2pm doesn't
+skip tomorrow's 9am fire, and a paused task stays paused).
+
+Firing shares the sleep/wake poll above -- `coscribe-web`'s background
+poll (every `COSCRIBE_WAKE_POLL_SECONDS`) and `coscribe --check-wakes`
+both check for due scheduled tasks in the same pass, no separate flag or
+server to run. A due task's schedule advances when its run *starts*, so a
+slow run is never started twice and a failed run isn't retried every poll
+(its failure is on the run record). Due runs execute concurrently. Times
+are the machine's own local wall-clock time -- coscribe is single-user,
+local-first software with no per-user timezone concept.
+
+Each run ends with a status on its record: `completed`, `failed` (with
+the error), `stopped`, or `needs_approval`. A run in `"manual"` approval
+mode that reaches a tool needing approval (any `WRITE_LOCAL`/`EXEC`/
+`EXTERNAL`-risk tool -- see `ARCHITECTURE.md`'s risk taxonomy) never
+blocks waiting for it: the call parks durably in the run's conversation,
+the run ends as `needs_approval`, and the approval is offered the next time
+you open that run (or right away, if you're already watching it).
+Resolving it finishes the run and updates its record. `"auto"` and
+`"skip"` currently both run with accept-edits on -- a hook veto, exec
+policy, or Plan Mode rejection still applies either way. If coscribe
+exits mid-run, that run is marked `failed` on the next start.
 
 ## Files
 
@@ -1214,100 +1226,6 @@ around them, including for modes toggled *after* the sub-agent tools were
 set up (mid-session `/plan`/`/accept-edits` changes still apply to calls a
 sub-agent makes afterwards). A sub-agent can never be granted `spawn_agent`
 or `review_work` itself, so delegation can't recurse.
-
-## Workflows
-
-Once you've worked out a repeating task through ordinary conversation, save
-it as a named **workflow** so you can re-run it later (see [Scheduled /
-unattended runs](#scheduled--unattended-runs) above for the actual
-unattended-execution story -- there's no scheduler built in yet, workflows
-only run when asked). *Creating* a workflow is always an explicit command
-you type yourself, never something the model decides to do on its own --
-early on, a model-callable `save_workflow` tool existed, but it let the
-Coordinator persist a workflow (and, by default, capture a long-running
-thread's *entire* tool-call history) on its own judgment, which could bake
-an earlier, unrelated conversation's actions into a workflow a later,
-different conversation would go on to replay. Recorded/saved workflows are
-global by name and outlive `/clear` by design, same as memory/tasks -- so
-that decision is now yours alone:
-
-- `/startworkflow` then `/endworkflow <name> [summary]` -- **chain mode**.
-  Everything you do between the two commands (only that -- not the rest of
-  the thread's history) becomes a fixed, ordered list of tool calls, replayed
-  exactly as recorded on every future run, with **zero model calls** during
-  the replay itself -- predictable, and the reason to prefer it whenever the
-  steps themselves won't need to change. A second `/startworkflow` before
-  `/endworkflow` discards the in-progress recording and starts over;
-  `/clear` also cancels one if it's still open.
-- `/saveworkflow <name>` (without a prior `/startworkflow`) -- the model
-  judges what's worth saving from the conversation so far and how, via a
-  one-off, tool-less curator call (same division of labor `/compact` uses --
-  the decision to save is still yours, only *what exactly* gets captured is
-  model-judged): a clean, deterministic sequence of tool calls becomes a
-  **chain**-mode workflow exactly as `/startworkflow`/`/endworkflow` would
-  have recorded it, had you marked the range yourself; something more
-  exploratory or judgment-dependent becomes an **agent**-mode workflow (a
-  natural-language summary, replayed by handing it to a fresh agent loop --
-  the same mechanism `spawn_agent` uses -- that decides what to do fresh
-  every time). If the conversation covers multiple unrelated tasks or is too
-  vague to tell, it asks a clarifying question instead of guessing (up to a
-  few rounds, then gives up and points you at `/startworkflow` for precise
-  control). Either way, it always shows a preview -- the chain's exact steps,
-  or the agent-mode summary text -- and waits for you to confirm before
-  anything is actually saved.
-- `/runworkflow <name>` -- run a saved workflow now, directly (no model
-  round-trip to decide to call it -- same reasoning as gating creation).
-  Goes through the same approval gating as everything else: in accept-edits
-  mode it just runs; in normal mode, each replayed chain step still prompts
-  individually if it's risky, exactly as if you'd typed each action
-  yourself. The web UI's top-left menu (see below) offers this as a click
-  instead of typing it.
-- `list_workflows()` / `get_workflow(name)` / `delete_workflow(name)` --
-  still reached through conversation, since they're read-only/low-risk
-  (`delete_workflow` requires approval). `list_recorded_steps()` lists the
-  current thread's recorded tool calls with their indices, if it helps
-  explain what's been done so far.
-- If a chain-mode run fails partway through, its result names which step
-  failed; rather than blindly redoing the whole chain (earlier steps like a
-  login or navigation may not be safe to repeat), ask to resume from that
-  step (`run_workflow`'s `resume_from_step` argument) once whatever caused
-  the failure is fixed.
-- Chain mode's "zero model calls during replay" also means replay can't
-  *notice* a step that ran without error but didn't actually do what it
-  looks like it did (a browser navigation against a stale tab that silently
-  no-ops, say) -- so `/endworkflow` makes one extra, one-off model call of
-  its own, invisible to you, that looks at each step's actual recorded
-  result and decides whether it contains a short, distinctive marker of
-  real success worth checking for next time. Nothing to configure: most
-  steps get no check at all, and a replay only fails loud on a mismatch
-  instead of silently continuing on a false premise.
-
-The web UI's header has a session/workflow menu (click the "coscribe"
-label, top left) alongside Settings > Workflows:
-
-- **New Session** / **Recent Session** -- start a fresh thread, or switch to
-  one you were in before.
-- **New Workflow** -- pick one of your saved workflows and run it now (the
-  `/runworkflow` command above, triggered by a click).
-- **Current Workflow** -- if a run is in flight, its live per-step progress
-  and a Stop button, right in the menu; a small dot on the menu's own icon
-  shows a run is active even when the menu is closed or you're on a
-  different thread.
-- **Recent Workflow** -- recent run records; click one to open Settings >
-  Workflows for full detail.
-
-Settings > Workflows itself has the saved-workflow list and a **Recent
-runs** section below it, each entry showing status and, for chain mode,
-live per-step progress as it happens -- pending/running/done/failed while a
-run is still in flight, not just the final result once the whole tool call
-returns. Every card has a delete button (🗑) -- for a saved workflow or a
-run record, backed by `DELETE /api/workflows/{name}` and
-`DELETE /api/workflow-runs/{run_id}` respectively. The runs list itself is
-backed by `GET /api/workflow-runs` (recent runs) and
-`GET /api/workflow-runs/{run_id}` (one run's full detail); runs are
-persisted one JSON file per run under `.coscribe/state/workflow_runs/`,
-separate from the saved workflow definitions themselves, which are stored
-one JSON file per name under `.coscribe/state/workflows/`.
 
 ## MCP servers
 
