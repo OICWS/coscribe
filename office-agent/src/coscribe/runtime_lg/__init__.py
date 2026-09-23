@@ -13,7 +13,12 @@ from .messages import (
     tool_result_value,
 )
 from .providers import resolve_chat_model
-from .scheduled_tasks import fire_trigger_now, poll_due_scheduled_tasks
+from .scheduled_tasks import (
+    execute_run,
+    fire_trigger_now,
+    poll_due_scheduled_tasks,
+    reconcile_interrupted_runs,
+)
 from .selfwake import poll_due_wakes
 from .skill_authoring import SkillSaveProposal, propose_skill_save_lg, write_skill_lg
 from .subagents import (
@@ -32,10 +37,12 @@ __all__ = [
     "build_spawn_agent_tool",
     "connect_mcp_tools_lg",
     "extract_text",
+    "execute_run",
     "fire_trigger_now",
     "load_exec_policy",
     "poll_due_scheduled_tasks",
     "poll_due_wakes",
+    "reconcile_interrupted_runs",
     "record_decision",
     "redact_secrets",
     "SkillSaveProposal",

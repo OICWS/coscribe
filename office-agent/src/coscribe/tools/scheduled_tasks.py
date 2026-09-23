@@ -33,7 +33,7 @@ import json
 import os
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -42,13 +42,43 @@ from ..runtime.types import tool_metadata
 
 VALID_KINDS = ("manual", "once", "hourly", "daily", "weekdays", "weekly", "monthly")
 VALID_APPROVAL_MODES = ("manual", "auto", "skip")
+RUN_STATUSES = ("running", "completed", "failed", "needs_approval", "stopped")
 
-# A trigger's own dedicated conversation is keyed off this prefix (see
-# create_trigger below) -- shared with web/app.py's list_threads, which
-# filters threads by it so a fired trigger's conversation doesn't also
-# show up in the ordinary chat sidebar (the frontend's own Scheduled
-# section is the one place to find it, per an explicit request).
+# Every run's conversation is keyed off this prefix (see run_thread_id) --
+# shared with web/app.py's list_threads, which filters by it so run
+# conversations only ever show up under Scheduled, never in the ordinary
+# chat sidebar.
 SCHEDULED_THREAD_PREFIX = "scheduled-"
+
+# Respond-only interrupt tools (like ask_user_question): the model's call
+# becomes a draft the user reviews and edits in the UI, and whatever they
+# decide is substituted as the tool's result -- the Python body below only
+# ever runs outside such a graph (e.g. a direct call in tests).
+TASK_DRAFT_TOOL_NAMES: frozenset[str] = frozenset({"create_scheduled_task"})
+
+# Oldest run records beyond this are dropped from the trigger (their
+# conversations are deleted along with them, see web/app.py).
+MAX_RUNS_KEPT = 50
+# The notes a run carries forward are part of every future run's prompt,
+# so they're kept deliberately small.
+MAX_NOTES_CHARS = 4000
+
+
+def run_thread_id(trigger_id: str, run_id: str) -> str:
+    return f"{SCHEDULED_THREAD_PREFIX}{trigger_id}-{run_id}"
+
+
+def parse_run_thread_id(thread_id: str) -> tuple[str, str] | None:
+    """(trigger_id, run_id) for a run's own thread, None for anything else
+    -- including a pre-per-run trigger's single shared thread
+    ("scheduled-<trigger_id>", no run part)."""
+    if not thread_id.startswith(SCHEDULED_THREAD_PREFIX):
+        return None
+    # rpartition: a run_id never contains "-", a trigger_id might.
+    trigger_id, sep, run_id = thread_id[len(SCHEDULED_THREAD_PREFIX) :].rpartition("-")
+    if not sep or not trigger_id or not run_id:
+        return None
+    return trigger_id, run_id
 
 
 def _now_iso() -> str:
@@ -204,13 +234,48 @@ def compute_next_run_at(rule: ScheduleRule, after: datetime) -> str | None:
 
 
 @dataclass
+class ScheduledRun:
+    """One execution of a trigger, in its own fresh conversation -- never
+    the thread the task was created from, and never a previous run's, so
+    history doesn't pile up run after run (continuity comes from the
+    task's notes instead)."""
+
+    run_id: str
+    thread_id: str
+    started_at: str
+    source: str  # "manual" (Run now) | "scheduled"
+    status: str = "running"  # one of RUN_STATUSES
+    finished_at: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "thread_id": self.thread_id,
+            "started_at": self.started_at,
+            "source": self.source,
+            "status": self.status,
+            "finished_at": self.finished_at,
+            "error": self.error,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ScheduledRun:
+        return cls(
+            run_id=data["run_id"],
+            thread_id=data["thread_id"],
+            started_at=data["started_at"],
+            source=data.get("source", "scheduled"),
+            status=data.get("status", "completed"),
+            finished_at=data.get("finished_at"),
+            error=data.get("error"),
+        )
+
+
+@dataclass
 class ScheduledTrigger:
     trigger_id: str
     name: str
-    thread_id: str  # this trigger's own dedicated, persistent thread --
-    # never the thread it was created from, so a recurring fire never
-    # injects messages into whatever conversation the user happened to be
-    # in when they asked for it.
     schedule: ScheduleRule
     enabled: bool
     created_at: str
@@ -229,12 +294,13 @@ class ScheduledTrigger:
     # accept_edits itself defaults to False) -- loading an old on-disk
     # trigger with no "approval_mode" key via from_dict must not silently
     # change its real behavior.
+    notes_enabled: bool = True
+    runs: list[ScheduledRun] = field(default_factory=list)  # oldest first
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "trigger_id": self.trigger_id,
             "name": self.name,
-            "thread_id": self.thread_id,
             "schedule": self.schedule.to_dict(),
             "enabled": self.enabled,
             "created_at": self.created_at,
@@ -244,14 +310,30 @@ class ScheduledTrigger:
             "last_run_status": self.last_run_status,
             "model": self.model,
             "approval_mode": self.approval_mode,
+            "notes_enabled": self.notes_enabled,
+            "runs": [run.to_dict() for run in self.runs],
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ScheduledTrigger:
+        runs = [ScheduledRun.from_dict(r) for r in data.get("runs", [])]
+        if "runs" not in data and data.get("last_run_at") and data.get("thread_id"):
+            # A trigger from before per-run conversations ran every time
+            # in one shared thread -- surfaced as a single run so its
+            # history stays reachable.
+            runs = [
+                ScheduledRun(
+                    run_id="earlier",
+                    thread_id=data["thread_id"],
+                    started_at=data["last_run_at"],
+                    source="scheduled",
+                    status=data.get("last_run_status") or "completed",
+                    finished_at=data["last_run_at"],
+                )
+            ]
         return cls(
             trigger_id=data["trigger_id"],
             name=data["name"],
-            thread_id=data["thread_id"],
             schedule=ScheduleRule.from_dict(data["schedule"]),
             enabled=data["enabled"],
             created_at=data["created_at"],
@@ -261,7 +343,12 @@ class ScheduledTrigger:
             last_run_status=data.get("last_run_status"),
             model=data.get("model"),
             approval_mode=data.get("approval_mode", "manual"),
+            notes_enabled=data.get("notes_enabled", True),
+            runs=runs,
         )
+
+    def find_run(self, run_id: str) -> ScheduledRun | None:
+        return next((run for run in self.runs if run.run_id == run_id), None)
 
 
 class ScheduledTriggerStore:
@@ -306,10 +393,75 @@ class ScheduledTriggerStore:
         path = self._path_for(trigger_id)
         existed = path.exists()
         path.unlink(missing_ok=True)
+        self._notes_path(trigger_id).unlink(missing_ok=True)
         return existed
+
+    def start_run(
+        self, trigger_id: str, source: str
+    ) -> tuple[ScheduledTrigger, ScheduledRun, list[ScheduledRun]]:
+        """Record a new run as "running". Returns the freshly loaded
+        trigger, the new run, and any runs dropped for exceeding
+        MAX_RUNS_KEPT (oldest first) so the caller can delete their
+        conversations too."""
+        trigger = self.load(trigger_id)
+        if trigger is None:
+            raise KeyError(f"No scheduled task with id {trigger_id!r}")
+        run_id = uuid.uuid4().hex[:8]
+        run = ScheduledRun(
+            run_id=run_id,
+            thread_id=run_thread_id(trigger_id, run_id),
+            started_at=_now_iso(),
+            source=source,
+        )
+        trigger.runs.append(run)
+        pruned = trigger.runs[:-MAX_RUNS_KEPT]
+        trigger.runs = trigger.runs[-MAX_RUNS_KEPT:]
+        trigger.last_run_at = run.started_at
+        trigger.last_run_status = run.status
+        self.save(trigger)
+        return trigger, run, pruned
+
+    def finish_run(
+        self, trigger_id: str, run_id: str, status: str, error: str | None = None
+    ) -> ScheduledTrigger | None:
+        """Re-reads the trigger before writing: a run can take minutes, and
+        the user may have edited the task meanwhile -- saving the copy
+        loaded at start would silently undo that edit."""
+        trigger = self.load(trigger_id)
+        if trigger is None:
+            return None
+        run = trigger.find_run(run_id)
+        if run is None:
+            return trigger
+        run.status = status
+        run.error = error
+        run.finished_at = _now_iso()
+        if trigger.runs and trigger.runs[-1] is run:
+            trigger.last_run_status = status
+        self.save(trigger)
+        return trigger
+
+    def read_notes(self, trigger_id: str) -> str:
+        path = self._notes_path(trigger_id)
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def write_notes(self, trigger_id: str, notes: str) -> None:
+        if len(notes) > MAX_NOTES_CHARS:
+            raise ValueError(
+                f"Notes are {len(notes)} characters, over the {MAX_NOTES_CHARS} limit -- "
+                "condense them to what future runs actually need."
+            )
+        self.root.mkdir(parents=True, exist_ok=True)
+        path = self._notes_path(trigger_id)
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(notes, encoding="utf-8")
+        os.replace(tmp_path, path)
 
     def _path_for(self, trigger_id: str) -> Path:
         return self.root / f"{trigger_id}.json"
+
+    def _notes_path(self, trigger_id: str) -> Path:
+        return self.root / f"{trigger_id}.notes.md"
 
 
 def _validate_and_build_schedule(
@@ -359,6 +511,7 @@ def create_trigger(
     start_date: str | None = None,
     model: str | None = None,
     approval_mode: str = "manual",
+    notes_enabled: bool = True,
 ) -> ScheduledTrigger:
     """Validate and persist a new ScheduledTrigger -- shared by
     build_scheduled_task_tools' model-callable create_scheduled_task and
@@ -380,7 +533,6 @@ def create_trigger(
     trigger = ScheduledTrigger(
         trigger_id=trigger_id,
         name=name,
-        thread_id=f"{SCHEDULED_THREAD_PREFIX}{trigger_id}",
         schedule=rule,
         enabled=True,
         created_at=_now_iso(),
@@ -388,6 +540,7 @@ def create_trigger(
         prompt=prompt,
         model=model,
         approval_mode=approval_mode,
+        notes_enabled=notes_enabled,
     )
     store.save(trigger)
     return trigger
@@ -406,11 +559,12 @@ def update_trigger(
     start_date: str | None = None,
     model: str | None = None,
     approval_mode: str = "manual",
+    notes_enabled: bool = True,
 ) -> ScheduledTrigger:
     """Edit an existing trigger in place -- the Edit modal's Save action.
     Same validation as create_trigger (via _validate_and_build_schedule),
     so an edited task can never end up in a state a *new* task couldn't
-    also be created in. Preserves trigger_id/thread_id/created_at/enabled/
+    also be created in. Preserves trigger_id/created_at/enabled/runs/
     last_run_at/last_run_status; recomputes next_run_at from now against
     the (possibly changed) schedule, same as resume_scheduled_task already
     does when re-enabling a paused trigger -- editing a currently-paused
@@ -437,18 +591,20 @@ def update_trigger(
     trigger.prompt = prompt
     trigger.model = model
     trigger.approval_mode = approval_mode
+    trigger.notes_enabled = notes_enabled
     store.save(trigger)
     return trigger
 
 
-def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]]:
-    """Return the Scheduled Tasks tool callables. Every tool here operates
-    globally, not scoped to the calling thread (unlike tools/selfwake.py's
-    list_wakes/cancel_wake) -- same global-by-design scope as
-    list_scheduled_tasks being global, matching ScheduledTrigger's own
-    "independent entity, not tied to the conversation that created it"
-    nature (each trigger mints its own new, independent thread id, never
-    reusing whatever thread called create_scheduled_task).
+def build_scheduled_task_tools(
+    state_dir: str | Path, thread_id: str | None = None
+) -> list[Callable[..., Any]]:
+    """Return the Scheduled Tasks tool callables. They operate globally,
+    not scoped to the calling thread -- a task is an independent entity,
+    not tied to the conversation that created it. The one exception is
+    update_task_notes, only present when `thread_id` is a run's own
+    thread (see parse_run_thread_id), and only ever touching that run's
+    own task.
     """
     store = ScheduledTriggerStore(state_dir)
 
@@ -470,13 +626,13 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
         model: Optional[str] = None,  # noqa: UP045
         approval_mode: str = "manual",
     ) -> dict[str, Any]:
-        """Create a scheduled task -- runs once at a specific time, or
-        repeatedly on an hourly/daily/weekdays/weekly/monthly schedule
-        ("manual" never fires on its own, only via a future explicit
-        run), independent of whether any conversation or browser tab is
-        open. Runs in its own dedicated, persistent conversation (not
-        this one), so it never interrupts whatever you're doing when it
-        fires.
+        """Draft a scheduled task (a reusable workflow) for the user to
+        review -- they can edit any field before saving, or dismiss it;
+        the result tells you which. Runs repeatedly on an hourly/daily/
+        weekdays/weekly/monthly schedule, or only when the user starts it
+        ("manual"), independent of whether any conversation is open. Each
+        run starts in a brand-new conversation with none of this one's
+        context, so `prompt` must stand on its own.
 
         Args:
             name: short, human-readable name, e.g. "Weekly sales report".
@@ -487,7 +643,9 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
                 minute). Otherwise a 24-hour "HH:MM" time of day, e.g.
                 "09:00" -- interpreted in this machine's own local
                 timezone.
-            prompt: what to do when it fires, in plain language.
+            prompt: complete, standalone instructions for a run: the
+                goal, the concrete steps and inputs that worked, pitfalls
+                to avoid, and the expected output.
             weekday: required for kind="weekly" -- 0=Monday .. 6=Sunday.
             day_of_month: required for kind="monthly" -- 1-31 (clamped to
                 the real last day of a shorter month).
@@ -568,7 +726,29 @@ def build_scheduled_task_tools(state_dir: str | Path) -> list[Callable[..., Any]
         return {"deleted": trigger_id}
 
     category = "scheduled_tasks"
-    return [
+    run = parse_run_thread_id(thread_id) if thread_id else None
+    extra: list[Callable[..., Any]] = []
+    if run is not None:
+        own_trigger_id = run[0]
+
+        def update_task_notes(notes: str) -> dict[str, Any]:
+            """Replace this scheduled task's notes -- your memory across its
+            runs, shown to you at the start of every future run. Write the
+            full updated notes (not a diff): progress markers, where you
+            left off, what changed, pitfalls worth remembering. Drop
+            anything stale. Keep them short.
+
+            Args:
+                notes: the complete new notes, plain text or markdown.
+            """
+            store.write_notes(own_trigger_id, notes.strip())
+            return {"saved": True, "characters": len(notes.strip())}
+
+        # READ tier: the notes are the task's own bookkeeping, not user
+        # content -- gating them would park every "ask first" run on an
+        # approval nobody is there to give.
+        extra.append(tool_metadata(update_task_notes, risk_category="READ", category=category))
+    return extra + [
         tool_metadata(create_scheduled_task, risk_category="WRITE_LOCAL", category=category),
         tool_metadata(list_scheduled_tasks, risk_category="READ", category=category),
         tool_metadata(pause_scheduled_task, risk_category="WRITE_LOCAL", category=category),

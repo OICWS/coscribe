@@ -240,10 +240,22 @@ export interface ScheduleRule {
   start_date: string | null;
 }
 
+export type RunStatus = "running" | "completed" | "failed" | "needs_approval" | "stopped";
+
+/** One execution of a task, in its own conversation (thread_id). */
+export interface ScheduledRun {
+  run_id: string;
+  thread_id: string;
+  started_at: string;
+  source: "manual" | "scheduled";
+  status: RunStatus;
+  finished_at: string | null;
+  error: string | null;
+}
+
 export interface ScheduledTask {
   trigger_id: string;
   name: string;
-  thread_id: string;
   schedule: ScheduleRule;
   enabled: boolean;
   created_at: string;
@@ -253,6 +265,9 @@ export interface ScheduledTask {
   last_run_status: string | null;
   model: string | null;
   approval_mode: ApprovalMode;
+  notes_enabled: boolean;
+  /** Oldest first. */
+  runs: ScheduledRun[];
 }
 
 export interface CreateScheduledTaskPayload {
@@ -265,8 +280,13 @@ export interface CreateScheduledTaskPayload {
   start_date?: string;
   model?: string;
   approval_mode?: ApprovalMode;
+  notes_enabled?: boolean;
 }
 
 export type ScheduledTaskResult = ScheduledTask | { error: string };
+
+export type RunNowResult = { task: ScheduledTask; run: ScheduledRun } | { error: string };
+
+export type TaskNotesResult = { notes: string } | { error: string };
 
 export type ScheduledTaskDeleteResult = { deleted: string } | { error: string };

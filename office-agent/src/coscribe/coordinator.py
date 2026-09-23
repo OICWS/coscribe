@@ -733,7 +733,7 @@ def build_coordinator_agent(
         + build_interaction_tools()
         + build_memory_tools(settings.memory_path)
         + build_selfwake_tools(thread_id, settings.state_dir)
-        + build_scheduled_task_tools(settings.state_dir)
+        + build_scheduled_task_tools(settings.state_dir, thread_id)
         + build_websearch_tools()
         + build_script_tools(root, settings.state_dir)
         + build_node_script_tools(root, settings.state_dir)

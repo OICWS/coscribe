@@ -398,7 +398,6 @@ def test_check_wakes_also_fires_a_due_scheduled_task(
         ScheduledTrigger(
             trigger_id="trig-1",
             name="Daily standup notes",
-            thread_id="scheduled-trig-1",
             schedule=ScheduleRule(kind="daily", at="09:00"),
             enabled=True,
             created_at=datetime.now().isoformat(),

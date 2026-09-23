@@ -19,6 +19,8 @@ import type {
   ScheduledTask,
   ScheduledTaskDeleteResult,
   ScheduledTaskResult,
+  RunNowResult,
+  TaskNotesResult,
   ScriptEnvInstallResult,
   ScriptEnvInterpreterInfo,
   ScriptEnvPackage,
@@ -206,7 +208,11 @@ export const deleteScheduledTask = (triggerId: string) =>
 export const updateScheduledTask = (triggerId: string, payload: CreateScheduledTaskPayload) =>
   putJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`, payload);
 export const runScheduledTaskNow = (triggerId: string) =>
-  postJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/run`, {});
+  postJson<RunNowResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/run`, {});
+export const getTaskNotes = (triggerId: string) =>
+  getJson<TaskNotesResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/notes`);
+export const saveTaskNotes = (triggerId: string, notes: string) =>
+  putJson<TaskNotesResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/notes`, { notes });
 
 // -- Threads --------------------------------------------------------------
 

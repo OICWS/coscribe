@@ -30,6 +30,10 @@ export interface StateEvent {
    * Fixed once per thread (see SelectWorkspaceOut), not freely
    * re-toggleable like enabled_skills. */
   workspace_root: string;
+  /** Only on the state sent right after connecting: whether a turn is
+   * already running on this thread (typically a scheduled run executing
+   * in the background), so the page can show it as running. */
+  turn_in_flight?: boolean;
   /** True iff workspace_root above came from a real per-thread choice
    * (a SelectWorkspaceOut that already succeeded), false if it's still
    * just settings.workspace_root's own global default -- the frontend's
@@ -137,6 +141,33 @@ export interface QuestionRequiredEvent {
   multi_select: boolean;
 }
 
+/** A scheduled run just started on this thread; `text` is the run's
+ * prompt (it never came from this tab, so there's no local echo). */
+export interface ScheduledRunStartedEvent {
+  type: "scheduled_run_started";
+  text: string;
+}
+
+/** create_scheduled_task's arguments as the model drafted them -- nothing
+ * is saved until the user reviews it; answered with question_response. */
+export interface TaskDraft {
+  name?: string;
+  kind?: string;
+  at?: string;
+  prompt?: string;
+  weekday?: number | null;
+  day_of_month?: number | null;
+  start_date?: string | null;
+  model?: string | null;
+  approval_mode?: string;
+}
+
+export interface TaskDraftRequiredEvent {
+  type: "task_draft_required";
+  id: string;
+  draft: TaskDraft;
+}
+
 export interface UsageEvent {
   type: "usage";
   total_tokens: number;
@@ -206,6 +237,8 @@ export type WsServerEvent =
   | ToolResultEvent
   | ApprovalRequiredEvent
   | QuestionRequiredEvent
+  | ScheduledRunStartedEvent
+  | TaskDraftRequiredEvent
   | UsageEvent
   | TasksChangedEvent
   | ErrorEvent

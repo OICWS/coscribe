@@ -1,17 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  deleteScheduledTask,
-  deleteThread,
-  getScheduledTasks,
-  renameThread,
-  runScheduledTaskNow,
-} from "../lib/rest";
+import { deleteScheduledTask, deleteThread, renameThread } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
 import { goToThread, startNewThread } from "../lib/nav";
+import { latestRun } from "../lib/runLabels";
 import { scheduleKindLabel } from "../lib/scheduleLabels";
 import type { ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { RunStatusIcon } from "./RunStatusIcon";
 import {
   ClockIcon,
   MessageCircleIcon,
@@ -140,8 +136,10 @@ function ThreadRow({ thread, isCurrent, onRenamed, onDeleteRequest }: ThreadRowP
 
 interface ScheduledTaskRowProps {
   task: ScheduledTask;
+  active: boolean;
   onSelect: () => void;
   onEdit: () => void;
+  onRunNow: () => void;
   onChanged: () => void;
 }
 
@@ -151,21 +149,21 @@ interface ScheduledTaskRowProps {
  * in muted text; hovering swaps that label for a "..." menu (Run now/
  * Edit/Delete -- no Pause, see sheduled-siderbar-workflow-display-
  * settings.png, unlike the portal card's own menu which keeps it).
- * Clicking the row itself opens ScheduledTaskDetail in RunPanel's main
- * area, one of the three confirmed entry points into the Edit modal
- * (via this row's own "Edit" item, or the detail page's pencil icon). */
-function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRowProps) {
+ * Clicking the row opens its latest run (or the task's page, before it
+ * has run). A running or stalled latest run replaces the bullet with its
+ * status, so it's visible without opening anything. */
+function ScheduledTaskRow({ task, active, onSelect, onEdit, onRunNow, onChanged }: ScheduledTaskRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useClickOutside(menuRef, () => setMenuOpen(false), menuOpen);
 
-  const runNow = async () => {
+  const runNow = () => {
     setMenuOpen(false);
-    await runScheduledTaskNow(task.trigger_id);
-    onChanged();
-    goToThread(task.thread_id);
+    onRunNow();
   };
+  const run = latestRun(task);
+  const showStatus = run !== null && (run.status === "running" || run.status === "needs_approval" || run.status === "failed");
 
   const confirmDelete = async () => {
     setDeleteConfirm(false);
@@ -175,10 +173,18 @@ function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRo
 
   return (
     <div
-      className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--card-bg)]"
+      className={`group flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--card-bg)] ${
+        active ? "bg-[var(--card-bg)] font-medium" : ""
+      }`}
       onClick={onSelect}
     >
-      <span className="shrink-0 text-[var(--muted)]">○</span>
+      {showStatus ? (
+        <span className="flex w-3 shrink-0 justify-center">
+          <RunStatusIcon status={run.status} className="h-3 w-3" />
+        </span>
+      ) : (
+        <span className="w-3 shrink-0 text-center text-[var(--muted)]">○</span>
+      )}
       <span className="min-w-0 flex-1 truncate" title={task.name}>
         {task.name}
       </span>
@@ -232,7 +238,7 @@ function ScheduledTaskRow({ task, onSelect, onEdit, onChanged }: ScheduledTaskRo
       {deleteConfirm && (
         <ConfirmDialog
           title="Delete scheduled task?"
-          description={`"${task.name}" will be permanently removed.`}
+          description={`"${task.name}" and the conversations of its runs will be permanently removed.`}
           onCancel={() => setDeleteConfirm(false)}
           onConfirm={confirmDelete}
         />
@@ -252,16 +258,14 @@ interface NavRailProps {
   onThreadRenamed: (threadId: string, title: string) => void;
   mode: NavMode;
   onModeChange: (mode: NavMode) => void;
-  scheduledTasksVersion: number;
-  // Plain state clear (the "Scheduled" button's own reset-to-portal
-  // click) vs. the "smart open" a row click gets (goToThread if the task
-  // has already run, otherwise the same select) -- see App.tsx's
-  // openScheduledTask for why these can't be the same function: a row
-  // click always wants "open," but nothing here ever wants to force-
-  // navigate on a plain clear.
-  onSelectScheduledTask: (task: ScheduledTask | null) => void;
+  scheduledTasks: ScheduledTask[];
+  onScheduledTasksChanged: () => void;
+  /** The task whose page or run is currently open, highlighted. */
+  activeTaskId: string | null;
   onOpenScheduledTask: (task: ScheduledTask) => void;
   onEditScheduledTask: (task: ScheduledTask | null) => void;
+  onRunScheduledTaskNow: (task: ScheduledTask) => void;
+  onNewScheduledTask: () => void;
 }
 
 /** A narrow icon-only rail that expands into a full nav panel on hover
@@ -277,24 +281,21 @@ export function NavRail({
   onThreadRenamed,
   mode,
   onModeChange,
-  scheduledTasksVersion,
-  onSelectScheduledTask,
+  scheduledTasks,
+  onScheduledTasksChanged,
+  activeTaskId,
   onOpenScheduledTask,
   onEditScheduledTask,
+  onRunScheduledTaskNow,
+  onNewScheduledTask,
 }: NavRailProps) {
   const [hovering, setHovering] = useState(false);
   const expanded = pinned || hovering;
-  const [scheduledTasks, setScheduledTasks] = useState<ScheduledTask[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
 
   useEffect(() => {
     if (expanded) onThreadsChanged();
   }, [expanded, onThreadsChanged]);
-
-  useEffect(() => {
-    getScheduledTasks().then(setScheduledTasks);
-  }, [expanded, scheduledTasksVersion]);
-
 
 
   const confirmDelete = () => {
@@ -348,13 +349,7 @@ export function NavRail({
                 className={`flex h-8 w-8 items-center justify-center rounded-md ${
                   mode === "run" ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
                 }`}
-                onClick={() => {
-                  onModeChange("run");
-                  // Always lands on the portal grid, never a stale
-                  // detail-page selection left over from before the user
-                  // switched away to Chat mode and back.
-                  onSelectScheduledTask(null);
-                }}
+                onClick={() => onModeChange("run")}
               >
                 <ClockIcon className="h-[16px] w-[16px]" />
               </button>
@@ -398,24 +393,26 @@ export function NavRail({
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <button
                   type="button"
-                  disabled
-                  title="Not available yet -- see the portal's New task menu"
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium opacity-60"
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)]"
+                  onClick={onNewScheduledTask}
                 >
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-fg)]">
                     <PlusIcon className="h-3 w-3" />
                   </span>
                   New task
                 </button>
-                <div className="mt-1 flex-1 overflow-y-auto">
+                <div className="mb-1 mt-2 px-2 text-xs font-medium tracking-wide text-[var(--muted)]">TASKS</div>
+                <div className="flex-1 overflow-y-auto">
                   {scheduledTasks.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No scheduled tasks yet.</div>}
                   {scheduledTasks.map((task) => (
                     <ScheduledTaskRow
                       key={task.trigger_id}
                       task={task}
+                      active={task.trigger_id === activeTaskId}
                       onSelect={() => onOpenScheduledTask(task)}
                       onEdit={() => onEditScheduledTask(task)}
-                      onChanged={() => getScheduledTasks().then(setScheduledTasks)}
+                      onRunNow={() => onRunScheduledTaskNow(task)}
+                      onChanged={onScheduledTasksChanged}
                     />
                   ))}
                 </div>

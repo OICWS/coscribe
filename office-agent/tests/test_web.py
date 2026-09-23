@@ -2928,12 +2928,11 @@ def test_wake_poll_loop_publishes_background_events_for_fired_wakes_and_triggers
     async def _fake_poll_due_wakes(state_dir: Any, get_session: Any) -> list[Any]:
         return [types.SimpleNamespace(reason="research done", thread_id="thread-a")]
 
-    async def _fake_poll_due_scheduled_tasks(state_dir: Any, get_session: Any) -> list[Any]:
-        return [
-            types.SimpleNamespace(
-                name="daily digest", thread_id="thread-b", last_run_status="failed"
-            )
-        ]
+    async def _fake_poll_due_scheduled_tasks(
+        state_dir: Any, get_session: Any, on_pruned: Any = None
+    ) -> list[Any]:
+        run = types.SimpleNamespace(thread_id="thread-b", status="failed")
+        return [types.SimpleNamespace(name="daily digest", runs=[run])]
 
     monkeypatch.setattr("coscribe.web.app.poll_due_wakes", _fake_poll_due_wakes)
     monkeypatch.setattr(
@@ -4819,7 +4818,6 @@ def test_get_scheduled_tasks_endpoint_lists_saved_triggers_lg(
         ScheduledTrigger(
             trigger_id="trig-1",
             name="Daily standup notes",
-            thread_id="scheduled-trig-1",
             schedule=ScheduleRule(kind="daily", at="09:00"),
             enabled=True,
             created_at="2026-01-01T00:00:00",
@@ -4835,6 +4833,180 @@ def test_get_scheduled_tasks_endpoint_lists_saved_triggers_lg(
     [trigger] = response.json()
     assert trigger["trigger_id"] == "trig-1"
     assert trigger["name"] == "Daily standup notes"
+
+
+def _wait_for_run_status(
+    client: Any, trigger_id: str, run_id: str, timeout: float = 5.0
+) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    while True:
+        tasks = client.get("/api/scheduled-tasks").json()
+        [task] = [t for t in tasks if t["trigger_id"] == trigger_id]
+        [run] = [r for r in task["runs"] if r["run_id"] == run_id]
+        if run["status"] != "running" or time.time() > deadline:
+            return run
+        time.sleep(0.05)
+
+
+def test_run_now_returns_at_once_and_the_run_finishes_in_the_background_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="report written")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Report", "kind": "manual", "at": "", "prompt": "Write the report"},
+        ).json()
+        response = client.post(f"/api/scheduled-tasks/{created['trigger_id']}/run")
+        body = response.json()
+        run = _wait_for_run_status(client, created["trigger_id"], body["run"]["run_id"])
+
+        with client.websocket_connect(f"/ws/{body['run']['thread_id']}") as ws:
+            state = ws.receive_json()
+            history = ws.receive_json()
+
+    assert response.status_code == 200
+    assert body["run"]["status"] == "running"
+    assert body["run"]["source"] == "manual"
+    assert run["status"] == "completed"
+    assert state["turn_in_flight"] is False
+    assert history["entries"][0]["kind"] == "user"
+    assert history["entries"][0]["text"].startswith('[Scheduled run of "Report"')
+    assert history["entries"][-1] == {"kind": "agent", "text": "report written"}
+
+
+def test_deleting_a_task_deletes_its_run_conversations_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="done")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Temp", "kind": "manual", "at": "", "prompt": "Do it"},
+        ).json()
+        run = client.post(f"/api/scheduled-tasks/{created['trigger_id']}/run").json()["run"]
+        _wait_for_run_status(client, created["trigger_id"], run["run_id"])
+
+        assert client.delete(f"/api/scheduled-tasks/{created['trigger_id']}").status_code == 200
+        with client.websocket_connect(f"/ws/{run['thread_id']}") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+
+    assert history["entries"] == []
+
+
+def test_startup_sweeps_run_conversations_no_task_lists_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A task deleted without a checkpointer at hand (the model's
+    delete_scheduled_task) leaves its run conversations behind; the next
+    startup removes them and keeps every run a task still lists."""
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
+
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="done"), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        runs = {}
+        for name in ("Keep", "Drop"):
+            created = client.post(
+                "/api/scheduled-tasks",
+                json={"name": name, "kind": "manual", "at": "", "prompt": "Do it"},
+            ).json()
+            run = client.post(f"/api/scheduled-tasks/{created['trigger_id']}/run").json()["run"]
+            _wait_for_run_status(client, created["trigger_id"], run["run_id"])
+            runs[name] = (created["trigger_id"], run["thread_id"])
+    ScheduledTriggerStore(tmp_path / "state").delete(runs["Drop"][0])
+
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        histories = {}
+        for name, (_, thread_id) in runs.items():
+            with client.websocket_connect(f"/ws/{thread_id}") as ws:
+                ws.receive_json()  # state
+                histories[name] = ws.receive_json()["entries"]
+
+    assert histories["Keep"] != []
+    assert histories["Drop"] == []
+
+
+def test_scheduled_task_notes_endpoints_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from coscribe.tools.scheduled_tasks import MAX_NOTES_CHARS
+
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "N", "kind": "manual", "at": "", "prompt": "p"},
+        ).json()
+        url = f"/api/scheduled-tasks/{created['trigger_id']}/notes"
+        empty = client.get(url).json()
+        saved = client.put(url, json={"notes": "  left off at page 3  "}).json()
+        too_long = client.put(url, json={"notes": "x" * (MAX_NOTES_CHARS + 1)})
+        missing = client.get("/api/scheduled-tasks/nope/notes")
+
+    assert created["notes_enabled"] is True
+    assert empty == {"notes": ""}
+    assert saved == {"notes": "left off at page 3"}
+    assert too_long.status_code == 400
+    assert missing.status_code == 404
+
+
+def test_create_scheduled_task_is_a_draft_the_user_reviews_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model's create_scheduled_task call never creates anything
+    itself: the user gets the draft, saves (or dismisses) it from the UI,
+    and their answer becomes the tool's result."""
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
+
+    draft_args = {"name": "Weekly export", "kind": "weekly", "at": "09:00", "prompt": "Export"}
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="", tool_calls=[_tool_call("d1", "create_scheduled_task", draft_args)]
+            ),
+            AIMessage(content="Saved it."),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_draft") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "make this weekly"})
+            draft = _receive_until(ws, "task_draft_required")[-1]
+            ws.send_json(
+                {
+                    "type": "question_response",
+                    "id": draft["id"],
+                    "answer": 'Saved as scheduled task "Weekly export".',
+                }
+            )
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert draft["draft"] == draft_args
+    assert not any(m["type"] == "tool_result" for m in messages)
+    tool_message = next(m for m in fake_model.received[-1] if isinstance(m, ToolMessage))
+    assert tool_message.content == 'Saved as scheduled task "Weekly export".'
+    assert ScheduledTriggerStore(tmp_path / "state").list_all() == []
+
+
+def test_saveworkflow_asks_the_model_to_draft_a_task_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="drafting")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_saveworkflow") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "/saveworkflow"})
+            usage = ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "/saveworkflow Monthly close"})
+            _receive_until(ws, "tasks_changed")
+
+    assert usage == {"type": "error", "message": "Usage: /saveworkflow <name>"}
+    [human] = [m for m in fake_model.received[-1] if isinstance(m, HumanMessage)]
+    assert 'named "Monthly close"' in str(human.content)
+    assert "create_scheduled_task" in str(human.content)
 
 
 def test_create_scheduled_task_endpoint_persists_a_prompt_backed_trigger_lg(

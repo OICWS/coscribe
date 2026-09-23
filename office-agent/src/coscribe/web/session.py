@@ -107,10 +107,26 @@ from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
 from ..tools.documents import DocumentToolkit
 from ..tools.presentations import PresentationToolkit
+from ..tools.scheduled_tasks import (
+    TASK_DRAFT_TOOL_NAMES,
+    ScheduledTriggerStore,
+    parse_run_thread_id,
+)
 from ..tools.spreadsheets import SpreadsheetToolkit
 from .context_usage import build_context_breakdown
 
 logger = logging.getLogger(__name__)
+
+# /saveworkflow <name>: the model distills the conversation into a draft
+# scheduled task via create_scheduled_task, which the user then reviews.
+SAVE_WORKFLOW_PROMPT = (
+    'Save what we did in this conversation as a reusable workflow named "{name}": '
+    'call create_scheduled_task with name="{name}", kind="manual" unless I asked '
+    "for a schedule, and a prompt distilled from this conversation -- the steps and "
+    "inputs that actually worked, pitfalls we ran into and how to avoid them, and "
+    "the expected output. Leave out dead ends and unrelated chatter. If there's no "
+    "repeatable task in this conversation yet, ask me what to save instead."
+)
 
 # How many rounds of clarifying question/answer /saveskill goes through
 # before giving up.
@@ -489,6 +505,13 @@ class ChatSessionLG:
         # notify_resync's own docstring for why this one specifically
         # needs a place to live outside any single call's stack).
         self._live_websocket: WebSocket | None = None
+        # The prompt of a scheduled run executing on this thread right now
+        # (set by runtime_lg/scheduled_tasks.py). A tab that opens the run
+        # just after it starts can connect before that prompt is
+        # checkpointed -- send_history fills it in so the run never shows
+        # up without its opening message.
+        self.active_run_prompt: str | None = None
+        self._offer_task: asyncio.Task[None] | None = None
 
     def _build_lg_tools(self, model: Any) -> list[Callable[..., Any] | BaseTool]:
         # self._base_tools ("domain" tools) combined with self._extra_tools
@@ -559,7 +582,7 @@ class ChatSessionLG:
             self._instructions,
             checkpointer=self._checkpointer,
             extra_interrupt_tool_names=extra_interrupt_names,
-            question_tool_names=QUESTION_TOOL_NAMES,
+            question_tool_names=QUESTION_TOOL_NAMES | TASK_DRAFT_TOOL_NAMES,
             max_turns=self.settings.max_turns,
             auto_compact_tokens=auto_compact_tokens,
             defer_tools=self.settings.defer_tools,
@@ -910,23 +933,28 @@ class ChatSessionLG:
         }
         await self.send_state(websocket)
 
-    async def send_state(self, websocket: WebSocket) -> None:
+    async def send_state(self, websocket: WebSocket, *, on_connect: bool = False) -> None:
         if self._context_window is None:
             self._context_window = await asyncio.to_thread(
                 self._context_window_client.get_context_window, self._model_string
             )
-        await websocket.send_json(
-            {
-                "type": "state",
-                "plan_mode": self.plan_mode,
-                "accept_edits": self.accept_edits,
-                "model": self._model_string,
-                "context_window": self._context_window,
-                "enabled_skills": sorted(self.enabled_skill_names),
-                "workspace_root": str(self.workspace_root),
-                "workspace_explicit": self._workspace_explicit,
-            }
-        )
+        state: dict[str, Any] = {
+            "type": "state",
+            "plan_mode": self.plan_mode,
+            "accept_edits": self.accept_edits,
+            "model": self._model_string,
+            "context_window": self._context_window,
+            "enabled_skills": sorted(self.enabled_skill_names),
+            "workspace_root": str(self.workspace_root),
+            "workspace_explicit": self._workspace_explicit,
+        }
+        if on_connect:
+            # A tab opening mid-turn (most often: a scheduled run executing
+            # in the background) needs to show that turn as running, with
+            # Stop available. Connect-time only: a state sent from *inside*
+            # a turn (/plan, a model switch) holds the lock itself.
+            state["turn_in_flight"] = self._turn_lock.locked()
+        await websocket.send_json(state)
 
     async def get_context_breakdown(self) -> dict[str, Any]:
         """Where this thread's context-window budget actually goes --
@@ -1029,13 +1057,13 @@ class ChatSessionLG:
         has_older = isinstance(first_message, HumanMessage) and str(
             first_message.content
         ).startswith(_COMPACT_NOTE_PREFIX)
-        await websocket.send_json(
-            {
-                "type": "history",
-                "entries": serialize_history_for_ws_lg(messages),
-                "has_older": has_older,
-            }
-        )
+        entries = serialize_history_for_ws_lg(messages)
+        prompt = self.active_run_prompt
+        if prompt is not None and not any(
+            e["kind"] == "user" and e["text"] == prompt for e in entries
+        ):
+            entries.append({"kind": "user", "text": prompt})
+        await websocket.send_json({"type": "history", "entries": entries, "has_older": has_older})
 
     async def load_older_messages(self, websocket: WebSocket) -> None:
         """Scroll-up pagination for a thread that's been /compact'd: send_
@@ -1287,7 +1315,7 @@ class ChatSessionLG:
                     # pending "tool" item exists, since question tools never got a
                     # "tool_call" one) and add a second, redundant "Asked: ..." row
                     # underneath the card for the same interaction.
-                    if name not in QUESTION_TOOL_NAMES:
+                    if name not in QUESTION_TOOL_NAMES and name not in TASK_DRAFT_TOOL_NAMES:
                         # `args` (recovered above, same value the hook just got)
                         # rides along so a live turn's collapsed row can show the
                         # real filename/query -- without this the frontend only
@@ -1558,7 +1586,8 @@ class ChatSessionLG:
         human's own explicit action with an obvious "why", not the
         was-anyone-watching gap this feature exists to close."""
         name = request["name"]
-        is_question = name in QUESTION_TOOL_NAMES
+        is_draft = name in TASK_DRAFT_TOOL_NAMES
+        is_question = name in QUESTION_TOOL_NAMES or is_draft
 
         def _denied(message: str) -> dict[str, Any]:
             if is_question:
@@ -1584,7 +1613,10 @@ class ChatSessionLG:
         if is_question:
             if not _can_resolve_approvals(websocket):
                 message = (
-                    "No one is available to answer this question -- this is an unattended run."
+                    "No one is available to review this draft -- this is an unattended run, "
+                    "so no task was created."
+                    if is_draft
+                    else "No one is available to answer this question -- this is an unattended run."
                 )
                 record_decision(
                     audit_log,
@@ -1596,6 +1628,8 @@ class ChatSessionLG:
                     detail=message,
                 )
                 return _denied(message)
+            if is_draft:
+                return await self._decide_task_draft_request(args, websocket)
             return await self._decide_question_request(args, websocket)
         if name not in self._approval_required_names:
             return {"type": "approve"}
@@ -1743,6 +1777,25 @@ class ChatSessionLG:
             self._pending_questions.pop(request_id, None)
         return {"type": "respond", "message": answer}
 
+    async def _decide_task_draft_request(
+        self, args: dict[str, Any], websocket: WebSocket
+    ) -> dict[str, Any]:
+        """create_scheduled_task's review flow: the frontend shows the
+        draft, the user edits and saves it (through the ordinary REST
+        create endpoint, with its full validation) or dismisses it, and
+        answers with a sentence saying which -- substituted as the tool's
+        result. Shares the pending-question plumbing, since the answer is
+        likewise a string and stop/reconnect treat it the same way."""
+        request_id = uuid.uuid4().hex
+        future: Future[str] = get_running_loop().create_future()
+        self._pending_questions[request_id] = future
+        await websocket.send_json({"type": "task_draft_required", "id": request_id, "draft": args})
+        try:
+            answer = await future
+        finally:
+            self._pending_questions.pop(request_id, None)
+        return {"type": "respond", "message": answer}
+
     async def _resolve_pending_approvals(self, websocket: WebSocket) -> str | None:
         """While the graph is paused, decide every pending action request
         and resume -- looping in case a resumed turn immediately hits
@@ -1840,10 +1893,38 @@ class ChatSessionLG:
             # can't actually happen here; `or ""` only satisfies the type
             # checker, not a real runtime fallback.
             text = await self._resolve_pending_approvals(websocket) or ""
+            await self._record_resumed_run_status()
             await websocket.send_json({"type": "agent_message", "text": _format_reply(text)})
             if self._last_usage_metadata is not None:
                 await websocket.send_json(_usage_event(self._last_usage_metadata))
             await websocket.send_json({"type": "tasks_changed"})
+
+    def offer_pending_approval_to_live_tab(self) -> None:
+        """A background run that parked on an approval while someone was
+        watching: hand the approval to that tab now, the same way a fresh
+        connection would get it, instead of waiting for a reload."""
+        websocket = self._live_websocket
+        if websocket is None:
+            return
+        self._offer_task = asyncio.create_task(self.resume_after_reconnect(websocket))
+
+    async def _record_resumed_run_status(self) -> None:
+        """A scheduled run that parked on an approval ended as
+        "needs_approval"; once someone resolves it here and the turn
+        finishes, the run record should say how it actually ended."""
+        parsed = parse_run_thread_id(self.thread_id)
+        if parsed is None:
+            return
+        trigger_id, run_id = parsed
+        store = ScheduledTriggerStore(self.settings.state_dir)
+        trigger = store.load(trigger_id)
+        run = trigger.find_run(run_id) if trigger is not None else None
+        if run is None or run.status != "needs_approval":
+            return
+        state = await self.lg_agent.aget_state(self.config)
+        if any(task.interrupts for task in state.tasks):
+            return
+        store.finish_run(trigger_id, run_id, "stopped" if self._stop_requested else "completed")
 
     async def _handle_compact(self, websocket: WebSocket) -> None:
         """Summarize this thread's checkpointed message history down to one
@@ -2287,6 +2368,13 @@ class ChatSessionLG:
             name = command[1:].lower()
             if name == "init":
                 user_input = INIT_PROMPT
+            elif name == "saveworkflow":
+                if not rest.strip():
+                    await websocket.send_json(
+                        {"type": "error", "message": "Usage: /saveworkflow <name>"}
+                    )
+                    return
+                user_input = SAVE_WORKFLOW_PROMPT.format(name=rest.strip())
             elif name in self.skills_by_slug:
                 skill = self.skills_by_slug[name]
                 fallback = (

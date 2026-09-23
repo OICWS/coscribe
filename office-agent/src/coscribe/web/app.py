@@ -93,10 +93,11 @@ from ..runtime import (
 )
 from ..runtime.types import get_tool_metadata
 from ..runtime_lg import (
+    execute_run,
     extract_text,
-    fire_trigger_now,
     poll_due_scheduled_tasks,
     poll_due_wakes,
+    reconcile_interrupted_runs,
     strip_mode_note,
 )
 from ..tools import (
@@ -114,6 +115,7 @@ from ..tools.node_env import list_packages as list_node_packages
 from ..tools.node_env import uninstall_package as uninstall_node_package
 from ..tools.scheduled_tasks import (
     SCHEDULED_THREAD_PREFIX,
+    ScheduledRun,
     ScheduledTriggerStore,
     compute_next_run_at,
     create_trigger,
@@ -911,6 +913,11 @@ class ScheduledTaskCreate(BaseModel):
     start_date: str | None = None
     model: str | None = None
     approval_mode: str = "manual"
+    notes_enabled: bool = True
+
+
+class TaskNotesUpdate(BaseModel):
+    notes: str
 
 
 # Plain name ("mcp-server-fetch") or scoped ("@playwright/mcp") npm package
@@ -961,6 +968,11 @@ FIXED_COMMANDS = [
     {"name": "clear", "description": "Wipe this thread's conversation history and start fresh"},
     {"name": "stop", "description": "Stop the current in-progress run"},
     {"name": "init", "description": "Explore the workspace and write OVERVIEW.md"},
+    {
+        "name": "saveworkflow",
+        "description": "Save this conversation as a reusable scheduled task "
+        "(usage: /saveworkflow <name>)",
+    },
     {
         "name": "saveskill",
         "description": "Save this conversation as a reusable Skill (usage: /saveskill <name>)",
@@ -1290,27 +1302,88 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                         await live_session.notify_resync()
             except Exception:
                 logging.getLogger(__name__).exception("selfwake: poll_due_wakes failed")
-            try:
-                fired_triggers = await poll_due_scheduled_tasks(
-                    settings.state_dir, _get_session_async
+            # Backgrounded rather than awaited: a run can take minutes, and
+            # due wakes must keep being checked meanwhile. Overlapping polls
+            # can't double-fire a task -- its schedule advances before the
+            # run's first await (see poll_due_scheduled_tasks).
+            _track_background(asyncio.create_task(_poll_scheduled_tasks_once()))
+
+    async def _poll_scheduled_tasks_once() -> None:
+        try:
+            fired_triggers = await poll_due_scheduled_tasks(
+                settings.state_dir, _get_session_async, on_pruned=_delete_run_threads
+            )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "scheduled_tasks: poll_due_scheduled_tasks failed"
+            )
+            return
+        for trigger in fired_triggers:
+            if not trigger.runs:
+                continue
+            background_events.publish(
+                BackgroundEvent(
+                    kind="scheduled_task",
+                    status="failed" if trigger.runs[-1].status == "failed" else "completed",
+                    title=trigger.name,
+                    thread_id=trigger.runs[-1].thread_id,
                 )
-                for trigger in fired_triggers:
-                    background_events.publish(
-                        BackgroundEvent(
-                            kind="scheduled_task",
-                            status="failed" if trigger.last_run_status == "failed" else "completed",
-                            title=trigger.name,
-                            thread_id=trigger.thread_id,
-                        )
-                    )
-                    # Same resync nudge as the wake loop above.
-                    live_session = sessions.get(trigger.thread_id)
-                    if live_session is not None:
-                        await live_session.notify_resync()
-            except Exception:
-                logging.getLogger(__name__).exception(
-                    "scheduled_tasks: poll_due_scheduled_tasks failed"
-                )
+            )
+
+    background_tasks: set[asyncio.Task[Any]] = set()
+
+    def _track_background(task: asyncio.Task[Any]) -> None:
+        # The event loop only holds weak references to tasks -- without a
+        # strong one here, a run could be garbage-collected mid-flight.
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+
+    async def _delete_thread_data(thread_id: str) -> bool:
+        """Delete a thread's checkpoints plus every sidecar file that belongs
+        to it -- otherwise a new thread later reusing the same id would
+        inherit an old task list or workspace/skills choice. Returns
+        whether any checkpoint existed."""
+        checkpointer = checkpointer_holder["checkpointer"]
+        await checkpointer.setup()  # see list_threads' identical comment
+        cursor = await checkpointer.conn.execute(
+            "SELECT 1 FROM checkpoints WHERE thread_id = ? LIMIT 1", (thread_id,)
+        )
+        existed = await cursor.fetchone() is not None
+        await checkpointer.adelete_thread(thread_id)
+        (settings.state_dir / f"{thread_id}.tasks.json").unlink(missing_ok=True)
+        _skills_sidecar_path(thread_id).unlink(missing_ok=True)
+        _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
+        _title_sidecar_path(thread_id).unlink(missing_ok=True)
+        sessions.pop(thread_id, None)
+        return existed
+
+    async def _delete_run_threads(runs: list[ScheduledRun]) -> None:
+        for run in runs:
+            await _delete_thread_data(run.thread_id)
+
+    async def _sweep_orphaned_run_threads() -> int:
+        """Delete run conversations no task still lists -- left behind by
+        paths with no checkpointer to delete through (the model's
+        delete_scheduled_task, `coscribe --check-wakes` pruning old runs).
+        Thread ids are read before the store: a run is recorded before its
+        conversation exists, so one starting concurrently (a CLI poll) is
+        never mistaken for an orphan."""
+        checkpointer = checkpointer_holder["checkpointer"]
+        await checkpointer.setup()  # see list_threads' identical comment
+        cursor = await checkpointer.conn.execute(
+            "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE ?",
+            (f"{SCHEDULED_THREAD_PREFIX}%",),
+        )
+        thread_ids = [row[0] for row in await cursor.fetchall()]
+        known = {
+            run.thread_id
+            for trigger in ScheduledTriggerStore(settings.state_dir).list_all()
+            for run in trigger.runs
+        }
+        orphans = [t for t in thread_ids if t not in known]
+        for thread_id in orphans:
+            await _delete_thread_data(thread_id)
+        return len(orphans)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -1369,6 +1442,19 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                         await _refresh_all_sessions_extra_tools()
 
                     asyncio.create_task(_finish_mcp_connect_in_background(connect_task))
+            interrupted = reconcile_interrupted_runs(settings.state_dir)
+            if interrupted:
+                logging.getLogger(__name__).warning(
+                    "Marked %d scheduled run(s) as failed -- still running at startup, "
+                    "left over from a previous process that didn't shut down cleanly.",
+                    interrupted,
+                )
+            swept = await _sweep_orphaned_run_threads()
+            if swept:
+                logging.getLogger(__name__).info(
+                    "Deleted %d scheduled-run conversation(s) whose task or run record is gone.",
+                    swept,
+                )
             wake_poll_task = asyncio.create_task(_wake_poll_loop())
             yield
             wake_poll_task.cancel()
@@ -1376,6 +1462,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 await wake_poll_task
             except asyncio.CancelledError:
                 pass
+            for task in list(background_tasks):
+                task.cancel()
+            await asyncio.gather(*background_tasks, return_exceptions=True)
             if mcp_connect_task is not None and not mcp_connect_task.done():
                 mcp_connect_task.cancel()
                 try:
@@ -1497,27 +1586,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/threads/{thread_id}")
     async def delete_thread(thread_id: str) -> JSONResponse:
-        # Direct-storage counterpart to list_threads above -- web/app.py's
-        # identical endpoint deletes a FileStateStore-persisted RunState;
-        # this deletes the thread's real checkpoints instead. .tasks.json
-        # and the sidecar files aren't part of the checkpointer's own
-        # domain but belong to the same thread, so a delete needs to clean
-        # them up too -- otherwise a new thread later reusing the same id
-        # would inherit an old task list or workspace/skills choice from a
-        # "deleted" conversation (same reasoning as web/app.py's identical
-        # cleanup).
-        checkpointer = checkpointer_holder["checkpointer"]
-        await checkpointer.setup()  # see list_threads' identical comment
-        cursor = await checkpointer.conn.execute(
-            "SELECT 1 FROM checkpoints WHERE thread_id = ? LIMIT 1", (thread_id,)
-        )
-        existed = await cursor.fetchone() is not None
-        await checkpointer.adelete_thread(thread_id)
-        (settings.state_dir / f"{thread_id}.tasks.json").unlink(missing_ok=True)
-        _skills_sidecar_path(thread_id).unlink(missing_ok=True)
-        _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
-        _title_sidecar_path(thread_id).unlink(missing_ok=True)
-        sessions.pop(thread_id, None)
+        existed = await _delete_thread_data(thread_id)
         if not existed:
             return JSONResponse({"error": f"No thread {thread_id!r}"}, status_code=404)
         return JSONResponse({"deleted": thread_id})
@@ -1617,6 +1686,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 start_date=payload.start_date,
                 model=payload.model,
                 approval_mode=payload.approval_mode,
+                notes_enabled=payload.notes_enabled,
             )
         except (ValueError, KeyError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1639,6 +1709,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 start_date=payload.start_date,
                 model=payload.model,
                 approval_mode=payload.approval_mode,
+                notes_enabled=payload.notes_enabled,
             )
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
@@ -1648,18 +1719,40 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/scheduled-tasks/{trigger_id}/run")
     async def run_scheduled_task_now_endpoint(trigger_id: str) -> JSONResponse:
-        # A real, live turn (not a background poll) -- deliberately not
-        # asyncio.create_task'd the way ws_endpoint's user_message handling
-        # is, since there's no websocket here for a stuck call to block;
-        # this request's own response *is* "did it work," so it waits for
-        # the real answer.
+        # Returns as soon as the run is recorded, not when it finishes: the
+        # browser opens the run's own conversation right away and watches
+        # it stream there (see runtime_lg/scheduled_tasks.py's
+        # _RelaySocket). How it ended lands on the run record.
+        store = ScheduledTriggerStore(settings.state_dir)
         try:
-            trigger = await fire_trigger_now(settings.state_dir, trigger_id, _get_session_async)
+            trigger, run, pruned = store.start_run(trigger_id, "manual")
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
-        except Exception as exc:  # noqa: BLE001 -- surface a real firing failure to the caller
-            return JSONResponse({"error": str(exc)}, status_code=500)
-        return JSONResponse(trigger.to_dict())
+        await _delete_run_threads(pruned)
+        _track_background(
+            asyncio.create_task(
+                execute_run(settings.state_dir, trigger_id, run.run_id, _get_session_async)
+            )
+        )
+        return JSONResponse({"task": trigger.to_dict(), "run": run.to_dict()})
+
+    @app.get("/api/scheduled-tasks/{trigger_id}/notes")
+    async def get_scheduled_task_notes(trigger_id: str) -> JSONResponse:
+        store = ScheduledTriggerStore(settings.state_dir)
+        if store.load(trigger_id) is None:
+            return JSONResponse({"error": f"No scheduled task {trigger_id!r}"}, status_code=404)
+        return JSONResponse({"notes": store.read_notes(trigger_id)})
+
+    @app.put("/api/scheduled-tasks/{trigger_id}/notes")
+    async def put_scheduled_task_notes(trigger_id: str, payload: TaskNotesUpdate) -> JSONResponse:
+        store = ScheduledTriggerStore(settings.state_dir)
+        if store.load(trigger_id) is None:
+            return JSONResponse({"error": f"No scheduled task {trigger_id!r}"}, status_code=404)
+        try:
+            store.write_notes(trigger_id, payload.notes.strip())
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"notes": store.read_notes(trigger_id)})
 
     @app.post("/api/scheduled-tasks/{trigger_id}/pause")
     async def pause_scheduled_task_endpoint(trigger_id: str) -> JSONResponse:
@@ -1684,8 +1777,11 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/scheduled-tasks/{trigger_id}")
     async def delete_scheduled_task_endpoint(trigger_id: str) -> JSONResponse:
-        if not ScheduledTriggerStore(settings.state_dir).delete(trigger_id):
+        store = ScheduledTriggerStore(settings.state_dir)
+        trigger = store.load(trigger_id)
+        if trigger is None or not store.delete(trigger_id):
             return JSONResponse({"error": f"No scheduled task {trigger_id!r}"}, status_code=404)
+        await _delete_run_threads(trigger.runs)
         return JSONResponse({"deleted": trigger_id})
 
     @app.get("/api/commands")
@@ -2535,7 +2631,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         # newest tab is the one actually worth nudging.
         session._live_websocket = websocket
         try:
-            await session.send_state(websocket)
+            await session.send_state(websocket, on_connect=True)
             await session.send_history(websocket)
             # A pending approval from before a restart or dropped connection
             # doesn't wait for a new user_message to surface -- redeliver it

@@ -16,6 +16,8 @@ import { ChevronDownIcon, PencilIcon, RetryIcon, RewindIcon } from "./icons";
 import { ImageLightbox } from "./ImageLightbox";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { QuestionCard } from "./QuestionCard";
+import { RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
+import { TaskDraftCard } from "./TaskDraftCard";
 
 /** react-markdown + remark/rehype + katex is the single biggest dependency
  * added to this app (roughly triples the production bundle) -- code-split
@@ -50,6 +52,7 @@ function pptxOverlayTargetOf(arguments_: Record<string, unknown>): { path: strin
 }
 
 type ToolOrApprovalItem = Extract<LogItem, { kind: "tool" | "approval" }>;
+type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
 
 interface ChatLogProps {
   items: LogItem[];
@@ -66,6 +69,8 @@ interface ChatLogProps {
   /** True until this thread's history has arrived -- an existing
    * thread shows a spinner then, not the brand-new-thread greeting. */
   loading: boolean;
+  onReviewTaskDraft: (item: TaskDraftItem) => void;
+  onDismissTaskDraft: (item: TaskDraftItem) => void;
   /** A shape clicked in a pptx preview (PptxShapeOverlay) -- threaded up
    * to App.tsx exactly like BrowserPanel's own onSendToChat. */
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
@@ -98,6 +103,8 @@ export function ChatLog({
   onEditMessage,
   onRewindMessage,
   loading,
+  onReviewTaskDraft,
+  onDismissTaskDraft,
   onPptxShapePicked,
   olderItems,
   olderStatus,
@@ -209,6 +216,8 @@ export function ChatLog({
             onAnswerQuestion={onAnswerQuestion}
             onEditMessage={onEditMessage}
             onRewindMessage={onRewindMessage}
+            onReviewTaskDraft={onReviewTaskDraft}
+            onDismissTaskDraft={onDismissTaskDraft}
             onPptxShapePicked={onPptxShapePicked}
           />
         ))}
@@ -260,6 +269,8 @@ function TurnView({
   onAnswerQuestion,
   onEditMessage,
   onRewindMessage,
+  onReviewTaskDraft,
+  onDismissTaskDraft,
   onPptxShapePicked,
 }: {
   turn: Turn;
@@ -268,6 +279,8 @@ function TurnView({
   onAnswerQuestion: (id: string, answer: string) => void;
   onEditMessage?: (turnIndex: number, text: string) => void;
   onRewindMessage?: (turnIndex: number, text: string) => void;
+  onReviewTaskDraft?: (item: TaskDraftItem) => void;
+  onDismissTaskDraft?: (item: TaskDraftItem) => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const entries = groupToolRuns(turn.items);
@@ -287,6 +300,8 @@ function TurnView({
           <ToolRunGroupView key={entry.id} group={entry} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
         ) : entry.kind === "question" ? (
           <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
+        ) : entry.kind === "task_draft" ? (
+          <TaskDraftCard key={entry.id} item={entry} onReview={onReviewTaskDraft} onDismiss={onDismissTaskDraft} />
         ) : (
           <LogItemView key={entry.id} item={entry} onEditMessage={isLastTurn ? onEditMessage : undefined} />
         ),
@@ -842,6 +857,7 @@ function LogItemView({
   onEditMessage?: (turnIndex: number, text: string) => void;
 }) {
   if (item.kind === "user") {
+    if (item.text.startsWith(RUN_PROMPT_PREFIX)) return <ScheduledRunCard text={item.text} />;
     return <UserMessageView item={item} onEditMessage={onEditMessage} />;
   }
 

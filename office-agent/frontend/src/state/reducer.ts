@@ -1,4 +1,9 @@
-import type { WsServerEvent } from "../types/wire";
+import type { TaskDraft, WsServerEvent } from "../types/wire";
+
+/** The answer the frontend sends for a saved draft starts with this --
+ * also how a replayed create_scheduled_task call tells "saved" apart
+ * from "dismissed". */
+export const TASK_DRAFT_SAVED_PREFIX = "The user reviewed the draft and saved it";
 
 export type LogItem =
   // turnIndex: 0-based count among this thread's "user" items only (its
@@ -51,6 +56,15 @@ export type LogItem =
       multiSelect: boolean;
       status: "pending" | "answered";
       answer?: string;
+    }
+  | {
+      id: string;
+      kind: "task_draft";
+      draft: TaskDraft;
+      status: "pending" | "saved" | "dismissed";
+      /** The name it was actually saved under -- the user may have
+       * renamed it while reviewing. */
+      savedName?: string;
     }
   | { id: string; kind: "system"; text: string };
 
@@ -156,6 +170,7 @@ export type LocalAction =
   | { type: "local_rewind_message"; turnIndex: number }
   | { type: "local_approval_resolved"; id: string; approved: boolean }
   | { type: "local_question_answered"; id: string; answer: string }
+  | { type: "local_task_draft_resolved"; id: string; status: "saved" | "dismissed"; savedName?: string }
   | { type: "local_connection_reset" }
   | { type: "local_switch_thread" }
   | { type: "local_request_older_messages" };
@@ -300,9 +315,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ),
       };
 
+    case "local_task_draft_resolved":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.kind === "task_draft" && item.id === action.id
+            ? { ...item, status: action.status, savedName: action.savedName }
+            : item,
+        ),
+      };
+
     case "state":
       return {
         ...state,
+        turnInFlight: action.turn_in_flight ?? state.turnInFlight,
         planMode: action.plan_mode,
         acceptEdits: action.accept_edits,
         model: action.model,
@@ -337,6 +363,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           }
           if (entry.kind === "agent") {
             return { id: genId(), kind: "agent", text: entry.text, streaming: false } as const;
+          }
+          if (entry.tool_name === "create_scheduled_task") {
+            const saved = typeof entry.result === "string" && entry.result.startsWith(TASK_DRAFT_SAVED_PREFIX);
+            return {
+              id: genId(),
+              kind: "task_draft",
+              draft: entry.arguments as TaskDraft,
+              status: saved ? "saved" : "dismissed",
+            } as const;
           }
           return {
             id: genId(),
@@ -470,6 +505,25 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             beforePreview: action.before_preview,
             afterPreview: action.after_preview,
           },
+        ],
+      };
+
+    case "task_draft_required":
+      return {
+        ...state,
+        items: [
+          ...closeStreamingBubble(state.items),
+          { id: action.id, kind: "task_draft", draft: action.draft, status: "pending" },
+        ],
+      };
+
+    case "scheduled_run_started":
+      return {
+        ...state,
+        turnInFlight: true,
+        items: [
+          ...state.items,
+          { id: genId(), kind: "user", text: action.text, turnIndex: countUserItems(state.items) },
         ],
       };
 

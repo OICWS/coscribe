@@ -84,6 +84,7 @@ from .runtime import (
 from .runtime.provider_config import load_custom_providers
 from .runtime_lg import poll_due_scheduled_tasks, poll_due_wakes
 from .tools import load_builtin_skills, load_skills
+from .tools.scheduled_tasks import ScheduledTriggerStore, create_trigger
 
 app = typer.Typer(add_completion=False, no_args_is_help=False)
 logger = logging.getLogger(__name__)
@@ -218,6 +219,37 @@ class _CliSocket:
         self._streamed = ""
         self.had_error = False
 
+    def _review_task_draft(self, draft: dict[str, Any]) -> str:
+        typer.echo(
+            f"\n[scheduled task draft] {draft.get('name')} "
+            f"({draft.get('kind')}{' at ' + draft['at'] if draft.get('at') else ''})\n"
+            f"{draft.get('prompt', '')}\n"
+        )
+        if not typer.confirm("Save this scheduled task?", default=False):
+            return "The user dismissed the draft without saving it."
+        fields = {
+            key: draft[key]
+            for key in (
+                "name",
+                "kind",
+                "at",
+                "prompt",
+                "weekday",
+                "day_of_month",
+                "start_date",
+                "model",
+                "approval_mode",
+            )
+            if draft.get(key) is not None
+        }
+        try:
+            store = ScheduledTriggerStore(self._session.settings.state_dir)
+            trigger = create_trigger(store, **fields)
+        except (TypeError, ValueError) as exc:
+            typer.echo(f"Couldn't save it: {exc}", err=True)
+            return f"The draft couldn't be saved: {exc}"
+        return f'Saved as scheduled task "{trigger.name}".'
+
     async def send_json(self, data: dict[str, Any]) -> None:
         kind = data["type"]
         if kind == "agent_delta":
@@ -242,6 +274,8 @@ class _CliSocket:
             typer.echo(f"\n[approval required] {data['tool_name']}({data['arguments']})")
             approved = typer.confirm("Allow this action?", default=False)
             self._session.resolve_approval(data["id"], approved)
+        elif kind == "task_draft_required":
+            self._session.resolve_question(data["id"], self._review_task_draft(data["draft"]))
         elif kind == "history":
             for entry in data["entries"]:
                 if entry["kind"] == "user":
