@@ -1,4 +1,5 @@
 import type { CheckOp, Condition, Operand, StepKind, Workflow, WorkflowStep } from "../types/workflow";
+import { allSteps } from "./workflowTree";
 
 export const KIND_LABEL: Record<StepKind, string> = {
   tool: "Tool",
@@ -6,6 +7,8 @@ export const KIND_LABEL: Record<StepKind, string> = {
   llm: "Model",
   check: "Check",
   approval: "Approval",
+  branch: "Branch",
+  loop: "Loop",
 };
 
 export const KIND_COLOR: Record<StepKind, string> = {
@@ -14,6 +17,8 @@ export const KIND_COLOR: Record<StepKind, string> = {
   llm: "var(--kind-llm)",
   check: "var(--kind-check)",
   approval: "var(--kind-approval)",
+  branch: "var(--kind-branch)",
+  loop: "var(--kind-loop)",
 };
 
 export const OP_LABEL: Record<CheckOp, string> = {
@@ -48,6 +53,7 @@ export function describeCheckResult(op: CheckOp, held: boolean, left: unknown, r
 export function stepConditions(step: WorkflowStep): Condition[] {
   if (step.kind === "check") return step.conditions;
   if (step.kind === "approval" && step.when) return [step.when];
+  if (step.kind === "branch") return [step.condition];
   return [];
 }
 
@@ -80,16 +86,6 @@ export function stepOutput(step: WorkflowStep): string | null {
   return "save_as" in step ? step.save_as : null;
 }
 
-/** Names a step can read: the inputs, then what each earlier step saved. */
-export function namesBefore(workflow: Workflow, index: number): string[] {
-  const names = workflow.inputs.map((input) => input.name);
-  for (const step of workflow.steps.slice(0, index)) {
-    const output = stepOutput(step);
-    if (output) names.push(output);
-  }
-  return names;
-}
-
 export function operandReference(operand: Operand): string | null {
   if ("ref" in operand) return operand.ref;
   if ("count" in operand) return operand.count;
@@ -106,7 +102,7 @@ export function modelStepsRead(workflow: Workflow, conditions: Condition[]): Wor
       if (ref) roots.add(ref.split(".")[0]);
     }
   }
-  return workflow.steps.filter((step) => step.kind === "llm" && roots.has(step.save_as));
+  return allSteps(workflow).filter((step) => step.kind === "llm" && roots.has(step.save_as));
 }
 
 export function formatValue(value: unknown): string {
@@ -122,11 +118,14 @@ export function stepDuration(startedAt: string | null, finishedAt: string | null
   if (!startedAt || !finishedAt) return null;
   const seconds = (new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000;
   if (!Number.isFinite(seconds) || seconds < 0) return null;
-  return seconds < 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds)}s`;
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}m ${whole % 60}s`;
 }
 
 export function countModelSteps(workflow: Workflow): number {
-  return workflow.steps.filter((step) => step.kind === "llm").length;
+  return allSteps(workflow).filter((step) => step.kind === "llm").length;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

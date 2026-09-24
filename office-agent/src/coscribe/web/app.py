@@ -140,7 +140,7 @@ from ..tools.subagent_tasks import (
 from ..tools.tasks import TaskToolkit
 from ..workflows.catalog import describe_params
 from ..workflows.solidify import DraftFailed
-from ..workflows.spec import parse_workflow, workflow_error
+from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflow_error
 from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus
 from .browser_detect import find_windows_browser
@@ -1666,7 +1666,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         try:
             workflow = parse_workflow(body.workflow)
         except ValidationError as exc:
-            return JSONResponse({"error": workflow_error(exc)}, status_code=400)
+            return JSONResponse({"error": workflow_error(exc, body.workflow)}, status_code=400)
         return JSONResponse({"workflow": workflow.model_dump(mode="json")})
 
     def _thread_file(thread_id: str, path: str) -> Path | None:
@@ -1883,8 +1883,20 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         if isinstance(reopened, JSONResponse):
             return reopened
         before, run = reopened
+        trigger = ScheduledTriggerStore(settings.state_dir).load(trigger_id)
+        workflow = parse_workflow(trigger.workflow) if trigger and trigger.workflow else None
+        # A loop or branch around the failed step is recorded as failed
+        # too; retrying means the step itself, on the pass that failed.
+        blocks = {
+            p.step.id for p in walk(workflow.steps) if isinstance(p.step, (BranchStep, LoopStep))
+        } if workflow else set()
         step_id = payload.step_id or next(
-            (s["step_id"] for s in reversed(before.steps) if s.get("status") == "failed"), None
+            (
+                s["step_id"]
+                for s in reversed(before.steps)
+                if s.get("status") == "failed" and s["step_id"] not in blocks
+            ),
+            None,
         )
         if step_id is None:
             _continue_in_background(trigger_id, run_id, lambda wf: wf.resume())

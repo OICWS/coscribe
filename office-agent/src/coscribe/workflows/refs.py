@@ -23,6 +23,13 @@ class UnresolvedReference(ValueError):
     pass
 
 
+_PLAIN_REFERENCE = re.compile(_REFERENCE)
+
+
+def is_reference(text: str) -> bool:
+    return _PLAIN_REFERENCE.fullmatch(text) is not None
+
+
 def template_references(text: str) -> list[str]:
     return _TEMPLATE.findall(text)
 

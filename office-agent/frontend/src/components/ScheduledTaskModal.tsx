@@ -5,6 +5,7 @@ import type { Workflow } from "../types/workflow";
 import type { ApprovalMode, ScheduledTask, ScheduleKind } from "../types/settings";
 import type { TaskDraft } from "../types/wire";
 import { CloseIcon, FolderIcon } from "./icons";
+import { allSteps } from "../lib/workflowTree";
 
 const FREQUENCY_OPTIONS: { value: ScheduleKind; label: string }[] = [
   { value: "manual", label: "Manual" },
@@ -115,7 +116,7 @@ function modalTitle(isEdit: boolean, fromDraft: boolean, newWorkflow: Workflow |
 }
 
 function workflowSummary(workflow: Workflow, isEdit: boolean): string {
-  const count = workflow.steps.length;
+  const count = allSteps(workflow).length;
   if (count === 0) return "You'll add the workflow's steps on its page after saving.";
   const steps = count === 1 ? "1 step" : `${count} steps`;
   if (isEdit) return `This task runs a workflow of ${steps}. Edit its steps on the task page.`;

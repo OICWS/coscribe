@@ -16,6 +16,11 @@ const KINDS: { kind: StepKind; label: string; description: string }[] = [
   { kind: "approval", label: "Approval", description: "Pause until you approve" },
 ];
 
+const STRUCTURE: { kind: StepKind; label: string; description: string }[] = [
+  { kind: "branch", label: "If / otherwise", description: "Run different steps depending on a value" },
+  { kind: "loop", label: "For each", description: "Repeat steps for every item in a list" },
+];
+
 function categoryLabel(category: string): string {
   if (!category) return "Other";
   const text = category.replace(/_/g, " ").replace(/^mcp:/, "Connector: ");
@@ -78,8 +83,11 @@ export function AddStepMenu({ tools, onPick, onClose, placement = "below" }: Add
     >
       {view === "kinds" ? (
         <ul className="flex flex-col p-1.5">
-          {KINDS.map(({ kind, label, description }) => (
-            <li key={kind}>
+          {[...KINDS, ...STRUCTURE].map(({ kind, label, description }) => (
+            <li
+              key={kind}
+              className={kind === STRUCTURE[0].kind ? "mt-1.5 border-t border-[var(--border)] pt-1.5" : undefined}
+            >
               <button
                 type="button"
                 className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--card-bg)] focus-visible:bg-[var(--card-bg)] focus-visible:outline-none"

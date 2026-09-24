@@ -104,6 +104,8 @@
   --kind-llm: #b8456a;
   --kind-check: #2f7d4a;
   --kind-approval: #93600f;
+  --kind-branch: #6a4db3;
+  --kind-loop: #17767c;
   --accent-ink: #a83d5c;
   --card-bg: #f0f0ef;
   --primary: #171614;
@@ -148,6 +150,8 @@
     --kind-llm: #ef92ab;
     --kind-check: #8fd19f;
     --kind-approval: #e8b85c;
+    --kind-branch: #c3adf7;
+    --kind-loop: #7fd2d6;
     --accent-ink: #f5aec1;
     --card-bg: #322f2e;
     --primary: #f7f5f3;

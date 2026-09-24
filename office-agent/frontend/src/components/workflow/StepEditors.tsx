@@ -5,8 +5,10 @@ import { IDENTIFIER } from "../../lib/workflowEdit";
 import type { ToolInfo, ToolParam } from "../../types/settings";
 import type {
   ApprovalStep,
+  BranchStep,
   CheckStep,
   LLMStep,
+  LoopStep,
   OutputFieldType,
   ScriptStep,
   ToolStep,
@@ -33,6 +35,8 @@ export interface EditorContext {
   inputNames: Set<string>;
   tools: Map<string, ToolInfo>;
   listId: string;
+  /** For a loop: what its body makes, which it can keep from each pass. */
+  collectable?: string[];
 }
 
 interface EditorProps<T extends WorkflowStep> {
@@ -465,6 +469,123 @@ function ApprovalEditor({ step, onChange, context }: EditorProps<ApprovalStep>) 
   );
 }
 
+// -- Branch / loop -------------------------------------------------------------------
+
+function BranchEditor({ step, onChange, context }: EditorProps<BranchStep>) {
+  return (
+    <div className="flex flex-col gap-2">
+      <FieldLabel hint="Its Then steps run when this holds; the Otherwise steps when it doesn't">Condition</FieldLabel>
+      <ConditionRow
+        label="Condition"
+        condition={step.condition}
+        valuesListId={context.listId}
+        defaultReference={context.suggestions[0] ?? ""}
+        onChange={(condition) => onChange({ ...step, condition })}
+      />
+    </div>
+  );
+}
+
+function LoopEditor({ step, onChange, context }: EditorProps<LoopStep>) {
+  const collectable = context.collectable ?? [];
+  const itemInvalid = !IDENTIFIER.test(step.item);
+  const saveAsInvalid = step.save_as !== null && !IDENTIFIER.test(step.save_as);
+  const setCollect = (collect: string) => {
+    if (!collect) {
+      onChange({ ...step, collect: null, save_as: null });
+      return;
+    }
+    const root = collect.split(".")[0];
+    onChange({ ...step, collect, save_as: step.save_as ?? `${root}_list` });
+  };
+  return (
+    <>
+      <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_110px] gap-3">
+        <div>
+          <FieldLabel htmlFor={`${step.id}-over`}>Go through</FieldLabel>
+          <input
+            id={`${step.id}-over`}
+            list={context.listId}
+            spellCheck={false}
+            aria-invalid={!step.over}
+            className={`${inputClass} font-mono text-[12.5px]`}
+            placeholder="a list, e.g. matches"
+            value={step.over}
+            onChange={(e) => onChange({ ...step, over: e.target.value.trim() })}
+          />
+        </div>
+        <div>
+          <FieldLabel htmlFor={`${step.id}-item`}>Call each one</FieldLabel>
+          <input
+            id={`${step.id}-item`}
+            spellCheck={false}
+            aria-invalid={itemInvalid}
+            className={`${inputClass} font-mono text-[12.5px]`}
+            value={step.item}
+            onChange={(e) => onChange({ ...step, item: e.target.value.trim() })}
+          />
+        </div>
+        <div>
+          <FieldLabel htmlFor={`${step.id}-max`}>At most</FieldLabel>
+          <input
+            id={`${step.id}-max`}
+            type="number"
+            min={1}
+            max={200}
+            className={inputClass}
+            value={step.max_items}
+            onChange={(e) => onChange({ ...step, max_items: Math.max(1, Math.min(200, Number(e.target.value) || 1)) })}
+          />
+        </div>
+      </div>
+      <p className="-mt-2 text-xs text-[var(--muted)]">
+        The steps inside run once per item, in order, reading it as{" "}
+        <span className="font-mono">{`{{${step.item || "item"}}}`}</span>. A longer list stops the run rather than being
+        cut short.
+      </p>
+      <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_110px] gap-3">
+        <div>
+          <FieldLabel htmlFor={`${step.id}-collect`}>Keep from each pass</FieldLabel>
+          <select
+            id={`${step.id}-collect`}
+            className={inputClass}
+            value={step.collect ?? ""}
+            onChange={(e) => setCollect(e.target.value)}
+          >
+            <option value="">Nothing</option>
+            {step.collect && !collectable.includes(step.collect) && (
+              <option value={step.collect}>{step.collect}</option>
+            )}
+            {collectable.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {step.collect !== null && (
+          <div>
+            <FieldLabel htmlFor={`${step.id}-save-as`}>Save the list as</FieldLabel>
+            <input
+              id={`${step.id}-save-as`}
+              spellCheck={false}
+              aria-invalid={saveAsInvalid}
+              className={`${inputClass} font-mono text-[12.5px]`}
+              value={step.save_as ?? ""}
+              onChange={(e) => onChange({ ...step, save_as: e.target.value.trim() })}
+            />
+          </div>
+        )}
+      </div>
+      {(itemInvalid || saveAsInvalid) && (
+        <p className="-mt-2 text-xs text-[var(--danger)]">
+          Names use lowercase letters, digits and _, starting with a letter.
+        </p>
+      )}
+    </>
+  );
+}
+
 /** The kind-specific part of an open step. */
 export function StepFields({ step, onChange, context }: EditorProps<WorkflowStep>) {
   const body = (() => {
@@ -479,6 +600,10 @@ export function StepFields({ step, onChange, context }: EditorProps<WorkflowStep
         return <CheckEditor step={step} onChange={onChange} context={context} />;
       case "approval":
         return <ApprovalEditor step={step} onChange={onChange} context={context} />;
+      case "branch":
+        return <BranchEditor step={step} onChange={onChange} context={context} />;
+      case "loop":
+        return <LoopEditor step={step} onChange={onChange} context={context} />;
     }
   })();
   return (

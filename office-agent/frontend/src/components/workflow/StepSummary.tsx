@@ -81,6 +81,35 @@ export function StepSummary({ step, inputNames }: { step: WorkflowStep; inputNam
       </>
     );
   }
+  if (step.kind === "branch") {
+    return (
+      <>
+        <span>If</span>
+        <ConditionText condition={step.condition} inputNames={inputNames} />
+      </>
+    );
+  }
+  if (step.kind === "loop") {
+    return (
+      <>
+        <span>For each</span>
+        <VarToken name={step.item} isInput={false} />
+        <span>in</span>
+        {step.over ? (
+          <VarToken name={step.over} isInput={inputNames.has(step.over.split(".")[0])} />
+        ) : (
+          <span className="text-[var(--danger)]">a list not chosen yet</span>
+        )}
+        {step.collect && (
+          <>
+            <span>· keeps</span>
+            <VarToken name={step.collect} isInput={false} />
+          </>
+        )}
+        <Arrow output={output} inputNames={inputNames} />
+      </>
+    );
+  }
   return (
     <>
       <span>Pauses for your approval</span>

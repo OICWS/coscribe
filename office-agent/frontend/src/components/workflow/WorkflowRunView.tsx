@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { capitalize, formatRunTime, runDuration, runSourceLabel } from "../../lib/runLabels";
 import {
   describeCheckResult,
@@ -9,7 +9,16 @@ import {
   summarizeOutput,
 } from "../../lib/workflowLabels";
 import type { ScheduledRun, ScheduledTask } from "../../types/settings";
-import type { CheckResult, StepRecord, Workflow, WorkflowStep } from "../../types/workflow";
+import {
+  loopProgress,
+  passStatus,
+  recordKey,
+  recordMap,
+  stoppedInside,
+  type LoopProgress,
+} from "../../lib/workflowProgress";
+import { placeSteps } from "../../lib/workflowTree";
+import type { BranchStep, CheckResult, LoopStep, StepRecord, Workflow, WorkflowStep } from "../../types/workflow";
 import { CheckIcon, ChevronDownIcon, ClockIcon, CloseIcon } from "../icons";
 import { ConditionText, VarToken } from "./parts";
 import { StepOutput } from "./StepOutput";
@@ -104,17 +113,22 @@ function CheckLines({
   );
 }
 
-interface RowProps {
-  step: WorkflowStep;
-  index: number;
-  record: StepRecord | undefined;
-  status: RowStatus;
-  last: boolean;
+interface RunContext {
   workflow: Workflow;
+  run: ScheduledRun;
+  records: Map<string, StepRecord>;
+  numbers: Map<string, number>;
   inputNames: Set<string>;
   onRetry: (stepId?: string) => Promise<string | null>;
   onAnswer: (approved: boolean, note: string) => Promise<string | null>;
   onEditStep: (stepId: string) => void;
+}
+
+interface RowProps {
+  step: WorkflowStep;
+  record: StepRecord | undefined;
+  status: RowStatus;
+  ctx: RunContext;
 }
 
 function failureLabel(step: WorkflowStep): string {
@@ -123,21 +137,23 @@ function failureLabel(step: WorkflowStep): string {
   return "Failed";
 }
 
-function FailedCard({ step, index, record, workflow, inputNames, onRetry, onEditStep }: RowProps) {
+function FailedCard({ step, record, ctx }: RowProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const number = ctx.numbers.get(step.id) ?? 0;
   const source =
     step.kind === "check"
-      ? modelStepsRead(workflow, step.conditions)
-          .filter((s) => workflow.steps.indexOf(s) < index)
+      ? modelStepsRead(ctx.workflow, step.conditions)
+          .filter((s) => (ctx.numbers.get(s.id) ?? 0) < number)
           .pop()
       : undefined;
-  const sourceNumber = source ? workflow.steps.indexOf(source) + 1 : null;
+  const sourceNumber = source ? (ctx.numbers.get(source.id) ?? null) : null;
   const declined = step.kind === "approval";
+  const pass = record?.iteration?.length ? ` on item ${record.iteration[record.iteration.length - 1] + 1}` : "";
 
   const retry = async (stepId?: string) => {
     setBusy(true);
-    setError(await onRetry(stepId));
+    setError(await ctx.onRetry(stepId));
     setBusy(false);
   };
 
@@ -153,10 +169,11 @@ function FailedCard({ step, index, record, workflow, inputNames, onRetry, onEdit
         <span className="text-sm font-medium">{step.title}</span>
         <span className="text-[13px] font-medium" style={{ color: "var(--danger)" }}>
           {failureLabel(step)}
+          {pass}
         </span>
       </div>
       {record?.checks && record.checks.length > 0 ? (
-        <CheckLines step={step} checks={record.checks} inputNames={inputNames} />
+        <CheckLines step={step} checks={record.checks} inputNames={ctx.inputNames} />
       ) : (
         record?.error && (
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-[var(--fg)]">
@@ -175,8 +192,11 @@ function FailedCard({ step, index, record, workflow, inputNames, onRetry, onEdit
             <button type="button" disabled={busy} className={primaryButton} onClick={() => retry(source.id)}>
               Retry from step {sourceNumber}
             </button>
-            <button type="button" className={secondaryButton} onClick={() => onEditStep(source.id)}>
+            <button type="button" className={secondaryButton} onClick={() => ctx.onEditStep(source.id)}>
               Edit step {sourceNumber}
+            </button>
+            <button type="button" className={secondaryButton} onClick={() => ctx.onEditStep(step.id)}>
+              Edit this check
             </button>
           </>
         ) : (
@@ -184,8 +204,8 @@ function FailedCard({ step, index, record, workflow, inputNames, onRetry, onEdit
             <button type="button" disabled={busy} className={primaryButton} onClick={() => retry(step.id)}>
               {declined ? "Ask again" : "Retry this step"}
             </button>
-            <button type="button" className={secondaryButton} onClick={() => onEditStep(step.id)}>
-              Edit step {index + 1}
+            <button type="button" className={secondaryButton} onClick={() => ctx.onEditStep(step.id)}>
+              Edit step {number}
             </button>
           </>
         )}
@@ -199,13 +219,13 @@ function FailedCard({ step, index, record, workflow, inputNames, onRetry, onEdit
   );
 }
 
-function ApprovalCard({ step, record, onAnswer }: RowProps) {
+function ApprovalCard({ step, record, ctx }: RowProps) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const answer = async (approved: boolean) => {
     setBusy(true);
-    setError(await onAnswer(approved, note.trim()));
+    setError(await ctx.onAnswer(approved, note.trim()));
     setBusy(false);
   };
   return (
@@ -250,11 +270,32 @@ function ApprovalCard({ step, record, onAnswer }: RowProps) {
   );
 }
 
+function branchArm(record: StepRecord | undefined): "then" | "otherwise" | null {
+  const arm = (record?.output as { arm?: string } | null | undefined)?.arm;
+  return arm === "then" || arm === "otherwise" ? arm : null;
+}
+
 function rowSummary(step: WorkflowStep, record: StepRecord | undefined, status: RowStatus): string {
   if (status === "not_reached") return "Not reached";
   if (status === "pending") return "Up next";
+  if (step.kind === "loop") {
+    const progress = loopProgress(record);
+    if (!progress) return status === "running" ? "Starting…" : "";
+    const items = `${progress.total} ${progress.total === 1 ? "item" : "items"}`;
+    if (status === "done") return `Went through ${items}`;
+    if (status === "failed") return `Stopped at item ${progress.done + 1} of ${progress.total}`;
+    if (status === "waiting") return `Waiting at item ${progress.done + 1} of ${progress.total}`;
+    return `${progress.done} of ${items} done`;
+  }
   if (status === "running") return step.kind === "llm" ? "Asking the model…" : "Running…";
+  if (status === "failed") return "Stopped inside";
+  if (status === "waiting") return "Waiting inside";
   if (status === "skipped") return "Skipped · its condition didn't hold";
+  if (step.kind === "branch" && record?.checks?.length) {
+    const first = record.checks[0];
+    const arm = branchArm(record) === "then" ? "Took Then" : "Took Otherwise";
+    return `${arm} · ${describeCheckResult(step.condition.op, first.held, first.left, first.right)}`;
+  }
   if (step.kind === "check" && record?.checks?.length) {
     const first = record.checks[0];
     return `Passed · ${describeCheckResult(step.conditions[0].op, true, first.left, first.right)}`;
@@ -263,13 +304,190 @@ function rowSummary(step: WorkflowStep, record: StepRecord | undefined, status: 
   return summarizeOutput(record?.output);
 }
 
-function StepRow(props: RowProps) {
-  const { step, record, status, last } = props;
+function Nested({
+  label,
+  color,
+  note,
+  children,
+}: {
+  label: string;
+  color: string;
+  note?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      aria-label={label}
+      className="rounded-lg border-l-2 py-2 pl-3 pr-2"
+      style={{
+        borderLeftColor: `color-mix(in srgb, ${color} 55%, transparent)`,
+        backgroundColor: `color-mix(in srgb, ${color} 4%, transparent)`,
+      }}
+    >
+      <div className="mb-2 flex items-baseline gap-2 text-xs">
+        <span className="font-semibold uppercase tracking-[0.08em]" style={{ color }}>
+          {label}
+        </span>
+        {note && <span className="min-w-0 truncate text-[var(--muted)]">{note}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function stepCount(steps: WorkflowStep[]): string {
+  const count = placeSteps(steps).length;
+  return `${count} ${count === 1 ? "step" : "steps"}`;
+}
+
+function BranchArms({
+  step,
+  record,
+  path,
+  ctx,
+}: {
+  step: BranchStep;
+  record: StepRecord | undefined;
+  path: number[];
+  ctx: RunContext;
+}) {
+  const taken = record?.status === "done" ? branchArm(record) : null;
+  const arms = [
+    { arm: "then" as const, label: "Then", steps: step.then },
+    { arm: "otherwise" as const, label: "Otherwise", steps: step.otherwise },
+  ];
+  return (
+    <div className="flex flex-col gap-2">
+      {arms.map(({ arm, label, steps }) => {
+        if (taken === arm) {
+          return (
+            <Nested key={arm} label={label} color="var(--kind-branch)">
+              {steps.length > 0 ? (
+                <RunList steps={steps} path={path} ctx={ctx} />
+              ) : (
+                <p className="text-[13px] text-[var(--muted)]">Nothing to do here.</p>
+              )}
+            </Nested>
+          );
+        }
+        return (
+          <p key={arm} className="flex items-baseline gap-2 pl-3.5 text-[13px] text-[var(--muted)]">
+            <span className="text-xs font-semibold uppercase tracking-[0.08em]">{label}</span>
+            <span>
+              {stepCount(steps)} · {taken ? "not taken" : "not decided yet"}
+            </span>
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+const PASS_TINT: Record<string, string> = {
+  done: "var(--success)",
+  failed: "var(--danger)",
+  waiting: "var(--warning)",
+  running: "var(--accent)",
+};
+
+function defaultPass(step: LoopStep, path: number[], progress: LoopProgress, ctx: RunContext): number {
+  let latest = 0;
+  for (let index = 0; index < progress.total; index++) {
+    const status = passStatus(step, [...path, index], ctx.records);
+    if (status === "failed" || status === "waiting") return index;
+    if (status !== "not_reached") latest = index;
+  }
+  return latest;
+}
+
+function LoopPasses({
+  step,
+  record,
+  path,
+  ctx,
+}: {
+  step: LoopStep;
+  record: StepRecord | undefined;
+  path: number[];
+  ctx: RunContext;
+}) {
+  const progress = loopProgress(record);
+  const [chosen, setChosen] = useState<number | null>(null);
+  if (!progress || progress.total === 0) {
+    return (
+      <p className="pl-3.5 text-[13px] text-[var(--muted)]">
+        {progress ? "The list was empty, so nothing ran." : `${stepCount(step.steps)} for each ${step.item}`}
+      </p>
+    );
+  }
+  const selected = Math.min(chosen ?? defaultPass(step, path, progress, ctx), progress.total - 1);
+  const label = progress.items[selected];
+  return (
+    <Nested
+      label={`Item ${selected + 1} of ${progress.total}`}
+      color="var(--kind-loop)"
+      note={label ? `${step.item} = ${label}` : undefined}
+    >
+      <div role="tablist" aria-label={`Items of ${step.title}`} className="mb-3 flex flex-wrap gap-1">
+        {Array.from({ length: progress.total }, (_, index) => {
+          const status = passStatus(step, [...path, index], ctx.records);
+          const tint = PASS_TINT[status];
+          const active = index === selected;
+          const strength = active ? 18 : 10;
+          const style = tint
+            ? { color: tint, backgroundColor: `color-mix(in srgb, ${tint} ${strength}%, transparent)` }
+            : { color: "var(--muted)" };
+          return (
+            <button
+              key={index}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              title={progress.items[index]}
+              className={`h-6 min-w-6 rounded-md px-1.5 text-xs tabular-nums transition-colors ${
+                active ? "font-semibold ring-1 ring-[var(--fg)]" : "hover:bg-[var(--card-bg)]"
+              }`}
+              style={style}
+              onClick={() => setChosen(index)}
+            >
+              {index + 1}
+            </button>
+          );
+        })}
+      </div>
+      <RunList steps={step.steps} path={[...path, selected]} ctx={ctx} />
+    </Nested>
+  );
+}
+
+function StepRow({
+  step,
+  path,
+  last,
+  upNext,
+  ctx,
+}: {
+  step: WorkflowStep;
+  path: number[];
+  last: boolean;
+  upNext: boolean;
+  ctx: RunContext;
+}) {
+  const record = ctx.records.get(recordKey(step.id, path));
+  const status: RowStatus = record?.status ?? (upNext ? "pending" : "not_reached");
   const [open, setOpen] = useState(step.kind === "llm");
   const duration = stepDuration(record?.started_at ?? null, record?.finished_at ?? null);
+  const blockStopped = stoppedInside(step, ctx.run);
   const hasOutput =
-    status === "done" && record?.output !== null && record?.output !== undefined && step.kind !== "approval";
+    status === "done" &&
+    record?.output !== null &&
+    record?.output !== undefined &&
+    step.kind !== "approval" &&
+    step.kind !== "branch" &&
+    step.kind !== "loop";
   const muted = status === "not_reached" || status === "pending" || status === "skipped";
+  const props: RowProps = { step, record, status, ctx };
+  const showCard = !blockStopped && (status === "failed" || status === "waiting");
 
   return (
     <li className="flex gap-3.5">
@@ -278,9 +496,9 @@ function StepRow(props: RowProps) {
         {!last && <span className="min-h-3.5 w-px flex-1 bg-[var(--border)]" />}
       </div>
       <div className={`flex min-w-0 flex-1 flex-col gap-2.5 ${last ? "pb-1" : "pb-4"}`}>
-        {status === "failed" && <FailedCard {...props} />}
-        {status === "waiting" && <ApprovalCard {...props} />}
-        {status !== "failed" && status !== "waiting" && (
+        {showCard && status === "failed" && <FailedCard {...props} />}
+        {showCard && status === "waiting" && <ApprovalCard {...props} />}
+        {!showCard && (
           <>
             <div className="flex min-w-0 items-baseline gap-2.5">
               <span className={`shrink-0 text-sm ${muted ? "text-[var(--muted)]" : "font-medium"}`}>{step.title}</span>
@@ -311,15 +529,31 @@ function StepRow(props: RowProps) {
             {hasOutput && open && <StepOutput value={record?.output} />}
           </>
         )}
+        {step.kind === "branch" && <BranchArms step={step} record={record} path={path} ctx={ctx} />}
+        {step.kind === "loop" && <LoopPasses step={step} record={record} path={path} ctx={ctx} />}
       </div>
     </li>
   );
 }
 
-function rowStatus(record: StepRecord | undefined, run: ScheduledRun, index: number, firstOpen: number): RowStatus {
-  if (record) return record.status;
-  if (run.status === "running") return index === firstOpen ? "pending" : "not_reached";
-  return "not_reached";
+function RunList({ steps, path, ctx }: { steps: WorkflowStep[]; path: number[]; ctx: RunContext }) {
+  const firstOpen =
+    ctx.run.status === "running" ? steps.findIndex((step) => !ctx.records.has(recordKey(step.id, path))) : -1;
+  const previousDone = firstOpen > 0 && ctx.records.get(recordKey(steps[firstOpen - 1].id, path))?.status !== "running";
+  return (
+    <ol className="flex flex-col">
+      {steps.map((step, index) => (
+        <StepRow
+          key={step.id}
+          step={step}
+          path={path}
+          last={index === steps.length - 1}
+          upNext={index === firstOpen && (index === 0 ? path.length === 0 : previousDone)}
+          ctx={ctx}
+        />
+      ))}
+    </ol>
+  );
 }
 
 interface WorkflowRunViewProps {
@@ -333,15 +567,23 @@ interface WorkflowRunViewProps {
 
 /** One workflow run, step by step (the Run artboard of
  * https://claude.ai/artifact/4G5JyZ3r4tMPF6QcFG3Vj1): what each step did,
- * where it stopped and why, and the way on from there. */
+ * where it stopped and why, and the way on from there. A branch shows the
+ * arm it took; a loop shows one item's pass at a time. */
 export function WorkflowRunView({ task, run, workflow, onRetry, onAnswer, onEditStep }: WorkflowRunViewProps) {
-  const inputNames = new Set(workflow.inputs.map((input) => input.name));
-  const records = new Map(run.steps.map((record) => [record.step_id, record]));
-  const firstOpen = workflow.steps.findIndex((step) => !records.has(step.id));
   const duration = runDuration(run);
   const crashed = run.status === "failed" && !run.steps.some((record) => record.status === "failed");
   const [retrying, setRetrying] = useState(false);
   const [crashError, setCrashError] = useState<string | null>(null);
+  const ctx: RunContext = {
+    workflow,
+    run,
+    records: recordMap(run),
+    numbers: new Map(placeSteps(workflow.steps).map((placed) => [placed.step.id, placed.number])),
+    inputNames: new Set(workflow.inputs.map((input) => input.name)),
+    onRetry,
+    onAnswer,
+    onEditStep,
+  };
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -385,23 +627,7 @@ export function WorkflowRunView({ task, run, workflow, onRetry, onAnswer, onEdit
           </div>
         )}
 
-        <ol className="flex flex-col">
-          {workflow.steps.map((step, index) => (
-            <StepRow
-              key={step.id}
-              step={step}
-              index={index}
-              record={records.get(step.id)}
-              status={rowStatus(records.get(step.id), run, index, firstOpen)}
-              last={index === workflow.steps.length - 1}
-              workflow={workflow}
-              inputNames={inputNames}
-              onRetry={onRetry}
-              onAnswer={onAnswer}
-              onEditStep={onEditStep}
-            />
-          ))}
-        </ol>
+        <RunList steps={workflow.steps} path={[]} ctx={ctx} />
       </div>
     </div>
   );

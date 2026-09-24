@@ -188,3 +188,35 @@ def test_check_draft_catches_what_the_spec_cant() -> None:
         "step 3: there's no tool called 'ask_user_question' to use",
     ]
     assert check_draft(parse_workflow({"steps": []}), TOOLS) == ["the workflow has no steps"]
+
+
+def test_check_draft_looks_inside_loops_and_branches() -> None:
+    workflow = parse_workflow(
+        {
+            "inputs": [{"name": "files", "default": "x"}],
+            "steps": [
+                {"id": "each", "kind": "loop", "title": "Each", "over": "files", "steps": [
+                    {"id": "b", "kind": "branch", "title": "B",
+                     "condition": {"left": {"ref": "item"}, "op": "not_empty"},
+                     "then": [{"id": "x", "kind": "tool", "title": "X", "tool": "summon_file",
+                               "args": {}}]},
+                ]},
+            ],
+        }
+    )  # fmt: skip
+    assert check_draft(workflow, TOOLS) == ["step 3: there's no tool called 'summon_file' to use"]
+
+
+def test_check_draft_wants_a_field_not_a_whole_model_result_collected() -> None:
+    loop = {
+        "id": "each", "kind": "loop", "title": "Each", "over": "files", "collect": "summary",
+        "save_as": "summaries",
+        "steps": [{"id": "sum", "kind": "llm", "title": "Sum", "prompt": "{{item}}",
+                   "fields": [{"name": "text"}], "save_as": "summary"}],
+    }  # fmt: skip
+    data = {"inputs": [{"name": "files", "default": "x"}], "steps": [loop]}
+    assert check_draft(parse_workflow(data), TOOLS) == [
+        "step 1: collect a field of summary (like summary.<field>), not the whole result"
+    ]
+    loop["collect"] = "summary.text"
+    assert check_draft(parse_workflow(data), TOOLS) == []

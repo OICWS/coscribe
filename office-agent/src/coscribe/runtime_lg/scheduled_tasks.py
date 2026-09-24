@@ -31,7 +31,7 @@ from ..tools.scheduled_tasks import (
     compute_next_run_at,
 )
 from ..workflows.engine import RunOutcome, StepRecord, WorkflowNotRunnable, WorkflowRun
-from ..workflows.spec import parse_workflow
+from ..workflows.spec import parse_workflow, walk
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,7 @@ async def _run_workflow(
         return "completed", None
     if outcome.status == "waiting":
         return "needs_approval", None
-    titles = {step.id: step.title for step in workflow.steps}
+    titles = {placed.step.id: placed.step.title for placed in walk(workflow.steps)}
     title = titles.get(outcome.step_id or "", "A step")
     return "failed", f"{title}: {outcome.error}"
 

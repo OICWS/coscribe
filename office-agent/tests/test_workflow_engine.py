@@ -390,3 +390,216 @@ async def test_a_workflow_with_no_steps_saves_but_wont_run(tmp_path: Path) -> No
 
     with pytest.raises(WorkflowNotRunnable, match="no steps yet"):
         await Harness(tmp_path, []).run(InMemorySaver(), workflow).start({})
+
+
+# -- Branches and loops -----------------------------------------------------------
+
+
+class Files:
+    """A read tool per file, one of which can be made to fail a set number
+    of times."""
+
+    def __init__(self) -> None:
+        self.reads: list[str] = []
+        self.failing: dict[str, int] = {}
+
+    def read_file(self, path: str) -> str:
+        self.reads.append(path)
+        if self.failing.get(path, 0) > 0:
+            self.failing[path] -= 1
+            raise FileNotFoundError(f"{path} is locked")
+        return f"text of {path}"
+
+    def list_files(self, path: str = ".") -> list[dict[str, Any]]:
+        return [{"path": "a.txt"}, {"path": "b.txt"}, {"path": "c.txt"}]
+
+
+def _loop_workflow(body_extra: list[Any] | None = None, **loop: Any) -> Any:
+    return parse_workflow(
+        {
+            "steps": [
+                {"id": "ls", "kind": "tool", "title": "List", "tool": "list_files",
+                 "args": {}, "save_as": "files"},
+                {"id": "each", "kind": "loop", "title": "Each file", "over": "files",
+                 "item": "file", "collect": "text", "save_as": "texts", **loop,
+                 "steps": [
+                     {"id": "read", "kind": "tool", "title": "Read", "tool": "read_file",
+                      "args": {"path": "{{file.path}}"}, "save_as": "text"},
+                     *(body_extra or []),
+                 ]},
+                {"id": "enough", "kind": "check", "title": "Enough",
+                 "conditions": [{"left": {"count": "texts"}, "op": "eq", "right": {"value": 3}}]},
+            ]
+        }
+    )  # fmt: skip
+
+
+def _files_harness(tmp_path: Path) -> tuple[Harness, Files]:
+    h, files = Harness(tmp_path, []), Files()
+    h.ctx.tools.update(read_file=files.read_file, list_files=files.list_files)
+    return h, files
+
+
+def _records(h: Harness, step_id: str) -> list[tuple[str, list[int]]]:
+    return [(r.status, r.iteration) for r in h.records if r.step_id == step_id]
+
+
+async def test_a_loop_runs_its_steps_per_item_and_collects_a_list(tmp_path: Path) -> None:
+    h, files = _files_harness(tmp_path)
+
+    outcome = await h.run(InMemorySaver(), _loop_workflow()).start({})
+
+    assert outcome.status == "completed"
+    assert files.reads == ["a.txt", "b.txt", "c.txt"]
+    assert outcome.values["texts"] == ["text of a.txt", "text of b.txt", "text of c.txt"]
+    assert _records(h, "read") == [
+        ("running", [0]), ("done", [0]), ("running", [1]), ("done", [1]),
+        ("running", [2]), ("done", [2]),
+    ]  # fmt: skip
+    loop_records = [r for r in h.records if r.step_id == "each"]
+    assert [r.output["done"] for r in loop_records] == [0, 1, 2, 3, 3]
+    assert loop_records[0].output["items"] == ["a.txt", "b.txt", "c.txt"]
+    assert loop_records[-1].status == "done"
+    assert loop_records[-1].output["collected"][0] == "text of a.txt"
+
+
+async def test_a_failure_inside_a_loop_resumes_at_that_item(tmp_path: Path) -> None:
+    h, files = _files_harness(tmp_path)
+    files.failing["b.txt"] = 1
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.sqlite")) as checkpointer:
+        run = h.run(checkpointer, _loop_workflow())
+        failed = await run.start({})
+
+        assert failed.status == "failed" and failed.step_id == "read"
+        loop_record = [r for r in h.records if r.step_id == "each"][-1]
+        assert loop_record.status == "failed"
+        assert loop_record.error == "Stopped at item 2: b.txt is locked"
+
+        resumed = await run.retry_from("read")
+
+    assert resumed.status == "completed"
+    assert files.reads == ["a.txt", "b.txt", "b.txt", "c.txt"]
+    assert resumed.values["texts"][1] == "text of b.txt"
+    assert ("running", []) in _records(h, "each")[-3:]
+
+
+async def test_a_branch_takes_one_arm_and_a_value_both_set_is_read_after(tmp_path: Path) -> None:
+    def workflow(threshold: int) -> Any:
+        return parse_workflow(
+            {
+                "inputs": [{"name": "limit", "type": "number", "default": threshold}],
+                "steps": [
+                    {"id": "ls", "kind": "tool", "title": "List", "tool": "list_files",
+                     "args": {}, "save_as": "files"},
+                    {"id": "many", "kind": "branch", "title": "Many files?",
+                     "condition": {"left": {"count": "files"}, "op": "gt",
+                                   "right": {"ref": "limit"}},
+                     "then": [{"id": "big", "kind": "tool", "title": "Big", "tool": "read_file",
+                               "args": {"path": "big.txt"}, "save_as": "text"}],
+                     "otherwise": [{"id": "small", "kind": "tool", "title": "Small",
+                                    "tool": "read_file", "args": {"path": "small.txt"},
+                                    "save_as": "text"}]},
+                    {"id": "save", "kind": "tool", "title": "Save", "tool": "write_file",
+                     "args": {"path": "out.txt", "content": "{{text}}"}},
+                ],
+            }
+        )  # fmt: skip
+
+    h, files = _files_harness(tmp_path)
+    taken = await h.run(InMemorySaver(), workflow(2), "t1").start({})
+    skipped = await h.run(InMemorySaver(), workflow(5), "t2").start({})
+
+    assert taken.status == skipped.status == "completed"
+    assert files.reads == ["big.txt", "small.txt"]
+    assert [c[1]["content"] for c in h.calls] == ["text of big.txt", "text of small.txt"]
+    branch_outputs = [r.output for r in h.records if r.step_id == "many" and r.status == "done"]
+    assert branch_outputs == [{"arm": "then"}, {"arm": "otherwise"}]
+
+
+async def test_an_approval_inside_a_loop_waits_on_each_item(tmp_path: Path) -> None:
+    approve = {"id": "ok", "kind": "approval", "title": "OK?", "message": "Keep {{file.path}}?"}
+    h, files = _files_harness(tmp_path)
+    run = h.run(InMemorySaver(), _loop_workflow([approve]))
+
+    outcome = await run.start({})
+    messages = []
+    while outcome.status == "waiting":
+        messages.append(outcome.request["message"] if outcome.request else None)
+        outcome = await run.answer(True)
+
+    assert outcome.status == "completed"
+    assert messages == ["Keep a.txt?", "Keep b.txt?", "Keep c.txt?"]
+    assert ("waiting", []) in _records(h, "each")
+
+
+@pytest.mark.parametrize(
+    ("loop", "error"),
+    [
+        ({"max_items": 2}, "files has 3 items, more than this loop's limit of 2"),
+        ({"over": "files.0"}, "files.0 is dict, not a list to go through"),
+    ],
+)
+async def test_a_loop_refuses_what_it_cant_go_through(
+    tmp_path: Path, loop: dict[str, Any], error: str
+) -> None:
+    h, files = _files_harness(tmp_path)
+
+    outcome = await h.run(InMemorySaver(), _loop_workflow(**loop)).start({})
+
+    assert outcome.status == "failed" and outcome.step_id == "each"
+    assert outcome.error == error
+    assert files.reads == []
+
+
+async def test_nested_loops_record_both_positions(tmp_path: Path) -> None:
+    inner = {
+        "id": "twice", "kind": "loop", "title": "Twice", "over": "pair", "item": "n",
+        "steps": [{"id": "touch", "kind": "tool", "title": "Touch", "tool": "read_file",
+                   "args": {"path": "{{file.path}}-{{n}}"}}],
+    }  # fmt: skip
+    workflow = parse_workflow(
+        {
+            "inputs": [],
+            "steps": [
+                {"id": "ls", "kind": "tool", "title": "List", "tool": "list_files",
+                 "args": {}, "save_as": "files"},
+                {"id": "pairs", "kind": "script", "title": "Pair", "code": "print('[1, 2]')",
+                 "save_as": "pair"},
+                {"id": "each", "kind": "loop", "title": "Each", "over": "files", "item": "file",
+                 "steps": [inner]},
+            ],
+        }
+    )  # fmt: skip
+    h, files = _files_harness(tmp_path)
+    h.ctx.run_script = lambda *a: {"exit_code": 0, "stdout": "[1, 2]", "stderr": ""}
+
+    outcome = await h.run(InMemorySaver(), workflow).start({})
+
+    assert outcome.status == "completed"
+    assert files.reads == ["a.txt-1", "a.txt-2", "b.txt-1", "b.txt-2", "c.txt-1", "c.txt-2"]
+    done = [r.iteration for r in h.records if r.step_id == "touch" and r.status == "done"]
+    assert done == [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [2, 1]]
+    assert [r.iteration for r in h.records if r.step_id == "twice" and r.status == "done"] == [
+        [0], [1], [2],
+    ]  # fmt: skip
+
+
+async def test_an_empty_loop_or_branch_is_refused_before_running(tmp_path: Path) -> None:
+    h, _files = _files_harness(tmp_path)
+    workflow = parse_workflow(
+        {"steps": [{"id": "ls", "kind": "tool", "title": "List", "tool": "list_files",
+                    "args": {}, "save_as": "files"},
+                   {"id": "each", "kind": "loop", "title": "Each", "over": "files", "steps": []}]}
+    )  # fmt: skip
+    with pytest.raises(WorkflowNotRunnable, match="step 2: the loop has no steps to repeat yet"):
+        await h.run(InMemorySaver(), workflow).start({})
+
+
+def test_item_labels_use_the_field_that_tells_items_apart() -> None:
+    from coscribe.workflows.engine import _item_labels
+
+    hits = [{"path": "big.pdf", "page": 97, "text": "Error code E-0097"},
+            {"path": "big.pdf", "page": 194, "text": "Error code E-0194"}]  # fmt: skip
+    assert _item_labels(hits) == ["Error code E-0097", "Error code E-0194"]
+    assert _item_labels(["a", 3, {"x": 1}]) == ["a", "3", '{"x": 1}']
+    assert _item_labels(["word " * 30]) == [("word " * 12).strip()[:59] + "…"]

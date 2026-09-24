@@ -1,13 +1,25 @@
 import type { ReactNode } from "react";
 import { KIND_COLOR, KIND_LABEL, OP_LABEL, formatValue, splitTemplate } from "../../lib/workflowLabels";
 import type { Condition, Operand, StepKind, WorkflowStep } from "../../types/workflow";
-import { FileTextIcon, SearchIcon, ShieldCheckIcon, SparkIcon, TerminalIcon, ToolIcon, UserIcon } from "../icons";
+import {
+  BranchIcon,
+  FileTextIcon,
+  LoopIcon,
+  SearchIcon,
+  ShieldCheckIcon,
+  SparkIcon,
+  TerminalIcon,
+  ToolIcon,
+  UserIcon,
+} from "../icons";
 
 function StepIcon({ step, className }: { step: WorkflowStep; className: string }) {
   if (step.kind === "llm") return <SparkIcon className={className} />;
   if (step.kind === "check") return <ShieldCheckIcon className={className} />;
   if (step.kind === "approval") return <UserIcon className={className} />;
   if (step.kind === "script") return <TerminalIcon className={className} />;
+  if (step.kind === "branch") return <BranchIcon className={className} />;
+  if (step.kind === "loop") return <LoopIcon className={className} />;
   if (step.tool.startsWith("search")) return <SearchIcon className={className} />;
   if (/^(write|edit|fill|add|format)_/.test(step.tool)) return <FileTextIcon className={className} />;
   return <ToolIcon className={className} />;
@@ -19,6 +31,8 @@ const KIND_ICON: Record<StepKind, (props: { className: string }) => ReactNode> =
   llm: SparkIcon,
   check: ShieldCheckIcon,
   approval: UserIcon,
+  branch: BranchIcon,
+  loop: LoopIcon,
 };
 
 /** A kind's tile before there's a step to show (the add-step menu). */
@@ -51,7 +65,7 @@ export function StepKindTile({ step, size = "md" }: { step: WorkflowStep; size?:
 }
 
 export function KindLegend() {
-  const kinds: StepKind[] = ["tool", "script", "llm", "check", "approval"];
+  const kinds: StepKind[] = ["tool", "script", "llm", "check", "approval", "branch", "loop"];
   return (
     <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-[var(--muted)]">
       {kinds.map((kind) => (
