@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "inputs": [
+    {
+      "name": "pdf_path",
+      "label": "PDF to audit",
+      "type": "file",
+      "default": "big_manual.pdf"
+    }
+  ],
+  "steps": [
+    {
+      "id": "search",
+      "kind": "tool",
+      "title": "Search for \"Error code\"",
+      "tool": "search_pdf",
+      "args": {
+        "path": "{{pdf_path}}",
+        "query": "Error code"
+      },
+      "save_as": "matches"
+    },
+    {
+      "id": "search_variants",
+      "kind": "tool",
+      "title": "Search spelling variants",
+      "tool": "search_pdf",
+      "args": {
+        "path": "{{pdf_path}}",
+        "query": "(?i)error\\s*code",
+        "regex": true
+      },
+      "save_as": "variant_matches"
+    },
+    {
+      "id": "searches_agree",
+      "kind": "check",
+      "title": "Both searches agree",
+      "conditions": [
+        {
+          "left": {
+            "count": "matches"
+          },
+          "op": "eq",
+          "right": {
+            "count": "variant_matches"
+          }
+        }
+      ]
+    },
+    {
+      "id": "count_pages",
+      "kind": "script",
+      "title": "Count pages",
+      "code": "import json\nimport pdfplumber\nwith pdfplumber.open(inputs[\"pdf\"]) as pdf:\n    print(json.dumps({\"pages\": len(pdf.pages)}))",
+      "inputs": {
+        "pdf": "{{pdf_path}}"
+      },
+      "save_as": "page_count"
+    },
+    {
+      "id": "summarize",
+      "kind": "llm",
+      "title": "Summarize findings",
+      "prompt": "These are the lines matching \"Error code\" in a {{page_count.pages}}-page PDF:\n\n{{matches}}\n\nList every account number mentioned, in page order, and say whether these lines look like generated template boilerplate rather than real incidents.",
+      "fields": [
+        {
+          "name": "error_count",
+          "type": "number",
+          "description": "How many error lines there are"
+        },
+        {
+          "name": "accounts",
+          "type": "list",
+          "description": "Every account number, in page order"
+        },
+        {
+          "name": "boilerplate",
+          "type": "boolean",
+          "description": "True if the lines look generated rather than real"
+        },
+        {
+          "name": "summary",
+          "type": "text",
+          "description": "Two or three sentences for the report"
+        }
+      ],
+      "save_as": "summary"
+    },
+    {
+      "id": "reconcile",
+      "kind": "check",
+      "title": "Numbers reconcile",
+      "conditions": [
+        {
+          "left": {
+            "ref": "summary.error_count"
+          },
+          "op": "eq",
+          "right": {
+            "count": "matches"
+          }
+        },
+        {
+          "left": {
+            "count": "summary.accounts"
+          },
+          "op": "eq",
+          "right": {
+            "ref": "summary.error_count"
+          }
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "kind": "approval",
+      "title": "Review before saving",
+      "message": "These look like real incidents. Check the summary before the report is written:\n\n{{summary.summary}}",
+      "when": {
+        "left": {
+          "ref": "summary.boilerplate"
+        },
+        "op": "eq",
+        "right": {
+          "value": false
+        }
+      }
+    },
+    {
+      "id": "write_report",
+      "kind": "tool",
+      "title": "Write the report",
+      "tool": "write_file",
+      "args": {
+        "path": "reports/error-audit.md",
+        "content": "# Error code audit\n\nFile: {{pdf_path}} ({{page_count.pages}} pages)\n\nError lines: {{summary.error_count}}\n\nAccounts: {{summary.accounts}}\n\n{{summary.summary}}\n",
+        "overwrite": true
+      }
+    }
+  ]
+}

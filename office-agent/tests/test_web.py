@@ -6062,3 +6062,150 @@ def test_a_json_body_without_a_json_content_type_is_refused_lg(
 
     assert response.status_code == 422
     assert opened == []
+
+
+_NOTES_WORKFLOW: dict[str, Any] = {
+    "inputs": [{"name": "source", "default": "notes.txt"}],
+    "steps": [
+        {"id": "read", "kind": "tool", "title": "Read notes", "tool": "read_file",
+         "args": {"path": "{{source}}"}, "save_as": "content"},
+        {"id": "count", "kind": "llm", "title": "Count words",
+         "prompt": "Count the words:\n{{content}}",
+         "fields": [{"name": "words", "type": "number"}], "save_as": "tally"},
+        {"id": "sane", "kind": "check", "title": "Has words",
+         "conditions": [{"left": {"ref": "tally.words"}, "op": "gt", "right": {"value": 0}}]},
+        {"id": "ok", "kind": "approval", "title": "Looks right?",
+         "message": "{{tally.words}} words"},
+        {"id": "write", "kind": "tool", "title": "Save", "tool": "write_file",
+         "args": {"path": "out.md", "content": "{{tally.words}} words"}},
+    ],
+}  # fmt: skip
+
+
+def _structured(args: dict[str, Any]) -> AIMessage:
+    return AIMessage(content="", tool_calls=[_tool_call("s1", "step_result", args)])
+
+
+def _create_workflow_task(client: Any) -> dict[str, Any]:
+    response = client.post(
+        "/api/scheduled-tasks",
+        json={"name": "Word count", "kind": "manual", "at": "", "workflow": _NOTES_WORKFLOW},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_a_workflow_task_runs_waits_for_approval_and_finishes_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "notes.txt").write_text("one two three", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[_structured({"words": 3})])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        task = _create_workflow_task(client)
+        assert task["workflow"]["steps"][0]["tool"] == "read_file"
+        started = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={})
+        run = started.json()["run"]
+        parked = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+
+        # Opening the run's thread like a conversation must leave it alone.
+        with client.websocket_connect(f"/ws/{run['thread_id']}") as ws:
+            ws.receive_json()  # state
+            assert ws.receive_json()["entries"] == []
+
+        answered = client.post(
+            f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}/answer",
+            json={"approved": True},
+        )
+        finished = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        again = client.post(
+            f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}/answer",
+            json={"approved": True},
+        )
+
+    assert parked["status"] == "needs_approval"
+    assert [(s["step_id"], s["status"]) for s in parked["steps"]] == [
+        ("read", "done"),
+        ("count", "done"),
+        ("sane", "done"),
+        ("ok", "waiting"),
+    ]
+    assert parked["steps"][1]["output"] == {"words": 3}
+    assert parked["steps"][3]["output"] == "3 words"
+    assert answered.status_code == 200
+    assert finished["status"] == "completed" and finished["error"] is None
+    assert [s["status"] for s in finished["steps"]] == ["done"] * 5
+    assert (tmp_path / "workspace" / "out.md").read_text(encoding="utf-8") == "3 words"
+    assert again.status_code == 409
+
+
+def test_a_failed_workflow_step_can_be_retried_from_an_earlier_one_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "notes.txt").write_text("one two", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(
+        responses=[_structured({"words": 0}), _structured({"words": 2})]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        task = _create_workflow_task(client)
+        run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
+        failed = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        client.post(
+            f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}/retry",
+            json={"step_id": "count"},
+        )
+        waiting = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+
+    assert failed["status"] == "failed"
+    assert failed["error"] == "Has words: 1 of 1 checks failed"
+    assert failed["steps"][2]["checks"] == [{"held": False, "left": 0, "right": 0}]
+    assert waiting["status"] == "needs_approval"
+    assert [(s["step_id"], s["status"]) for s in waiting["steps"]][1:] == [
+        ("count", "done"),
+        ("sane", "done"),
+        ("ok", "waiting"),
+    ]
+    assert waiting["steps"][1]["output"] == {"words": 2}
+
+
+def test_a_workflow_task_with_a_bad_reference_is_refused_with_the_step_named_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broken = json.loads(json.dumps(_NOTES_WORKFLOW))
+    broken["steps"][2]["conditions"][0]["left"] = {"ref": "taly.words"}
+    with _client_lg(tmp_path, monkeypatch, FakeToolCallingChatModel(responses=[])) as client:
+        response = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Broken", "kind": "manual", "at": "", "workflow": broken},
+        )
+
+    assert response.status_code == 400
+    assert "step 3 ('Has words') reads 'taly.words'" in response.json()["error"]
+
+
+def test_a_workflow_run_thread_is_never_driven_as_a_conversation_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "notes.txt").write_text("a b", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[_structured({"words": 2})])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        task = _create_workflow_task(client)
+        run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
+        _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        with client.websocket_connect(f"/ws/{run['thread_id']}") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "hello?"})
+            error = _receive_until(ws, "error")[-1]
+        # The pending approval survived the connection, untouched.
+        client.post(
+            f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}/answer",
+            json={"approved": True},
+        )
+        finished = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+
+    assert error["message"] == "A workflow run doesn't take messages."
+    assert fake_model.i == 1  # only the workflow's own model step
+    assert finished["status"] == "completed"

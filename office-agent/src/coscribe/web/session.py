@@ -113,6 +113,7 @@ from ..tools.scheduled_tasks import (
     parse_run_thread_id,
 )
 from ..tools.spreadsheets import SpreadsheetToolkit
+from ..workflows.engine import StepContext
 from .activity import summarize_activity
 from .context_usage import build_context_breakdown
 
@@ -961,6 +962,41 @@ class ChatSessionLG:
             extra_readable=self.settings.extra_readable_dirs,
             extra_writable=self.settings.extra_writable_dirs,
         )
+
+    def workflow_context(self, model: str | None) -> StepContext:
+        """What a workflow's steps run with: this thread's own tools and
+        workspace scope, and `model` (else this session's) for model steps."""
+        tools = {
+            tool_name(t): t
+            for t in self._base_tools
+            if callable(t) and not isinstance(t, BaseTool)
+        }
+
+        def make_model(step_model: str | None) -> Any:
+            return resolve_chat_model(
+                step_model or model or self._model_string, self._custom_providers
+            )
+
+        return StepContext(
+            tools=tools,
+            workspace_root=Path(self.workspace_root),
+            state_dir=Path(self.settings.state_dir),
+            make_model=make_model,
+        )
+
+    @property
+    def checkpointer(self) -> Any:
+        return self._checkpointer
+
+    def is_workflow_run(self) -> bool:
+        """This thread's checkpoints belong to a workflow's graph, not this
+        session's agent -- driving the agent on them (resuming a pending
+        interrupt, a new turn) would feed one graph's state to another."""
+        parsed = parse_run_thread_id(self.thread_id)
+        if parsed is None:
+            return False
+        trigger = ScheduledTriggerStore(self.settings.state_dir).load(parsed[0])
+        return trigger is not None and trigger.workflow is not None
 
     async def get_activity(self) -> dict[str, Any]:
         state = await self.lg_agent.aget_state(self.config)
@@ -1958,6 +1994,8 @@ class ChatSessionLG:
         user_message the client sends immediately after connecting, racing
         on the same self.lg_agent/self.config the way two concurrent
         handle_user_message calls would."""
+        if self.is_workflow_run():
+            return
         async with self._turn_lock:
             self._current_turn_task = asyncio.current_task()
             # A turn hard-cancelled mid-tool also leaves state.next set, but
@@ -2399,6 +2437,11 @@ class ChatSessionLG:
         # See _turn_lock's docstring in __init__: this serializes turns so a
         # message sent while one is still running waits its turn instead of
         # racing it.
+        if self.is_workflow_run():
+            await websocket.send_json(
+                {"type": "error", "message": "A workflow run doesn't take messages."}
+            )
+            return
         async with self._turn_lock:
             self._current_turn_task = asyncio.current_task()
             await self._handle_user_message_locked(text, websocket, images=images)
