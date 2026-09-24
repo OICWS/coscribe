@@ -5988,6 +5988,14 @@ def test_thread_activity_lists_outputs_references_tools_and_progress_lg(
                 tool_calls=[
                     _tool_call("c4", "write_file", {"path": "report.md", "content": "# R"}),
                     _tool_call("c5", "write_file", {"path": "../outside.md", "content": "x"}),
+                ],
+            ),
+            # Its own turn: a script's files_written is a before/after
+            # snapshot of the workspace, so a write running alongside it
+            # would be counted as the script's too.
+            AIMessage(
+                content="",
+                tool_calls=[
                     _tool_call("c6", "run_python_script", {"script": script, "description": "d"}),
                 ],
             ),
@@ -6231,3 +6239,67 @@ def test_a_workflow_runs_activity_comes_from_its_steps_lg(
     assert [o["path"] for o in activity["outputs"]] == ["out.md"]
     assert {t["name"]: t["count"] for t in activity["tools"]} == {"read_file": 1, "write_file": 1}
     assert activity["tasks"] == []
+
+
+def test_workflow_draft_distills_the_threads_tool_calls_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
+
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "input.txt").write_text("data", encoding="utf-8")
+    draft = {
+        "name": "Read the input",
+        "workflow": {
+            "inputs": [{"name": "path", "default": "input.txt"}],
+            "steps": [
+                {
+                    "id": "read",
+                    "kind": "tool",
+                    "title": "Read it",
+                    "tool": "read_file",
+                    "args": {"path": "{{path}}"},
+                    "save_as": "text",
+                }
+            ],
+        },
+        "notes": ["The path became an input."],
+    }
+    read = _tool_call("c1", "read_file", {"path": "input.txt"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[read]),
+            AIMessage(content="done"),
+            AIMessage(content=json.dumps(draft)),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        empty = client.post("/api/threads/t_empty/workflow-draft", json={})
+        _run_turn(client, "t_draft", "read input.txt")
+        response = client.post("/api/threads/t_draft/workflow-draft", json={"name": ""})
+
+    assert empty.status_code == 400
+    assert "hasn't used any tools" in empty.json()["error"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Read the input"
+    assert body["notes"] == ["The path became an input."]
+    assert body["workflow"]["steps"][0]["args"] == {"path": "{{path}}"}
+    curator_request = str(fake_model.received[-1][-1].content)
+    assert '[tool call #1] read_file({"path": "input.txt"})' in curator_request
+    # Nothing is saved until the person reviews the draft.
+    assert ScheduledTriggerStore(tmp_path / "state").list_all() == []
+
+
+def test_validate_workflow_normalizes_or_explains_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="unused")])
+    step = {"id": "a", "kind": "check", "title": "A", "conditions": []}
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        ok = client.post("/api/workflows/validate", json={"workflow": {"steps": []}})
+        bad = client.post("/api/workflows/validate", json={"workflow": {"steps": [step]}})
+
+    assert ok.json() == {"workflow": {"version": 1, "inputs": [], "steps": []}}
+    assert bad.status_code == 400
+    assert "step 1" in bad.json()["error"]

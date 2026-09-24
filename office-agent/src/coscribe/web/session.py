@@ -114,6 +114,7 @@ from ..tools.scheduled_tasks import (
 )
 from ..tools.spreadsheets import SpreadsheetToolkit
 from ..workflows.engine import StepContext
+from ..workflows.solidify import DraftFailed, WorkflowDraft, draft_workflow
 from .activity import summarize_activity, summarize_workflow_run
 from .context_usage import build_context_breakdown
 
@@ -982,6 +983,21 @@ class ChatSessionLG:
             workspace_root=Path(self.workspace_root),
             state_dir=Path(self.settings.state_dir),
             make_model=make_model,
+        )
+
+    async def draft_workflow(self, name_hint: str = "") -> WorkflowDraft:
+        """A workflow draft distilled from this conversation, for the person
+        to review before it's saved anywhere."""
+        if self.is_workflow_run():
+            raise DraftFailed("This is already a workflow run.")
+        if self._turn_lock.locked():
+            raise DraftFailed("Wait for the current reply to finish first.")
+        state = await self.lg_agent.aget_state(self.config)
+        if state.next:
+            raise DraftFailed("Resolve the pending approval first.")
+        messages = list(state.values.get("messages", [])) if state.values else []
+        return await draft_workflow(
+            self.model, messages, self.workflow_context(None).tools, name_hint
         )
 
     @property

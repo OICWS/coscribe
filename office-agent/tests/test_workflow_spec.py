@@ -47,6 +47,31 @@ def test_a_typo_in_a_reference_is_rejected() -> None:
 
 
 @pytest.mark.parametrize(
+    ("step", "field", "text"),
+    [
+        (4, "prompt", "There are {{count:matches}} lines."),
+        (6, "message", "Check {{ summary.summary | upper }} first."),
+    ],
+)
+def test_an_expression_in_braces_is_rejected_not_left_as_text(
+    step: int, field: str, text: str
+) -> None:
+    data = _audit()
+    data["steps"][step][field] = text
+
+    with pytest.raises(ValidationError, match=r"isn't a reference -- write \{\{name\}\}"):
+        parse_workflow(data)
+
+
+def test_braces_in_tool_arguments_are_checked_too() -> None:
+    data = _audit()
+    data["steps"][7]["args"]["content"] = "Pages: {{page_count.pages + 1}}"
+
+    with pytest.raises(ValidationError, match=r"step 8 \('Write the report'\)"):
+        parse_workflow(data)
+
+
+@pytest.mark.parametrize(
     ("mutate", "message"),
     [
         (lambda d: d["steps"][1].update(id="search"), "id 'search' is used twice"),

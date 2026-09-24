@@ -1,10 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { inputClass, primaryButton, secondaryButton } from "../../lib/formStyles";
-import { getTools, updateScheduledTask } from "../../lib/rest";
-import { taskPayload } from "../../lib/taskPayload";
+import { getTools } from "../../lib/rest";
 import { moveStep, newStep, renameValue, suggestionsBefore } from "../../lib/workflowEdit";
 import { stepOutput } from "../../lib/workflowLabels";
-import type { ScheduledTask, ToolInfo } from "../../types/settings";
+import type { ToolInfo } from "../../types/settings";
 import type { StepKind, Workflow, WorkflowInput, WorkflowStep } from "../../types/workflow";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, PlusIcon, TrashIcon } from "../icons";
@@ -15,7 +14,9 @@ import { KindLegend, SectionHeading, StepKindTile } from "./parts";
 import { StepFields } from "./StepEditors";
 import { StepSummary } from "./StepSummary";
 
-type Persist = (workflow: Workflow) => Promise<string | null>;
+/** Saves (or, for a draft, only checks) the whole workflow; resolves to
+ * the server's refusal, or null once it holds. */
+export type Persist = (workflow: Workflow) => Promise<string | null>;
 
 /** The server's validation message, led by what the edit was. */
 function refusal(action: string, problem: string | null): string | null {
@@ -241,20 +242,19 @@ function InsertPoint({
   );
 }
 
-/** A workflow task's inputs and steps (the Edit artboard of
+/** A workflow's inputs and steps (the Edit artboard of
  * https://claude.ai/artifact/4G5JyZ3r4tMPF6QcFG3Vj1). One step open at a
- * time; every change saves the whole workflow, which the server
- * re-validates -- so a refusal (a later step reading a deleted result, a
- * move past a value's source) comes back to the step that caused it. */
+ * time; every change goes through `persist` with the whole workflow, which
+ * the server re-validates -- so a refusal (a later step reading a deleted
+ * result, a move past a value's source) comes back to the step that
+ * caused it. */
 export function WorkflowEditor({
-  task,
   workflow,
-  onSaved,
+  persist,
   focusStepId,
 }: {
-  task: ScheduledTask;
   workflow: Workflow;
-  onSaved: () => void;
+  persist: Persist;
   focusStepId?: string | null;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(focusStepId ?? null);
@@ -280,13 +280,6 @@ export function WorkflowEditor({
       ?.querySelector(`[data-step="${focusStepId}"]`)
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusStepId]);
-
-  const persist: Persist = async (next) => {
-    const result = await updateScheduledTask(task.trigger_id, taskPayload(task, { workflow: next }));
-    if ("error" in result) return result.error;
-    onSaved();
-    return null;
-  };
 
   const saveStep = (index: number, isNew: boolean) => async (updated: WorkflowStep) => {
     const steps = [...workflow.steps];

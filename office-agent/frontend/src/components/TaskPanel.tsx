@@ -6,7 +6,15 @@ import { readStored, writeStored } from "../lib/storage";
 import type { ScheduledRun, ScheduledTask } from "../types/settings";
 import type { ActivityFile, ActivityToolUse, ThreadActivity } from "../types/session";
 import type { ProgressItem, ProgressStatus } from "../lib/workflowProgress";
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, DownloadIcon, FolderIcon } from "./icons";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  DownloadIcon,
+  FolderIcon,
+  WorkflowIcon,
+} from "./icons";
 import { RunStatusIcon } from "./RunStatusIcon";
 
 type SectionId = "progress" | "outputs" | "context";
@@ -26,6 +34,10 @@ interface TaskPanelProps {
   /** Changes whenever the conversation may have done something new. */
   refreshSignal: string;
   onOpenTask: (task: ScheduledTask) => void;
+  /** Offered once the conversation has used tools; absent on a run. */
+  onSaveAsWorkflow?: () => void;
+  /** A reply is still being written, so the conversation isn't settled. */
+  busy?: boolean;
 }
 
 function readCollapsed(): Set<SectionId> {
@@ -36,7 +48,17 @@ function readCollapsed(): Set<SectionId> {
 /** The right-hand panel beside a conversation
  * (docs/ui-references/scheduled-siderbar-task-running.png): what the
  * model planned, which files it produced, and what it drew on. */
-export function TaskPanel({ threadId, title, task, run, workflowSteps, refreshSignal, onOpenTask }: TaskPanelProps) {
+export function TaskPanel({
+  threadId,
+  title,
+  task,
+  run,
+  workflowSteps,
+  refreshSignal,
+  onOpenTask,
+  onSaveAsWorkflow,
+  busy = false,
+}: TaskPanelProps) {
   const [activity, setActivity] = useState<ThreadActivity | null>(null);
   const [collapsed, setCollapsed] = useState<Set<SectionId>>(readCollapsed);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -156,6 +178,24 @@ export function TaskPanel({ threadId, title, task, run, workflowSteps, refreshSi
           )}
         </Section>
       </div>
+
+      {onSaveAsWorkflow && activity && activity.tools.length > 0 && (
+        <div className="border-t border-[var(--border)] px-4 py-3">
+          <button
+            type="button"
+            disabled={busy}
+            title={busy ? "Wait for the reply to finish" : undefined}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-medium hover:border-[var(--border-hover)] hover:bg-[var(--card-bg)] disabled:pointer-events-none disabled:opacity-50"
+            onClick={onSaveAsWorkflow}
+          >
+            <WorkflowIcon className="h-4 w-4 text-[var(--muted)]" />
+            Save as workflow
+          </button>
+          <p className="mt-1.5 text-center text-xs text-[var(--muted)]">
+            Turn what this conversation did into fixed steps you can rerun.
+          </p>
+        </div>
+      )}
     </aside>
   );
 }

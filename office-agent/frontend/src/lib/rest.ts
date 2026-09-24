@@ -43,6 +43,7 @@ import type {
   ThreadsResponse,
   UploadResult,
 } from "../types/session";
+import type { Workflow } from "../types/workflow";
 
 // Every settings tab does `someGetter().then(setState)` with no .catch --
 // a rejected promise there just leaves that tab's state at its initial
@@ -244,6 +245,24 @@ export const answerWorkflowStep = (triggerId: string, runId: string, approved: b
 /** No stepId: retry the step the run failed at. */
 export const retryWorkflowRun = (triggerId: string, runId: string, stepId?: string) =>
   errorOf(runUrl(triggerId, runId, "retry"), { step_id: stepId ?? null });
+
+export interface WorkflowDraftResult {
+  name: string;
+  workflow: Workflow;
+  notes: string[];
+}
+
+/** Can take a minute: a model reads the whole conversation. */
+export const draftWorkflowFromThread = (threadId: string, name = "") =>
+  sendForResult<WorkflowDraftResult>(`/api/threads/${encodeURIComponent(threadId)}/workflow-draft`, "POST", {
+    name,
+  });
+
+/** Checks a workflow without saving it anywhere; resolves to the
+ * normalized workflow or the reason it doesn't hold. */
+export const validateWorkflow = (workflow: Workflow) =>
+  sendForResult<{ workflow: Workflow }>("/api/workflows/validate", "POST", { workflow });
+
 export const getTaskNotes = (triggerId: string) =>
   getJson<TaskNotesResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/notes`);
 export const saveTaskNotes = (triggerId: string, notes: string) =>

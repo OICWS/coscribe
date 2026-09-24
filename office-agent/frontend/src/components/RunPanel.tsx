@@ -255,8 +255,9 @@ export function RunPanel({
           <div className="mt-10 rounded-xl border border-dashed border-[var(--border)] px-6 py-10 text-center">
             <p className="font-medium">No scheduled tasks yet</p>
             <p className="mx-auto mt-1 max-w-md text-sm text-[var(--muted)]">
-              Do something once in a chat, then ask coscribe to save it as a task -- or type
-              <code className="mx-1 rounded bg-[var(--code-bg)] px-1">/saveworkflow &lt;name&gt;</code>.
+              Do something once in a chat, then turn it into fixed steps with
+              <code className="mx-1 rounded bg-[var(--code-bg)] px-1">/saveworkflow</code>
+              -- or ask coscribe to save it as a task.
             </p>
             <button
               type="button"

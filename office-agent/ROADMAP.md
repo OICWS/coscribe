@@ -5671,8 +5671,55 @@ workflow draft.
       viewport; a new step's header didn't follow its name field; write
       tools got a pointless "Save result as" name.
 
-**Next: phase 2b** -- solidify a conversation into a workflow draft,
-reviewed in this editor before saving.
+---
+
+## Phase 8az -- Workflows phase 2b: solidify a conversation into a workflow draft (shipped)
+
+- [x] **Curator** (`workflows/solidify.py`): the conversation rendered as
+      `[user]` / `[assistant]` / `[tool call #n] name(args)` + result
+      (args to 4000 chars so scripts survive whole, results to 600,
+      failures marked; over 60k chars the middle is dropped, keeping the
+      request and the end). Only tools the conversation used successfully
+      are offered, with their parameters. The reply must parse as a
+      workflow *and* pass `check_draft` -- the tool exists and isn't
+      workflow-unavailable, `run_python_script` becomes a script step, no
+      unknown arguments, required ones present. Up to three attempts,
+      each problem fed back. The curator can refuse (`{"error": ...}`); a
+      conversation with no successful tool calls is refused without a
+      model call.
+- [x] **Save-time rule found by the live run**: `{{...}}` that isn't a
+      plain reference is now refused (`step 4 ('Draft the markdown
+      report'): {{count:matches}} isn't a reference -- ...`). DeepSeek
+      wrote `{{count:matches}}` into a prompt in the first live draft; the
+      old validator only looked at well-formed references, so it passed
+      and would have reached the model as literal text. The curator is
+      now told there are no expressions inside braces.
+- [x] **Web**: `POST /api/threads/{id}/workflow-draft` (refuses mid-turn,
+      a pending approval, or a workflow-run thread) and `POST
+      /api/workflows/validate`. `/saveworkflow [name]` is handled in the
+      browser (name optional); the CLI keeps its prompt-task route.
+      **Save as workflow** sits at the bottom of the side panel once the
+      conversation has used tools. The draft page -- loading state,
+      failure with Try again, the curator's notes, the full step editor
+      backed by validate-only -- ends in **Save as task…**, the task form
+      prefilled with the name and "Runs the N steps you reviewed".
+      `WorkflowEditor` now takes a `persist` function instead of a task.
+- [x] **Verified live** (Playwright, DeepSeek): a real chat did the PDF
+      audit (list_files, search_pdf, a pdfplumber page-count script,
+      write_file, two approvals). Save as workflow drafted in 6.7s:
+      list_files dropped, the PDF path and report path made inputs, the
+      script kept, a check added, notes flagging the missing `overwrite`.
+      A second draft (via `/saveworkflow PDF error audit`) came back fully
+      deterministic -- search, one script parsing codes/accounts and
+      building the markdown, a check that the table has every match
+      (`report.count == count of matches`), write. Set `overwrite` in the
+      editor, saved as a manual task, ran it: 4/4 steps in 1.6s, report
+      identical in content to the conversation's (650 pages, 6 lines,
+      accounts 4410-97 ... 4410-582). Light and dark; the no-tools
+      failure state checked.
+
+**Next (not started, to confirm):** branches, loops, test-run
+comparison, versioning.
 
 ---
 

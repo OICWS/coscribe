@@ -22,7 +22,7 @@ from pydantic import (
     model_validator,
 )
 
-from .refs import template_references
+from .refs import malformed_templates, template_references
 
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 
@@ -193,6 +193,29 @@ def _value_references(value: Any) -> list[str]:
     return []
 
 
+def _texts(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [t for item in value for t in _texts(item)]
+    if isinstance(value, dict):
+        return [t for item in value.values() for t in _texts(item)]
+    return []
+
+
+def step_templates(step: Step) -> list[str]:
+    """Every text of a step that references are filled into."""
+    if isinstance(step, ToolStep):
+        return _texts(step.args)
+    if isinstance(step, ScriptStep):
+        return _texts(step.inputs)
+    if isinstance(step, LLMStep):
+        return [step.prompt]
+    if isinstance(step, ApprovalStep):
+        return [step.message]
+    return []
+
+
 def step_output(step: Step) -> str | None:
     return getattr(step, "save_as", None)
 
@@ -214,6 +237,12 @@ class Workflow(_Model):
             if step.id in step_ids:
                 raise ValueError(f"step {index}: id {step.id!r} is used twice")
             step_ids.add(step.id)
+            for text in step_templates(step):
+                for bad in malformed_templates(text):
+                    raise ValueError(
+                        f"step {index} ({step.title!r}): {bad} isn't a reference -- write "
+                        "{{name}} or {{name.field}}, with no other expressions"
+                    )
             for reference in step_references(step):
                 if _root(reference) not in available:
                     raise ValueError(

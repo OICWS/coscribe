@@ -136,10 +136,13 @@ Several commands are typed as a message mid-session (not startup flags):
   start fresh (unlike `/compact`, which summarizes rather than discards).
   Doesn't touch Plan Mode/Accept Edits Mode (those are session-level
   toggles, not conversation content) or memory/tasks/scheduled tasks.
-- `/saveworkflow <name>` -- turn what this conversation just did into a
-  reusable [scheduled task](#scheduled-tasks----a-real-product-level-scheduler):
-  the model distills the steps that worked into a standalone prompt and
-  drafts the task, which you review and edit before anything is saved.
+- `/saveworkflow [name]` -- turn what this conversation just did into a
+  reusable workflow. In the web UI this drafts a
+  [workflow](#workflows----fixed-steps-instead-of-a-prompt) (fixed steps,
+  not a prompt) for review before anything is saved; the name is
+  optional. In the CLI the model still distills the conversation into a
+  prompt-backed [scheduled task](#scheduled-tasks----a-real-product-level-scheduler)
+  draft.
 - `/stop` -- stop the current in-progress run (a runaway tool-calling loop,
   a task stuck retrying, or just a response you no longer need). In the
   web UI, this is also what the composer's send button turns into while a
@@ -251,7 +254,7 @@ now**). There's no separate recording/replay format; the prompt *is* the
 workflow.
 
 **Creating one starts in conversation.** Work the task out in chat first,
-then ask for it to be saved (or type `/saveworkflow <name>`). The
+then ask for it to be saved. The
 Coordinator calls `create_scheduled_task`, which doesn't save anything by
 itself -- it drafts the task, and the web UI shows a review card that
 opens the task form prefilled with the model's draft: you edit any field,
@@ -404,6 +407,25 @@ step; **Edit step N** opens that step on the task page. An approval step
 waits as a card with its message, an optional note (kept on the run) and
 Approve / Decline. The header names where a run stopped ("Stopped at
 step 3"), and the side panel's Progress follows the steps.
+
+**From a conversation.** Once a conversation has done a task with tools,
+**Save as workflow** at the bottom of the side panel (or `/saveworkflow
+[name]` in the composer) drafts a workflow from it
+(`src/coscribe/workflows/solidify.py`, `POST
+/api/threads/{id}/workflow-draft`). A curator model reads the
+conversation -- each tool call numbered, with its real arguments and a
+trimmed result, failed calls marked -- and keeps only the calls that did
+the work: copied arguments, the values that change from run to run
+turned into inputs (the original as default), `run_python_script` calls
+as script steps, judgment as model steps, and checks grounded in what the
+conversation verified. Its reply is held to the same save-time rules plus
+the real tool catalog (the tool exists, takes those arguments, has its
+required ones); a draft that fails goes back with the problems, up to
+three tries. The draft opens in the step editor with the curator's
+**Worth checking** notes (guesses, values it made inputs, steps it
+dropped); edits are validated (`POST /api/workflows/validate`) but not
+saved, and **Save as task…** picks when it runs. Nothing is saved until
+then.
 
 ## Files
 
