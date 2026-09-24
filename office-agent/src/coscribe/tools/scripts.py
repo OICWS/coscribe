@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from ..runtime.types import tool_metadata
+from ._files_written import snapshot_workspace, with_files_written
 from ._output_truncation import truncate_script_output
 from .script_env import ensure_script_env, venv_python
 
@@ -68,6 +69,7 @@ def _run_python_script(
     # the write above or the child's own stdout write raises. This was a
     # real, live-reported failure on the user's Windows test machine.
     child_env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    before = snapshot_workspace(workspace_root)
     try:
         try:
             result = subprocess.run(
@@ -84,18 +86,20 @@ def _run_python_script(
             partial_stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else exc.stdout
             partial_stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else exc.stderr
             timeout_note = f"\n[timed out after {timeout}s]"
-            return {
+            timed_out: dict[str, object] = {
                 "exit_code": None,
                 "stdout": truncate_script_output(partial_stdout or ""),
                 "stderr": truncate_script_output(partial_stderr or "") + timeout_note,
                 "timed_out": True,
             }
-        return {
+            return with_files_written(timed_out, before, workspace_root)
+        finished: dict[str, object] = {
             "exit_code": result.returncode,
             "stdout": truncate_script_output(result.stdout),
             "stderr": truncate_script_output(result.stderr),
             "timed_out": False,
         }
+        return with_files_written(finished, before, workspace_root)
     finally:
         shutil.rmtree(scratch_dir, ignore_errors=True)
 

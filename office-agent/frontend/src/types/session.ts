@@ -72,3 +72,36 @@ export interface ContextBreakdown {
   total_is_estimated: boolean;
   categories: ContextBreakdownCategory[];
 }
+
+// -- Side panel (GET /api/threads/{id}/activity) ------------------------------
+
+export interface ActivityFile {
+  /** Relative to the workspace (or absolute, for an extra directory). */
+  path: string;
+  name: string;
+  exists: boolean;
+  /** A document/media type the OS may open; anything else is reveal-only. */
+  openable: boolean;
+  modified_at: string | null;
+}
+
+export interface ActivityToolUse {
+  name: string;
+  count: number;
+}
+
+export interface PlanTask {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
+export interface ThreadActivity {
+  tasks: PlanTask[];
+  /** Most recently touched first. */
+  outputs: ActivityFile[];
+  references: ActivityFile[];
+  tools: ActivityToolUse[];
+  connectors: { server: string; tools: ActivityToolUse[] }[];
+  skills: string[];
+}

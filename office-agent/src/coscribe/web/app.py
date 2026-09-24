@@ -137,6 +137,7 @@ from ..tools.subagent_tasks import (
     resume_subagent_task,
 )
 from ..tools.tasks import TaskToolkit
+from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus
 from .browser_detect import find_windows_browser
 from .browser_panel import BrowserPanelError, BrowserPanelSession
@@ -876,6 +877,11 @@ class ConfigUpdate(BaseModel):
     updates: dict[str, str]
 
 
+class OpenFileRequest(BaseModel):
+    path: str
+    reveal: bool = False
+
+
 class MemoryUpdate(BaseModel):
     content: str
 
@@ -1610,6 +1616,47 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/threads/{thread_id}/tasks")
     async def get_tasks(thread_id: str) -> list[dict[str, Any]]:
         return TaskToolkit(thread_id, settings.state_dir).list_tasks()
+
+    @app.get("/api/threads/{thread_id}/activity")
+    async def get_thread_activity(thread_id: str) -> dict[str, Any]:
+        session = _get_session(thread_id)
+        activity = await session.get_activity()
+        return {"tasks": TaskToolkit(thread_id, settings.state_dir).list_tasks(), **activity}
+
+    def _thread_file(thread_id: str, path: str) -> Path | None:
+        try:
+            resolved = _get_session(thread_id).workspace_scope().resolve(path)
+        except (PermissionError, OSError, ValueError):
+            return None
+        return resolved if resolved.is_file() else None
+
+    @app.post("/api/threads/{thread_id}/files/open")
+    async def open_thread_file(thread_id: str, body: OpenFileRequest) -> JSONResponse:
+        resolved = _thread_file(thread_id, body.path)
+        if resolved is None:
+            return JSONResponse({"error": f"No file {body.path!r}"}, status_code=404)
+        if not body.reveal and resolved.suffix.lower() not in OPENABLE_EXTENSIONS:
+            return JSONResponse(
+                {"error": f"{resolved.suffix or 'This'} files can't be opened from here"},
+                status_code=400,
+            )
+        try:
+            open_in_os(resolved, reveal=body.reveal)
+        except FileNotFoundError:
+            return JSONResponse(
+                {"error": "No app on this machine can open it -- download it instead."},
+                status_code=501,
+            )
+        except OSError as exc:
+            return JSONResponse({"error": f"Couldn't open it: {exc}"}, status_code=501)
+        return JSONResponse({"opened": body.path})
+
+    @app.get("/api/threads/{thread_id}/files/download")
+    async def download_thread_file(thread_id: str, path: str) -> Response:
+        resolved = _thread_file(thread_id, path)
+        if resolved is None:
+            return JSONResponse({"error": f"No file {path!r}"}, status_code=404)
+        return FileResponse(resolved, filename=resolved.name)
 
     @app.get("/api/threads/{thread_id}/context-breakdown")
     async def get_context_breakdown_endpoint(thread_id: str) -> dict[str, Any]:

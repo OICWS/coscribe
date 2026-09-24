@@ -656,11 +656,10 @@ def build_scheduled_task_tools(
                 "anthropic:claude-opus-5". Optional; defaults to the
                 app's own configured default model.
             approval_mode: "manual" (pauses for every action needing
-                approval -- the default, and the only option that
-                behaves safely if nobody is watching when it fires),
-                "auto" (auto-approves like accept-edits mode, still
-                pausing if something looks genuinely unsafe), or "skip"
-                (never pauses, even for unsafe actions -- use with real
+                approval -- the default), "auto" (creates and edits
+                local files without asking, but pauses before running
+                code or using connectors/downloads), or "skip" (never
+                pauses, including for running code -- use with real
                 caution for an unattended task).
         """
         trigger = create_trigger(

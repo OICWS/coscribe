@@ -386,3 +386,24 @@ export function HelpIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+/** The side panel's toggle -- the sidebar glyph, divided on the right. */
+export function PanelRightIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M15 3v18" />
+    </Icon>
+  );
+}
+
+/** feather-icons "download". */
+export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </Icon>
+  );
+}

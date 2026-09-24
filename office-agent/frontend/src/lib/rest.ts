@@ -38,6 +38,7 @@ import type {
   SubAgentTranscriptResponse,
   ThreadDeleteResult,
   ThreadRenameResult,
+  ThreadActivity,
   ThreadsResponse,
   UploadResult,
 } from "../types/session";
@@ -222,6 +223,24 @@ export const renameThread = (id: string, title: string) =>
   postJson<ThreadRenameResult>(`/api/threads/${encodeURIComponent(id)}/rename`, { title });
 
 // -- Sub Agents (background spawn_agent_background runs) --------------------
+
+export const getThreadActivity = (threadId: string) =>
+  getJson<ThreadActivity>(`/api/threads/${encodeURIComponent(threadId)}/activity`);
+
+/** Resolves to an error message, or null once the file was handed to the OS. */
+export async function openThreadFile(threadId: string, path: string, reveal: boolean): Promise<string | null> {
+  const res = await fetch(`/api/threads/${encodeURIComponent(threadId)}/files/open`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, reveal }),
+  });
+  if (res.ok) return null;
+  const body = (await res.json().catch(() => null)) as { error?: string } | null;
+  return body?.error ?? `Couldn't open ${path} (${res.status})`;
+}
+
+export const threadFileDownloadUrl = (threadId: string, path: string) =>
+  `/api/threads/${encodeURIComponent(threadId)}/files/download?path=${encodeURIComponent(path)}`;
 
 export const getSubAgentTasks = (threadId: string) =>
   getJson<SubAgentTasksResponse>(`/api/threads/${encodeURIComponent(threadId)}/subagents`);

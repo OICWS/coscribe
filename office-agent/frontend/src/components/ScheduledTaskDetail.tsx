@@ -27,8 +27,8 @@ const APPROVAL_LABEL: Record<ScheduledTask["approval_mode"], string> = {
 
 const APPROVAL_DESCRIPTION: Record<ScheduledTask["approval_mode"], string> = {
   manual: "coscribe pauses and waits for your approval before any action that needs it.",
-  auto: "coscribe runs on its own and uses connectors without pausing for approval.",
-  skip: "coscribe never pauses for approval, even for actions that would otherwise need a second look.",
+  auto: "coscribe creates and edits files on its own, but pauses before running code or using connectors.",
+  skip: "coscribe never pauses for approval, including for running code and using connectors. Your blocking rules still apply.",
 };
 
 function formatNextRun(task: ScheduledTask): string {
