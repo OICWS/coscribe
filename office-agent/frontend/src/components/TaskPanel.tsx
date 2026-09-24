@@ -4,8 +4,9 @@ import { formatRunTime, runSourceLabel } from "../lib/runLabels";
 import { toolLabel } from "../lib/toolLabels";
 import { readStored, writeStored } from "../lib/storage";
 import type { ScheduledRun, ScheduledTask } from "../types/settings";
-import type { ActivityFile, ActivityToolUse, PlanTask, ThreadActivity } from "../types/session";
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, DownloadIcon, FolderIcon } from "./icons";
+import type { ActivityFile, ActivityToolUse, ThreadActivity } from "../types/session";
+import type { ProgressItem, ProgressStatus } from "../lib/workflowProgress";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CloseIcon, DownloadIcon, FolderIcon } from "./icons";
 import { RunStatusIcon } from "./RunStatusIcon";
 
 type SectionId = "progress" | "outputs" | "context";
@@ -20,6 +21,8 @@ interface TaskPanelProps {
   /** Set when this conversation is a scheduled run. */
   task: ScheduledTask | null;
   run: ScheduledRun | null;
+  /** A workflow run's steps, shown as Progress in place of the plan. */
+  workflowSteps: ProgressItem[] | null;
   /** Changes whenever the conversation may have done something new. */
   refreshSignal: string;
   onOpenTask: (task: ScheduledTask) => void;
@@ -33,7 +36,7 @@ function readCollapsed(): Set<SectionId> {
 /** The right-hand panel beside a conversation
  * (docs/ui-references/scheduled-siderbar-task-running.png): what the
  * model planned, which files it produced, and what it drew on. */
-export function TaskPanel({ threadId, title, task, run, refreshSignal, onOpenTask }: TaskPanelProps) {
+export function TaskPanel({ threadId, title, task, run, workflowSteps, refreshSignal, onOpenTask }: TaskPanelProps) {
   const [activity, setActivity] = useState<ThreadActivity | null>(null);
   const [collapsed, setCollapsed] = useState<Set<SectionId>>(readCollapsed);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -80,6 +83,8 @@ export function TaskPanel({ threadId, title, task, run, refreshSignal, onOpenTas
     [threadId],
   );
 
+  const progressItems: ProgressItem[] | null = workflowSteps ?? (activity?.tasks.length ? activity.tasks : null);
+
   const contextEmpty =
     activity !== null &&
     activity.references.length === 0 &&
@@ -119,8 +124,8 @@ export function TaskPanel({ threadId, title, task, run, refreshSignal, onOpenTas
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section id="progress" title="Progress" collapsed={collapsed} onToggle={toggle}>
-          {activity && activity.tasks.length > 0 ? (
-            <ProgressView tasks={activity.tasks} />
+          {progressItems ? (
+            <ProgressView tasks={progressItems} unit={workflowSteps ? "steps" : undefined} />
           ) : (
             <EmptyState art={<ProgressArt />} text="See task progress for longer tasks." />
           )}
@@ -207,8 +212,18 @@ function EmptyState({ art, text }: { art: ReactNode; text: string }) {
 
 const DOT_SIZE = { md: "h-5 w-5", sm: "h-4 w-4" } as const;
 
-function StepDot({ status, size = "md" }: { status: PlanTask["status"]; size?: keyof typeof DOT_SIZE }) {
+function StepDot({ status, size = "md" }: { status: ProgressStatus; size?: keyof typeof DOT_SIZE }) {
   const box = `${DOT_SIZE[size]} flex shrink-0 items-center justify-center rounded-full`;
+  if (status === "failed") {
+    return (
+      <span
+        className={box}
+        style={{ color: "var(--danger)", backgroundColor: "color-mix(in srgb, var(--danger) 16%, transparent)" }}
+      >
+        <CloseIcon className={size === "md" ? "h-3 w-3" : "h-2.5 w-2.5"} strokeWidth={3} />
+      </span>
+    );
+  }
   if (status === "completed") {
     return (
       <span className={`${box} border border-[var(--border-hover)] text-[var(--muted)]`}>
@@ -228,14 +243,16 @@ function StepDot({ status, size = "md" }: { status: PlanTask["status"]; size?: k
   return <span className={`${box} bg-[var(--card-bg)]`} />;
 }
 
-const STEP_TEXT_CLASS: Record<PlanTask["status"], string> = {
+const STEP_TEXT_CLASS: Record<ProgressStatus, string> = {
   pending: "",
   in_progress: "font-medium",
   completed: "text-[var(--muted)]",
+  failed: "font-medium text-[var(--danger)]",
 };
 
-function ProgressView({ tasks }: { tasks: PlanTask[] }) {
+function ProgressView({ tasks, unit }: { tasks: ProgressItem[]; unit?: string }) {
   const done = tasks.filter((t) => t.status === "completed").length;
+  const stopped = tasks.some((t) => t.status === "failed");
   return (
     <div>
       <div className="flex flex-wrap items-center gap-y-2" aria-hidden="true">
@@ -247,7 +264,8 @@ function ProgressView({ tasks }: { tasks: PlanTask[] }) {
         ))}
       </div>
       <p className="mt-2.5 text-xs tabular-nums text-[var(--muted)]">
-        {done} of {tasks.length} done
+        {done} of {tasks.length} {unit ?? "done"}
+        {stopped && " · stopped"}
       </p>
       <ol className="mt-2 flex flex-col gap-1.5">
         {tasks.map((task) => (

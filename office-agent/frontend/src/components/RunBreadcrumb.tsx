@@ -13,13 +13,15 @@ interface RunBreadcrumbProps {
   threadId: string;
   onOpenPortal: () => void;
   onOpenTask: (task: ScheduledTask) => void;
+  /** Overrides the plain status name, e.g. "Stopped at step 6". */
+  statusLabel?: string | null;
 }
 
 /** "Scheduled / <task> ⌄" above a run's conversation
  * (docs/ui-references/scheduled-siderbar-task-running.png). The task name
  * opens a menu to the task's page and its other runs, so moving between
  * runs never needs a trip back to the portal. */
-export function RunBreadcrumb({ task, threadId, onOpenPortal, onOpenTask }: RunBreadcrumbProps) {
+export function RunBreadcrumb({ task, threadId, onOpenPortal, onOpenTask, statusLabel }: RunBreadcrumbProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useClickOutside(menuRef, () => setOpen(false), open);
@@ -101,7 +103,7 @@ export function RunBreadcrumb({ task, threadId, onOpenPortal, onOpenTask }: RunB
       {showStatus && currentRun && (
         <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]">
           <RunStatusIcon status={currentRun.status} className="h-3 w-3" />
-          {RUN_STATUS_LABEL[currentRun.status]}
+          {statusLabel ?? RUN_STATUS_LABEL[currentRun.status]}
         </span>
       )}
     </div>

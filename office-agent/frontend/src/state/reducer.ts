@@ -517,6 +517,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ],
       };
 
+    case "workflow_step":
+      // Applied to the task list in App.tsx, where run records live.
+      return state;
+
     case "scheduled_run_started":
       return {
         ...state,

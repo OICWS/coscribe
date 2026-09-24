@@ -16,6 +16,7 @@ import type {
   ProviderDeleteResult,
   ProviderUpdateResult,
   ProvidersResponse,
+  ScheduledRun,
   ScheduledTask,
   ScheduledTaskDeleteResult,
   ScheduledTaskResult,
@@ -74,6 +75,20 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   });
   await checkOk(res);
   return res.json() as Promise<T>;
+}
+
+/** For endpoints whose result type already includes `{ error }`: a
+ * refusal (400/404/409 with an error body) comes back as that value for the
+ * caller to show, instead of a thrown Error nobody catches. */
+async function sendForResult<T>(url: string, method: string, body: unknown): Promise<T | { error: string }> {
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.ok) return res.json() as Promise<T>;
+  const parsed = (await res.json().catch(() => null)) as { error?: string } | null;
+  return { error: parsed?.error ?? `Request failed (${res.status})` };
 }
 
 async function del<T>(url: string): Promise<T> {
@@ -198,18 +213,37 @@ export const removeNodeEnvPackage = (packageName: string) =>
 // -- Scheduled Tasks --------------------------------------------------------
 
 export const getScheduledTasks = () => getJson<ScheduledTask[]>("/api/scheduled-tasks");
-export const createScheduledTask = (payload: CreateScheduledTaskPayload) =>
-  postJson<ScheduledTaskResult>("/api/scheduled-tasks", payload);
+export const createScheduledTask = (payload: CreateScheduledTaskPayload): Promise<ScheduledTaskResult> =>
+  sendForResult<ScheduledTask>("/api/scheduled-tasks", "POST", payload);
 export const pauseScheduledTask = (triggerId: string) =>
   postJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/pause`, {});
 export const resumeScheduledTask = (triggerId: string) =>
   postJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/resume`, {});
 export const deleteScheduledTask = (triggerId: string) =>
   del<ScheduledTaskDeleteResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`);
-export const updateScheduledTask = (triggerId: string, payload: CreateScheduledTaskPayload) =>
-  putJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`, payload);
-export const runScheduledTaskNow = (triggerId: string) =>
-  postJson<RunNowResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/run`, {});
+export const updateScheduledTask = (triggerId: string, payload: CreateScheduledTaskPayload): Promise<ScheduledTaskResult> =>
+  sendForResult<ScheduledTask>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`, "PUT", payload);
+export const runScheduledTaskNow = (triggerId: string, inputs?: Record<string, unknown>): Promise<RunNowResult> =>
+  sendForResult<{ task: ScheduledTask; run: ScheduledRun }>(
+    `/api/scheduled-tasks/${encodeURIComponent(triggerId)}/run`,
+    "POST",
+    inputs ? { inputs } : {},
+  );
+
+async function errorOf(url: string, body: unknown): Promise<string | null> {
+  const result = await sendForResult<unknown>(url, "POST", body);
+  return result !== null && typeof result === "object" && "error" in result ? String(result.error) : null;
+}
+
+const runUrl = (triggerId: string, runId: string, action: string) =>
+  `/api/scheduled-tasks/${encodeURIComponent(triggerId)}/runs/${encodeURIComponent(runId)}/${action}`;
+
+export const answerWorkflowStep = (triggerId: string, runId: string, approved: boolean, note = "") =>
+  errorOf(runUrl(triggerId, runId, "answer"), { approved, note });
+
+/** No stepId: retry the step the run failed at. */
+export const retryWorkflowRun = (triggerId: string, runId: string, stepId?: string) =>
+  errorOf(runUrl(triggerId, runId, "retry"), { step_id: stepId ?? null });
 export const getTaskNotes = (triggerId: string) =>
   getJson<TaskNotesResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/notes`);
 export const saveTaskNotes = (triggerId: string, notes: string) =>

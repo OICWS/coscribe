@@ -1,3 +1,5 @@
+import type { StepRecord, Workflow } from "./workflow";
+
 /**
  * REST request/response shapes for the settings panel, hand-encoded from
  * coscribe/web/app.py the same way types/wire.ts encodes the WS
@@ -251,6 +253,9 @@ export interface ScheduledRun {
   status: RunStatus;
   finished_at: string | null;
   error: string | null;
+  /** A workflow run's steps, in the order they first ran. Empty otherwise. */
+  steps: StepRecord[];
+  inputs: Record<string, unknown> | null;
 }
 
 export interface ScheduledTask {
@@ -268,6 +273,8 @@ export interface ScheduledTask {
   notes_enabled: boolean;
   /** Oldest first. */
   runs: ScheduledRun[];
+  /** Set when the task runs fixed steps instead of `prompt`. */
+  workflow: Workflow | null;
 }
 
 export interface CreateScheduledTaskPayload {
@@ -281,6 +288,7 @@ export interface CreateScheduledTaskPayload {
   model?: string;
   approval_mode?: ApprovalMode;
   notes_enabled?: boolean;
+  workflow?: Workflow | null;
 }
 
 export type ScheduledTaskResult = ScheduledTask | { error: string };

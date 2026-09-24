@@ -367,6 +367,29 @@ recorded on the run as it goes. A run that stops can be taken further:
 an input left out uses its default. The PDF audit used to verify this is
 `tests/fixtures/pdf_error_audit_workflow.json`.
 
+In the web UI, a workflow task's page shows its **inputs** and its
+**steps** as a vertical list -- a colored tile per kind, a one-line
+summary per step in which values read from inputs (tinted) or earlier
+steps (neutral) appear as tokens. Opening a step edits its name and its
+kind's own fields: tool arguments, the script, a model step's
+instructions, returned fields (type, meaning) and model, a check's
+comparisons and literal values, an approval's message and condition.
+Each step saves on its own; the server re-validates the whole workflow,
+and a refusal shows under that step. (Adding, removing and reordering
+steps is phase 2.) **Run now** asks for the inputs first, prefilled with
+their defaults.
+
+A workflow run opens as a timeline instead of a conversation: each step's
+status, duration and result (a model step's fields as a table, search
+hits as rows), updated live as steps finish. A failed step says exactly
+what went wrong -- for a check, each comparison with what it found
+(`6 ≠ 5`) -- and offers the way on: **Retry this step**, or, when a check
+rejected data a model step produced, **Retry from step N** on that model
+step; **Edit step N** opens that step on the task page. An approval step
+waits as a card with its message, an optional note (kept on the run) and
+Approve / Decline. The header names where a run stopped ("Stopped at
+step 3"), and the side panel's Progress follows the steps.
+
 ## Files
 
 The Coordinator's most basic tools work on plain-text files under the

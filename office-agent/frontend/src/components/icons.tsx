@@ -407,3 +407,43 @@ export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+/** An LLM step: a four-point spark. */
+export function SparkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z" />
+      <path d="M19 16v4M17 18h4" />
+    </Icon>
+  );
+}
+
+/** A check step: feather-icons "shield" with a tick. */
+export function ShieldCheckIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z" />
+      <path d="M8.5 12l2.5 2.5 4.5-5" />
+    </Icon>
+  );
+}
+
+/** An approval step: feather-icons "user". */
+export function UserIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
+    </Icon>
+  );
+}
+
+/** feather-icons "file-text". */
+export function FileTextIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+      <path d="M14 3v6h6M8 13h8M8 17h5" />
+    </Icon>
+  );
+}

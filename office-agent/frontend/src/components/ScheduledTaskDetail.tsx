@@ -10,11 +10,15 @@ import {
 import { goToThread } from "../lib/nav";
 import { capitalize, formatRunTime, RUN_STATUS_LABEL, runDuration, runSourceLabel } from "../lib/runLabels";
 import { describeSchedule } from "../lib/scheduleLabels";
+import { taskPayload } from "../lib/taskPayload";
+import { countModelSteps } from "../lib/workflowLabels";
 import type { ScheduledTask } from "../types/settings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ChevronRightIcon, PencilIcon, PlayIcon, TrashIcon } from "./icons";
 import { RunStatusIcon } from "./RunStatusIcon";
 import { ToggleSwitch } from "./ToggleSwitch";
+import { RunInputsDialog } from "./workflow/RunInputsDialog";
+import { WorkflowEditor } from "./workflow/WorkflowEditor";
 
 // Mirrors tools/scheduled_tasks.py's MAX_NOTES_CHARS.
 const MAX_NOTES_CHARS = 4000;
@@ -128,18 +132,7 @@ function NotesSection({ task, onChanged }: { task: ScheduledTask; onChanged: () 
   };
 
   const toggleNotes = async () => {
-    await updateScheduledTask(task.trigger_id, {
-      name: task.name,
-      kind: task.schedule.kind,
-      at: task.schedule.at,
-      prompt: task.prompt,
-      ...(task.schedule.weekday !== null ? { weekday: task.schedule.weekday } : {}),
-      ...(task.schedule.day_of_month !== null ? { day_of_month: task.schedule.day_of_month } : {}),
-      ...(task.schedule.start_date ? { start_date: task.schedule.start_date } : {}),
-      ...(task.model ? { model: task.model } : {}),
-      approval_mode: task.approval_mode,
-      notes_enabled: !task.notes_enabled,
-    });
+    await updateScheduledTask(task.trigger_id, taskPayload(task, { notes_enabled: !task.notes_enabled }));
     onChanged();
   };
 
@@ -226,17 +219,46 @@ function RunsSection({ task }: { task: ScheduledTask }) {
 interface ScheduledTaskDetailProps {
   task: ScheduledTask;
   onEdit: () => void;
-  onRunNow: () => void;
+  onRunNow: (inputs?: Record<string, unknown>) => void;
   onDeleted: () => void;
   onChanged: () => void;
+  /** Opens this workflow step for editing (from a run's "Edit step"). */
+  focusStepId?: string | null;
+}
+
+function WorkflowBadge({ task }: { task: ScheduledTask }) {
+  if (!task.workflow) return null;
+  const steps = task.workflow.steps.length;
+  const models = countModelSteps(task.workflow);
+  return (
+    <span className="text-sm text-[var(--muted)]">
+      Workflow · {steps} {steps === 1 ? "step" : "steps"}
+      {models > 0 && ` · ${models} ${models === 1 ? "uses" : "use"} a model`}
+    </span>
+  );
 }
 
 /** One scheduled task: its settings (docs/ui-references/
  * sheduled-display-tasks.png), its notes, and every run it has made --
  * each run opening its own conversation. */
-export function ScheduledTaskDetail({ task, onEdit, onRunNow, onDeleted, onChanged }: ScheduledTaskDetailProps) {
+export function ScheduledTaskDetail({
+  task,
+  onEdit,
+  onRunNow,
+  onDeleted,
+  onChanged,
+  focusStepId,
+}: ScheduledTaskDetailProps) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [askingInputs, setAskingInputs] = useState(false);
+  const workflow = task.workflow;
+
+  const start = (inputs?: Record<string, unknown>) => {
+    setAskingInputs(false);
+    setStarting(true);
+    onRunNow(inputs);
+  };
 
   const toggleEnabled = async () => {
     if (task.enabled) await pauseScheduledTask(task.trigger_id);
@@ -283,10 +305,7 @@ export function ScheduledTaskDetail({ task, onEdit, onRunNow, onDeleted, onChang
               type="button"
               disabled={starting}
               className="flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-fg)] hover:bg-[var(--primary-hover)] disabled:opacity-60"
-              onClick={() => {
-                setStarting(true);
-                onRunNow();
-              }}
+              onClick={() => (workflow && workflow.inputs.length > 0 ? setAskingInputs(true) : start())}
             >
               <PlayIcon className="h-3.5 w-3.5" /> Run now
             </button>
@@ -305,26 +324,52 @@ export function ScheduledTaskDetail({ task, onEdit, onRunNow, onDeleted, onChang
             {task.enabled ? "Active" : "Paused"}
           </span>
           <span className="text-sm text-[var(--muted)]">{formatNextRun(task)}</span>
+          {workflow && <span className="text-sm text-[var(--muted)]">·</span>}
+          <WorkflowBadge task={task} />
         </div>
 
         <div className="mt-4 border-t border-[var(--border)]" />
 
         <div className="mt-6 flex flex-col gap-6">
-          <InstructionsSection prompt={task.prompt} />
+          {workflow ? (
+            <WorkflowEditor task={task} workflow={workflow} onSaved={onChanged} focusStepId={focusStepId} />
+          ) : (
+            <InstructionsSection prompt={task.prompt} />
+          )}
           <div>
             <SectionLabel>Repeats</SectionLabel>
             <div className="text-sm font-medium">{describeSchedule(task.schedule)}</div>
           </div>
           <div>
             <SectionLabel>Permissions</SectionLabel>
-            <div className="text-sm font-medium">{APPROVAL_LABEL[task.approval_mode]}</div>
-            <div className="text-sm text-[var(--muted)]">{APPROVAL_DESCRIPTION[task.approval_mode]}</div>
+            {workflow ? (
+              <>
+                <div className="text-sm font-medium">Steps run as saved</div>
+                <div className="text-sm text-[var(--muted)]">
+                  Saving a step is its review: tool and script steps run without asking each time. The run pauses
+                  only at approval steps.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-sm font-medium">{APPROVAL_LABEL[task.approval_mode]}</div>
+                <div className="text-sm text-[var(--muted)]">{APPROVAL_DESCRIPTION[task.approval_mode]}</div>
+              </>
+            )}
           </div>
-          <NotesSection task={task} onChanged={onChanged} />
+          {!workflow && <NotesSection task={task} onChanged={onChanged} />}
           <RunsSection task={task} />
         </div>
       </div>
 
+      {askingInputs && workflow && (
+        <RunInputsDialog
+          taskName={task.name}
+          inputs={workflow.inputs}
+          onCancel={() => setAskingInputs(false)}
+          onRun={start}
+        />
+      )}
       {deleteConfirm && (
         <ConfirmDialog
           title="Delete scheduled task?"

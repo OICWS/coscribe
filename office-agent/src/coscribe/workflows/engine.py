@@ -86,6 +86,8 @@ class StepRecord:
     # One entry per condition of a check (or an approval's `when`):
     # {"held", "left", "right"}, so a failure shows what it compared.
     checks: list[dict[str, Any]] | None = None
+    # What the person who answered an approval step wrote, if anything.
+    note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -116,7 +118,7 @@ OnStep = Callable[[StepRecord], Awaitable[None] | None]
 
 
 def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now().isoformat(timespec="milliseconds")
 
 
 def _merge(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
@@ -395,9 +397,19 @@ def build_graph(workflow: Workflow, ctx: StepContext, on_step: OnStep, checkpoin
         note = str(answer.get("note") or "") if isinstance(answer, dict) else ""
         if not approved:
             error = "Not approved" + (f": {note}" if note else "")
-            await emit(StepRecord(step.id, "failed", started, _now(), output=message, error=error))
+            await emit(
+                StepRecord(
+                    step.id,
+                    "failed",
+                    started,
+                    _now(),
+                    output=message,
+                    error=error,
+                    note=note or None,
+                )
+            )
             raise StepFailed(error, step_id=step.id)
-        await emit(StepRecord(step.id, "done", started, _now(), output=message))
+        await emit(StepRecord(step.id, "done", started, _now(), output=message, note=note or None))
         return {"values": {}}
 
     graph = StateGraph(_State)
