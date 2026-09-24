@@ -30,6 +30,8 @@ from ..tools.scheduled_tasks import (
     ScheduledTriggerStore,
     compute_next_run_at,
 )
+from ..workflows.engine import RunOutcome, StepRecord, WorkflowNotRunnable, WorkflowRun
+from ..workflows.spec import parse_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +138,78 @@ async def _run_in_session(
     return "completed", None
 
 
+WorkflowAction = Callable[[WorkflowRun], Awaitable[RunOutcome]]
+
+
+async def _run_workflow(
+    store: ScheduledTriggerStore,
+    trigger: ScheduledTrigger,
+    run: ScheduledRun,
+    session: Any,
+    action: WorkflowAction,
+) -> tuple[str, str | None]:
+    """Drive a workflow run one action further (start, answer an approval,
+    retry a step), recording each step on the run and relaying it to a
+    watching tab. Returns (status, error) like _run_in_session."""
+    if trigger.workflow is None:
+        raise ValueError(f"Task {trigger.name!r} has no workflow")
+    workflow = parse_workflow(trigger.workflow)
+    socket = _RelaySocket(session)
+
+    async def on_step(record: StepRecord) -> None:
+        data = record.to_dict()
+        store.record_step(trigger.trigger_id, run.run_id, data)
+        await socket.send_json({"type": "workflow_step", "run_id": run.run_id, "record": data})
+
+    workflow_run = WorkflowRun(
+        workflow,
+        session.workflow_context(trigger.model),
+        session.checkpointer,
+        run.thread_id,
+        on_step,
+    )
+    try:
+        outcome = await action(workflow_run)
+    except WorkflowNotRunnable as exc:
+        return "failed", str(exc)
+    if outcome.status == "completed":
+        return "completed", None
+    if outcome.status == "waiting":
+        return "needs_approval", None
+    titles = {step.id: step.title for step in workflow.steps}
+    title = titles.get(outcome.step_id or "", "A step")
+    return "failed", f"{title}: {outcome.error}"
+
+
+async def continue_workflow_run(
+    state_dir: str | Path,
+    trigger_id: str,
+    run_id: str,
+    get_session: Callable[[str], Awaitable[Any]],
+    action: WorkflowAction,
+) -> ScheduledRun | None:
+    """Take a stopped workflow run further -- an approval answered, a step
+    retried -- once the caller has reopened it (ScheduledTriggerStore.
+    reopen_run), so a request for a run that's still going is refused
+    before anything starts."""
+    store = ScheduledTriggerStore(state_dir)
+    trigger = store.load(trigger_id)
+    run = trigger.find_run(run_id) if trigger is not None else None
+    if trigger is None or run is None:
+        return None
+    try:
+        session = await get_session(run.thread_id)
+        status, error = await _run_workflow(store, trigger, run, session, action)
+    except asyncio.CancelledError:
+        store.finish_run(trigger_id, run_id, "stopped")
+        raise
+    except Exception as exc:  # noqa: BLE001 -- recorded on the run, not swallowed
+        logger.exception("scheduled_tasks: continuing workflow run %s failed", run_id)
+        status, error = "failed", str(exc)
+    updated = store.finish_run(trigger_id, run_id, status, error)
+    return updated.find_run(run_id) if updated is not None else None
+
+
 async def execute_run(
     state_dir: str | Path,
     trigger_id: str,
@@ -153,7 +227,15 @@ async def execute_run(
         return None
     try:
         session = await get_session(run.thread_id)
-        status, error = await _run_in_session(trigger, run, store.read_notes(trigger_id), session)
+        if trigger.workflow is not None:
+            inputs = run.inputs or {}
+            status, error = await _run_workflow(
+                store, trigger, run, session, lambda wf: wf.start(inputs)
+            )
+        else:
+            status, error = await _run_in_session(
+                trigger, run, store.read_notes(trigger_id), session
+            )
     except asyncio.CancelledError:
         store.finish_run(trigger_id, run_id, "stopped")
         raise
@@ -163,7 +245,7 @@ async def execute_run(
         )
         status, error = "failed", str(exc)
     updated = store.finish_run(trigger_id, run_id, status, error)
-    if status == "needs_approval":
+    if status == "needs_approval" and trigger.workflow is None:
         # Only after finish_run: resolving the approval re-records the run
         # (see ChatSessionLG._record_resumed_run_status).
         session.offer_pending_approval_to_live_tab()
@@ -209,6 +291,7 @@ async def fire_trigger_now(
     state_dir: str | Path,
     trigger_id: str,
     get_session: Callable[[str], Awaitable[Any]],
+    inputs: dict[str, Any] | None = None,
 ) -> ScheduledRun | None:
     """Start a manual run and wait for it -- for callers with nothing else
     to do meanwhile (the CLI, tests). web/app.py's Run now endpoint
@@ -218,7 +301,7 @@ async def fire_trigger_now(
     hand at 2pm must not make it skip tomorrow's real 9am fire, and a
     paused task stays paused."""
     store = ScheduledTriggerStore(state_dir)
-    _, run, _ = store.start_run(trigger_id, "manual")
+    _, run, _ = store.start_run(trigger_id, "manual", inputs)
     return await execute_run(state_dir, trigger_id, run.run_id, get_session)
 
 

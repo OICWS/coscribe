@@ -38,7 +38,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from pydantic import ValidationError
+
 from ..runtime.types import tool_metadata
+from ..workflows.spec import parse_workflow, workflow_error
 
 VALID_KINDS = ("manual", "once", "hourly", "daily", "weekdays", "weekly", "monthly")
 VALID_APPROVAL_MODES = ("manual", "auto", "skip")
@@ -247,6 +250,10 @@ class ScheduledRun:
     status: str = "running"  # one of RUN_STATUSES
     finished_at: str | None = None
     error: str | None = None
+    # A workflow run's per-step records (workflows/engine.py's StepRecord),
+    # in the order the steps first ran, and the inputs it was given.
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    inputs: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -257,6 +264,8 @@ class ScheduledRun:
             "status": self.status,
             "finished_at": self.finished_at,
             "error": self.error,
+            "steps": self.steps,
+            "inputs": self.inputs,
         }
 
     @classmethod
@@ -269,6 +278,8 @@ class ScheduledRun:
             status=data.get("status", "completed"),
             finished_at=data.get("finished_at"),
             error=data.get("error"),
+            steps=data.get("steps") or [],
+            inputs=data.get("inputs"),
         )
 
 
@@ -296,6 +307,9 @@ class ScheduledTrigger:
     # change its real behavior.
     notes_enabled: bool = True
     runs: list[ScheduledRun] = field(default_factory=list)  # oldest first
+    # A workflows/spec.py Workflow as JSON: when set, a run executes these
+    # steps instead of handing `prompt` to the model.
+    workflow: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -312,6 +326,7 @@ class ScheduledTrigger:
             "approval_mode": self.approval_mode,
             "notes_enabled": self.notes_enabled,
             "runs": [run.to_dict() for run in self.runs],
+            "workflow": self.workflow,
         }
 
     @classmethod
@@ -345,6 +360,7 @@ class ScheduledTrigger:
             approval_mode=data.get("approval_mode", "manual"),
             notes_enabled=data.get("notes_enabled", True),
             runs=runs,
+            workflow=data.get("workflow"),
         )
 
     def find_run(self, run_id: str) -> ScheduledRun | None:
@@ -397,7 +413,7 @@ class ScheduledTriggerStore:
         return existed
 
     def start_run(
-        self, trigger_id: str, source: str
+        self, trigger_id: str, source: str, inputs: dict[str, Any] | None = None
     ) -> tuple[ScheduledTrigger, ScheduledRun, list[ScheduledRun]]:
         """Record a new run as "running". Returns the freshly loaded
         trigger, the new run, and any runs dropped for exceeding
@@ -412,6 +428,7 @@ class ScheduledTriggerStore:
             thread_id=run_thread_id(trigger_id, run_id),
             started_at=_now_iso(),
             source=source,
+            inputs=inputs,
         )
         trigger.runs.append(run)
         pruned = trigger.runs[:-MAX_RUNS_KEPT]
@@ -440,6 +457,37 @@ class ScheduledTriggerStore:
             trigger.last_run_status = status
         self.save(trigger)
         return trigger
+
+    def record_step(self, trigger_id: str, run_id: str, record: dict[str, Any]) -> None:
+        """Replace this step's record on the run, or append it."""
+        trigger = self.load(trigger_id)
+        run = trigger.find_run(run_id) if trigger is not None else None
+        if trigger is None or run is None:
+            return
+        for index, existing in enumerate(run.steps):
+            if existing.get("step_id") == record.get("step_id"):
+                run.steps[index] = record
+                break
+        else:
+            run.steps.append(record)
+        self.save(trigger)
+
+    def reopen_run(self, trigger_id: str, run_id: str) -> ScheduledRun:
+        """Mark a finished run as running again -- it's being resumed, a
+        step retried, or an approval answered."""
+        trigger = self.load(trigger_id)
+        run = trigger.find_run(run_id) if trigger is not None else None
+        if trigger is None or run is None:
+            raise KeyError(f"No run {run_id!r} of scheduled task {trigger_id!r}")
+        if run.status == "running":
+            raise ValueError("This run is still going")
+        run.status = "running"
+        run.error = None
+        run.finished_at = None
+        if trigger.runs[-1] is run:
+            trigger.last_run_status = "running"
+        self.save(trigger)
+        return run
 
     def read_notes(self, trigger_id: str) -> str:
         path = self._notes_path(trigger_id)
@@ -473,7 +521,8 @@ def _validate_and_build_schedule(
     day_of_month: int | None,
     start_date: str | None,
     approval_mode: str,
-) -> tuple[ScheduleRule, str | None]:
+    workflow: dict[str, Any] | None = None,
+) -> tuple[ScheduleRule, str | None, dict[str, Any] | None]:
     """Shared validation + ScheduleRule construction for create_trigger
     and update_trigger -- kept as one function so the two paths can never
     silently drift out of sync with each other, same reasoning
@@ -485,7 +534,13 @@ def _validate_and_build_schedule(
         raise ValueError(
             f"approval_mode must be one of {VALID_APPROVAL_MODES}, got {approval_mode!r}"
         )
-    if not prompt.strip():
+    normalized_workflow = None
+    if workflow is not None:
+        try:
+            normalized_workflow = parse_workflow(workflow).model_dump(mode="json")
+        except ValidationError as exc:
+            raise ValueError(f"The workflow isn't valid: {workflow_error(exc)}") from exc
+    elif not prompt.strip():
         raise ValueError("prompt cannot be blank")
 
     rule = ScheduleRule(
@@ -496,7 +551,7 @@ def _validate_and_build_schedule(
     # only every other kind treats a None result as "at was in the past."
     if next_run_at is None and kind != "manual":
         raise ValueError(f"at must be in the future, got {at!r}")
-    return rule, next_run_at
+    return rule, next_run_at, normalized_workflow
 
 
 def create_trigger(
@@ -512,6 +567,7 @@ def create_trigger(
     model: str | None = None,
     approval_mode: str = "manual",
     notes_enabled: bool = True,
+    workflow: dict[str, Any] | None = None,
 ) -> ScheduledTrigger:
     """Validate and persist a new ScheduledTrigger -- shared by
     build_scheduled_task_tools' model-callable create_scheduled_task and
@@ -519,7 +575,7 @@ def create_trigger(
     which needs the exact same validation without going through a live
     conversation), so the two creation paths can never silently drift out
     of sync with each other."""
-    rule, next_run_at = _validate_and_build_schedule(
+    rule, next_run_at, normalized_workflow = _validate_and_build_schedule(
         kind=kind,
         at=at,
         prompt=prompt,
@@ -527,6 +583,7 @@ def create_trigger(
         day_of_month=day_of_month,
         start_date=start_date,
         approval_mode=approval_mode,
+        workflow=workflow,
     )
 
     trigger_id = uuid.uuid4().hex[:12]
@@ -541,6 +598,7 @@ def create_trigger(
         model=model,
         approval_mode=approval_mode,
         notes_enabled=notes_enabled,
+        workflow=normalized_workflow,
     )
     store.save(trigger)
     return trigger
@@ -560,6 +618,7 @@ def update_trigger(
     model: str | None = None,
     approval_mode: str = "manual",
     notes_enabled: bool = True,
+    workflow: dict[str, Any] | None = None,
 ) -> ScheduledTrigger:
     """Edit an existing trigger in place -- the Edit modal's Save action.
     Same validation as create_trigger (via _validate_and_build_schedule),
@@ -575,7 +634,7 @@ def update_trigger(
     if trigger is None:
         raise KeyError(f"No scheduled task with id {trigger_id!r}")
 
-    rule, next_run_at = _validate_and_build_schedule(
+    rule, next_run_at, normalized_workflow = _validate_and_build_schedule(
         kind=kind,
         at=at,
         prompt=prompt,
@@ -583,6 +642,7 @@ def update_trigger(
         day_of_month=day_of_month,
         start_date=start_date,
         approval_mode=approval_mode,
+        workflow=workflow,
     )
 
     trigger.name = name
@@ -592,6 +652,7 @@ def update_trigger(
     trigger.model = model
     trigger.approval_mode = approval_mode
     trigger.notes_enabled = notes_enabled
+    trigger.workflow = normalized_workflow
     store.save(trigger)
     return trigger
 

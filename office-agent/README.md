@@ -327,6 +327,46 @@ rule rejects the call. Every automatic approval is recorded in the audit
 log (`approval_mode_auto` / `approval_mode_skip`). If coscribe exits
 mid-run, that run is marked `failed` on the next start.
 
+### Workflows -- fixed steps instead of a prompt
+
+A scheduled task can hold a **workflow** instead of a prompt: named
+inputs plus an ordered list of low-autonomy steps, run by a LangGraph
+graph (`src/coscribe/workflows/`). Where a prompt task hands the whole job
+to the model each time, a workflow only lets a model decide where a step
+says so, and checks what comes out -- for the repeatable, auditable work
+(month-end reconciliations, report roll-ups) a free-form agent is too
+variable for.
+
+| Step | Model? | What it does |
+|---|---|---|
+| `tool` | no | Calls one built-in tool with fixed arguments; `{{name}}` references fill in earlier values. |
+| `script` | no | Runs a fixed Python script, reviewed once when saved. Earlier values arrive as an `inputs` dict (injected as data, never spliced into the code); the result is the JSON its last output line prints. |
+| `llm` | one call, no tools | Returns exactly the declared fields (`text`/`number`/`boolean`/`list`) at temperature 0. A wrong answer is sent back once with what was wrong, then the step fails. Uses forced structured output where the provider allows it, else asks for bare JSON (DeepSeek's thinking mode refuses forced tool calls). |
+| `check` | no | Structured comparisons (`eq`, `ne`, `gt`, `ge`, `lt`, `le`, `contains`, `not_empty`) on references, counts (`{"count": "matches"}`) or literals. Any that fails stops the run, recording what it compared. |
+| `approval` | no | Pauses until a person approves -- only when its `when` condition holds, if it has one. |
+
+References are checked when the workflow is saved -- a typo, or reading
+a value a later step produces, is refused with the step named (`step 3
+('Has words') reads 'taly.words', which isn't an input or the result of
+an earlier step`). A saved workflow's tool and script steps run without
+per-call approval prompts (the task's Permissions apply to prompt tasks):
+saving it is the review. Only `approval` steps pause.
+
+Every step's status, timing, output (trimmed) and check results are
+recorded on the run as it goes. A run that stops can be taken further:
+
+- `POST /api/scheduled-tasks/{id}/runs/{run_id}/retry` -- re-run from the
+  failed step, or from an earlier `step_id` (a check failing because a
+  model step returned bad data needs that model step re-run). Steps
+  before it aren't re-run: their results come from the run's checkpoint.
+- `POST .../runs/{run_id}/answer` with `{"approved": true|false,
+  "note": ""}` -- answer a pending approval step. Declining fails the run
+  there; retrying that step asks again.
+
+`POST /api/scheduled-tasks/{id}/run` takes optional `{"inputs": {...}}`;
+an input left out uses its default. The PDF audit used to verify this is
+`tests/fixtures/pdf_error_audit_workflow.json`.
+
 ## Files
 
 The Coordinator's most basic tools work on plain-text files under the

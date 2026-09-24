@@ -14,6 +14,7 @@ from .messages import (
 )
 from .providers import resolve_chat_model
 from .scheduled_tasks import (
+    continue_workflow_run,
     execute_run,
     fire_trigger_now,
     poll_due_scheduled_tasks,
@@ -36,6 +37,7 @@ __all__ = [
     "build_spawn_agent_background_tool",
     "build_spawn_agent_tool",
     "connect_mcp_tools_lg",
+    "continue_workflow_run",
     "extract_text",
     "execute_run",
     "fire_trigger_now",

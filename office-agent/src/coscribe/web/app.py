@@ -93,6 +93,7 @@ from ..runtime import (
 )
 from ..runtime.types import get_tool_metadata
 from ..runtime_lg import (
+    continue_workflow_run,
     execute_run,
     extract_text,
     poll_due_scheduled_tasks,
@@ -913,13 +914,28 @@ class ScheduledTaskCreate(BaseModel):
     name: str
     kind: str
     at: str
-    prompt: str
+    prompt: str = ""
     weekday: int | None = None
     day_of_month: int | None = None
     start_date: str | None = None
     model: str | None = None
     approval_mode: str = "manual"
     notes_enabled: bool = True
+    workflow: dict[str, Any] | None = None
+
+
+class RunNowRequest(BaseModel):
+    inputs: dict[str, Any] | None = None
+
+
+class WorkflowAnswer(BaseModel):
+    approved: bool
+    note: str = ""
+
+
+class WorkflowRetry(BaseModel):
+    # None: the step the run failed at (or, after a crash, wherever it stopped).
+    step_id: str | None = None
 
 
 class TaskNotesUpdate(BaseModel):
@@ -1734,6 +1750,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 model=payload.model,
                 approval_mode=payload.approval_mode,
                 notes_enabled=payload.notes_enabled,
+                workflow=payload.workflow,
             )
         except (ValueError, KeyError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1757,6 +1774,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 model=payload.model,
                 approval_mode=payload.approval_mode,
                 notes_enabled=payload.notes_enabled,
+                workflow=payload.workflow,
             )
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
@@ -1765,14 +1783,18 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(trigger.to_dict())
 
     @app.post("/api/scheduled-tasks/{trigger_id}/run")
-    async def run_scheduled_task_now_endpoint(trigger_id: str) -> JSONResponse:
+    async def run_scheduled_task_now_endpoint(
+        trigger_id: str, payload: RunNowRequest | None = None
+    ) -> JSONResponse:
         # Returns as soon as the run is recorded, not when it finishes: the
         # browser opens the run's own conversation right away and watches
         # it stream there (see runtime_lg/scheduled_tasks.py's
         # _RelaySocket). How it ended lands on the run record.
         store = ScheduledTriggerStore(settings.state_dir)
         try:
-            trigger, run, pruned = store.start_run(trigger_id, "manual")
+            trigger, run, pruned = store.start_run(
+                trigger_id, "manual", payload.inputs if payload else None
+            )
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         await _delete_run_threads(pruned)
@@ -1782,6 +1804,63 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             )
         )
         return JSONResponse({"task": trigger.to_dict(), "run": run.to_dict()})
+
+    def _reopen_workflow_run(trigger_id: str, run_id: str) -> tuple[Any, Any] | JSONResponse:
+        store = ScheduledTriggerStore(settings.state_dir)
+        trigger = store.load(trigger_id)
+        if trigger is None or trigger.workflow is None:
+            return JSONResponse({"error": f"No workflow task {trigger_id!r}"}, status_code=404)
+        existing = trigger.find_run(run_id)
+        if existing is None:
+            return JSONResponse({"error": f"No run {run_id!r}"}, status_code=404)
+        try:
+            run = store.reopen_run(trigger_id, run_id)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return existing, run
+
+    def _continue_in_background(trigger_id: str, run_id: str, action: Any) -> None:
+        _track_background(
+            asyncio.create_task(
+                continue_workflow_run(
+                    settings.state_dir, trigger_id, run_id, _get_session_async, action
+                )
+            )
+        )
+
+    @app.post("/api/scheduled-tasks/{trigger_id}/runs/{run_id}/answer")
+    async def answer_workflow_approval(
+        trigger_id: str, run_id: str, payload: WorkflowAnswer
+    ) -> JSONResponse:
+        store = ScheduledTriggerStore(settings.state_dir)
+        trigger = store.load(trigger_id)
+        before = trigger.find_run(run_id) if trigger is not None else None
+        if before is not None and before.status != "needs_approval":
+            return JSONResponse({"error": "This run isn't waiting for approval"}, status_code=409)
+        reopened = _reopen_workflow_run(trigger_id, run_id)
+        if isinstance(reopened, JSONResponse):
+            return reopened
+        _continue_in_background(
+            trigger_id, run_id, lambda wf: wf.answer(payload.approved, payload.note)
+        )
+        return JSONResponse({"run": reopened[1].to_dict()})
+
+    @app.post("/api/scheduled-tasks/{trigger_id}/runs/{run_id}/retry")
+    async def retry_workflow_run(
+        trigger_id: str, run_id: str, payload: WorkflowRetry
+    ) -> JSONResponse:
+        reopened = _reopen_workflow_run(trigger_id, run_id)
+        if isinstance(reopened, JSONResponse):
+            return reopened
+        before, run = reopened
+        step_id = payload.step_id or next(
+            (s["step_id"] for s in reversed(before.steps) if s.get("status") == "failed"), None
+        )
+        if step_id is None:
+            _continue_in_background(trigger_id, run_id, lambda wf: wf.resume())
+        else:
+            _continue_in_background(trigger_id, run_id, lambda wf: wf.retry_from(step_id))
+        return JSONResponse({"run": run.to_dict()})
 
     @app.get("/api/scheduled-tasks/{trigger_id}/notes")
     async def get_scheduled_task_notes(trigger_id: str) -> JSONResponse:

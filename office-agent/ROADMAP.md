@@ -5544,6 +5544,65 @@ sub-agent (`spawn_agent`) aren't attributed to the parent thread's panel.
 
 ---
 
+## Phase 8ax -- Orchestrated workflows, phase 1: engine + scheduled-task integration (backend shipped; frontend next)
+
+Decided with you: the "one description = one task" agent covers
+consumer-style work, but production work needs stable, low-autonomy,
+step-controlled workflows (the Dify / hand-built LangGraph end). The
+direction: keep conversation for discovery, then *solidify* a working
+conversation into a fixed step list (phase 2); a vertical step list, not
+a canvas (your call); LLM steps carry no tools (your call); the PDF audit
+as the first real case (your call).
+
+- [x] **Spec** (`workflows/spec.py`): named inputs + `tool`/`script`/
+      `llm`/`check`/`approval` steps as pydantic models, stored as JSON on
+      the task. Every reference is validated at save time against what
+      earlier steps produce. Operand serialization had a real bug caught
+      by the integration test: the unset `ref`/`count`/`value` keys came
+      back as explicit nulls and a saved workflow failed its own
+      "exactly one" validator on reload -- fixed with a serializer that
+      emits only the set key, plus a round-trip test.
+- [x] **Engine** (`workflows/engine.py`): compiled to a LangGraph
+      StateGraph over the conversations' checkpointer. Two LangGraph
+      behaviours verified by experiment (langgraph 1.2.11) before
+      designing around them: after a node raises, `invoke(None)` re-runs
+      only that node (earlier results stay in state) -- the basis of
+      "retry from here"; and on resume an interrupted node re-executes
+      *from its start*, so approval steps do nothing but ask (a side
+      effect before `interrupt()` would run twice). A declined approval
+      is replayed on `invoke(None)`, so asking again forks from before
+      that step (`retry_from`), which also covers re-running an earlier
+      step whose output a later check rejected.
+- [x] **Integration**: `ScheduledTrigger.workflow`, per-step records on
+      `ScheduledRun.steps` (+ `inputs`), `execute_run` branches on it
+      (poller and Run now alike), `/runs/{id}/retry` and `/runs/{id}/answer`,
+      step events relayed to a watching tab (`workflow_step`). A workflow
+      run's thread holds the workflow graph's checkpoints, not a
+      conversation -- the chat session now refuses to drive one (no
+      reconnect-resume, no messages), since feeding its interrupt to the
+      chat agent's graph would corrupt it.
+- [x] **Verified live** (DeepSeek, `tests/fixtures/pdf_error_audit_workflow.json`
+      against the 650-page `big_manual.pdf`), and it found two real
+      problems on the way: (1) the page-count script imported `pypdf`,
+      which the script environment doesn't have -- the run stopped at
+      step 4 with the traceback; after editing the step to `pdfplumber`
+      and retrying, steps 1-3 were *not* re-run (their timestamps
+      unchanged); (2) DeepSeek's thinking mode rejects forced tool calls
+      ("Thinking mode does not support this tool_choice"), so structured
+      output now falls back to asking for bare JSON and validating it.
+      Then: completed, 6 error lines / 6 accounts / boilerplate -> the
+      review step skipped, report written. Two fresh runs afterwards:
+      6.0s each, identical results -- the same audit as a prompt task
+      took over a minute and stopped for script approval.
+
+**Next (phase 1 frontend, after the design is signed off --
+`https://claude.ai/artifact/4G5JyZ3r4tMPF6QcFG3Vj1`)**: steps list on the
+task page, run timeline with per-step output and "Retry from here",
+approval card, task panel Progress from steps. **Phase 2**: add/remove/
+reorder steps; solidify a conversation into a workflow draft.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
