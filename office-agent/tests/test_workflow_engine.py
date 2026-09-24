@@ -603,3 +603,61 @@ def test_item_labels_use_the_field_that_tells_items_apart() -> None:
     assert _item_labels(hits) == ["Error code E-0097", "Error code E-0194"]
     assert _item_labels(["a", 3, {"x": 1}]) == ["a", "3", '{"x": 1}']
     assert _item_labels(["word " * 30]) == [("word " * 12).strip()[:59] + "…"]
+
+
+async def test_a_connectors_tool_runs_as_a_step_and_its_text_becomes_a_value(
+    tmp_path: Path,
+) -> None:
+    from langchain_core.tools import StructuredTool
+
+    seen: list[dict[str, Any]] = []
+
+    async def evaluate(**kwargs: Any) -> list[dict[str, Any]]:
+        seen.append(kwargs)
+        return [{"type": "text", "text": '{"rows": 12}'}]
+
+    browser = StructuredTool(
+        name="playwright_browser_evaluate",
+        description="Evaluate JavaScript on the page.",
+        args_schema={
+            "type": "object",
+            "properties": {"function": {"type": "string"}},
+            "required": ["function"],
+        },
+        coroutine=evaluate,
+    )
+    h = Harness(tmp_path, [])
+    h.ctx.tools["playwright_browser_evaluate"] = browser
+    workflow = parse_workflow(
+        {
+            "steps": [
+                {"id": "count", "kind": "tool", "title": "Count rows",
+                 "tool": "playwright_browser_evaluate",
+                 "args": {"function": "() => document.querySelectorAll('tr').length"},
+                 "save_as": "table"},
+                {"id": "some", "kind": "check", "title": "Some rows",
+                 "conditions": [{"left": {"ref": "table.rows"}, "op": "gt",
+                                 "right": {"value": 0}}]},
+            ]
+        }
+    )  # fmt: skip
+
+    outcome = await h.run(InMemorySaver(), workflow).start({})
+
+    assert outcome.status == "completed"
+    assert outcome.values["table"] == {"rows": 12}
+    assert seen == [{"function": "() => document.querySelectorAll('tr').length"}]
+
+
+def test_a_connectors_result_section_is_the_value() -> None:
+    from coscribe.workflows.engine import _connector_value
+
+    playwright = [
+        {"type": "text", "text": '### Result\n"Items: 3\\n| a |"\n### Ran Playwright code\n```js\n'
+         "await page.evaluate('() => 1');\n```"},
+    ]  # fmt: skip
+    assert _connector_value(playwright) == "Items: 3\n| a |"
+    assert _connector_value('### Result\n{"rows": 2}\n') == {"rows": 2}
+    navigate = "### Ran Playwright code\n```js\nawait page.goto('x');\n```"
+    assert _connector_value(navigate) == navigate
+    assert _connector_value("plain ### not a heading") == "plain ### not a heading"

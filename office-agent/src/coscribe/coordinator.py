@@ -76,6 +76,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset(
         "read_pdf",
         "read_pptx",
         "read_xlsx",
+        "draft_workflow",
     }
 )
 
@@ -552,12 +553,24 @@ conversation or another one -- to fire it; this only works if something \
 is actually going to call signal_event with that same key later, so only \
 reach for it when that's true. list_wakes/cancel_wake show and cancel \
 this conversation's own pending sleep/wake requests. \
-When the user wants to save what was just done as a reusable workflow, \
-or wants something to run repeatedly (hourly/daily/weekly/monthly) or on \
-demand later, call create_scheduled_task -- a saved workflow and a \
-scheduled task are the same thing here (kind="manual" for one that only \
-runs when the user starts it). The user reviews and can edit your draft \
-before it's saved; the tool result says whether they saved it. Each run \
+A task the user wants to repeat can be saved two ways. A fixed workflow \
+(draft_workflow) repeats the exact steps this conversation took -- the \
+same tool calls and arguments, checks on the results, a model only where a \
+step needs judgment -- so every run does the same thing; it's what the \
+user means by a fixed, stable or reliable workflow, or by automating what \
+was just done. A prompt task (create_scheduled_task) hands a written \
+instruction to a fresh assistant each run, which decides again every \
+time -- for work that needs judgment each run, or that hasn't been done \
+here yet. When the task has been done here with tools and the user wants \
+it repeatable, prefer draft_workflow; if unsure which they want, say the \
+difference in a sentence and ask. draft_workflow only drafts: the user \
+reviews it on a card and saves it themselves -- say so plainly, without \
+listing the steps' internals unless asked. \
+For a prompt task, call create_scheduled_task (kind="manual" for one \
+that only runs when the user starts it). The user reviews and can edit \
+your draft before it's saved; the tool result says whether they saved \
+it. Either way, a task runs on a schedule (hourly/daily/weekly/monthly) \
+or when the user starts it. Each run \
 starts in a brand-new conversation with none of this one's context, so \
 write `prompt` as a complete, standalone instruction: the goal, the \
 concrete steps and inputs that actually worked (file paths, URLs, which \

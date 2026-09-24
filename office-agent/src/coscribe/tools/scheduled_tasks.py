@@ -310,6 +310,8 @@ class ScheduledTrigger:
     # A workflows/spec.py Workflow as JSON: when set, a run executes these
     # steps instead of handing `prompt` to the model.
     workflow: dict[str, Any] | None = None
+    # The folder a run reads and writes in; None is the app's default.
+    workspace: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -327,6 +329,7 @@ class ScheduledTrigger:
             "notes_enabled": self.notes_enabled,
             "runs": [run.to_dict() for run in self.runs],
             "workflow": self.workflow,
+            "workspace": self.workspace,
         }
 
     @classmethod
@@ -361,6 +364,7 @@ class ScheduledTrigger:
             notes_enabled=data.get("notes_enabled", True),
             runs=runs,
             workflow=data.get("workflow"),
+            workspace=data.get("workspace"),
         )
 
     def find_run(self, run_id: str) -> ScheduledRun | None:
@@ -557,6 +561,15 @@ def _validate_and_build_schedule(
     return rule, next_run_at, normalized_workflow
 
 
+def _checked_workspace(workspace: str | None) -> str | None:
+    if not workspace or not workspace.strip():
+        return None
+    path = Path(workspace.strip()).expanduser()
+    if not path.is_absolute() or not path.is_dir():
+        raise ValueError(f"The workspace {workspace!r} isn't an existing folder")
+    return str(path)
+
+
 def create_trigger(
     store: ScheduledTriggerStore,
     *,
@@ -571,6 +584,7 @@ def create_trigger(
     approval_mode: str = "manual",
     notes_enabled: bool = True,
     workflow: dict[str, Any] | None = None,
+    workspace: str | None = None,
 ) -> ScheduledTrigger:
     """Validate and persist a new ScheduledTrigger -- shared by
     build_scheduled_task_tools' model-callable create_scheduled_task and
@@ -602,6 +616,7 @@ def create_trigger(
         approval_mode=approval_mode,
         notes_enabled=notes_enabled,
         workflow=normalized_workflow,
+        workspace=_checked_workspace(workspace),
     )
     store.save(trigger)
     return trigger
@@ -622,6 +637,7 @@ def update_trigger(
     approval_mode: str = "manual",
     notes_enabled: bool = True,
     workflow: dict[str, Any] | None = None,
+    workspace: str | None = None,
 ) -> ScheduledTrigger:
     """Edit an existing trigger in place -- the Edit modal's Save action.
     Same validation as create_trigger (via _validate_and_build_schedule),
@@ -656,6 +672,7 @@ def update_trigger(
     trigger.approval_mode = approval_mode
     trigger.notes_enabled = notes_enabled
     trigger.workflow = normalized_workflow
+    trigger.workspace = _checked_workspace(workspace)
     store.save(trigger)
     return trigger
 

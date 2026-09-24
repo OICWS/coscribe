@@ -6362,3 +6362,75 @@ def test_a_failed_pass_is_retried_where_it_stopped_not_the_whole_loop_lg(
         "list_files": 1, "read_file": 3, "write_file": 1,
     }  # fmt: skip
     assert [o["path"] for o in activity["outputs"]] == ["out/all.md"]
+
+
+def test_the_chat_model_drafts_a_fixed_workflow_without_saving_it_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
+
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "input.txt").write_text("data", encoding="utf-8")
+    draft = {
+        "name": "Read the input",
+        "workflow": {
+            "steps": [{"id": "read", "kind": "tool", "title": "Read it", "tool": "read_file",
+                       "args": {"path": "input.txt"}, "save_as": "text"}],
+        },
+        "notes": [],
+    }  # fmt: skip
+    read = _tool_call("c1", "read_file", {"path": "input.txt"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[read]),
+            AIMessage(content="", tool_calls=[_tool_call("c2", "draft_workflow", {"name": ""})]),
+            AIMessage(content=json.dumps(draft)),
+            AIMessage(content="Drafted -- review it on the card."),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        _run_turn(client, "t_chat_draft", "read input.txt, then make it a fixed workflow")
+        with client.websocket_connect("/ws/t_chat_draft") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+
+    [result] = [e for e in history["entries"] if e.get("tool_name") == "draft_workflow"]
+    assert result["result"]["status"] == "drafted", result["result"]
+    assert result["result"]["workflow"]["steps"][0]["tool"] == "read_file"
+    assert result["result"]["workspace"] is None
+    # The curator saw the read that worked, not the draft call itself.
+    curator_request = str(fake_model.received[2][-1].content)
+    assert '[tool call #1] read_file({"path": "input.txt"})' in curator_request
+    assert "draft_workflow(" not in curator_request
+    assert ScheduledTriggerStore(tmp_path / "state").list_all() == []
+
+
+def test_a_tasks_runs_work_in_its_own_workspace_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = tmp_path / "elsewhere"
+    folder.mkdir()
+    (folder / "only-here.txt").write_text("found me", encoding="utf-8")
+    workflow = {
+        "steps": [{"id": "read", "kind": "tool", "title": "Read", "tool": "read_file",
+                   "args": {"path": "only-here.txt"}, "save_as": "text"}],
+    }  # fmt: skip
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="unused")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        missing = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "R", "kind": "manual", "at": "", "workflow": workflow,
+                  "workspace": str(tmp_path / "nowhere")},
+        )  # fmt: skip
+        task = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "R", "kind": "manual", "at": "", "workflow": workflow,
+                  "workspace": str(folder)},
+        ).json()  # fmt: skip
+        run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
+        done = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+
+    assert missing.status_code == 400 and "isn't an existing folder" in missing.json()["error"]
+    assert task["workspace"] == str(folder)
+    assert done["status"] == "completed", done.get("error")
+    assert done["steps"][0]["output"] == "found me"

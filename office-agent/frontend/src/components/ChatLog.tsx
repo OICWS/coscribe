@@ -8,6 +8,7 @@ import {
   type SummaryParts,
   type ToolRunGroup,
   type Turn,
+  type WorkflowDraftEntry,
 } from "../lib/transcriptGrouping";
 import type { LogItem } from "../state/reducer";
 import { CopyButton } from "./CopyButton";
@@ -18,6 +19,7 @@ import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { QuestionCard } from "./QuestionCard";
 import { RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
 import { TaskDraftCard } from "./TaskDraftCard";
+import { WorkflowDraftCard } from "./workflow/WorkflowDraftCard";
 
 /** react-markdown + remark/rehype + katex is the single biggest dependency
  * added to this app (roughly triples the production bundle) -- code-split
@@ -71,6 +73,7 @@ interface ChatLogProps {
   loading: boolean;
   onReviewTaskDraft: (item: TaskDraftItem) => void;
   onDismissTaskDraft: (item: TaskDraftItem) => void;
+  onReviewWorkflowDraft?: (entry: WorkflowDraftEntry) => void;
   /** A shape clicked in a pptx preview (PptxShapeOverlay) -- threaded up
    * to App.tsx exactly like BrowserPanel's own onSendToChat. */
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
@@ -105,6 +108,7 @@ export function ChatLog({
   loading,
   onReviewTaskDraft,
   onDismissTaskDraft,
+  onReviewWorkflowDraft,
   onPptxShapePicked,
   olderItems,
   olderStatus,
@@ -218,6 +222,7 @@ export function ChatLog({
             onRewindMessage={onRewindMessage}
             onReviewTaskDraft={onReviewTaskDraft}
             onDismissTaskDraft={onDismissTaskDraft}
+            onReviewWorkflowDraft={onReviewWorkflowDraft}
             onPptxShapePicked={onPptxShapePicked}
           />
         ))}
@@ -271,6 +276,7 @@ function TurnView({
   onRewindMessage,
   onReviewTaskDraft,
   onDismissTaskDraft,
+  onReviewWorkflowDraft,
   onPptxShapePicked,
 }: {
   turn: Turn;
@@ -281,6 +287,7 @@ function TurnView({
   onRewindMessage?: (turnIndex: number, text: string) => void;
   onReviewTaskDraft?: (item: TaskDraftItem) => void;
   onDismissTaskDraft?: (item: TaskDraftItem) => void;
+  onReviewWorkflowDraft?: (entry: WorkflowDraftEntry) => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const entries = groupToolRuns(turn.items);
@@ -302,6 +309,8 @@ function TurnView({
           <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
         ) : entry.kind === "task_draft" ? (
           <TaskDraftCard key={entry.id} item={entry} onReview={onReviewTaskDraft} onDismiss={onDismissTaskDraft} />
+        ) : entry.kind === "workflow_draft" ? (
+          <WorkflowDraftCard key={entry.id} entry={entry} onReview={onReviewWorkflowDraft} />
         ) : (
           <LogItemView key={entry.id} item={entry} onEditMessage={isLastTurn ? onEditMessage : undefined} />
         ),

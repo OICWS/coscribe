@@ -5786,7 +5786,55 @@ Known cost: each record update rewrites the task's JSON file, and a loop
 writes a record per inner step per pass -- fine at the 200-item cap, but
 the reason the cap is 200.
 
-**Next (not started, to confirm):** test-run comparison, versioning.
+---
+
+## Phase 8bb -- Workflows from chat, connector steps, task workspaces (shipped)
+
+Prompted by a real-machine test: a user did a web (SAP) task in chat,
+asked the model for a "fixed workflow", and got a prompt task -- the
+model's only saving tool was `create_scheduled_task`, and the browser
+tools it had used (the Playwright connector's) couldn't be workflow steps
+at all: `workflow_context` only took plain built-in functions. Downloads
+also couldn't land in a chosen folder: tasks had no workspace.
+
+- [x] **`draft_workflow` tool** (session-bound, in the core tool set):
+      runs the curator on the conversation and returns the draft; the
+      chat shows it as a card (`WorkflowDraftCard`, derived from the
+      stored tool result, so it survives a reload) opening the draft
+      page. It reads the graph's live state (`InjectedState`) -- the
+      checkpoint mid-turn held only the first human message, so the first
+      version saw "no tool calls". Instructions now separate a fixed
+      workflow from a prompt task instead of calling them the same thing.
+- [x] **Connector tools as steps**: `workflow_context` includes `mcp:`
+      LangChain tools; the engine `ainvoke`s them and turns text blocks
+      into values; `describe_params` reads JSON schema; `/api/tools` lists
+      connected connectors' tools (25 Playwright tools here). Playwright's
+      replies are markdown with `### Result` / `### Ran Playwright code`
+      sections -- found by the live run below, where the whole blob was
+      written into the report -- so a `### Result` section is taken as
+      the value. Curator told snapshot refs don't survive a reload.
+- [x] **Task workspace**: `ScheduledTrigger.workspace` (validated as an
+      existing folder); a run thread with no workspace of its own takes
+      its task's (`_resolve_workspace`); the task form's folder button
+      (previously disabled, "Not available yet") works for prompt and
+      workflow tasks; drafts default to the conversation's folder.
+- [x] **Verified live** (Playwright, DeepSeek, the real `@playwright/mcp`
+      connected to a local report page): the chat opened the page, filled
+      company code 49A0 and 2026-09-01..05, clicked Execute and wrote the
+      3-row table to reports/line-items.md (approving each browser call).
+      Asked "turn this into a fixed workflow I can rerun the same way",
+      the model called `draft_workflow` and the card appeared: 7 steps --
+      navigate, fill the form through a page script, check it filled,
+      click via `button:has-text("Execute")` (a selector, not a ref),
+      read the table through a page script, check it's not empty, write
+      -- with 5 inputs (URL, company code, both dates, output path).
+      Saved and run: 7/7 in 2s, no model calls; after the Result fix the
+      report matched the chat's line for line; with the task's workspace
+      set to another folder, the next run wrote there.
+
+**Next (not started, to confirm):** test-run comparison, versioning, and
+the UI batch (tool-call groups, wider chat column, copy for code/tables/
+formulas, multi-select guidance, one scrollbar style everywhere).
 
 ---
 

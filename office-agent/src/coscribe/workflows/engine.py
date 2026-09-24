@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
@@ -107,7 +108,8 @@ class StepRecord:
 
 @dataclass
 class StepContext:
-    tools: dict[str, Callable[..., Any]]
+    # Built-in tools are plain functions; a connector's are LangChain tools.
+    tools: dict[str, Any]
     workspace_root: Path
     state_dir: Path
     # A LangChain chat model for a "provider:model" string, or the
@@ -175,9 +177,47 @@ def preview(value: Any, depth: int = 0) -> Any:
 # -- Step executors -----------------------------------------------------------
 
 
+_SECTION_HEADING = re.compile(r"^### (.+?)\s*$", re.MULTILINE)
+
+
+def _result_section(text: str) -> str | None:
+    """The body of a `### Result` section, for connectors (Playwright's)
+    that wrap a tool's value in markdown sections alongside the code they
+    ran and the page state -- the value is what later steps need."""
+    if not text.startswith("### "):
+        return None
+    headings = list(_SECTION_HEADING.finditer(text))
+    for index, heading in enumerate(headings):
+        if heading.group(1).strip().lower() == "result":
+            end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
+            return text[heading.end() : end].strip()
+    return None
+
+
+def _connector_value(result: Any) -> Any:
+    """What a connector's tool returned, as a value: its text content
+    blocks joined, its `### Result` section if it has one, and JSON
+    decoded where the text is JSON."""
+    if isinstance(result, tuple):  # (content, artifact)
+        result = result[0]
+    if isinstance(result, list) and all(
+        isinstance(block, dict) and block.get("type") == "text" for block in result
+    ):
+        result = "\n".join(str(block.get("text", "")) for block in result)
+    if isinstance(result, str):
+        result = _result_section(result) or result
+        try:
+            return json.loads(result)
+        except ValueError:
+            return result
+    return result
+
+
 async def _run_tool(step: ToolStep, values: dict[str, Any], ctx: StepContext) -> Any:
     tool = ctx.tools[step.tool]
     args = render_value(step.args, values)
+    if isinstance(tool, BaseTool):
+        return _connector_value(await tool.ainvoke(args))
     if inspect.iscoroutinefunction(tool):
         return await tool(**args)
     return await asyncio.to_thread(tool, **args)

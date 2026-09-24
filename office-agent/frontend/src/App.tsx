@@ -32,6 +32,8 @@ import { goToThread, SCHEDULED_THREAD_PREFIX, startNewThread, THREAD_CHANGE_EVEN
 import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
 import { readStored, writeStored } from "./lib/storage";
+import type { WorkflowDraftResult } from "./lib/rest";
+import type { WorkflowDraftEntry } from "./lib/transcriptGrouping";
 import { EMPTY_WORKFLOW } from "./lib/workflowEdit";
 import { recordKey, workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
@@ -87,6 +89,7 @@ function App() {
     draft?: TaskDraftItem;
     newWorkflow?: Workflow;
     initialName?: string;
+    initialWorkspace?: string | null;
   } | null>(null);
   // A workflow being drafted from a conversation, shown in place of the
   // Scheduled page until it's saved, discarded or navigated away from.
@@ -94,6 +97,8 @@ function App() {
     threadId: string;
     threadTitle: string;
     nameHint: string;
+    initial?: WorkflowDraftResult;
+    workspace: string | null;
   } | null>(null);
   // One shared copy for the sidebar, portal, task page and run header --
   // REST mutations don't flow through the websocket, so every mutation
@@ -295,8 +300,23 @@ function App() {
     setNavMode("run");
   };
 
+  // A task made from this conversation works in the conversation's folder.
+  const threadWorkspace = state.workspaceExplicit ? state.workspaceRoot : null;
+
   const startWorkflowDraft = (nameHint: string) => {
-    setWorkflowDraft({ threadId, threadTitle: sessionLabel, nameHint });
+    setWorkflowDraft({ threadId, threadTitle: sessionLabel, nameHint, workspace: threadWorkspace });
+    setScheduledTaskModal(null);
+    setNavMode("run");
+  };
+
+  const reviewWorkflowDraft = (entry: WorkflowDraftEntry) => {
+    setWorkflowDraft({
+      threadId,
+      threadTitle: sessionLabel,
+      nameHint: entry.name,
+      initial: { name: entry.name, workflow: entry.workflow, notes: entry.notes },
+      workspace: entry.workspace ?? threadWorkspace,
+    });
     setScheduledTaskModal(null);
     setNavMode("run");
   };
@@ -350,7 +370,8 @@ function App() {
     setPendingComposerText("I'd like to set up a scheduled task: ");
   };
 
-  const onReviewTaskDraft = (item: TaskDraftItem) => setScheduledTaskModal({ task: null, draft: item });
+  const onReviewTaskDraft = (item: TaskDraftItem) =>
+    setScheduledTaskModal({ task: null, draft: item, initialWorkspace: threadWorkspace });
 
   const onDismissTaskDraft = (item: TaskDraftItem) => {
     dispatch({ type: "local_task_draft_resolved", id: item.id, status: "dismissed" });
@@ -613,6 +634,7 @@ function App() {
               loading={!state.historyReceived}
               onReviewTaskDraft={onReviewTaskDraft}
               onDismissTaskDraft={onDismissTaskDraft}
+              onReviewWorkflowDraft={reviewWorkflowDraft}
               onPptxShapePicked={onPptxShapePicked}
               olderItems={state.olderItems}
               olderStatus={state.olderStatus}
@@ -659,9 +681,17 @@ function App() {
             threadId={workflowDraft.threadId}
             threadTitle={workflowDraft.threadTitle}
             nameHint={workflowDraft.nameHint}
+            initial={workflowDraft.initial}
             onBack={leaveWorkflowDraft}
             onDiscard={leaveWorkflowDraft}
-            onSave={(name, workflow) => setScheduledTaskModal({ task: null, newWorkflow: workflow, initialName: name })}
+            onSave={(name, workflow) =>
+              setScheduledTaskModal({
+                task: null,
+                newWorkflow: workflow,
+                initialName: name,
+                initialWorkspace: workflowDraft.workspace,
+              })
+            }
           />
         ) : (
           <RunPanel
@@ -683,6 +713,7 @@ function App() {
             draft={scheduledTaskModal.draft?.draft}
             newWorkflow={scheduledTaskModal.newWorkflow}
             initialName={scheduledTaskModal.initialName}
+            initialWorkspace={scheduledTaskModal.initialWorkspace}
             onClose={() => setScheduledTaskModal(null)}
             onSaved={onTaskSaved}
           />

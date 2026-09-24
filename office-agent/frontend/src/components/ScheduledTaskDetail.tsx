@@ -351,6 +351,10 @@ export function ScheduledTaskDetail({
             <div className="text-sm font-medium">{describeSchedule(task.schedule)}</div>
           </div>
           <div>
+            <SectionLabel>Workspace</SectionLabel>
+            <div className="break-all text-sm font-medium">{task.workspace || "Default workspace"}</div>
+          </div>
+          <div>
             <SectionLabel>Permissions</SectionLabel>
             {workflow ? (
               <>
