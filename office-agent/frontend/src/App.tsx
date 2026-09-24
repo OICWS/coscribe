@@ -16,17 +16,26 @@ import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { SubAgentsPanel } from "./components/SubAgentsPanel";
 import { TaskPanel } from "./components/TaskPanel";
+import { WorkflowRunView } from "./components/workflow/WorkflowRunView";
 import { BrowserIcon, HelpIcon, PanelRightIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
-import { getCommands, getScheduledTasks, getThreads, runScheduledTaskNow } from "./lib/rest";
+import {
+  answerWorkflowStep,
+  getCommands,
+  getScheduledTasks,
+  getThreads,
+  retryWorkflowRun,
+  runScheduledTaskNow,
+} from "./lib/rest";
 import { goToThread, SCHEDULED_THREAD_PREFIX, startNewThread, THREAD_CHANGE_EVENT } from "./lib/nav";
 import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
 import { readStored, writeStored } from "./lib/storage";
+import { workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState, TASK_DRAFT_SAVED_PREFIX, type LogItem } from "./state/reducer";
 import type { CommandInfo, ThreadSummary } from "./types/session";
-import type { ScheduledTask } from "./types/settings";
+import type { ScheduledRun, ScheduledTask } from "./types/settings";
 
 type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
 
@@ -65,6 +74,8 @@ function App() {
   // Which task Scheduled mode shows the page for (null = the portal) --
   // an id, not a copy of the task, so it always reads the latest list.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // A workflow step to open on the task page -- set by a run's "Edit step".
+  const [focusStepId, setFocusStepId] = useState<string | null>(null);
   // null = closed. { task: null } = create. { task } = editing that task.
   // `draftId` marks a create prefilled from a model's draft in chat,
   // whose outcome goes back to the model as the tool's answer.
@@ -148,7 +159,31 @@ function App() {
       // history is now stale and must wait for the new one instead.
       if (status !== "open") dispatch({ type: "local_connection_reset" });
     };
-    const socket = connect(threadId, dispatch, handleStatus);
+    const socket = connect(
+      threadId,
+      (event) => {
+        if (event.type !== "workflow_step") {
+          dispatch(event);
+          return;
+        }
+        // Step records live on the task list's run; patch it in place so
+        // the run view follows each step without waiting for a poll.
+        setScheduledTasks((tasks) =>
+          tasks.map((task) => ({
+            ...task,
+            runs: task.runs.map((run) => {
+              if (run.run_id !== event.run_id) return run;
+              const known = run.steps.some((step) => step.step_id === event.record.step_id);
+              const steps = known
+                ? run.steps.map((step) => (step.step_id === event.record.step_id ? event.record : step))
+                : [...run.steps, event.record];
+              return { ...run, steps };
+            }),
+          })),
+        );
+      },
+      handleStatus,
+    );
     socketRef.current = socket;
     return () => socket.close();
   }, [threadId]);
@@ -197,6 +232,7 @@ function App() {
   const isScheduledTaskThread = threadId.startsWith(SCHEDULED_THREAD_PREFIX);
   const threadTask = isScheduledTaskThread ? taskForThread(scheduledTasks, threadId) : null;
   const threadRun = threadTask?.runs.find((r) => r.thread_id === threadId) ?? null;
+  const threadWorkflow = threadRun ? (threadTask?.workflow ?? null) : null;
   // Browser and Sub Agents take the same right-hand space, so either one
   // open hides this panel without forgetting that it's wanted.
   const taskPanelShown =
@@ -204,8 +240,8 @@ function App() {
     taskPanelWanted &&
     !browserPanelOpen &&
     !subAgentsPanelOpen &&
-    state.historyReceived &&
-    (state.items.length > 0 || state.olderItems.length > 0);
+    (threadWorkflow !== null ||
+      (state.historyReceived && (state.items.length > 0 || state.olderItems.length > 0)));
   const finishedToolCalls = state.items.filter((item) => item.kind === "tool" && item.result !== undefined).length;
   const toggleTaskPanel = () => {
     const next = !taskPanelShown;
@@ -247,11 +283,29 @@ function App() {
 
   const showScheduledTaskPage = (task: ScheduledTask | null) => {
     setSelectedTaskId(task?.trigger_id ?? null);
+    setFocusStepId(null);
     setNavMode("run");
   };
 
-  const runTaskNow = async (task: ScheduledTask) => {
-    const result = await runScheduledTaskNow(task.trigger_id);
+  const editWorkflowStep = (task: ScheduledTask, stepId: string) => {
+    showScheduledTaskPage(task);
+    setFocusStepId(stepId);
+  };
+
+  const retryWorkflow = async (task: ScheduledTask, run: ScheduledRun, stepId?: string) => {
+    const error = await retryWorkflowRun(task.trigger_id, run.run_id, stepId);
+    refreshScheduledTasks();
+    return error;
+  };
+
+  const answerWorkflow = async (task: ScheduledTask, run: ScheduledRun, approved: boolean, note: string) => {
+    const error = await answerWorkflowStep(task.trigger_id, run.run_id, approved, note);
+    refreshScheduledTasks();
+    return error;
+  };
+
+  const runTaskNow = async (task: ScheduledTask, inputs?: Record<string, unknown>) => {
+    const result = await runScheduledTaskNow(task.trigger_id, inputs);
     if ("error" in result) {
       dispatch({ type: "error", message: result.error });
       return;
@@ -442,6 +496,7 @@ function App() {
             <RunBreadcrumb
               task={threadTask}
               threadId={threadId}
+              statusLabel={threadWorkflow && threadRun ? workflowRunLabel(threadWorkflow, threadRun) : null}
               onOpenPortal={() => showScheduledTaskPage(null)}
               onOpenTask={showScheduledTaskPage}
             />
@@ -504,7 +559,16 @@ function App() {
             Connection lost -- reconnecting...
           </div>
         )}
-        {navMode === "create" ? (
+        {navMode === "create" && threadWorkflow && threadTask && threadRun ? (
+          <WorkflowRunView
+            task={threadTask}
+            run={threadRun}
+            workflow={threadWorkflow}
+            onRetry={(stepId) => retryWorkflow(threadTask, threadRun, stepId)}
+            onAnswer={(approved, note) => answerWorkflow(threadTask, threadRun, approved, note)}
+            onEditStep={(stepId) => editWorkflowStep(threadTask, stepId)}
+          />
+        ) : navMode === "create" ? (
           <>
             <ChatLog
               items={state.items}
@@ -565,6 +629,7 @@ function App() {
             onOpenTask={openScheduledTask}
             onEditTask={(task) => setScheduledTaskModal({ task })}
             onRunNow={runTaskNow}
+            focusStepId={focusStepId}
             onCreateWithCoscribe={createTaskWithCoscribe}
           />
         )}
@@ -600,7 +665,8 @@ function App() {
           title={sessionLabel}
           task={threadTask}
           run={threadRun}
-          refreshSignal={`${state.turnTick}:${finishedToolCalls}`}
+          workflowSteps={threadWorkflow && threadRun ? workflowProgress(threadWorkflow, threadRun) : null}
+          refreshSignal={`${state.turnTick}:${finishedToolCalls}:${threadRun?.steps.length ?? 0}:${threadRun?.status ?? ""}`}
           onOpenTask={showScheduledTaskPage}
         />
       )}

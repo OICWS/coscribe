@@ -6209,3 +6209,25 @@ def test_a_workflow_run_thread_is_never_driven_as_a_conversation_lg(
     assert error["message"] == "A workflow run doesn't take messages."
     assert fake_model.i == 1  # only the workflow's own model step
     assert finished["status"] == "completed"
+
+
+def test_a_workflow_runs_activity_comes_from_its_steps_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "notes.txt").write_text("a b", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[_structured({"words": 2})])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        task = _create_workflow_task(client)
+        run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
+        _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        client.post(
+            f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}/answer",
+            json={"approved": True},
+        )
+        _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        activity = client.get(f"/api/threads/{run['thread_id']}/activity").json()
+
+    assert [o["path"] for o in activity["outputs"]] == ["out.md"]
+    assert {t["name"]: t["count"] for t in activity["tools"]} == {"read_file": 1, "write_file": 1}
+    assert activity["tasks"] == []

@@ -114,7 +114,7 @@ from ..tools.scheduled_tasks import (
 )
 from ..tools.spreadsheets import SpreadsheetToolkit
 from ..workflows.engine import StepContext
-from .activity import summarize_activity
+from .activity import summarize_activity, summarize_workflow_run
 from .context_usage import build_context_breakdown
 
 logger = logging.getLogger(__name__)
@@ -999,12 +999,20 @@ class ChatSessionLG:
         return trigger is not None and trigger.workflow is not None
 
     async def get_activity(self) -> dict[str, Any]:
-        state = await self.lg_agent.aget_state(self.config)
-        messages = list(state.values.get("messages", [])) if state.values else []
         catalog = {
             tool_name(t): get_tool_metadata(cast(Any, t))
             for t in [*self._base_tools, *self._extra_tools]
         }
+        parsed = parse_run_thread_id(self.thread_id)
+        if parsed is not None:
+            trigger = ScheduledTriggerStore(self.settings.state_dir).load(parsed[0])
+            run = trigger.find_run(parsed[1]) if trigger is not None else None
+            if trigger is not None and trigger.workflow is not None and run is not None:
+                return summarize_workflow_run(
+                    trigger.workflow, run, catalog, self.workspace_scope()
+                )
+        state = await self.lg_agent.aget_state(self.config)
+        messages = list(state.values.get("messages", [])) if state.values else []
         return summarize_activity(messages, catalog, self.workspace_scope())
 
     async def get_context_breakdown(self) -> dict[str, Any]:

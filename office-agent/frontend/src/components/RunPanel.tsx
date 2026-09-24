@@ -132,8 +132,9 @@ interface RunPanelProps {
   onSelectTask: (task: ScheduledTask | null) => void;
   onOpenTask: (task: ScheduledTask) => void;
   onEditTask: (task: ScheduledTask | null) => void;
-  onRunNow: (task: ScheduledTask) => void;
+  onRunNow: (task: ScheduledTask, inputs?: Record<string, unknown>) => void;
   onCreateWithCoscribe: () => void;
+  focusStepId?: string | null;
 }
 
 /** Scheduled mode's main content: the card-grid portal
@@ -149,6 +150,7 @@ export function RunPanel({
   onEditTask,
   onRunNow,
   onCreateWithCoscribe,
+  focusStepId,
 }: RunPanelProps) {
   const [newTaskMenuOpen, setNewTaskMenuOpen] = useState(false);
   const newTaskMenuRef = useRef<HTMLDivElement>(null);
@@ -160,7 +162,8 @@ export function RunPanel({
         key={selectedTask.trigger_id}
         task={selectedTask}
         onEdit={() => onEditTask(selectedTask)}
-        onRunNow={() => onRunNow(selectedTask)}
+        onRunNow={(inputs) => onRunNow(selectedTask, inputs)}
+        focusStepId={focusStepId}
         onDeleted={() => {
           onSelectTask(null);
           onScheduledTasksChanged();
@@ -275,7 +278,11 @@ export function RunPanel({
                     onChanged={onScheduledTasksChanged}
                   />
                 </div>
-                <p className="mt-1 line-clamp-2 text-sm text-[var(--muted)]">{task.prompt}</p>
+                <p className="mt-1 line-clamp-2 text-sm text-[var(--muted)]">
+                  {task.workflow
+                    ? `Workflow · ${task.workflow.steps.map((step) => step.title).join(" → ")}`
+                    : task.prompt}
+                </p>
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <span
                     className={`inline-block shrink-0 rounded-md px-2 py-1 text-xs font-medium ${

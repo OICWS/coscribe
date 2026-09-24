@@ -99,6 +99,12 @@
   --file-slides: #c4561f;
   --file-pdf: #c23b3b;
   --file-image: #7a5bc4;
+  --kind-tool: #5f5a57;
+  --kind-script: #2d62b8;
+  --kind-llm: #b8456a;
+  --kind-check: #2f7d4a;
+  --kind-approval: #93600f;
+  --accent-ink: #a83d5c;
   --card-bg: #f0f0ef;
   --primary: #171614;
   --primary-hover: #322f2c;
@@ -137,6 +143,12 @@
     --file-slides: #f0a076;
     --file-pdf: #f09a9a;
     --file-image: #b9a3ee;
+    --kind-tool: #cbc5c2;
+    --kind-script: #8cb4f0;
+    --kind-llm: #ef92ab;
+    --kind-check: #8fd19f;
+    --kind-approval: #e8b85c;
+    --accent-ink: #f5aec1;
     --card-bg: #322f2e;
     --primary: #f7f5f3;
     --primary-hover: #ffffff;

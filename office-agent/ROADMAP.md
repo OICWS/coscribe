@@ -5544,7 +5544,7 @@ sub-agent (`spawn_agent`) aren't attributed to the parent thread's panel.
 
 ---
 
-## Phase 8ax -- Orchestrated workflows, phase 1: engine + scheduled-task integration (backend shipped; frontend next)
+## Phase 8ax -- Orchestrated workflows, phase 1: engine, scheduled-task integration, step editor and run timeline (shipped)
 
 Decided with you: the "one description = one task" agent covers
 consumer-style work, but production work needs stable, low-autonomy,
@@ -5595,11 +5595,39 @@ as the first real case (your call).
       6.0s each, identical results -- the same audit as a prompt task
       took over a minute and stopped for script approval.
 
-**Next (phase 1 frontend, after the design is signed off --
-`https://claude.ai/artifact/4G5JyZ3r4tMPF6QcFG3Vj1`)**: steps list on the
-task page, run timeline with per-step output and "Retry from here",
-approval card, task panel Progress from steps. **Phase 2**: add/remove/
-reorder steps; solidify a conversation into a workflow draft.
+- [x] **Frontend** (design signed off:
+      `https://claude.ai/artifact/4G5JyZ3r4tMPF6QcFG3Vj1`): the task page's
+      inputs + vertical step list (kind tiles and legend, value tokens,
+      per-kind step editors saving one step at a time), a run timeline in
+      place of the chat for workflow runs (per-step status/duration/
+      output, failed-step card with each comparison's actual result,
+      retry / retry-from-the-model-step / edit, approval card with note),
+      Run now inputs dialog, "Stopped at step N" in the header, the side
+      panel's Progress from steps and Outputs/Context from the run's step
+      records (a workflow thread has no messages to read), live
+      `workflow_step` updates, step-kind color tokens for both themes.
+      **Verified live in the browser** (Playwright, DeepSeek, light and
+      dark): changed step 3's comparison to `≠` in the editor and ran it
+      -- stopped at step 3 with "6 = 6" shown against the `≠` it
+      required; "Edit step 3" opened that step, set back to `=`, "Retry
+      this step" re-ran from step 3 only and finished 8/8 with the report
+      in Outputs; switched the approval's condition to fire, ran again,
+      approved with a note from the card, completed. Found and fixed on
+      the way: failed checks were printed as "left ≠ right" regardless of
+      operator (a failed `>` read "0 ≠ 0") -- now the negated operator;
+      an approval note was promised "kept with the run" but only a
+      decline stored it -- now recorded either way; the side panel
+      didn't appear on workflow runs (its "conversation has content"
+      rule); the condition editor's operator select took the full row.
+      Also fixed two pre-existing bugs this touched: the task create/
+      update/Run now REST helpers threw on a 4xx while their callers
+      expected `{error}` -- a rejected save left the modal stuck on
+      "Saving" with no message; and the notes toggle's update omitted
+      fields (now one shared `taskPayload`, which also carries the
+      workflow every partial update must keep).
+
+**Phase 2**: add/remove/reorder steps; solidify a conversation into a
+workflow draft.
 
 ---
 

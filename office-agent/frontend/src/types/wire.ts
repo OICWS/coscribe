@@ -1,3 +1,4 @@
+import type { StepRecord } from "./workflow";
 /**
  * The exact wire contract coscribe-web speaks, as of this session's
  * full re-read of coscribe/web/app.py, web/session.py,
@@ -148,6 +149,14 @@ export interface ScheduledRunStartedEvent {
   text: string;
 }
 
+/** One step of a workflow run on this thread started, finished, failed
+ * or began waiting (runtime_lg/scheduled_tasks.py's _run_workflow). */
+export interface WorkflowStepEvent {
+  type: "workflow_step";
+  run_id: string;
+  record: StepRecord;
+}
+
 /** create_scheduled_task's arguments as the model drafted them -- nothing
  * is saved until the user reviews it; answered with question_response. */
 export interface TaskDraft {
@@ -238,6 +247,7 @@ export type WsServerEvent =
   | ApprovalRequiredEvent
   | QuestionRequiredEvent
   | ScheduledRunStartedEvent
+  | WorkflowStepEvent
   | TaskDraftRequiredEvent
   | UsageEvent
   | TasksChangedEvent

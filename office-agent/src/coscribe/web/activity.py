@@ -155,3 +155,63 @@ def open_in_os(path: Path, *, reveal: bool) -> None:
         subprocess.Popen(["open", "-R", str(path)] if reveal else ["open", str(path)])
     else:
         subprocess.Popen(["xdg-open", str(path.parent if reveal else path)])
+
+
+def summarize_workflow_run(
+    workflow: dict[str, Any],
+    run: Any,
+    catalog: dict[str, ToolMetadata],
+    scope: WorkspaceScope,
+) -> dict[str, Any]:
+    """The same shape as summarize_activity, for a workflow run -- whose
+    thread holds no conversation to read, but whose step records say what
+    each step did."""
+    records = {r.get("step_id"): r for r in run.steps}
+    output_paths: list[str] = []
+    tool_counts: dict[str, int] = {}
+    connectors: dict[str, dict[str, int]] = {}
+    for step in workflow.get("steps", []):
+        record = records.get(step.get("id"))
+        if record is None or record.get("status") != "done":
+            continue
+        if step.get("kind") == "script":
+            tool_counts["run_python_script"] = tool_counts.get("run_python_script", 0) + 1
+            continue
+        if step.get("kind") != "tool":
+            continue
+        name = step.get("tool", "")
+        metadata = catalog.get(name)
+        category = metadata.category if metadata is not None else None
+        if category is not None and category.startswith("mcp:"):
+            server_tools = connectors.setdefault(category.removeprefix("mcp:"), {})
+            server_tools[name] = server_tools.get(name, 0) + 1
+            continue
+        tool_counts[name] = tool_counts.get(name, 0) + 1
+        output = record.get("output")
+        if (
+            metadata is not None
+            and metadata.risk_category in _OUTPUT_RISKS
+            and isinstance(output, dict)
+            and isinstance(output.get("path"), str)
+        ):
+            output_paths.append(output["path"])
+
+    outputs = [e for p in reversed(output_paths) if (e := _file_entry(scope, p)) is not None]
+    given = run.inputs or {}
+    references = []
+    for spec in workflow.get("inputs", []):
+        value = given.get(spec.get("name"), spec.get("default"))
+        if spec.get("type") == "file" and isinstance(value, str) and value:
+            entry = _file_entry(scope, value)
+            if entry is not None and entry["exists"]:
+                references.append(entry)
+    return {
+        "outputs": outputs,
+        "references": references,
+        "tools": [{"name": n, "count": c} for n, c in tool_counts.items()],
+        "connectors": [
+            {"server": server, "tools": [{"name": n, "count": c} for n, c in used.items()]}
+            for server, used in connectors.items()
+        ],
+        "skills": [],
+    }

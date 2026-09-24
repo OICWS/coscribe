@@ -205,9 +205,12 @@ async def test_an_approval_step_waits_and_its_answer_is_honoured(tmp_path: Path)
     assert waiting.request is not None and "Two generated lines." in waiting.request["message"]
     assert "write_file" not in _tool_names(h)
 
-    done = await run.answer(approved=True)
+    done = await run.answer(approved=True, note="checked the totals")
 
     assert done.status == "completed"
+    assert next(r for r in h.records if r.step_id == "review" and r.status == "done").note == (
+        "checked the totals"
+    )
     assert _tool_names(h).count("write_file") == 1
     assert h.final_status()["review"] == "done"
 

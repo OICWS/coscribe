@@ -123,6 +123,7 @@ interface ScheduledTaskModalProps {
  * times). */
 export function ScheduledTaskModal({ task, draft, onClose, onSaved }: ScheduledTaskModalProps) {
   const isEdit = task !== null;
+  const workflow = task?.workflow ?? null;
   const [initial] = useState(() => initialValues(task, draft));
   const [name, setName] = useState(initial.name);
   const [instructions, setInstructions] = useState(initial.instructions);
@@ -152,7 +153,7 @@ export function ScheduledTaskModal({ task, draft, onClose, onSaved }: ScheduledT
       setError("Name is required.");
       return;
     }
-    if (!trimmedInstructions) {
+    if (!trimmedInstructions && !workflow) {
       setError("Instructions are required.");
       return;
     }
@@ -166,6 +167,7 @@ export function ScheduledTaskModal({ task, draft, onClose, onSaved }: ScheduledT
       ...(model ? { model } : {}),
       approval_mode: approvalMode,
       notes_enabled: task?.notes_enabled ?? true,
+      workflow,
     };
     setSaving(true);
     setError(null);
@@ -219,46 +221,52 @@ export function ScheduledTaskModal({ task, draft, onClose, onSaved }: ScheduledT
             />
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Instructions <span className="text-[var(--danger)]">*</span>
-            </label>
-            <div className="overflow-hidden rounded-md border border-[var(--border)]">
-              <textarea
-                className="w-full resize-none bg-transparent px-3 py-2 text-sm outline-none"
-                placeholder="Summarize my calendar and unread emails. Flag anything urgent."
-                rows={5}
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-              />
-              <div className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm">
-                <button
-                  type="button"
-                  disabled
-                  title="Not available yet"
-                  className="flex items-center gap-1.5 text-[var(--muted)] opacity-60"
-                >
-                  <FolderIcon className="h-3.5 w-3.5" /> Select workspace
-                </button>
-                <select
-                  aria-label="Model"
-                  className="bg-transparent text-[var(--muted)] outline-none"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                >
-                  <option value="">Default model</option>
-                  {providers.map(([providerKey, info]) => {
-                    const value = `${providerKey}:${info.default_model}`;
-                    return (
-                      <option key={providerKey} value={value}>
-                        {info.default_model}
-                      </option>
-                    );
-                  })}
-                </select>
+          {workflow ? (
+            <div className="rounded-md border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--muted)]">
+              This task runs a workflow of {workflow.steps.length} steps. Edit its steps on the task page.
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Instructions <span className="text-[var(--danger)]">*</span>
+              </label>
+              <div className="overflow-hidden rounded-md border border-[var(--border)]">
+                <textarea
+                  className="w-full resize-none bg-transparent px-3 py-2 text-sm outline-none"
+                  placeholder="Summarize my calendar and unread emails. Flag anything urgent."
+                  rows={5}
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                />
+                <div className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm">
+                  <button
+                    type="button"
+                    disabled
+                    title="Not available yet"
+                    className="flex items-center gap-1.5 text-[var(--muted)] opacity-60"
+                  >
+                    <FolderIcon className="h-3.5 w-3.5" /> Select workspace
+                  </button>
+                  <select
+                    aria-label="Model"
+                    className="bg-transparent text-[var(--muted)] outline-none"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                  >
+                    <option value="">Default model</option>
+                    {providers.map(([providerKey, info]) => {
+                      const value = `${providerKey}:${info.default_model}`;
+                      return (
+                        <option key={providerKey} value={value}>
+                          {info.default_model}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* w-24 on both labels is load-bearing, not decorative -- it's
            * what keeps the Frequency/Permissions dropdowns' left edges
@@ -329,23 +337,25 @@ export function ScheduledTaskModal({ task, draft, onClose, onSaved }: ScheduledT
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="w-24 shrink-0 text-sm font-medium">Permissions</label>
-            <select
-              aria-label="Permissions"
-              className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm"
-              value={approvalMode}
-              onChange={(e) => setApprovalMode(e.target.value as ApprovalMode)}
-            >
-              {APPROVAL_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!workflow && (
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="w-24 shrink-0 text-sm font-medium">Permissions</label>
+              <select
+                aria-label="Permissions"
+                className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm"
+                value={approvalMode}
+                onChange={(e) => setApprovalMode(e.target.value as ApprovalMode)}
+              >
+                {APPROVAL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          {APPROVAL_BANNER[approvalMode] && (
+          {!workflow && APPROVAL_BANNER[approvalMode] && (
             <div className="rounded-md border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)]">
               {APPROVAL_BANNER[approvalMode]}
             </div>
