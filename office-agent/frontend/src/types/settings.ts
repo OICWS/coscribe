@@ -69,12 +69,22 @@ export type BrowseDirsResponse =
 // Tools tab
 // ---------------------------------------------------------------------
 
+export interface ToolParam {
+  name: string;
+  /** Coarse, for picking an input control; "other" = a list or object. */
+  type: "text" | "number" | "boolean" | "other";
+  required: boolean;
+  default: string | number | boolean | null;
+  description: string;
+}
+
 export interface ToolInfo {
   name: string;
   category: string;
   risk_category: "READ" | "WRITE_LOCAL" | "EXEC" | "EXTERNAL";
   requires_approval: boolean;
   description: string;
+  params: ToolParam[];
 }
 
 export interface ToolsResponse {

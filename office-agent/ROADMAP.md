@@ -5631,6 +5631,51 @@ workflow draft.
 
 ---
 
+## Phase 8ay -- Workflows phase 2a: build and restructure workflows in the editor (shipped)
+
+- [x] **Add / delete / reorder**: a "+" between steps and an "Add step"
+      button open a menu of the five kinds; Tool opens a searchable,
+      category-grouped picker. A new step is a draft card until "Add
+      step" saves it. An open step has move up / down / delete; delete
+      confirms. Every change PUTs the whole workflow, so the server's
+      save-time validation is the one rule -- a move or delete that would
+      leave a step reading something no longer before it is refused and
+      explained on that step ("Can't move it there -- ...", "Can't delete
+      it -- ...").
+- [x] **Full step editors**: tool steps get a form built from the
+      tool's own signature and docstring (`workflows/catalog.py`;
+      `GET /api/tools` now carries `params` -- name, coarse type,
+      required, default, meaning; 1 parameter out of the whole catalog
+      lacks a docstring line); model fields add/remove/rename; checks
+      add/remove conditions with a full operand editor (value / count of /
+      fixed text, number or yes-no, names suggested including model steps'
+      fields); script inputs add/remove; approval condition on/off;
+      "Save result as" for tool/script/model steps.
+- [x] **Renames carry through**: renaming a step's result or an input
+      rewrites every later `{{ref}}` and operand reading it
+      (`lib/workflowEdit.ts`'s renameValue).
+- [x] **Inputs editor** and **New task -> Build a workflow**: an empty
+      workflow now saves (steps' min length dropped) but preflight refuses
+      to run one, and Run now is disabled until it has steps.
+- [x] **Verified live in the browser** (Playwright, DeepSeek): built "Q3
+      sales roll-up" from nothing entirely in the UI -- a file input, Read
+      Excel on it, a model step returning q1_total/q2_total, a > 0 check,
+      Write file -- then: moving the check above the model step was
+      refused with the reason on the card; renaming the model's result
+      `result` -> `totals` rewrote the check and the report template;
+      Run now completed and wrote Q1 376050 / Q2 392400, which match the
+      workbook (125000+98750+152300, 138400+104200+149800); deleting the
+      model step was refused. Light and dark checked. Found on the way:
+      "Add an input" on an empty workflow opened an editor with no rows;
+      the bottom "Add step" menu opened upward and was clipped by the
+      viewport; a new step's header didn't follow its name field; write
+      tools got a pointless "Save result as" name.
+
+**Next: phase 2b** -- solidify a conversation into a workflow draft,
+reviewed in this editor before saving.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

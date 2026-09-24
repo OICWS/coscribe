@@ -132,6 +132,7 @@ interface RunPanelProps {
   onSelectTask: (task: ScheduledTask | null) => void;
   onOpenTask: (task: ScheduledTask) => void;
   onEditTask: (task: ScheduledTask | null) => void;
+  onBuildWorkflow: () => void;
   onRunNow: (task: ScheduledTask, inputs?: Record<string, unknown>) => void;
   onCreateWithCoscribe: () => void;
   focusStepId?: string | null;
@@ -148,6 +149,7 @@ export function RunPanel({
   onSelectTask,
   onOpenTask,
   onEditTask,
+  onBuildWorkflow,
   onRunNow,
   onCreateWithCoscribe,
   focusStepId,
@@ -232,6 +234,17 @@ export function RunPanel({
                     <span className="text-sm">Set up manually</span>
                     <span className="text-xs text-[var(--muted)]">Write the instructions and schedule yourself</span>
                   </button>
+                  <button
+                    type="button"
+                    className={menuItem}
+                    onClick={() => {
+                      setNewTaskMenuOpen(false);
+                      onBuildWorkflow();
+                    }}
+                  >
+                    <span className="text-sm">Build a workflow</span>
+                    <span className="text-xs text-[var(--muted)]">Fixed steps you control, checked as they run</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -280,7 +293,7 @@ export function RunPanel({
                 </div>
                 <p className="mt-1 line-clamp-2 text-sm text-[var(--muted)]">
                   {task.workflow
-                    ? `Workflow · ${task.workflow.steps.map((step) => step.title).join(" → ")}`
+                    ? `Workflow · ${task.workflow.steps.map((step) => step.title).join(" → ") || "no steps yet"}`
                     : task.prompt}
                 </p>
                 <div className="mt-3 flex items-center justify-between gap-3">

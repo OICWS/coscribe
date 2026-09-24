@@ -383,3 +383,10 @@ async def test_a_model_that_refuses_forced_tool_calls_is_asked_for_json(tmp_path
 
     assert outcome.status == "completed"
     assert outcome.values["summary"] == GOOD_SUMMARY
+
+
+async def test_a_workflow_with_no_steps_saves_but_wont_run(tmp_path: Path) -> None:
+    workflow = parse_workflow({"inputs": [], "steps": []})
+
+    with pytest.raises(WorkflowNotRunnable, match="no steps yet"):
+        await Harness(tmp_path, []).run(InMemorySaver(), workflow).start({})

@@ -82,6 +82,7 @@ function App() {
   const [scheduledTaskModal, setScheduledTaskModal] = useState<{
     task: ScheduledTask | null;
     draft?: TaskDraftItem;
+    newWorkflow?: boolean;
   } | null>(null);
   // One shared copy for the sidebar, portal, task page and run header --
   // REST mutations don't flow through the websocket, so every mutation
@@ -335,6 +336,7 @@ function App() {
 
   const onTaskSaved = (task: ScheduledTask) => {
     refreshScheduledTasks();
+    if (scheduledTaskModal?.newWorkflow) showScheduledTaskPage(task);
     const draft = scheduledTaskModal?.draft;
     if (!draft) return;
     dispatch({ type: "local_task_draft_resolved", id: draft.id, status: "saved", savedName: task.name });
@@ -631,12 +633,14 @@ function App() {
             onRunNow={runTaskNow}
             focusStepId={focusStepId}
             onCreateWithCoscribe={createTaskWithCoscribe}
+            onBuildWorkflow={() => setScheduledTaskModal({ task: null, newWorkflow: true })}
           />
         )}
         {scheduledTaskModal && (
           <ScheduledTaskModal
             task={scheduledTaskModal.task}
             draft={scheduledTaskModal.draft?.draft}
+            newWorkflow={scheduledTaskModal.newWorkflow}
             onClose={() => setScheduledTaskModal(null)}
             onSaved={onTaskSaved}
           />

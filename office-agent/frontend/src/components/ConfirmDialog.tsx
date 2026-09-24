@@ -8,6 +8,8 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
+  /** "neutral" for a confirm that destroys nothing (an acknowledgement). */
+  tone?: "danger" | "neutral";
 }
 
 /** Shared styled confirm dialog -- matches SettingsModal's overlay/card
@@ -21,6 +23,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   onCancel,
   onConfirm,
+  tone = "danger",
 }: ConfirmDialogProps) {
   // Portaled to document.body -- same fix, same reason as SettingsModal's
   // own (see its docstring): a modal rendered in place, deep in App's
@@ -44,7 +47,11 @@ export function ConfirmDialog({
           </button>
           <button
             type="button"
-            className="rounded-md bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-700"
+            className={
+              tone === "danger"
+                ? "rounded-md bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-700"
+                : "rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm text-[var(--primary-fg)] hover:bg-[var(--primary-hover)]"
+            }
             onClick={onConfirm}
           >
             {confirmLabel}

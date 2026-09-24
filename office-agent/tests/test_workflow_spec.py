@@ -57,7 +57,6 @@ def test_a_typo_in_a_reference_is_rejected() -> None:
         (lambda d: d["steps"][4].pop("save_as"), "save_as"),
         (lambda d: d["steps"][0].update(kind="agent"), "tag 'agent'"),
         (lambda d: d["steps"][0].update(surprise=1), "surprise"),
-        (lambda d: d.update(steps=[]), "at least 1 item"),
     ],
 )
 def test_malformed_workflows_are_rejected(mutate: Any, message: str) -> None:

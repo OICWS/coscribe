@@ -447,3 +447,21 @@ export function FileTextIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+/** feather-icons "arrow-up". */
+export function ArrowUpIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 19V5M5 12l7-7 7 7" />
+    </Icon>
+  );
+}
+
+/** feather-icons "arrow-down". */
+export function ArrowDownIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 5v14M19 12l-7 7-7-7" />
+    </Icon>
+  );
+}

@@ -13,6 +13,29 @@ function StepIcon({ step, className }: { step: WorkflowStep; className: string }
   return <ToolIcon className={className} />;
 }
 
+const KIND_ICON: Record<StepKind, (props: { className: string }) => ReactNode> = {
+  tool: ToolIcon,
+  script: TerminalIcon,
+  llm: SparkIcon,
+  check: ShieldCheckIcon,
+  approval: UserIcon,
+};
+
+/** A kind's tile before there's a step to show (the add-step menu). */
+export function KindTile({ kind }: { kind: StepKind }) {
+  const color = KIND_COLOR[kind];
+  const Glyph = KIND_ICON[kind];
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
+      style={{ color, backgroundColor: `color-mix(in srgb, ${color} 13%, transparent)` }}
+    >
+      <Glyph className="h-[15px] w-[15px]" />
+    </span>
+  );
+}
+
 /** The colored square that says what kind of step this is. */
 export function StepKindTile({ step, size = "md" }: { step: WorkflowStep; size?: "sm" | "md" }) {
   const color = KIND_COLOR[step.kind];
