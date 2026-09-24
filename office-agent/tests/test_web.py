@@ -6303,3 +6303,62 @@ def test_validate_workflow_normalizes_or_explains_lg(
     assert ok.json() == {"workflow": {"version": 1, "inputs": [], "steps": []}}
     assert bad.status_code == 400
     assert "step 1" in bad.json()["error"]
+
+
+def _loop_workflow(skip: str) -> dict[str, Any]:
+    return {
+        "steps": [
+            {"id": "ls", "kind": "tool", "title": "List", "tool": "list_files",
+             "args": {"pattern": "*.txt"}, "save_as": "listing"},
+            {"id": "each", "kind": "loop", "title": "Each file", "over": "listing.files",
+             "item": "file", "collect": "text", "save_as": "texts",
+             "steps": [
+                 {"id": "read", "kind": "tool", "title": "Read", "tool": "read_file",
+                  "args": {"path": "{{file}}"}, "save_as": "text"},
+                 {"id": "not_b", "kind": "check", "title": "Not B",
+                  "conditions": [{"left": {"ref": "file"}, "op": "ne", "right": {"value": skip}}]},
+             ]},
+            {"id": "keep", "kind": "tool", "title": "Keep", "tool": "write_file",
+             "args": {"path": "out/all.md", "content": "All: {{texts}}", "overwrite": True}},
+        ]
+    }  # fmt: skip
+
+
+def test_a_failed_pass_is_retried_where_it_stopped_not_the_whole_loop_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for name in ("a", "b", "c"):
+        (workspace / f"{name}.txt").write_text(f"text {name}", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="unused")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Each", "kind": "manual", "at": "", "workflow": _loop_workflow("b.txt")},
+        ).json()
+        trigger_id = created["trigger_id"]
+        run = client.post(f"/api/scheduled-tasks/{trigger_id}/run", json={}).json()["run"]
+        failed = _wait_for_run_status(client, trigger_id, run["run_id"])
+
+        fixed = {"name": "Each", "kind": "manual", "at": "", "workflow": _loop_workflow("z.txt")}
+        assert client.put(f"/api/scheduled-tasks/{trigger_id}", json=fixed).status_code == 200
+        client.post(f"/api/scheduled-tasks/{trigger_id}/runs/{run['run_id']}/retry", json={})
+        done = _wait_for_run_status(client, trigger_id, run["run_id"])
+        activity = client.get(f"/api/threads/{run['thread_id']}/activity").json()
+
+    assert failed["status"] == "failed"
+    assert failed["error"] == "Not B: 1 of 1 checks failed"
+    stopped = {(s["step_id"], tuple(s["iteration"])): s["status"] for s in failed["steps"]}
+    assert stopped[("not_b", (1,))] == "failed" and stopped[("each", ())] == "failed"
+    assert done["status"] == "completed", done["error"]
+    reads = [s for s in done["steps"] if s["step_id"] == "read"]
+    assert [s["iteration"] for s in reads] == [[0], [1], [2]]
+    # The first pass wasn't run again.
+    first_read = next(s for s in failed["steps"] if s["step_id"] == "read")
+    assert reads[0]["finished_at"] == first_read["finished_at"]
+    assert (workspace / "out" / "all.md").read_text(encoding="utf-8").count("text") == 3
+    assert {t["name"]: t["count"] for t in activity["tools"]} == {
+        "list_files": 1, "read_file": 3, "write_file": 1,
+    }  # fmt: skip
+    assert [o["path"] for o in activity["outputs"]] == ["out/all.md"]

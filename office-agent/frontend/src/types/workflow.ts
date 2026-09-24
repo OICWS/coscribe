@@ -1,7 +1,7 @@
 // Mirrors src/coscribe/workflows/spec.py (the definition) and
 // engine.py's StepRecord (one step of one run).
 
-export type StepKind = "tool" | "script" | "llm" | "check" | "approval";
+export type StepKind = "tool" | "script" | "llm" | "check" | "approval" | "branch" | "loop";
 export type OutputFieldType = "text" | "number" | "boolean" | "list";
 export type CheckOp = "eq" | "ne" | "gt" | "ge" | "lt" | "le" | "contains" | "not_empty";
 
@@ -65,7 +65,27 @@ export interface ApprovalStep extends StepBase {
   when: Condition | null;
 }
 
-export type WorkflowStep = ToolStep | ScriptStep | LLMStep | CheckStep | ApprovalStep;
+export interface BranchStep extends StepBase {
+  kind: "branch";
+  condition: Condition;
+  then: WorkflowStep[];
+  otherwise: WorkflowStep[];
+}
+
+export interface LoopStep extends StepBase {
+  kind: "loop";
+  /** A reference to the list to go through. */
+  over: string;
+  item: string;
+  steps: WorkflowStep[];
+  /** What to keep from each pass; the list of them is saved as save_as. */
+  collect: string | null;
+  save_as: string | null;
+  max_items: number;
+}
+
+export type WorkflowStep = ToolStep | ScriptStep | LLMStep | CheckStep | ApprovalStep | BranchStep | LoopStep;
+export type BlockStep = BranchStep | LoopStep;
 
 export interface Workflow {
   version: 1;
@@ -91,4 +111,6 @@ export interface StepRecord {
   checks: CheckResult[] | null;
   /** What the person who answered an approval step wrote. */
   note?: string | null;
+  /** Which pass of each loop around the step, outermost first. */
+  iteration?: number[];
 }

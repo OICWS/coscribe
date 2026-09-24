@@ -459,13 +459,16 @@ class ScheduledTriggerStore:
         return trigger
 
     def record_step(self, trigger_id: str, run_id: str, record: dict[str, Any]) -> None:
-        """Replace this step's record on the run, or append it."""
+        """Replace this step's record on the run -- this pass of it, inside
+        a loop -- or append it."""
         trigger = self.load(trigger_id)
         run = trigger.find_run(run_id) if trigger is not None else None
         if trigger is None or run is None:
             return
         for index, existing in enumerate(run.steps):
-            if existing.get("step_id") == record.get("step_id"):
+            if existing.get("step_id") == record.get("step_id") and (
+                existing.get("iteration") or []
+            ) == (record.get("iteration") or []):
                 run.steps[index] = record
                 break
         else:
@@ -539,7 +542,7 @@ def _validate_and_build_schedule(
         try:
             normalized_workflow = parse_workflow(workflow).model_dump(mode="json")
         except ValidationError as exc:
-            raise ValueError(f"The workflow isn't valid: {workflow_error(exc)}") from exc
+            raise ValueError(f"The workflow isn't valid: {workflow_error(exc, workflow)}") from exc
     elif not prompt.strip():
         raise ValueError("prompt cannot be blank")
 

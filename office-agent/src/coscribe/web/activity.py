@@ -157,6 +157,20 @@ def open_in_os(path: Path, *, reveal: bool) -> None:
         subprocess.Popen(["xdg-open", str(path.parent if reveal else path)])
 
 
+def _all_steps(steps: list[Any]) -> list[dict[str, Any]]:
+    """Every step dict of a stored workflow, branches' and loops' included."""
+    found: list[dict[str, Any]] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        found.append(step)
+        for arm in ("then", "otherwise", "steps"):
+            children = step.get(arm)
+            if isinstance(children, list):
+                found.extend(_all_steps(children))
+    return found
+
+
 def summarize_workflow_run(
     workflow: dict[str, Any],
     run: Any,
@@ -166,13 +180,14 @@ def summarize_workflow_run(
     """The same shape as summarize_activity, for a workflow run -- whose
     thread holds no conversation to read, but whose step records say what
     each step did."""
-    records = {r.get("step_id"): r for r in run.steps}
+    # One record per step per loop pass; each pass that ran counts.
+    steps = {step.get("id"): step for step in _all_steps(workflow.get("steps", []))}
     output_paths: list[str] = []
     tool_counts: dict[str, int] = {}
     connectors: dict[str, dict[str, int]] = {}
-    for step in workflow.get("steps", []):
-        record = records.get(step.get("id"))
-        if record is None or record.get("status") != "done":
+    for record in run.steps:
+        step = steps.get(record.get("step_id"))
+        if step is None or record.get("status") != "done":
             continue
         if step.get("kind") == "script":
             tool_counts["run_python_script"] = tool_counts.get("run_python_script", 0) + 1
@@ -193,6 +208,7 @@ def summarize_workflow_run(
             and metadata.risk_category in _OUTPUT_RISKS
             and isinstance(output, dict)
             and isinstance(output.get("path"), str)
+            and output["path"] not in output_paths
         ):
             output_paths.append(output["path"])
 

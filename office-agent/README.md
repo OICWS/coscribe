@@ -347,6 +347,8 @@ variable for.
 | `llm` | one call, no tools | Returns exactly the declared fields (`text`/`number`/`boolean`/`list`) at temperature 0. A wrong answer is sent back once with what was wrong, then the step fails. Uses forced structured output where the provider allows it, else asks for bare JSON (DeepSeek's thinking mode refuses forced tool calls). |
 | `check` | no | Structured comparisons (`eq`, `ne`, `gt`, `ge`, `lt`, `le`, `contains`, `not_empty`) on references, counts (`{"count": "matches"}`) or literals. Any that fails stops the run, recording what it compared. |
 | `approval` | no | Pauses until a person approves -- only when its `when` condition holds, if it has one. |
+| `branch` | no | Runs its `then` steps when a condition holds, else its `otherwise` steps. |
+| `loop` | no | Runs its steps once per item of a list, in order, with the item as `{{item}}` (or the name you give it); `collect` keeps one value per pass, saved as a list. A list longer than `max_items` (default 50, at most 200) stops the run instead of being cut short. |
 
 References are checked when the workflow is saved -- a typo, or reading
 a value a later step produces, is refused with the step named (`step 3
@@ -354,6 +356,16 @@ a value a later step produces, is refused with the step named (`step 3
 an earlier step`). A saved workflow's tool and script steps run without
 per-call approval prompts (the task's Permissions apply to prompt tasks):
 saving it is the review. Only `approval` steps pause.
+
+Branches and loops scope what they produce. After a branch, a name is
+readable only if both arms produce it (that's how a value set either way
+is merged); a loop's item and the names made inside it exist per pass, so
+only its collected list is readable after it -- and two loops in a row
+can both call their item `item`. Steps are numbered in document order,
+nested ones included, in messages, the editor and the run view. Blocks
+nest at most three deep; a workflow has at most 100 steps in all. Reading
+a model step's field it doesn't declare (`summary.text` when it returns
+only `summary`) is refused at save time too.
 
 Every step's status, timing, output (trimmed) and check results are
 recorded on the run as it goes. A run that stops can be taken further:
@@ -407,6 +419,17 @@ step; **Edit step N** opens that step on the task page. An approval step
 waits as a card with its message, an optional note (kept on the run) and
 Approve / Decline. The header names where a run stopped ("Stopped at
 step 3"), and the side panel's Progress follows the steps.
+
+In the editor a branch or loop is a card that holds its own lists --
+**Then** / **Otherwise**, or **For each** -- each with its own **Add
+step** and **+** between steps; a step moves up or down within its list.
+Deleting a block says how many steps inside it go too. In a run, a branch
+shows the arm it took and the other as "not taken"; a loop shows one
+item's pass at a time, with a numbered, colour-coded strip to pick any
+item (failed and waiting passes stand out) and the item's own name. A
+step failing inside a loop stops the run at that pass: **Retry this
+step** (or **Retry from step N**) re-runs from there, on that pass, and
+the passes before it are kept, not re-run.
 
 **From a conversation.** Once a conversation has done a task with tools,
 **Save as workflow** at the bottom of the side panel (or `/saveworkflow

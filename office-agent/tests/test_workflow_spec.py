@@ -12,7 +12,7 @@ from coscribe.workflows.refs import (
     render_value,
     resolve,
 )
-from coscribe.workflows.spec import Condition, parse_workflow
+from coscribe.workflows.spec import Condition, parse_workflow, walk, workflow_error
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pdf_error_audit_workflow.json"
 
@@ -183,3 +183,127 @@ def test_a_saved_workflow_loads_back_unchanged() -> None:
     assert parse_workflow(saved) == workflow
     assert saved["steps"][2]["conditions"][0]["left"] == {"count": "matches"}
     assert saved["steps"][6]["when"]["right"] == {"value": False}
+
+
+def _tool(step_id: str, save_as: str | None = None, **args: Any) -> dict[str, Any]:
+    return {
+        "id": step_id, "kind": "tool", "title": step_id.title(), "tool": "read_file",
+        "args": args, "save_as": save_as,
+    }  # fmt: skip
+
+
+def _branch(then: list[Any], otherwise: list[Any]) -> dict[str, Any]:
+    return {
+        "id": "decide", "kind": "branch", "title": "Decide",
+        "condition": {"left": {"count": "files"}, "op": "gt", "right": {"value": 0}},
+        "then": then, "otherwise": otherwise,
+    }  # fmt: skip
+
+
+def _loop(body: list[Any], **extra: Any) -> dict[str, Any]:
+    return {
+        "id": "each", "kind": "loop", "title": "Each file", "over": "files",
+        "item": "file", "steps": body, **extra,
+    }  # fmt: skip
+
+
+def _with(*steps: Any) -> dict[str, Any]:
+    return {"inputs": [{"name": "files", "default": "a"}], "steps": list(steps)}
+
+
+def test_a_value_both_arms_produce_is_readable_after_the_branch() -> None:
+    workflow = parse_workflow(
+        _with(
+            _branch([_tool("a", "text", path="x")], [_tool("b", "text", path="y")]),
+            _tool("after", path="{{text}}"),
+        )
+    )
+    assert [p.number for p in walk(workflow.steps)] == [1, 2, 3, 4]
+    assert [p.step.id for p in walk(workflow.steps)] == ["decide", "a", "b", "after"]
+
+
+def test_a_value_only_one_arm_produces_is_not() -> None:
+    data = _with(
+        _branch([_tool("a", "text", path="x")], [_tool("b", path="y")]),
+        _tool("after", path="{{text}}"),
+    )
+    with pytest.raises(
+        ValidationError, match=r"step 4 \('After'\) reads 'text'.*only one arm of a branch"
+    ):
+        parse_workflow(data)
+
+
+def test_a_loop_body_sees_its_item_and_only_the_collected_list_leaks() -> None:
+    body = [_tool("read", "text", path="{{file.path}}")]
+    workflow = parse_workflow(
+        _with(
+            _loop(body, collect="text", save_as="texts"),
+            _tool("after", path="{{texts}}"),
+            # Its names are free again after the loop.
+            {**_loop([_tool("again", "text", path="{{file}}")]), "id": "each2"},
+        )
+    )
+    placed = walk(workflow.steps)
+    assert [(p.number, p.step.id, p.loops) for p in placed] == [
+        (1, "each", ()), (2, "read", ("each",)), (3, "after", ()), (4, "each2", ()),
+        (5, "again", ("each2",)),
+    ]  # fmt: skip
+
+    leaky = _with(_loop(body), _tool("after", path="{{text}}"))
+    with pytest.raises(ValidationError, match="made inside a loop"):
+        parse_workflow(leaky)
+
+
+@pytest.mark.parametrize(
+    ("loop", "message"),
+    [
+        (_loop([_tool("read", "text", path="{{file}}")], collect="texts"), "go together"),
+        (
+            _loop([_tool("read", "text", path="x")], collect="files", save_as="t"),
+            "collects 'files'",
+        ),
+        (_loop([], over="files | first"), "isn't a name like"),
+        (_loop([], item="files"), "'files' is already taken"),
+        (_loop([], max_items=500), "less than or equal to 200"),
+    ],
+)
+def test_malformed_loops_are_rejected(loop: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        parse_workflow(_with(loop))
+
+
+def test_blocks_nest_three_deep_at_most() -> None:
+    inner: dict[str, Any] = _tool("leaf", path="x")
+    for depth in range(4):
+        inner = {**_branch([inner], []), "id": f"b{depth}"}
+    with pytest.raises(ValidationError, match="nest at most 3 deep"):
+        parse_workflow(_with(inner))
+
+
+def test_errors_inside_blocks_are_numbered_like_the_editor() -> None:
+    data = _with(
+        _tool("first", path="x"),
+        _branch([_tool("a", path="x")], [_tool("b", path="y"), {"id": "bad", "kind": "tool"}]),
+    )
+    with pytest.raises(ValidationError) as caught:
+        parse_workflow(data)
+    assert workflow_error(caught.value, data).startswith("step 5: title: Field required")
+
+
+def test_a_model_steps_fields_are_the_only_ones_to_read() -> None:
+    data = _audit()
+    data["steps"][5]["conditions"][0]["left"] = {"ref": "summary.errors"}
+    with pytest.raises(
+        ValidationError,
+        match=r"reads 'summary.errors', but summary only has "
+        r"accounts, boilerplate, error_count, summary",
+    ):
+        parse_workflow(data)
+
+    loop = _loop(
+        [{"id": "sum", "kind": "llm", "title": "Sum", "prompt": "{{file}}",
+          "fields": [{"name": "summary"}], "save_as": "note"}],
+        collect="note.text", save_as="notes",
+    )  # fmt: skip
+    with pytest.raises(ValidationError, match="reads 'note.text', but note only has summary"):
+        parse_workflow(_with(loop))

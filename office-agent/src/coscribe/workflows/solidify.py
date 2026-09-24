@@ -21,7 +21,7 @@ from pydantic import ValidationError
 from ..runtime_lg.messages import serialize_history_for_ws_lg
 from .catalog import describe_params
 from .engine import UNAVAILABLE_TOOLS
-from .spec import ToolStep, Workflow, parse_workflow, workflow_error
+from .spec import LLMStep, LoopStep, ToolStep, Workflow, parse_workflow, walk, workflow_error
 
 SCRIPT_TOOL = "run_python_script"
 MAX_ATTEMPTS = 3
@@ -55,12 +55,14 @@ replacing only the values that became inputs or come from earlier steps.
 "save_as": "<name>"} -- for a run_python_script call. The code reads \
 values from a ready-made `inputs` dict (never paste them into the code) \
 and must print its result as JSON on its last line, e.g. \
-print(json.dumps({"total": total})).
+print(json.dumps({"total": total})) -- its save_as then holds that object, \
+read as {{name.total}}.
 - "llm": {"prompt": "<text with {{references}}>", "fields": [{"name": \
 "...", "type": "text" | "number" | "boolean" | "list", "description": \
 "..."}], "save_as": "<name>"} -- one model call with no tools, for the \
 places where the assistant judged, summarized or classified something. It \
-must return exactly those fields.
+must return exactly those fields, and its save_as holds them as an object: \
+read one as {{name.field}}, never {{name}} where you mean the field.
 - "check": {"conditions": [{"left": <operand>, "op": "eq" | "ne" | "gt" | \
 "ge" | "lt" | "le" | "contains" | "not_empty", "right": <operand>}]} -- \
 stops the run unless every condition holds. An operand is exactly one of \
@@ -70,6 +72,18 @@ stops the run unless every condition holds. An operand is exactly one of \
 <condition, optional>} -- pauses for a person. Use one before a step that \
 overwrites or sends something, only if the conversation asked for a \
 confirmation there.
+
+- "loop": {"over": "<name of a list>", "item": "<name for each item>", \
+"steps": [...], "collect": "<a name made inside>", "save_as": "<name>", \
+"max_items": 50} -- runs its steps once per item, in order. Use it when the \
+conversation made the same calls once per item of a list (each file, each \
+row) instead of copying every call. The list must come from an input or an \
+earlier step. collect/save_as (both or neither) keep one value per item as \
+a list -- collect the exact value later steps use (summary.text, not the \
+whole summary object); names made inside a loop can't be read after it.
+- "branch": {"condition": <condition>, "then": [...], "otherwise": [...]} \
+-- only where what the conversation did depended on something a run can \
+check. After it, a name can be read only if both arms make it.
 
 References: "{{name}}" or "{{name.field}}" reads an input or an earlier \
 step's save_as. A whole-string reference keeps the value's type; inside \
@@ -170,7 +184,16 @@ def check_draft(workflow: Workflow, tools: dict[str, Callable[..., Any]]) -> lis
     if not workflow.steps:
         return ["the workflow has no steps"]
     problems = []
-    for index, step in enumerate(workflow.steps, start=1):
+    model_results = {p.step.save_as for p in walk(workflow.steps) if isinstance(p.step, LLMStep)}
+    for placed in walk(workflow.steps):
+        step, index = placed.step, placed.number
+        if isinstance(step, LoopStep) and step.collect in model_results:
+            # A model step's result is always an object of its fields; a
+            # list of those is rarely what the steps after the loop expect.
+            problems.append(
+                f"step {index}: collect a field of {step.collect} (like {step.collect}.<field>), "
+                "not the whole result"
+            )
         if not isinstance(step, ToolStep):
             continue
         if step.tool == SCRIPT_TOOL:
@@ -216,7 +239,7 @@ def _parse_reply(text: str, tools: dict[str, Callable[..., Any]], name_hint: str
     try:
         workflow = parse_workflow(data.get("workflow"))
     except ValidationError as exc:
-        raise ValueError(workflow_error(exc)) from exc
+        raise ValueError(workflow_error(exc, data.get("workflow"))) from exc
     problems = check_draft(workflow, tools)
     if problems:
         raise ValueError("; ".join(problems))

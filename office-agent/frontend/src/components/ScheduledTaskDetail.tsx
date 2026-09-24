@@ -12,6 +12,7 @@ import { capitalize, formatRunTime, RUN_STATUS_LABEL, runDuration, runSourceLabe
 import { describeSchedule } from "../lib/scheduleLabels";
 import { taskPayload } from "../lib/taskPayload";
 import { countModelSteps } from "../lib/workflowLabels";
+import { allSteps } from "../lib/workflowTree";
 import type { ScheduledTask } from "../types/settings";
 import type { Workflow } from "../types/workflow";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -229,7 +230,7 @@ interface ScheduledTaskDetailProps {
 
 function WorkflowBadge({ task }: { task: ScheduledTask }) {
   if (!task.workflow) return null;
-  const steps = task.workflow.steps.length;
+  const steps = allSteps(task.workflow).length;
   const models = countModelSteps(task.workflow);
   return (
     <span className="text-sm text-[var(--muted)]">

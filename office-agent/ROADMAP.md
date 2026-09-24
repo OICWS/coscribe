@@ -5718,8 +5718,75 @@ workflow draft.
       accounts 4410-97 ... 4410-582). Light and dark; the no-tools
       failure state checked.
 
-**Next (not started, to confirm):** branches, loops, test-run
-comparison, versioning.
+---
+
+## Phase 8ba -- Workflows phase 3: branches and loops (shipped)
+
+- [x] **Spec** (`workflows/spec.py`): `branch` (condition, `then`,
+      `otherwise`) and `loop` (`over` a list, `item`, `steps`, `collect` +
+      `save_as` together, `max_items` 1-200, default 50). Save-time scoping
+      in `_Scope`: after a branch only names both arms make are readable;
+      a loop's item and body names are per pass (released after it, so
+      sibling loops can reuse `item`); a read of a scoped name says why
+      ("it's made inside a loop, or in only one arm of a branch"). Nesting
+      at most 3 deep, 100 steps in all. Steps numbered in document order,
+      nested included (`walk()`), and `workflow_error` locates problems
+      inside blocks the same way from the submitted data. Model steps'
+      declared fields are now checked too: `summary.text` against a step
+      returning only `summary` is refused.
+- [x] **Engine**: compiled into the same StateGraph rather than run inside
+      one node -- an approval inside a loop interrupts and resumes per
+      pass, and a failed pass resumes where it stopped, which a loop run in
+      one node couldn't do without re-running every pass's side effects.
+      A branch is a node plus a conditional edge; a loop is start /
+      next-item / collect nodes with each loop's position in a `loops`
+      state key. Records carry `iteration` (the pass of each enclosing
+      loop), the store keys records by (step, iteration), and the loops
+      around a stopped step are recorded failed/waiting at that pass (and
+      running again on retry). `recursion_limit` is computed from the
+      workflow's worst case. Loop records carry a short label per item --
+      the first field that tells the items apart (search hits share their
+      `path`, so their `text`).
+- [x] **Editor**: block cards hold their own lists, edited in place --
+      add, insert, move within a list, delete (with the count inside).
+      Suggestions are scoped like the server (`lib/workflowTree.ts`'s
+      `scopes`); renaming a loop's item or any result rewrites every later
+      read, nested ones included. A loop's "Keep from each pass" offers
+      only names its body makes.
+- [x] **Run view**: branch shows the arm taken; loop shows one pass at a
+      time with a pass strip; a failure inside a loop shows on the step,
+      not the loop ("Check failed on item 4"), header "Stopped at step 4,
+      item 4". The retry endpoint's default skips block records. The side
+      panel's Progress lists a loop once ("3 of 6") and only the arm a
+      branch took; its Outputs/Tools now walk nested steps and every pass
+      (they used to see only top-level steps).
+- [x] **Curator** taught loops and branches, and to collect a field, not a
+      whole result. A draft that collects a whole model result is sent
+      back (`check_draft`).
+- [x] **Verified live** (Playwright, DeepSeek), light and dark: a
+      9-step workflow (search -> loop of a model step + a check added from
+      the UI -> check -> branch with an approval) ran 6 passes in 7.8s,
+      took Then, paused at the approval inside the branch, wrote the
+      escalation list. With the in-loop check made to fail on item 4:
+      "Stopped at step 4, item 4", then fixed the check and Retry from
+      step 3 -- passes 1-3 kept their 03:18 records, pass 4 re-ran at
+      03:20, then the run went on. A conversation that summarised three
+      notes one by one was drafted into a loop every time, then each draft
+      was saved and run as-is. Round by round: the first prompt, 0 of 1
+      ran (collected the model's `summary` object whole; the script
+      concatenated it as text); after "collect the exact value", 1 of 2
+      (the other collected a script's printed object whole); after the
+      script note and `check_draft`'s whole-result check, 2 of 3 (the
+      other collected `summary.text` from a step returning `summary`);
+      after the field check in the spec, 3 of 4 -- the fourth never
+      produced valid JSON in three tries (quoting inside Python code), and
+      the draft page says so with Try again.
+
+Known cost: each record update rewrites the task's JSON file, and a loop
+writes a record per inner step per pass -- fine at the 200-item cap, but
+the reason the cap is 200.
+
+**Next (not started, to confirm):** test-run comparison, versioning.
 
 ---
 

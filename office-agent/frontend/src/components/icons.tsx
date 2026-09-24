@@ -476,3 +476,21 @@ export function WorkflowIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+/** lucide "split". */
+export function BranchIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M16 3h5v5M8 3H3v5M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3M15 9l6-6" />
+    </Icon>
+  );
+}
+
+/** lucide "repeat". */
+export function LoopIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3" />
+    </Icon>
+  );
+}

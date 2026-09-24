@@ -33,12 +33,12 @@ import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
 import { readStored, writeStored } from "./lib/storage";
 import { EMPTY_WORKFLOW } from "./lib/workflowEdit";
-import { workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
+import { recordKey, workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState, TASK_DRAFT_SAVED_PREFIX, type LogItem } from "./state/reducer";
 import type { CommandInfo, ThreadSummary } from "./types/session";
 import type { ScheduledRun, ScheduledTask } from "./types/settings";
-import type { Workflow } from "./types/workflow";
+import type { StepRecord, Workflow } from "./types/workflow";
 
 type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
 
@@ -185,9 +185,10 @@ function App() {
             ...task,
             runs: task.runs.map((run) => {
               if (run.run_id !== event.run_id) return run;
-              const known = run.steps.some((step) => step.step_id === event.record.step_id);
-              const steps = known
-                ? run.steps.map((step) => (step.step_id === event.record.step_id ? event.record : step))
+              const key = recordKey(event.record.step_id, event.record.iteration);
+              const same = (step: StepRecord) => recordKey(step.step_id, step.iteration) === key;
+              const steps = run.steps.some(same)
+                ? run.steps.map((step) => (same(step) ? event.record : step))
                 : [...run.steps, event.record];
               return { ...run, steps };
             }),
