@@ -106,29 +106,25 @@ async def _run_in_session(
     error).
 
     Applies trigger.model to the session before firing (a one-way switch:
-    this thread belongs to this run alone). approval_mode IS restored
-    after, since accept_edits is a broader safety toggle. "manual" needs
-    no session change at all: the relay socket already makes any gated
-    call durably park rather than block on an approval nobody's there to
-    give ("needs_approval"). "auto"/"skip" both map to accept_edits --
-    there's no third gating tier between "ask a human" and
-    "auto-approve"; a hook veto/exec-policy-forbidden/plan_mode rejection
-    still applies either way."""
+    this thread belongs to this run alone). The approval tier is set only
+    for the run itself (see ChatSessionLG._auto_approves): a person who
+    keeps chatting in this thread afterwards gets ordinary approvals. Any
+    gated call the tier doesn't cover parks durably for a person to
+    approve later ("needs_approval") -- the relay socket never blocks on
+    one."""
     socket = _RelaySocket(session)
     current_model = getattr(session, "_model_string", None)
     if trigger.model is not None and trigger.model != current_model:
         await session.switch_model(trigger.model, socket)
 
     prompt = build_run_prompt(trigger, run, notes)
-    previous_accept_edits = session.accept_edits
-    if trigger.approval_mode in ("auto", "skip"):
-        session.accept_edits = True
+    session.run_approval_mode = trigger.approval_mode
     session.active_run_prompt = prompt
     try:
         await socket.send_json({"type": "scheduled_run_started", "text": prompt})
         await session.handle_user_message(prompt, socket)
     finally:
-        session.accept_edits = previous_accept_edits
+        session.run_approval_mode = None
         session.active_run_prompt = None
 
     if socket.error is not None:

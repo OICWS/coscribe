@@ -90,7 +90,7 @@ class _FakeContextWindowClient:
         return 128_000
 
 
-def _settings(tmp_path: Path) -> Settings:
+def _settings(tmp_path: Path, **overrides: Any) -> Settings:
     return Settings(
         _env_file=None,  # type: ignore[call-arg]
         default_model="fake:model",
@@ -98,6 +98,7 @@ def _settings(tmp_path: Path) -> Settings:
         state_dir=tmp_path / "state",
         skills_dir=tmp_path / "skills",
         memory_path=tmp_path / "MEMORY.md",
+        **overrides,
     )  # type: ignore[arg-type]
 
 
@@ -450,10 +451,9 @@ def test_reconcile_interrupted_runs_marks_leftover_running_runs_failed(tmp_path:
 async def test_approval_mode_auto_or_skip_auto_approves_a_gated_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approval_mode: str
 ) -> None:
-    """Unlike the default "manual" mode (where the call parks, awaiting an
-    approval nobody is there to give), an "auto"/"skip" trigger must
-    actually get the gated write_file call approved and executed --
-    session.accept_edits is set for the duration of the run."""
+    """A local file edit is covered by both tiers: unlike "manual" (where
+    the call parks, awaiting an approval nobody is there to give), it is
+    approved and executed."""
     from langchain_core.messages import ToolCall
 
     settings = _settings(tmp_path)
@@ -510,8 +510,8 @@ async def test_approval_mode_manual_parks_the_run_as_needs_approval(
 async def test_approval_mode_auto_is_restored_after_the_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """accept_edits is a broader safety toggle than one run: an "auto"
-    run must not leave it on for anyone driving that session afterward."""
+    """The tier belongs to the run: a person who keeps chatting in this
+    thread afterwards gets ordinary approvals."""
     from langchain_core.messages import ToolCall
 
     settings = _settings(tmp_path)
@@ -540,6 +540,184 @@ async def test_approval_mode_auto_is_restored_after_the_run(
 
         await asyncio.wait_for(_run_in_session(trigger, run, "", session), timeout=5)
         assert session.accept_edits is False
+        assert session.run_approval_mode is None
+
+
+def _stub_script_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runs scripts with the Python running pytest instead of provisioning
+    the dedicated script venv."""
+    import sys
+
+    monkeypatch.setattr(
+        "coscribe.tools.scripts.ensure_script_env", lambda state_dir: Path(sys.executable).parent
+    )
+    monkeypatch.setattr("coscribe.tools.scripts.venv_python", lambda venv_dir: Path(sys.executable))
+
+
+def _script_call(call_id: str, script: str) -> Any:
+    from langchain_core.messages import ToolCall
+
+    return ToolCall(
+        name="run_python_script", args={"script": script, "description": "test"}, id=call_id
+    )
+
+
+def _audit(settings: Settings) -> list[tuple[str, str, str]]:
+    from coscribe.runtime_lg.audit import AuditLog
+
+    return [(e.tool_name, e.decision, e.reason) for e in AuditLog(settings.state_dir).read_all()]
+
+
+async def test_approval_mode_auto_approves_edits_but_parks_running_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The line between the two tiers: "auto" approves a local file edit,
+    then parks before a script runs -- rather than rejecting it and letting
+    the run carry on without it."""
+    from langchain_core.messages import ToolCall
+
+    _stub_script_env(monkeypatch)
+    settings = _settings(tmp_path)
+    write = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[write]),
+            AIMessage(content="", tool_calls=[_script_call("call_2", "print('ran')")]),
+        ]
+    )
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.sqlite")) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        ScheduledTriggerStore(settings.state_dir).save(
+            _trigger("trig-auto", approval_mode="auto", notes_enabled=False)
+        )
+        run = await asyncio.wait_for(
+            fire_trigger_now(settings.state_dir, "trig-auto", get_session), timeout=10
+        )
+
+    assert run is not None and run.status == "needs_approval"
+    assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
+    assert _audit(settings) == [("write_file", "approve", "approval_mode_auto")]
+
+
+async def test_approval_mode_skip_runs_code_without_asking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_script_env(monkeypatch)
+    settings = _settings(tmp_path)
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_script_call("call_1", "print('ran')")]),
+            AIMessage(content="done"),
+        ]
+    )
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.sqlite")) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        ScheduledTriggerStore(settings.state_dir).save(
+            _trigger("trig-skip", approval_mode="skip", notes_enabled=False)
+        )
+        run = await asyncio.wait_for(
+            fire_trigger_now(settings.state_dir, "trig-skip", get_session), timeout=10
+        )
+
+    assert run is not None and run.status == "completed"
+    assert _audit(settings) == [("run_python_script", "approve", "approval_mode_skip")]
+    tool_result = fake_model.received[-1][-1]
+    assert "ran" in str(tool_result.content)
+
+
+async def test_approval_mode_skip_still_obeys_a_forbidding_exec_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipping approvals doesn't override the user's own standing rules."""
+    import json
+
+    _stub_script_env(monkeypatch)
+    policy_path = tmp_path / "exec_policy.json"
+    policy_path.write_text(
+        json.dumps({"rules": [{"pattern": "shutil.rmtree", "decision": "forbidden"}]}),
+        encoding="utf-8",
+    )
+    settings = _settings(tmp_path, exec_policy_path=policy_path)
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[_script_call("call_1", "import shutil; shutil.rmtree('x')")],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.sqlite")) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        ScheduledTriggerStore(settings.state_dir).save(
+            _trigger("trig-skip-policy", approval_mode="skip", notes_enabled=False)
+        )
+        run = await asyncio.wait_for(
+            fire_trigger_now(settings.state_dir, "trig-skip-policy", get_session), timeout=10
+        )
+
+    assert run is not None and run.status == "completed"
+    assert _audit(settings) == [("run_python_script", "reject", "exec_policy")]
+
+
+async def test_finishing_a_parked_auto_run_keeps_its_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A person approves the script an "auto" run parked on; the file edit
+    that follows is still approved automatically, not put to them too."""
+    from langchain_core.messages import ToolCall
+
+    _stub_script_env(monkeypatch)
+    settings = _settings(tmp_path)
+    write = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_2")
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_script_call("call_1", "print('ran')")]),
+            AIMessage(content="", tool_calls=[write]),
+            AIMessage(content="done"),
+        ]
+    )
+
+    class _WatchingTab:
+        def __init__(self) -> None:
+            self.events: list[dict[str, Any]] = []
+
+        async def send_json(self, data: dict[str, Any]) -> None:
+            self.events.append(data)
+
+    tab = _WatchingTab()
+    sessions: list[Any] = []
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.sqlite")) as checkpointer:
+        get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+        store = ScheduledTriggerStore(settings.state_dir)
+        store.save(_trigger("trig-resume", approval_mode="auto", notes_enabled=False))
+
+        async def get_watched_session(thread_id: str) -> Any:
+            session = await get_session(thread_id)
+            session._live_websocket = tab
+            sessions.append(session)
+            return session
+
+        run = await fire_trigger_now(settings.state_dir, "trig-resume", get_watched_session)
+        for _ in range(100):
+            if any(e["type"] == "approval_required" for e in tab.events):
+                break
+            await asyncio.sleep(0.02)
+        approval = next(e for e in tab.events if e["type"] == "approval_required")
+        sessions[0].resolve_approval(approval["id"], True)
+        await asyncio.wait_for(sessions[0]._offer_task, timeout=10)
+
+    assert run is not None and run.status == "needs_approval"
+    assert approval["tool_name"] == "run_python_script"
+    assert [e["type"] for e in tab.events].count("approval_required") == 1
+    assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
+    finished = store.load("trig-resume")
+    assert finished is not None
+    assert finished.runs[0].status == "completed"
+    assert _audit(settings) == [
+        ("run_python_script", "approve", "human"),
+        ("write_file", "approve", "approval_mode_auto"),
+    ]
 
 
 async def test_trigger_model_override_switches_the_session_before_firing(

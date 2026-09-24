@@ -94,6 +94,11 @@
      brand accents so "completed" never reads as decoration. */
   --success: #3d8f56;
   --warning: #b87a14;
+  --file-sheet: #2f7d4a;
+  --file-doc: #2d62b8;
+  --file-slides: #c4561f;
+  --file-pdf: #c23b3b;
+  --file-image: #7a5bc4;
   --card-bg: #f0f0ef;
   --primary: #171614;
   --primary-hover: #322f2c;
@@ -127,6 +132,11 @@
     --danger-fg: #fbd8e1;
     --success: #8fd19f;
     --warning: #e8b85c;
+    --file-sheet: #7fcf98;
+    --file-doc: #8cb4f0;
+    --file-slides: #f0a076;
+    --file-pdf: #f09a9a;
+    --file-image: #b9a3ee;
     --card-bg: #322f2e;
     --primary: #f7f5f3;
     --primary-hover: #ffffff;

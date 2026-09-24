@@ -5470,7 +5470,77 @@ clean, full suite green.
 **Still open from Phase 8am's list**: "Automatically approve" vs. "Skip
 all approvals" still behave identically; the right-side Progress/
 Outputs/Context panel and the template gallery are not built; the
-portal's Search/Sort are still stubs.
+portal's Search/Sort are still stubs. *(The first two: Phase 8aw.)*
+
+---
+
+## Phase 8aw -- Approval tiers that actually differ; the task details panel (shipped)
+
+- [x] **"Skip all approvals" is now a genuinely stronger tier** (your
+      call). Decided by risk category, not a model-judged "looks unsafe"
+      classifier -- deterministic and auditable, which matters for the
+      finance-style tasks this is meant for:
+      `manual` asks for every gated call; `auto` approves `WRITE_LOCAL`
+      (local file edits: recoverable) and parks `EXEC`/`EXTERNAL`
+      (running code, MCP connectors, downloads: can't be taken back);
+      `skip` approves all three. A hook veto or an exec-policy `forbidden`
+      rule still rejects under every tier -- the user's own standing
+      rules, not approvals; an exec-policy `allow` still auto-approves a
+      matching script under `auto`. Previously both tiers just switched
+      `accept_edits` on for the run.
+      Two real traps found while building it: (1) unattended, the old
+      path only entered approval-deciding at all when `accept_edits` was
+      on, and a call nobody could approve was then *rejected* ("No one is
+      available") and the run carried on without it -- `auto` must
+      *park* the script instead, so `_resolve_pending_approvals` now
+      checks, every round, whether each pending request can be settled
+      without a person (a write approved, then a script in the next round
+      parks); (2) once a person approves the parked script, the rest of
+      the run has to keep its tier -- `_effective_run_approval_mode`
+      reads it back from the task while the run is `needs_approval`, so
+      the next file edit isn't put to them too. The tier is only in force
+      for the run itself: chatting in the run's thread afterwards gets
+      ordinary approvals. Audit reasons `approval_mode_auto`/
+      `approval_mode_skip`. **Verified live** (DeepSeek, the "PDF error
+      audit" task switched to `auto`): parked on its first
+      `run_python_script` as `needs_approval`; approving both scripts in
+      the UI finished the run as `completed`, audit showing two `human`
+      approvals.
+- [x] **Task details panel** (`docs/ui-references/scheduled-siderbar-
+      task-running.png`; the same idea as Claude Cowork's and other
+      agent apps' right rail) -- beside *every* conversation, not only
+      scheduled runs: Progress (the `task_create` plan as a step row +
+      checklist), Outputs (files created/changed, click to open with the
+      OS default app, reveal in folder, download), Context (files read,
+      skills, MCP connectors, built-in tools with counts). Derived
+      server-side from the checkpointed messages
+      (`GET /api/threads/{id}/activity`), not accumulated client-side --
+      so it covers paginated-away history and runs nobody watched; the
+      frontend refetches (debounced) on each finished tool call, so it
+      updates live mid-turn. Outputs = the `path` of successful
+      `WRITE_LOCAL`/`EXTERNAL` calls from built-in tools (MCP tools are
+      excluded: their `path` could mean anything), plus new
+      `files_written` from `run_python_script`/`run_node_script` (a
+      before/after mtime snapshot of the workspace, capped at 5000 files
+      scanned / 50 reported) -- without it, a report a script generated
+      would never show up. Opening is limited to document/media
+      extensions so a written `.bat`/`.py` is never one click from
+      running (reveal/download still work). Mutually exclusive with the
+      Browser/Sub Agents panels (same space); hidden below 1024px and on
+      an empty new chat; open/collapsed state remembered in
+      localStorage. File-type colors are tokens with separate dark values.
+      **Verified live**: a DeepSeek turn creating a 3-step plan, reading
+      the PDF, writing `summary.md` and `sales.xlsx` -- the panel went
+      1/3 -> 3/3 mid-turn, both outputs listed newest-first, the PDF under
+      Files, the Excel skill and 8 tools under Context; light + dark
+      checked; hover actions, download (real 4967-byte xlsx), open error
+      on a headless box ("No app on this machine can open it -- download
+      it instead."), toggle persistence and Browser exclusivity all
+      driven in Playwright. One bug caught in screenshots: a pending
+      step's dot rendered zero-width (an inline wrapper around it).
+
+**Not done**: the template gallery; portal Search/Sort; outputs from a
+sub-agent (`spawn_agent`) aren't attributed to the parent thread's panel.
 
 ---
 
@@ -5786,7 +5856,8 @@ a concrete reason to prioritize a new surface.
   detail page, Create/Edit modal, all verified live via Playwright
   screenshots against the reference images). Real deviations from the
   spec below, not yet resolved:
-  - **"Automatically approve" and "Skip all approvals" behave
+  - ~~Resolved in Phase 8aw (tiers by risk category).~~
+    **"Automatically approve" and "Skip all approvals" behave
     identically** -- both map to `accept_edits`-style auto-approval
     (`_decide_action_request` has no third gating tier between "ask a
     human" and that). Making "Skip" a genuinely stronger tier (e.g.
@@ -5833,7 +5904,7 @@ a concrete reason to prioritize a new surface.
   **Deferred, recorded per your explicit request not to build it now**
   (the conversation view, breadcrumb and run card shipped in Phase 8av --
   one conversation *per run* with notes as memory, not one per task; the
-  right-side panel is still open): the "task running" view -- clicking "Run now" (or reopening a task
+  right-side panel shipped in Phase 8aw): the "task running" view -- clicking "Run now" (or reopening a task
   that's running/has run) should land on a *chat-like* thread view for
   that trigger's own dedicated thread_id, not `ScheduledTaskDetail`.
   Reference: `docs/ui-references/scheduled-siderbar-task-running.png`.

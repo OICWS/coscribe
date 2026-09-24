@@ -307,16 +307,25 @@ are the machine's own local wall-clock time -- coscribe is single-user,
 local-first software with no per-user timezone concept.
 
 Each run ends with a status on its record: `completed`, `failed` (with
-the error), `stopped`, or `needs_approval`. A run in `"manual"` approval
-mode that reaches a tool needing approval (any `WRITE_LOCAL`/`EXEC`/
-`EXTERNAL`-risk tool -- see `ARCHITECTURE.md`'s risk taxonomy) never
-blocks waiting for it: the call parks durably in the run's conversation,
-the run ends as `needs_approval`, and the approval is offered the next time
-you open that run (or right away, if you're already watching it).
-Resolving it finishes the run and updates its record. `"auto"` and
-`"skip"` currently both run with accept-edits on -- a hook veto, exec
-policy, or Plan Mode rejection still applies either way. If coscribe
-exits mid-run, that run is marked `failed` on the next start.
+the error), `stopped`, or `needs_approval`. Each task's **Permissions**
+decide which tool calls a run may make without asking anyone, by risk
+tier (see `ARCHITECTURE.md`'s risk taxonomy):
+
+| Permissions | `WRITE_LOCAL` (create/edit local files) | `EXEC` (run scripts) / `EXTERNAL` (MCP connectors, downloads) |
+|---|---|---|
+| Ask before every action (`"manual"`, default) | asks | asks |
+| Automatically approve (`"auto"`) | approved | asks |
+| Never ask (`"skip"`) | approved | approved |
+
+"Asks" never blocks a run: the call parks durably in the run's
+conversation, the run ends as `needs_approval`, and the approval is
+offered the next time you open that run (or right away, if you're
+already watching it). Resolving it finishes the run under the same
+permissions and updates its record. Under every tier, your own blocking
+rules still win: a PreToolUse hook veto or an exec-policy `forbidden`
+rule rejects the call. Every automatic approval is recorded in the audit
+log (`approval_mode_auto` / `approval_mode_skip`). If coscribe exits
+mid-run, that run is marked `failed` on the next start.
 
 ## Files
 
@@ -989,6 +998,14 @@ packages, no scripts or command-line knowledge required, deliberately
 simpler than Claude Code's own freeform "Setup script" field since
 coscribe is aimed at non-technical office users.
 
+A script's result also lists the workspace files it created or modified
+(`files_written`, up to 50 -- found by comparing file timestamps before
+and after the run, skipping hidden folders, `node_modules` and virtual
+environments; skipped entirely for a workspace of more than 5000 files),
+so what it produced shows up in the task panel's Outputs and the model
+doesn't have to re-list the folder to find it. `run_node_script` does the
+same.
+
 There is currently no control over what network hosts a script can reach
 (Claude Code's own cloud environments offer a None/Trusted/Full/Custom
 dropdown for this, but that's enforced at the container/network-policy
@@ -1452,6 +1469,31 @@ The web layer (`src/coscribe/web/app.py` + `web/session.py`) runs
 directly on runtime_lg -- `ChatSessionLG` compiles and drives a LangGraph
 agent per thread, it isn't a bridge in front of a separate execution
 engine.
+
+**Task details panel** (right side, toggled by the panel icon at the top
+right; remembered per browser, shown on windows at least 1024px wide once
+a conversation has started) -- three collapsible sections, all derived
+from the thread's own checkpointed messages via
+`GET /api/threads/{id}/activity`, so they cover runs nobody watched and
+refresh live as each tool call finishes:
+
+- **Progress** -- the model's plan (`task_create`/`task_update`) as a step
+  row and a checklist.
+- **Outputs** -- every file the conversation created or changed: the
+  `path` of any successful `WRITE_LOCAL`/`EXTERNAL` tool call, plus the
+  workspace files a script reports writing (see [Running
+  scripts](#running-scripts)), newest first. Clicking one opens it with
+  the OS's default app (`POST /api/threads/{id}/files/open`) -- only for
+  document/media types, so a script or executable a run wrote is never one
+  click from running; those can still be shown in their folder or
+  downloaded (`GET /api/threads/{id}/files/download`). Paths resolve
+  through the thread's own workspace scope, same as the tools.
+- **Context** -- files it read, skills it loaded, MCP connectors and
+  built-in tools it used (with counts).
+
+On a scheduled run the panel's header names the task (click for its page)
+and shows that run's status. The Browser and Sub Agents panels use the
+same space, so opening either one hides this panel until it's toggled back.
 
 Below the message box, a small bar shows how much of the model's context
 window the current thread is using (updates after each reply) next to the

@@ -177,7 +177,11 @@ dev = [
     "types-openpyxl>=3.1.0",
 ]
 web = [
-    "fastapi>=0.115.0",
+    # 0.132.0 rejects a JSON body without a JSON Content-Type. Earlier
+    # versions parse one sent with no Content-Type at all -- which any web
+    # page can POST to 127.0.0.1 cross-site without a CORS preflight,
+    # reaching endpoints that add MCP servers or open files.
+    "fastapi>=0.132.0",
     "uvicorn[standard]>=0.30.0",
     # Required for FastAPI's UploadFile (POST /api/upload) -- already pulled
     # in transitively via aisuite's mcp extra, but declared explicitly since

@@ -167,3 +167,39 @@ def test_run_python_script_can_use_baseline_packages(tools: ScriptTools) -> None
 
     assert result["exit_code"] == 0
     assert result["stdout"] == "ok\n"
+
+
+def test_run_python_script_reports_the_workspace_files_it_wrote(tools: ScriptTools) -> None:
+    (tools.workspace / "untouched.txt").write_text("same")
+    (tools.workspace / "data").mkdir()
+    (tools.workspace / "data" / "old.csv").write_text("a")
+    result = tools.run_python_script(
+        script=(
+            "from pathlib import Path\n"
+            "Path('report.xlsx').write_text('new')\n"
+            "Path('data/old.csv').write_text('a,b,c')\n"
+            "Path('.hidden').write_text('x')"
+        ),
+        description="write some files",
+    )
+
+    assert result["files_written"] == ["data/old.csv", "report.xlsx"]
+
+
+def test_run_python_script_omits_files_written_when_it_wrote_none(tools: ScriptTools) -> None:
+    result = tools.run_python_script(script="print(1)", description="no files")
+
+    assert "files_written" not in result
+
+
+def test_files_written_gives_up_on_a_workspace_too_big_to_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools import _files_written
+
+    monkeypatch.setattr(_files_written, "_MAX_FILES_SCANNED", 2)
+    for name in ("a", "b", "c"):
+        (tmp_path / name).write_text(name)
+
+    assert _files_written.snapshot_workspace(tmp_path) is None
+    assert _files_written.files_written(None, tmp_path) == []

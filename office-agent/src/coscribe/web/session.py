@@ -88,7 +88,7 @@ from ..runtime_lg import (
 from ..runtime_lg import extract_text as _extract_text
 from ..runtime_lg import render_transcript_lg as _render_transcript_lg
 from ..runtime_lg import tool_result_value as _tool_result_value
-from ..runtime_lg.audit import AuditLog, record_decision
+from ..runtime_lg.audit import AuditLog, AutoApproveReason, record_decision
 from ..runtime_lg.exec_policy import EXEC_POLICY_TOOL_NAMES, load_exec_policy
 from ..runtime_lg.messages import (
     ACCEPT_EDITS_MODE_NOTE,
@@ -113,6 +113,7 @@ from ..tools.scheduled_tasks import (
     parse_run_thread_id,
 )
 from ..tools.spreadsheets import SpreadsheetToolkit
+from .activity import summarize_activity
 from .context_usage import build_context_breakdown
 
 logger = logging.getLogger(__name__)
@@ -268,6 +269,17 @@ def _usage_event(usage: UsageMetadata) -> dict[str, Any]:
         event["input_tokens"] = input_tokens
         event["cache_hit_rate"] = cache_read / input_tokens
     return event
+
+
+def _risks_of_gated_tools(lg_tools: list[Any]) -> dict[str, str]:
+    """Every approval-gated tool's name -> its risk category, which the
+    scheduled-run approval tiers key on (see _auto_approves)."""
+    risks: dict[str, str] = {}
+    for t in lg_tools:
+        metadata = get_tool_metadata(cast(Any, t))
+        if metadata.requires_approval:
+            risks[tool_name(t)] = metadata.risk_category
+    return risks
 
 
 def _can_resolve_approvals(websocket: Any) -> bool:
@@ -484,11 +496,7 @@ class ChatSessionLG:
         # change across a model switch (same base tools, same spawn_agent/
         # review_work names every time), so this set is computed once here
         # and never needs recomputing anywhere else.
-        self._approval_required_names = {
-            tool_name(t)
-            for t in lg_tools
-            if get_tool_metadata(cast(Any, t)).requires_approval
-        }
+        self._gated_tool_risks = _risks_of_gated_tools(lg_tools)
         self.lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
         self.config = {"configurable": {"thread_id": thread_id}}
         # Pagination cursor for load_older_messages -- lazily set to
@@ -511,6 +519,9 @@ class ChatSessionLG:
         # checkpointed -- send_history fills it in so the run never shows
         # up without its opening message.
         self.active_run_prompt: str | None = None
+        # The executing scheduled run's approval_mode, also set by
+        # runtime_lg/scheduled_tasks.py -- see _auto_approves.
+        self.run_approval_mode: str | None = None
         self._offer_task: asyncio.Task[None] | None = None
 
     def _build_lg_tools(self, model: Any) -> list[Callable[..., Any] | BaseTool]:
@@ -786,11 +797,7 @@ class ChatSessionLG:
                 )
                 return
             self.lg_agent = new_lg_agent
-            self._approval_required_names = {
-                tool_name(t)
-                for t in lg_tools
-                if get_tool_metadata(cast(Any, t)).requires_approval
-            }
+            self._gated_tool_risks = _risks_of_gated_tools(lg_tools)
 
     async def select_workspace(self, path: str, websocket: WebSocket) -> bool:
         """The WS-message counterpart to passing ?workspace= at connect
@@ -827,7 +834,7 @@ class ChatSessionLG:
         previous_instructions = self._instructions
         previous_base_tools = self._base_tools
         previous_lg_agent = self.lg_agent
-        previous_approval_required_names = self._approval_required_names
+        previous_gated_tool_risks = self._gated_tool_risks
         self._context_window = None
         try:
             # Unlike set_enabled_skills, build_coordinator_agent itself is
@@ -848,25 +855,21 @@ class ChatSessionLG:
             )
             self._base_tools = list(agent.tools)
             lg_tools = self._build_lg_tools(self.model)
-            new_approval_required_names = {
-                tool_name(t)
-                for t in lg_tools
-                if get_tool_metadata(cast(Any, t)).requires_approval
-            }
+            new_gated_tool_risks = _risks_of_gated_tools(lg_tools)
             new_lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
         except Exception as exc:  # noqa: BLE001 -- a bad workspace path must not corrupt session state
             self.workspace_root = previous_workspace_root
             self._instructions = previous_instructions
             self._base_tools = previous_base_tools
             self.lg_agent = previous_lg_agent
-            self._approval_required_names = previous_approval_required_names
+            self._gated_tool_risks = previous_gated_tool_risks
             self._context_window = None
             await websocket.send_json(
                 {"type": "error", "message": f"Could not switch to workspace {path!r}: {exc}"}
             )
             return False
         self.lg_agent = new_lg_agent
-        self._approval_required_names = new_approval_required_names
+        self._gated_tool_risks = new_gated_tool_risks
         self._workspace_explicit = True
         await self.send_state(websocket)
         return True
@@ -887,7 +890,7 @@ class ChatSessionLG:
         previous_instructions = self._instructions
         previous_base_tools = self._base_tools
         previous_lg_agent = self.lg_agent
-        previous_approval_required_names = self._approval_required_names
+        previous_gated_tool_risks = self._gated_tool_risks
         previous_enabled_skill_names = self.enabled_skill_names
         self.enabled_skill_names = set(skill_names)
         agent = build_coordinator_agent(
@@ -900,17 +903,13 @@ class ChatSessionLG:
         self._context_window = None
         try:
             lg_tools = self._build_lg_tools(self.model)
-            new_approval_required_names = {
-                tool_name(t)
-                for t in lg_tools
-                if get_tool_metadata(cast(Any, t)).requires_approval
-            }
+            new_gated_tool_risks = _risks_of_gated_tools(lg_tools)
             new_lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
         except Exception as exc:  # noqa: BLE001 -- a bad rebuild must not corrupt session state
             self._instructions = previous_instructions
             self._base_tools = previous_base_tools
             self.lg_agent = previous_lg_agent
-            self._approval_required_names = previous_approval_required_names
+            self._gated_tool_risks = previous_gated_tool_risks
             self.enabled_skill_names = previous_enabled_skill_names
             self._context_window = None
             await websocket.send_json(
@@ -918,7 +917,7 @@ class ChatSessionLG:
             )
             return
         self.lg_agent = new_lg_agent
-        self._approval_required_names = new_approval_required_names
+        self._gated_tool_risks = new_gated_tool_risks
         # Also re-scans disk for skills_by_slug (the /<slug> force-load
         # lookup, unrestricted by enabled_skill_names -- see its own
         # comment in __init__) -- cheap, and keeps it correctly in sync
@@ -955,6 +954,22 @@ class ChatSessionLG:
             # a turn (/plan, a model switch) holds the lock itself.
             state["turn_in_flight"] = self._turn_lock.locked()
         await websocket.send_json(state)
+
+    def workspace_scope(self) -> WorkspaceScope:
+        return WorkspaceScope(
+            self.workspace_root,
+            extra_readable=self.settings.extra_readable_dirs,
+            extra_writable=self.settings.extra_writable_dirs,
+        )
+
+    async def get_activity(self) -> dict[str, Any]:
+        state = await self.lg_agent.aget_state(self.config)
+        messages = list(state.values.get("messages", [])) if state.values else []
+        catalog = {
+            tool_name(t): get_tool_metadata(cast(Any, t))
+            for t in [*self._base_tools, *self._extra_tools]
+        }
+        return summarize_activity(messages, catalog, self.workspace_scope())
 
     async def get_context_breakdown(self) -> dict[str, Any]:
         """Where this thread's context-window budget actually goes --
@@ -1530,7 +1545,7 @@ class ChatSessionLG:
         configured PreToolUse hook can veto it outright (same precedence as
         runtime/policies.py's HookToolPolicy, which always runs before the
         policy it wraps); otherwise, a request for a tool in
-        self._approval_required_names is genuinely gated. For
+        self._gated_tool_risks is genuinely gated. For
         run_python_script/run_node_script specifically (EXEC_POLICY_TOOL_NAMES),
         a configured exec policy (runtime_lg/exec_policy.py, ROADMAP.md
         Phase 7) can pre-decide the call: "forbidden" rejects outright,
@@ -1574,7 +1589,7 @@ class ChatSessionLG:
         Audit logging (ROADMAP.md's Phase 4 "Audit logging" item, via
         runtime_lg/audit.py): every branch below that decides a genuinely
         risky action -- a hook veto (even for a tool outside
-        self._approval_required_names, since a hook denying something is
+        self._gated_tool_risks, since a hook denying something is
         inherently security-relevant regardless of that tool's own base
         risk tier), an exec-policy rule forbidding or auto-allowing a
         script call, plan mode blocking a gated call, accept-edits
@@ -1631,7 +1646,7 @@ class ChatSessionLG:
             if is_draft:
                 return await self._decide_task_draft_request(args, websocket)
             return await self._decide_question_request(args, websocket)
-        if name not in self._approval_required_names:
+        if name not in self._gated_tool_risks:
             return {"type": "approve"}
         exec_policy_decision, exec_policy_detail = "prompt", None
         if name in EXEC_POLICY_TOOL_NAMES:
@@ -1676,14 +1691,15 @@ class ChatSessionLG:
                 detail=exec_policy_detail,
             )
             return {"type": "approve"}
-        if self.accept_edits:
+        auto_reason = self._auto_approves(name)
+        if auto_reason is not None:
             record_decision(
                 audit_log,
                 thread_id=self.thread_id,
                 tool_name=name,
                 arguments=args,
                 decision="approve",
-                reason="accept_edits",
+                reason=auto_reason,
             )
             return {"type": "approve"}
         if not _can_resolve_approvals(websocket):
@@ -1743,6 +1759,64 @@ class ChatSessionLG:
             reason="human",
         )
         return {"type": "approve" if approved else "reject"}
+
+    def _effective_run_approval_mode(self) -> str | None:
+        """The scheduled-run approval tier in force here: the executing
+        run's, or -- while a person finishes a run that parked on an
+        approval -- that run's task's, so the rest of the run keeps the
+        rules it started under. None for an ordinary conversation."""
+        if self.run_approval_mode is not None:
+            return self.run_approval_mode
+        parsed = parse_run_thread_id(self.thread_id)
+        if parsed is None:
+            return None
+        trigger = ScheduledTriggerStore(self.settings.state_dir).load(parsed[0])
+        if trigger is None:
+            return None
+        run = trigger.find_run(parsed[1])
+        if run is None or run.status != "needs_approval":
+            return None
+        return trigger.approval_mode
+
+    def _auto_approves(self, name: str) -> AutoApproveReason | None:
+        """Why a gated call may go ahead without asking anyone, or None.
+
+        "skip" approves every risk tier. "auto" approves only WRITE_LOCAL:
+        a local file edit stays on this machine and can be redone, while
+        running code (EXEC) or acting outside this machine (EXTERNAL) can't
+        be taken back, so those still wait for a person. A hook veto or an
+        exec-policy "forbidden" rule is checked before this and still wins
+        under either tier -- those are the user's own standing rules, not
+        approvals."""
+        if self.accept_edits:
+            return "accept_edits"
+        mode = self._effective_run_approval_mode()
+        if mode == "skip":
+            return "approval_mode_skip"
+        if mode == "auto" and self._gated_tool_risks.get(name) == "WRITE_LOCAL":
+            return "approval_mode_auto"
+        return None
+
+    def _auto_approval_active(self) -> bool:
+        return self.accept_edits or self._effective_run_approval_mode() in ("auto", "skip")
+
+    def _decidable_unattended(self, request: dict[str, Any]) -> bool:
+        """Whether _decide_action_request can settle this request with
+        nobody present other than by refusing for lack of a person. A gated
+        call that can't must stay parked for someone to approve later,
+        rather than be rejected and let the run carry on without it."""
+        name = request["name"]
+        if name in QUESTION_TOOL_NAMES or name in TASK_DRAFT_TOOL_NAMES:
+            return True
+        if name not in self._gated_tool_risks or self.plan_mode:
+            return True
+        if self._auto_approves(name) is not None:
+            return True
+        if name in EXEC_POLICY_TOOL_NAMES:
+            exec_policy = load_exec_policy(self.settings.exec_policy_path)
+            decision, _ = exec_policy.decide(request["args"].get("script", ""))
+            return decision != "prompt"
+        return False
 
     async def _decide_question_request(
         self, args: dict[str, Any], websocket: WebSocket
@@ -1847,6 +1921,13 @@ class ChatSessionLG:
         latest_text: str | None = None
         state = await agent.aget_state(config)
         while state.next:
+            if not _can_resolve_approvals(websocket) and not all(
+                self._decidable_unattended(request)
+                for task in state.tasks
+                for interrupt in task.interrupts
+                for request in interrupt.value.get("action_requests", [])
+            ):
+                break
             resume_map: dict[str, Any] = {}
             for task in state.tasks:
                 for interrupt in task.interrupts:
@@ -2436,10 +2517,10 @@ class ChatSessionLG:
                 # means nothing was pending, so the initial call's own text
                 # already *is* the whole (single-segment) reply.
                 reply_text = await self._stream_turn(turn_input, websocket)
-                # self.accept_edits also opens this when unattended: an
-                # approval_mode="auto"/"skip" Scheduled Task auto-approves
-                # every gated call, so nothing ever waits on a human.
-                if _can_resolve_approvals(websocket) or self.accept_edits:
+                # Unattended, only worth entering when something can
+                # approve without a person; _resolve_pending_approvals
+                # itself leaves anything else parked.
+                if _can_resolve_approvals(websocket) or self._auto_approval_active():
                     resolved_text = await self._resolve_pending_approvals(websocket)
                     if resolved_text is not None:
                         reply_text = resolved_text

@@ -5953,3 +5953,112 @@ def test_history_replay_includes_an_approved_calls_real_result_lg(
         "lines_removed": 0,
     }
     assert tool_entry["is_error"] is False
+
+
+def _run_turn(client: Any, thread_id: str, text: str, accept_edits: bool = True) -> None:
+    with client.websocket_connect(f"/ws/{thread_id}") as ws:
+        ws.receive_json()  # state
+        ws.receive_json()  # history
+        if accept_edits:
+            ws.send_json({"type": "user_message", "text": "/accept-edits"})
+            _receive_until(ws, "state")
+        ws.send_json({"type": "user_message", "text": text})
+        _receive_until(ws, "tasks_changed")
+
+
+def test_thread_activity_lists_outputs_references_tools_and_progress_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_script_env(monkeypatch)
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "input.txt").write_text("data", encoding="utf-8")
+    script = "open('chart.png', 'w').write('png')"
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call("c1", "task_create", {"content": "Read the input"}),
+                    _tool_call("c2", "read_file", {"path": "input.txt"}),
+                    _tool_call("c3", "list_files", {"path": "."}),
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call("c4", "write_file", {"path": "report.md", "content": "# R"}),
+                    _tool_call("c5", "write_file", {"path": "../outside.md", "content": "x"}),
+                    _tool_call("c6", "run_python_script", {"script": script, "description": "d"}),
+                ],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        _run_turn(client, "t_activity", "make a report")
+        activity = client.get("/api/threads/t_activity/activity").json()
+
+    assert [t["content"] for t in activity["tasks"]] == ["Read the input"]
+    # Newest first; the write outside the workspace failed, so it isn't one.
+    assert [o["path"] for o in activity["outputs"]] == ["chart.png", "report.md"]
+    assert all(o["exists"] and o["openable"] for o in activity["outputs"])
+    assert [r["path"] for r in activity["references"]] == ["input.txt"]
+    assert {t["name"]: t["count"] for t in activity["tools"]} == {
+        "read_file": 1,
+        "list_files": 1,
+        "write_file": 1,
+        "run_python_script": 1,
+    }
+    assert activity["connectors"] == [] and activity["skills"] == []
+
+
+def test_opening_a_thread_file_only_hands_documents_to_the_os_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        "coscribe.web.app.open_in_os", lambda path, *, reveal: opened.append((path.name, reveal))
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "report.xlsx").write_bytes(b"x")
+    (workspace / "run.bat").write_text("echo hi", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("s", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        url = "/api/threads/t_files/files/open"
+        doc = client.post(url, json={"path": "report.xlsx"})
+        script = client.post(url, json={"path": "run.bat"})
+        revealed = client.post(url, json={"path": "run.bat", "reveal": True})
+        outside = client.post(url, json={"path": "../secret.txt"})
+        download = client.get("/api/threads/t_files/files/download", params={"path": "report.xlsx"})
+        missing = client.get("/api/threads/t_files/files/download", params={"path": "nope.xlsx"})
+
+    assert doc.status_code == 200 and script.status_code == 400
+    assert revealed.status_code == 200 and outside.status_code == 404
+    assert opened == [("report.xlsx", False), ("run.bat", True)]
+    assert download.status_code == 200 and download.content == b"x"
+    assert "report.xlsx" in download.headers["content-disposition"]
+    assert missing.status_code == 404
+
+
+def test_a_json_body_without_a_json_content_type_is_refused_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cross-site page can POST to 127.0.0.1 without a CORS preflight
+    only if it sends no JSON Content-Type -- such a body must not be
+    parsed, or any website could drive these endpoints."""
+    opened: list[Any] = []
+    monkeypatch.setattr("coscribe.web.app.open_in_os", lambda path, *, reveal: opened.append(path))
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "report.xlsx").write_bytes(b"x")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        request = client.build_request(
+            "POST", "/api/threads/t_csrf/files/open", content=b'{"path": "report.xlsx"}'
+        )
+        assert "content-type" not in request.headers
+        response = client.send(request)
+
+    assert response.status_code == 422
+    assert opened == []

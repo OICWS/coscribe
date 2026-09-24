@@ -15,18 +15,22 @@ import { SettingsModal } from "./components/settings/SettingsModal";
 import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { SubAgentsPanel } from "./components/SubAgentsPanel";
-import { BrowserIcon, HelpIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
+import { TaskPanel } from "./components/TaskPanel";
+import { BrowserIcon, HelpIcon, PanelRightIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
 import { getCommands, getScheduledTasks, getThreads, runScheduledTaskNow } from "./lib/rest";
 import { goToThread, SCHEDULED_THREAD_PREFIX, startNewThread, THREAD_CHANGE_EVENT } from "./lib/nav";
 import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
+import { readStored, writeStored } from "./lib/storage";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState, TASK_DRAFT_SAVED_PREFIX, type LogItem } from "./state/reducer";
 import type { CommandInfo, ThreadSummary } from "./types/session";
 import type { ScheduledTask } from "./types/settings";
 
 type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
+
+const TASK_PANEL_KEY = "coscribe.taskPanel.open";
 
 function App() {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
@@ -37,6 +41,7 @@ function App() {
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [browserPanelOpen, setBrowserPanelOpen] = useState(false);
   const [subAgentsPanelOpen, setSubAgentsPanelOpen] = useState(false);
+  const [taskPanelWanted, setTaskPanelWanted] = useState(() => readStored(TASK_PANEL_KEY) !== "0");
   // Set by BrowserPanel's "Send to chat" (an element it picked, screenshot
   // + a short description) -- Composer watches this prop and appends it to
   // its own pendingImages the moment it changes, same "external image
@@ -191,6 +196,26 @@ function App() {
   // ThreadHeader, and the sidebar stays on the task list.
   const isScheduledTaskThread = threadId.startsWith(SCHEDULED_THREAD_PREFIX);
   const threadTask = isScheduledTaskThread ? taskForThread(scheduledTasks, threadId) : null;
+  const threadRun = threadTask?.runs.find((r) => r.thread_id === threadId) ?? null;
+  // Browser and Sub Agents take the same right-hand space, so either one
+  // open hides this panel without forgetting that it's wanted.
+  const taskPanelShown =
+    navMode === "create" &&
+    taskPanelWanted &&
+    !browserPanelOpen &&
+    !subAgentsPanelOpen &&
+    state.historyReceived &&
+    (state.items.length > 0 || state.olderItems.length > 0);
+  const finishedToolCalls = state.items.filter((item) => item.kind === "tool" && item.result !== undefined).length;
+  const toggleTaskPanel = () => {
+    const next = !taskPanelShown;
+    setTaskPanelWanted(next);
+    writeStored(TASK_PANEL_KEY, next ? "1" : "0");
+    if (next) {
+      setBrowserPanelOpen(false);
+      setSubAgentsPanelOpen(false);
+    }
+  };
   const selectedTask = scheduledTasks.find((t) => t.trigger_id === selectedTaskId) ?? null;
   const showingScheduled = navMode === "run" || isScheduledTaskThread;
 
@@ -430,6 +455,17 @@ function App() {
           ) : (
             <div className="min-w-0 flex-1" />
           )}
+          {navMode === "create" && (
+            <button
+              type="button"
+              title={taskPanelShown ? "Hide task details" : "Show task details"}
+              aria-pressed={taskPanelShown}
+              className={`hidden h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] lg:flex ${taskPanelShown ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
+              onClick={toggleTaskPanel}
+            >
+              <PanelRightIcon className="h-[18px] w-[18px]" />
+            </button>
+          )}
           <button
             type="button"
             title="Browser"
@@ -558,6 +594,16 @@ function App() {
           />
         )}
       </div>
+      {taskPanelShown && (
+        <TaskPanel
+          threadId={threadId}
+          title={sessionLabel}
+          task={threadTask}
+          run={threadRun}
+          refreshSignal={`${state.turnTick}:${finishedToolCalls}`}
+          onOpenTask={showScheduledTaskPage}
+        />
+      )}
       {browserPanelOpen && (
         <BrowserPanel onClose={() => setBrowserPanelOpen(false)} onSendToChat={onBrowserPanelCapture} />
       )}

@@ -33,8 +33,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 Decision = Literal["approve", "reject"]
+AutoApproveReason = Literal["accept_edits", "approval_mode_auto", "approval_mode_skip"]
 Reason = Literal[
-    "hook_veto", "plan_mode", "exec_policy", "accept_edits", "human", "stopped", "unattended"
+    "hook_veto",
+    "plan_mode",
+    "exec_policy",
+    AutoApproveReason,
+    "human",
+    "stopped",
+    "unattended",
 ]
 
 _REDACTED = "[REDACTED]"
