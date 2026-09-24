@@ -285,6 +285,8 @@ export interface ScheduledTask {
   runs: ScheduledRun[];
   /** Set when the task runs fixed steps instead of `prompt`. */
   workflow: Workflow | null;
+  /** The folder runs work in; null is the app's default workspace. */
+  workspace?: string | null;
 }
 
 export interface CreateScheduledTaskPayload {
@@ -299,6 +301,7 @@ export interface CreateScheduledTaskPayload {
   approval_mode?: ApprovalMode;
   notes_enabled?: boolean;
   workflow?: Workflow | null;
+  workspace?: string | null;
 }
 
 export type ScheduledTaskResult = ScheduledTask | { error: string };

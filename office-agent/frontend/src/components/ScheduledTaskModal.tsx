@@ -4,8 +4,9 @@ import { createScheduledTask, updateScheduledTask } from "../lib/rest";
 import type { Workflow } from "../types/workflow";
 import type { ApprovalMode, ScheduledTask, ScheduleKind } from "../types/settings";
 import type { TaskDraft } from "../types/wire";
-import { CloseIcon, FolderIcon } from "./icons";
+import { CloseIcon } from "./icons";
 import { allSteps } from "../lib/workflowTree";
+import { WorkspacePicker } from "./WorkspacePicker";
 
 const FREQUENCY_OPTIONS: { value: ScheduleKind; label: string }[] = [
   { value: "manual", label: "Manual" },
@@ -133,6 +134,8 @@ interface ScheduledTaskModalProps {
    * on its page). */
   newWorkflow?: Workflow;
   initialName?: string;
+  /** The folder runs work in, when the task comes from a conversation. */
+  initialWorkspace?: string | null;
 }
 
 /** The Create/Edit scheduled task form -- matches
@@ -149,6 +152,7 @@ export function ScheduledTaskModal({
   onSaved,
   newWorkflow,
   initialName,
+  initialWorkspace,
 }: ScheduledTaskModalProps) {
   const isEdit = task !== null;
   const workflow = task?.workflow ?? newWorkflow ?? null;
@@ -156,6 +160,7 @@ export function ScheduledTaskModal({
   const [name, setName] = useState(initial.name);
   const [instructions, setInstructions] = useState(initial.instructions);
   const [model, setModel] = useState(initial.model);
+  const [workspace, setWorkspace] = useState(task ? (task.workspace ?? "") : (initialWorkspace ?? ""));
   const [kind, setKind] = useState<ScheduleKind>(initial.kind);
   const [date, setDate] = useState(() => initialDateFor(task, draft));
   const [time, setTime] = useState(initial.time);
@@ -196,6 +201,7 @@ export function ScheduledTaskModal({
       approval_mode: approvalMode,
       notes_enabled: task?.notes_enabled ?? true,
       workflow,
+      workspace: workspace || null,
     };
     setSaving(true);
     setError(null);
@@ -248,8 +254,11 @@ export function ScheduledTaskModal({
           </div>
 
           {workflow ? (
-            <div className="rounded-md border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--muted)]">
-              {workflowSummary(workflow, isEdit)}
+            <div className="overflow-hidden rounded-md border border-[var(--border)] text-sm">
+              <div className="px-3 py-2.5 text-[var(--muted)]">{workflowSummary(workflow, isEdit)}</div>
+              <div className="border-t border-[var(--border)] bg-[var(--card-bg)] px-3 py-2">
+                <WorkspacePicker value={workspace} onChange={setWorkspace} />
+              </div>
             </div>
           ) : (
             <div>
@@ -265,14 +274,7 @@ export function ScheduledTaskModal({
                   onChange={(e) => setInstructions(e.target.value)}
                 />
                 <div className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm">
-                  <button
-                    type="button"
-                    disabled
-                    title="Not available yet"
-                    className="flex items-center gap-1.5 text-[var(--muted)] opacity-60"
-                  >
-                    <FolderIcon className="h-3.5 w-3.5" /> Select workspace
-                  </button>
+                  <WorkspacePicker value={workspace} onChange={setWorkspace} />
                   <select
                     aria-label="Model"
                     className="bg-transparent text-[var(--muted)] outline-none"

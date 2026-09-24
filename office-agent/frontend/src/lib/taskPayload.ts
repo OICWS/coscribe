@@ -21,6 +21,7 @@ export function taskPayload(
     approval_mode: task.approval_mode,
     notes_enabled: task.notes_enabled,
     workflow: task.workflow,
+    workspace: task.workspace ?? null,
     ...changes,
   };
 }

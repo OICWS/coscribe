@@ -120,6 +120,7 @@ from ..tools.scheduled_tasks import (
     ScheduledTriggerStore,
     compute_next_run_at,
     create_trigger,
+    parse_run_thread_id,
     update_trigger,
 )
 from ..tools.script_env import (
@@ -138,7 +139,7 @@ from ..tools.subagent_tasks import (
     resume_subagent_task,
 )
 from ..tools.tasks import TaskToolkit
-from ..workflows.catalog import describe_params
+from ..workflows.catalog import describe_params, tool_description
 from ..workflows.solidify import DraftFailed
 from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflow_error
 from .activity import OPENABLE_EXTENSIONS, open_in_os
@@ -925,6 +926,7 @@ class ScheduledTaskCreate(BaseModel):
     approval_mode: str = "manual"
     notes_enabled: bool = True
     workflow: dict[str, Any] | None = None
+    workspace: str | None = None
 
 
 class RunNowRequest(BaseModel):
@@ -1097,6 +1099,14 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         settings.state_dir.mkdir(parents=True, exist_ok=True)
         _workspace_sidecar_path(thread_id).write_text(path, encoding="utf-8")
 
+    def _run_workspace(thread_id: str) -> str | None:
+        """A scheduled run's thread works in its task's folder."""
+        parsed = parse_run_thread_id(thread_id)
+        if parsed is None:
+            return None
+        trigger = ScheduledTriggerStore(settings.state_dir).load(parsed[0])
+        return trigger.workspace if trigger is not None else None
+
     def _resolve_workspace(thread_id: str, workspace_param: str | None) -> tuple[Path, bool]:
         """"First choice wins, then sticks" -- the ?workspace= query
         param only matters the *first* time a thread_id is seen; a
@@ -1116,6 +1126,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         ChatSessionLG.select_workspace's "already set" guard needs this
         explicit flag, not a path comparison."""
         sidecar = _workspace_sidecar_path(thread_id)
+        if workspace_param is None and not sidecar.is_file():
+            workspace_param = _run_workspace(thread_id)
         if workspace_param is None and sidecar.is_file():
             workspace_param = sidecar.read_text(encoding="utf-8").strip()
         elif workspace_param is not None and not sidecar.is_file():
@@ -1781,6 +1793,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 approval_mode=payload.approval_mode,
                 notes_enabled=payload.notes_enabled,
                 workflow=payload.workflow,
+                workspace=payload.workspace,
             )
         except (ValueError, KeyError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1805,6 +1818,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 approval_mode=payload.approval_mode,
                 notes_enabled=payload.notes_enabled,
                 workflow=payload.workflow,
+                workspace=payload.workspace,
             )
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
@@ -1969,6 +1983,21 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     async def get_tools() -> dict[str, Any]:
         agent = build_coordinator_agent(settings, thread_id="__tools_probe__")
         tools = []
+        # Connected connectors' tools can be workflow steps too.
+        for connector_tool in extra_tools_holder["tools"]:
+            metadata = get_tool_metadata(connector_tool)
+            if not (metadata.category or "").startswith("mcp:"):
+                continue
+            tools.append(
+                {
+                    "name": connector_tool.name,
+                    "category": metadata.category,
+                    "risk_category": metadata.risk_category,
+                    "requires_approval": metadata.requires_approval,
+                    "description": tool_description(connector_tool).split(". ")[0],
+                    "params": describe_params(connector_tool),
+                }
+            )
         for tool in agent.tools:
             metadata = get_tool_metadata(tool)
             doc = inspect.getdoc(tool) or ""

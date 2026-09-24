@@ -9,9 +9,7 @@ before anything is saved, so this only has to be a good first pass."""
 
 from __future__ import annotations
 
-import inspect
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,7 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from ..runtime_lg.messages import serialize_history_for_ws_lg
-from .catalog import describe_params
+from .catalog import describe_params, tool_description
 from .engine import UNAVAILABLE_TOOLS
 from .spec import LLMStep, LoopStep, ToolStep, Workflow, parse_workflow, walk, workflow_error
 
@@ -99,6 +97,11 @@ undone later.
 - Add a check wherever the conversation verified something (counts that \
 must match, a value that must not be empty), grounded in what it found.
 - Keep it as short as the task allows; the reviewer can add steps later.
+- Browser steps must work on a fresh page load. An element reference taken \
+from a page snapshot (like ref "e42") is made anew on every load, so never \
+copy one into a step: navigate by URL, and act on elements through a tool \
+that takes a CSS selector or runs code against the page, using selectors \
+the conversation showed to work.
 - "notes" lists what you weren't sure about: guesses, values you turned \
 into inputs, steps you dropped on purpose.
 """
@@ -160,7 +163,7 @@ def render_conversation(messages: list[Any]) -> tuple[str, list[str]]:
     return transcript, used
 
 
-def describe_tools(names: list[str], tools: dict[str, Callable[..., Any]]) -> str:
+def describe_tools(names: list[str], tools: dict[str, Any]) -> str:
     lines = []
     for name in names:
         if name in UNAVAILABLE_TOOLS or name not in tools:
@@ -168,7 +171,7 @@ def describe_tools(names: list[str], tools: dict[str, Callable[..., Any]]) -> st
         if name == SCRIPT_TOOL:
             lines.append(f'- {SCRIPT_TOOL}: becomes a "script" step, not a tool step')
             continue
-        doc = (inspect.getdoc(tools[name]) or "").split("\n\n", 1)[0].replace("\n", " ")
+        doc = tool_description(tools[name])
         params = ", ".join(
             f"{p['name']}{'' if p['required'] else '?'}: {p['type']}"
             + (f" -- {p['description']}" if p["description"] else "")
@@ -178,7 +181,7 @@ def describe_tools(names: list[str], tools: dict[str, Callable[..., Any]]) -> st
     return "\n".join(lines) or "(none)"
 
 
-def check_draft(workflow: Workflow, tools: dict[str, Callable[..., Any]]) -> list[str]:
+def check_draft(workflow: Workflow, tools: dict[str, Any]) -> list[str]:
     """What stops this workflow from running here, beyond what the spec
     itself enforces."""
     if not workflow.steps:
@@ -231,7 +234,7 @@ def _reply_text(message: Any) -> str:
     )
 
 
-def _parse_reply(text: str, tools: dict[str, Callable[..., Any]], name_hint: str) -> WorkflowDraft:
+def _parse_reply(text: str, tools: dict[str, Any], name_hint: str) -> WorkflowDraft:
     """The draft, or ValueError with every problem the curator should fix."""
     data = _reply_object(text)
     if "error" in data and "workflow" not in data:
@@ -257,7 +260,7 @@ def _parse_reply(text: str, tools: dict[str, Callable[..., Any]], name_hint: str
 async def draft_workflow(
     model: Any,
     messages: list[Any],
-    tools: dict[str, Callable[..., Any]],
+    tools: dict[str, Any],
     name_hint: str = "",
 ) -> WorkflowDraft:
     transcript, used = render_conversation(messages)

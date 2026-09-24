@@ -1,6 +1,6 @@
 from typing import Optional
 
-from coscribe.workflows.catalog import arg_descriptions, describe_params
+from coscribe.workflows.catalog import arg_descriptions, describe_params, tool_description
 
 
 def sample(
@@ -45,3 +45,35 @@ def test_describe_params_reads_types_defaults_and_meanings() -> None:
 
 def test_arg_descriptions_stops_at_the_next_section() -> None:
     assert "nothing" not in arg_descriptions(sample.__doc__ or "")
+
+
+def test_a_connector_tools_params_come_from_its_json_schema() -> None:
+    from langchain_core.tools import StructuredTool
+
+    async def run(**kwargs: object) -> str:
+        return ""
+
+    tool = StructuredTool(
+        name="playwright_browser_navigate",
+        description="Navigate to a URL.\n\nMore detail here.",
+        args_schema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to\n  navigate to"},
+                "timeout": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": 30},
+                "options": {"type": "object"},
+            },
+            "required": ["url"],
+        },
+        coroutine=run,
+    )
+
+    params = {p["name"]: p for p in describe_params(tool)}
+
+    assert params["url"] == {
+        "name": "url", "type": "text", "required": True, "default": None,
+        "description": "The URL to navigate to",
+    }  # fmt: skip
+    assert params["timeout"]["type"] == "number" and params["timeout"]["default"] == 30
+    assert params["options"]["type"] == "other"
+    assert tool_description(tool) == "Navigate to a URL."

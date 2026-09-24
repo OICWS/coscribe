@@ -15,6 +15,9 @@ interface WorkflowDraftPageProps {
   threadId: string;
   threadTitle: string;
   nameHint: string;
+  /** A draft already made (by the model, in the conversation) -- shown
+   * as is, not drafted again. */
+  initial?: WorkflowDraftResult;
   onBack: () => void;
   onDiscard: () => void;
   onSave: (name: string, workflow: Workflow) => void;
@@ -72,15 +75,17 @@ export function WorkflowDraftPage({
   threadId,
   threadTitle,
   nameHint,
+  initial,
   onBack,
   onDiscard,
   onSave,
 }: WorkflowDraftPageProps) {
-  const [draft, setDraft] = useState<DraftState>({ status: "drafting" });
+  const [draft, setDraft] = useState<DraftState>(initial ? { status: "ready", ...initial } : { status: "drafting" });
   const [attempt, setAttempt] = useState(0);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
 
   useEffect(() => {
+    if (initial) return;
     let current = true;
     setDraft({ status: "drafting" });
     draftWorkflowFromThread(threadId, nameHint)
@@ -94,7 +99,7 @@ export function WorkflowDraftPage({
     return () => {
       current = false;
     };
-  }, [threadId, nameHint, attempt]);
+  }, [threadId, nameHint, attempt, initial]);
 
   const persist = async (workflow: Workflow) => {
     const result = await validateWorkflow(workflow);

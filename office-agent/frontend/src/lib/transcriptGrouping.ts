@@ -1,4 +1,5 @@
 import type { LogItem } from "../state/reducer";
+import type { Workflow } from "../types/workflow";
 
 type ToolOrApprovalItem = Extract<LogItem, { kind: "tool" | "approval" }>;
 type UserItem = Extract<LogItem, { kind: "user" }>;
@@ -86,7 +87,41 @@ export interface ToolRunGroup {
 // (what `npm run build` actually runs) correctly rejected the type
 // mismatch once TranscriptEntry's own type no longer reflected the
 // runtime invariant.
-export type TranscriptEntry = Exclude<LogItem, ToolOrApprovalItem> | ToolRunGroup;
+/** A workflow the model drafted with draft_workflow, shown as a card to
+ * review instead of as a tool call. */
+export interface WorkflowDraftEntry {
+  kind: "workflow_draft";
+  id: string;
+  name: string;
+  workflow: Workflow;
+  notes: string[];
+  workspace: string | null;
+}
+
+export type TranscriptEntry = Exclude<LogItem, ToolOrApprovalItem> | ToolRunGroup | WorkflowDraftEntry;
+
+function workflowDraftOf(item: ToolOrApprovalItem): WorkflowDraftEntry | null {
+  if (item.kind !== "tool" || item.toolName !== "draft_workflow" || item.result === undefined) return null;
+  let result: unknown = item.result;
+  if (typeof result === "string") {
+    try {
+      result = JSON.parse(result);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof result !== "object" || result === null) return null;
+  const draft = result as Record<string, unknown>;
+  if (draft.status !== "drafted" || typeof draft.workflow !== "object" || draft.workflow === null) return null;
+  return {
+    kind: "workflow_draft",
+    id: item.id,
+    name: typeof draft.name === "string" ? draft.name : "Untitled workflow",
+    workflow: draft.workflow as Workflow,
+    notes: Array.isArray(draft.notes) ? draft.notes.map(String) : [],
+    workspace: typeof draft.workspace === "string" ? draft.workspace : null,
+  };
+}
 
 /** Render-time-only grouping pass -- no reducer/wire changes. Coalesces
  * every consecutive run of tool/approval items (a "run") between user/
@@ -108,7 +143,11 @@ export function groupToolRuns(items: LogItem[]): TranscriptEntry[] {
   };
 
   for (const item of items) {
-    if (item.kind === "tool" || item.kind === "approval") {
+    const drafted = item.kind === "tool" ? workflowDraftOf(item) : null;
+    if (drafted) {
+      flush();
+      result.push(drafted);
+    } else if (item.kind === "tool" || item.kind === "approval") {
       current.push(item);
     } else {
       flush();

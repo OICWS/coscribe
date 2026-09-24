@@ -450,6 +450,33 @@ dropped); edits are validated (`POST /api/workflows/validate`) but not
 saved, and **Save as task…** picks when it runs. Nothing is saved until
 then.
 
+The chat model can do the same when asked in plain words ("make this a
+fixed workflow I can rerun"): its `draft_workflow` tool runs the same
+curator on the conversation so far, and the result shows in the chat as
+a **Fixed workflow draft** card -- step tiles, inputs, the number of
+things worth checking -- whose **Review and save** opens the draft page.
+The model is told the difference between the two kinds of repeatable
+task: a fixed workflow for "the same steps every time", a prompt task
+(`create_scheduled_task`) for work that needs judgment each run.
+
+**Connector tools in steps.** A tool step can call a connected
+connector's (MCP) tools, not only built-in ones -- the Playwright
+connector's browser tools, for example, so a web task done once in chat
+can become fixed browser steps. Their parameters come from the tool's
+JSON schema (the editor's argument form and the curator's tool list use
+them); their text replies become values (JSON decoded, and for replies
+laid out as `### Result` / `### Ran Playwright code` sections, the
+Result section). The curator is told not to copy element references from
+page snapshots (`ref: "e42"`), which change on every load, and to act
+through selectors or page scripts that worked instead. A connector that
+isn't connected when a run starts stops it before any step runs.
+
+**A task's workspace.** A task can have its own folder (the folder
+button in the task form; `workspace` in the API, which must be an
+existing folder): its runs read and write there instead of the app's
+default workspace. A task saved from a conversation starts with that
+conversation's folder.
+
 ## Files
 
 The Coordinator's most basic tools work on plain-text files under the

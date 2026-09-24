@@ -35,6 +35,7 @@ HumanInTheLoopMiddleware's own exactly).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import tempfile
@@ -45,7 +46,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 from fastapi import WebSocket
 from langchain_core.messages import (
@@ -57,9 +58,10 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.messages.ai import UsageMetadata
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.graph import END
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from ..cli import INIT_PROMPT
@@ -560,7 +562,46 @@ class ChatSessionLG:
             spawn_agent_tool,
             spawn_agent_background_tool,
             review_work_tool,
+            self._build_draft_workflow_tool(),
         ]
+
+    def _build_draft_workflow_tool(self) -> BaseTool:
+        async def draft_workflow_tool(
+            state: Annotated[dict[str, Any], InjectedState], name: str = ""
+        ) -> str:
+            # The graph's live state, not the checkpoint: mid-turn the
+            # checkpoint doesn't hold this turn's tool calls yet.
+            messages = list(state.get("messages", []))
+            try:
+                draft = await draft_workflow(
+                    self.model, messages, self.workflow_context(None).tools, name.strip()
+                )
+            except DraftFailed as exc:
+                return json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "status": "drafted",
+                    **draft.to_dict(),
+                    "workspace": str(self.workspace_root) if self._workspace_explicit else None,
+                    "next": "The user reviews this draft on a card and saves it as a task; "
+                    "nothing is saved yet.",
+                },
+                ensure_ascii=False,
+            )
+
+        return StructuredTool.from_function(
+            coroutine=draft_workflow_tool,
+            name="draft_workflow",
+            description=(
+                "Draft a fixed workflow from what this conversation did: the tool calls "
+                "that worked become fixed steps (values that change become inputs), with "
+                "checks, and a model step only where judgment was used. For a task the "
+                "user wants to repeat exactly -- a fixed, stable workflow. Nothing is "
+                "saved: the user reviews the draft on a card and saves it. Needs this "
+                "conversation to have done the task with tools already. `name`: a short "
+                "name for it, or empty to let the draft name itself."
+            ),
+        )
 
     def _build_lg_agent(
         self, model: Any, model_string: str, lg_tools: list[Callable[..., Any] | BaseTool]
@@ -967,10 +1008,13 @@ class ChatSessionLG:
     def workflow_context(self, model: str | None) -> StepContext:
         """What a workflow's steps run with: this thread's own tools and
         workspace scope, and `model` (else this session's) for model steps."""
-        tools = {
+        # A connector's tools are LangChain tools; the other LangChain tools
+        # here (spawn_agent, review_work) need a running agent around them.
+        tools: dict[str, Any] = {
             tool_name(t): t
-            for t in self._base_tools
-            if callable(t) and not isinstance(t, BaseTool)
+            for t in [*self._base_tools, *self._extra_tools]
+            if not isinstance(t, BaseTool)
+            or (get_tool_metadata(cast(Any, t)).category or "").startswith("mcp:")
         }
 
         def make_model(step_model: str | None) -> Any:
