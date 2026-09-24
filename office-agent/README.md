@@ -375,9 +375,24 @@ kind's own fields: tool arguments, the script, a model step's
 instructions, returned fields (type, meaning) and model, a check's
 comparisons and literal values, an approval's message and condition.
 Each step saves on its own; the server re-validates the whole workflow,
-and a refusal shows under that step. (Adding, removing and reordering
-steps is phase 2.) **Run now** asks for the inputs first, prefilled with
-their defaults.
+and a refusal shows under that step. **Run now** asks for the inputs
+first, prefilled with their defaults.
+
+Building one from scratch: **New task → Build a workflow** creates a task
+with no steps (it won't run until it has some) and opens its page. The
+**+** between steps (or **Add step** at the end) picks a kind; a tool
+step then picks from every built-in and connected tool, searchable, and
+gets a form from that tool's own parameters -- types, defaults, required
+marks and each argument's meaning from its docstring (`GET /api/tools`
+now includes `params`). A check's operands can be a value, a count of
+one, or a fixed text/number/yes-no, with the names available at that
+point suggested (model steps' fields included). Inputs are edited in
+place too. An open step can be moved up or down or deleted; the server
+refuses an edit that would leave a step reading something that no longer
+comes before it, and says which ("Can't move it there -- step 2 ('Check
+the values') reads 'result.q1_total', which isn't an input or the result
+of an earlier step"). Renaming a step's result, or an input, rewrites
+every later reference to it, so a rename never breaks the steps after.
 
 A workflow run opens as a timeline instead of a conversation: each step's
 status, duration and result (a model step's fields as a table, search

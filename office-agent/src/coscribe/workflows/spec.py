@@ -200,7 +200,9 @@ def step_output(step: Step) -> str | None:
 class Workflow(_Model):
     version: Literal[1] = 1
     inputs: list[WorkflowInput] = []
-    steps: list[Step] = Field(min_length=1, max_length=100)
+    # Empty is a workflow still being built on its task page; preflight
+    # refuses to run one.
+    steps: list[Step] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def _names_resolve_in_order(self) -> Workflow:

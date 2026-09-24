@@ -138,6 +138,7 @@ from ..tools.subagent_tasks import (
     resume_subagent_task,
 )
 from ..tools.tasks import TaskToolkit
+from ..workflows.catalog import describe_params
 from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus
 from .browser_detect import find_windows_browser
@@ -1938,6 +1939,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "risk_category": metadata.risk_category,
                     "requires_approval": metadata.requires_approval,
                     "description": description,
+                    "params": describe_params(tool),
                 }
             )
         return {"tools": tools}

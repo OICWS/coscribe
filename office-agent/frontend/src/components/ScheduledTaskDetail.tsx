@@ -303,7 +303,8 @@ export function ScheduledTaskDetail({
             </button>
             <button
               type="button"
-              disabled={starting}
+              disabled={starting || workflow?.steps.length === 0}
+              title={workflow?.steps.length === 0 ? "Add steps before running it" : undefined}
               className="flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-fg)] hover:bg-[var(--primary-hover)] disabled:opacity-60"
               onClick={() => (workflow && workflow.inputs.length > 0 ? setAskingInputs(true) : start())}
             >

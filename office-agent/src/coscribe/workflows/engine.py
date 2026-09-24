@@ -320,6 +320,8 @@ def _run_check(step: CheckStep, values: dict[str, Any]) -> list[dict[str, Any]]:
 
 def preflight(workflow: Workflow, ctx: StepContext) -> None:
     """Refuse a workflow that can't run here, before any step does."""
+    if not workflow.steps:
+        raise WorkflowNotRunnable("This workflow has no steps yet -- add some on its task page.")
     for index, step in enumerate(workflow.steps, start=1):
         if isinstance(step, ToolStep):
             if step.tool in UNAVAILABLE_TOOLS:
