@@ -13,6 +13,7 @@ import { describeSchedule } from "../lib/scheduleLabels";
 import { taskPayload } from "../lib/taskPayload";
 import { countModelSteps } from "../lib/workflowLabels";
 import type { ScheduledTask } from "../types/settings";
+import type { Workflow } from "../types/workflow";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ChevronRightIcon, PencilIcon, PlayIcon, TrashIcon } from "./icons";
 import { RunStatusIcon } from "./RunStatusIcon";
@@ -266,6 +267,13 @@ export function ScheduledTaskDetail({
     onChanged();
   };
 
+  const saveWorkflow = async (next: Workflow) => {
+    const result = await updateScheduledTask(task.trigger_id, taskPayload(task, { workflow: next }));
+    if ("error" in result) return result.error;
+    onChanged();
+    return null;
+  };
+
   const confirmDelete = async () => {
     setDeleteConfirm(false);
     await deleteScheduledTask(task.trigger_id);
@@ -333,7 +341,7 @@ export function ScheduledTaskDetail({
 
         <div className="mt-6 flex flex-col gap-6">
           {workflow ? (
-            <WorkflowEditor task={task} workflow={workflow} onSaved={onChanged} focusStepId={focusStepId} />
+            <WorkflowEditor workflow={workflow} persist={saveWorkflow} focusStepId={focusStepId} />
           ) : (
             <InstructionsSection prompt={task.prompt} />
           )}

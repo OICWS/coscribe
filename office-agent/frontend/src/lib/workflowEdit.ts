@@ -185,3 +185,5 @@ export function suggestionsBefore(workflow: Workflow, index: number): string[] {
   }
   return names;
 }
+
+export const EMPTY_WORKFLOW: Workflow = { version: 1, inputs: [], steps: [] };

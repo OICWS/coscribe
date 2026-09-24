@@ -70,7 +70,7 @@ from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .. import __version__
 from ..cli import _dotenv_path, _load_settings_or_none
@@ -139,6 +139,8 @@ from ..tools.subagent_tasks import (
 )
 from ..tools.tasks import TaskToolkit
 from ..workflows.catalog import describe_params
+from ..workflows.solidify import DraftFailed
+from ..workflows.spec import parse_workflow, workflow_error
 from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus
 from .browser_detect import find_windows_browser
@@ -929,6 +931,14 @@ class RunNowRequest(BaseModel):
     inputs: dict[str, Any] | None = None
 
 
+class WorkflowDraftRequest(BaseModel):
+    name: str = ""
+
+
+class WorkflowCheck(BaseModel):
+    workflow: dict[str, Any]
+
+
 class WorkflowAnswer(BaseModel):
     approved: bool
     note: str = ""
@@ -993,8 +1003,8 @@ FIXED_COMMANDS = [
     {"name": "init", "description": "Explore the workspace and write OVERVIEW.md"},
     {
         "name": "saveworkflow",
-        "description": "Save this conversation as a reusable scheduled task "
-        "(usage: /saveworkflow <name>)",
+        "description": "Draft a workflow from what this conversation did "
+        "(usage: /saveworkflow [name])",
     },
     {
         "name": "saveskill",
@@ -1639,6 +1649,25 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         session = _get_session(thread_id)
         activity = await session.get_activity()
         return {"tasks": TaskToolkit(thread_id, settings.state_dir).list_tasks(), **activity}
+
+    @app.post("/api/threads/{thread_id}/workflow-draft")
+    async def draft_thread_workflow(
+        thread_id: str, body: WorkflowDraftRequest | None = None
+    ) -> JSONResponse:
+        session = await _get_session_async(thread_id)
+        try:
+            draft = await session.draft_workflow((body.name if body else "").strip())
+        except DraftFailed as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(draft.to_dict())
+
+    @app.post("/api/workflows/validate")
+    async def validate_workflow(body: WorkflowCheck) -> JSONResponse:
+        try:
+            workflow = parse_workflow(body.workflow)
+        except ValidationError as exc:
+            return JSONResponse({"error": workflow_error(exc)}, status_code=400)
+        return JSONResponse({"workflow": workflow.model_dump(mode="json")})
 
     def _thread_file(thread_id: str, path: str) -> Path | None:
         try:

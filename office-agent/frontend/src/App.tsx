@@ -16,6 +16,7 @@ import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { SubAgentsPanel } from "./components/SubAgentsPanel";
 import { TaskPanel } from "./components/TaskPanel";
+import { WorkflowDraftPage } from "./components/workflow/WorkflowDraftPage";
 import { WorkflowRunView } from "./components/workflow/WorkflowRunView";
 import { BrowserIcon, HelpIcon, PanelRightIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
@@ -31,11 +32,13 @@ import { goToThread, SCHEDULED_THREAD_PREFIX, startNewThread, THREAD_CHANGE_EVEN
 import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
 import { readStored, writeStored } from "./lib/storage";
+import { EMPTY_WORKFLOW } from "./lib/workflowEdit";
 import { workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState, TASK_DRAFT_SAVED_PREFIX, type LogItem } from "./state/reducer";
 import type { CommandInfo, ThreadSummary } from "./types/session";
 import type { ScheduledRun, ScheduledTask } from "./types/settings";
+import type { Workflow } from "./types/workflow";
 
 type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
 
@@ -82,7 +85,15 @@ function App() {
   const [scheduledTaskModal, setScheduledTaskModal] = useState<{
     task: ScheduledTask | null;
     draft?: TaskDraftItem;
-    newWorkflow?: boolean;
+    newWorkflow?: Workflow;
+    initialName?: string;
+  } | null>(null);
+  // A workflow being drafted from a conversation, shown in place of the
+  // Scheduled page until it's saved, discarded or navigated away from.
+  const [workflowDraft, setWorkflowDraft] = useState<{
+    threadId: string;
+    threadTitle: string;
+    nameHint: string;
   } | null>(null);
   // One shared copy for the sidebar, portal, task page and run header --
   // REST mutations don't flow through the websocket, so every mutation
@@ -278,11 +289,26 @@ function App() {
       goToThread(run.thread_id);
       return;
     }
+    setWorkflowDraft(null);
     setSelectedTaskId(task.trigger_id);
     setNavMode("run");
   };
 
+  const startWorkflowDraft = (nameHint: string) => {
+    setWorkflowDraft({ threadId, threadTitle: sessionLabel, nameHint });
+    setScheduledTaskModal(null);
+    setNavMode("run");
+  };
+
+  const leaveWorkflowDraft = () => {
+    const draftThread = workflowDraft?.threadId;
+    setWorkflowDraft(null);
+    if (draftThread && draftThread !== threadId) goToThread(draftThread);
+    setNavMode("create");
+  };
+
   const showScheduledTaskPage = (task: ScheduledTask | null) => {
+    setWorkflowDraft(null);
     setSelectedTaskId(task?.trigger_id ?? null);
     setFocusStepId(null);
     setNavMode("run");
@@ -369,6 +395,11 @@ function App() {
   const sendRaw = (text: string) => socketRef.current?.send({ type: "user_message", text });
 
   const onSend = (payload: ComposerSendPayload) => {
+    const saveWorkflow = /^\/saveworkflow(?:\s+([\s\S]*))?$/i.exec(payload.displayText.trim());
+    if (saveWorkflow) {
+      startWorkflowDraft((saveWorkflow[1] ?? "").trim());
+      return;
+    }
     if (payload.displayText.trim().toLowerCase() === "/stop") {
       // Reaches the currently-running turn directly, not queued behind it
       // like a normal message would -- see web/session.py's request_stop().
@@ -622,6 +653,15 @@ function App() {
               onExternalTextConsumed={() => setPendingComposerText(null)}
             />
           </>
+        ) : workflowDraft ? (
+          <WorkflowDraftPage
+            threadId={workflowDraft.threadId}
+            threadTitle={workflowDraft.threadTitle}
+            nameHint={workflowDraft.nameHint}
+            onBack={leaveWorkflowDraft}
+            onDiscard={leaveWorkflowDraft}
+            onSave={(name, workflow) => setScheduledTaskModal({ task: null, newWorkflow: workflow, initialName: name })}
+          />
         ) : (
           <RunPanel
             tasks={scheduledTasks}
@@ -633,7 +673,7 @@ function App() {
             onRunNow={runTaskNow}
             focusStepId={focusStepId}
             onCreateWithCoscribe={createTaskWithCoscribe}
-            onBuildWorkflow={() => setScheduledTaskModal({ task: null, newWorkflow: true })}
+            onBuildWorkflow={() => setScheduledTaskModal({ task: null, newWorkflow: EMPTY_WORKFLOW })}
           />
         )}
         {scheduledTaskModal && (
@@ -641,6 +681,7 @@ function App() {
             task={scheduledTaskModal.task}
             draft={scheduledTaskModal.draft?.draft}
             newWorkflow={scheduledTaskModal.newWorkflow}
+            initialName={scheduledTaskModal.initialName}
             onClose={() => setScheduledTaskModal(null)}
             onSaved={onTaskSaved}
           />
@@ -672,6 +713,8 @@ function App() {
           workflowSteps={threadWorkflow && threadRun ? workflowProgress(threadWorkflow, threadRun) : null}
           refreshSignal={`${state.turnTick}:${finishedToolCalls}:${threadRun?.steps.length ?? 0}:${threadRun?.status ?? ""}`}
           onOpenTask={showScheduledTaskPage}
+          onSaveAsWorkflow={threadTask ? undefined : () => startWorkflowDraft("")}
+          busy={state.turnInFlight}
         />
       )}
       {browserPanelOpen && (

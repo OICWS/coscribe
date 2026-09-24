@@ -107,12 +107,19 @@ interface ProviderInfo {
   default_model: string;
 }
 
-const EMPTY_WORKFLOW: Workflow = { version: 1, inputs: [], steps: [] };
-
-function modalTitle(isEdit: boolean, fromDraft: boolean, newWorkflow: boolean): string {
+function modalTitle(isEdit: boolean, fromDraft: boolean, newWorkflow: Workflow | undefined): string {
   if (isEdit) return "Edit scheduled task";
   if (fromDraft) return "Review scheduled task";
-  return newWorkflow ? "Build a workflow" : "Create scheduled task";
+  if (!newWorkflow) return "Create scheduled task";
+  return newWorkflow.steps.length > 0 ? "Save workflow" : "Build a workflow";
+}
+
+function workflowSummary(workflow: Workflow, isEdit: boolean): string {
+  const count = workflow.steps.length;
+  if (count === 0) return "You'll add the workflow's steps on its page after saving.";
+  const steps = count === 1 ? "1 step" : `${count} steps`;
+  if (isEdit) return `This task runs a workflow of ${steps}. Edit its steps on the task page.`;
+  return `Runs the ${steps} you reviewed. Choose when it runs; you can keep editing the steps on its page.`;
 }
 
 interface ScheduledTaskModalProps {
@@ -121,8 +128,10 @@ interface ScheduledTaskModalProps {
   draft?: TaskDraft;
   onClose: () => void;
   onSaved: (task: ScheduledTask) => void;
-  /** Create a task whose steps are then built on its page. */
-  newWorkflow?: boolean;
+  /** Create a task that runs this workflow (empty: steps are then built
+   * on its page). */
+  newWorkflow?: Workflow;
+  initialName?: string;
 }
 
 /** The Create/Edit scheduled task form -- matches
@@ -132,10 +141,17 @@ interface ScheduledTaskModalProps {
  * action, and the detail page's pencil icon (all pass a different `task`
  * prop into the same component rather than duplicating the form three
  * times). */
-export function ScheduledTaskModal({ task, draft, onClose, onSaved, newWorkflow }: ScheduledTaskModalProps) {
+export function ScheduledTaskModal({
+  task,
+  draft,
+  onClose,
+  onSaved,
+  newWorkflow,
+  initialName,
+}: ScheduledTaskModalProps) {
   const isEdit = task !== null;
-  const workflow = task?.workflow ?? (newWorkflow ? EMPTY_WORKFLOW : null);
-  const [initial] = useState(() => initialValues(task, draft));
+  const workflow = task?.workflow ?? newWorkflow ?? null;
+  const [initial] = useState(() => ({ ...initialValues(task, draft), ...(initialName ? { name: initialName } : {}) }));
   const [name, setName] = useState(initial.name);
   const [instructions, setInstructions] = useState(initial.instructions);
   const [model, setModel] = useState(initial.model);
@@ -200,7 +216,7 @@ export function ScheduledTaskModal({ task, draft, onClose, onSaved, newWorkflow 
       >
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold">{modalTitle(isEdit, Boolean(draft), Boolean(newWorkflow))}</h2>
+            <h2 className="text-lg font-semibold">{modalTitle(isEdit, Boolean(draft), newWorkflow)}</h2>
             {draft && (
               <p className="mt-0.5 text-sm text-[var(--muted)]">
                 Drafted from your conversation -- adjust anything before saving.
@@ -232,9 +248,7 @@ export function ScheduledTaskModal({ task, draft, onClose, onSaved, newWorkflow 
 
           {workflow ? (
             <div className="rounded-md border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--muted)]">
-              {workflow.steps.length === 0
-                ? "You'll add the workflow's steps on its page after saving."
-                : `This task runs a workflow of ${workflow.steps.length} steps. Edit its steps on the task page.`}
+              {workflowSummary(workflow, isEdit)}
             </div>
           ) : (
             <div>

@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 _REFERENCE = r"[a-z][a-z0-9_]*(?:\.[A-Za-z0-9_]+)*"
 _TEMPLATE = re.compile(r"\{\{\s*(" + _REFERENCE + r")\s*\}\}")
+_ANY_TEMPLATE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
+_BARE_REFERENCE = re.compile(r"\s*" + _REFERENCE + r"\s*")
 _WHOLE_TEMPLATE = re.compile(r"^\s*\{\{\s*(" + _REFERENCE + r")\s*\}\}\s*$")
 
 
@@ -23,6 +25,16 @@ class UnresolvedReference(ValueError):
 
 def template_references(text: str) -> list[str]:
     return _TEMPLATE.findall(text)
+
+
+def malformed_templates(text: str) -> list[str]:
+    """`{{...}}` that isn't a plain reference -- `{{count:x}}`, `{{x | len}}`.
+    Rendering leaves these as literal text, so they're refused up front."""
+    return [
+        match.group(0)
+        for match in _ANY_TEMPLATE.finditer(text)
+        if not _BARE_REFERENCE.fullmatch(match.group(1))
+    ]
 
 
 def resolve(reference: str, values: dict[str, Any]) -> Any:
