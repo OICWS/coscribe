@@ -240,20 +240,18 @@
   box-sizing: border-box;
 }
 
-/* Thin scrollbars everywhere, replacing the OS/Electron default (a thick
-   track with distinct up/down arrow buttons) -- real, live-reported
-   complaint that it looked out of place next to this app's own flat,
-   minimal chrome. `scrollbar-width`/`scrollbar-color` cover Firefox;
-   `::-webkit-scrollbar` covers the Chromium engine every other target
-   here actually runs on (the Electron shell, and every other browser
-   this ships to in browser mode). `background-clip: content-box` on the
-   thumb combined with a transparent border is what actually produces a
-   thumb narrower than the scrollbar's own hit-area width -- setting
-   `width` alone on the thumb has no effect, the scrollbar's total width
-   is fixed by the `::-webkit-scrollbar` rule above it. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+/* Thin scrollbars everywhere, replacing the OS default (a thick track
+   with arrow buttons). The standard properties are for Firefox only:
+   Chromium 121+ ignores every ::-webkit-scrollbar rule on an element that
+   has scrollbar-width or scrollbar-color, falling back to the native
+   scrollbar -- on Windows a square one with arrows. `background-clip:
+   content-box` with a transparent border is what makes the thumb narrower
+   than the scrollbar's hit area; `width` on the thumb has no effect. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
 }
 *::-webkit-scrollbar {
   width: 10px;
@@ -340,4 +338,66 @@ body {
 }
 .md-prose a {
   text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+/* The running tool call: a highlight sweeping across muted text. */
+.shimmer-text {
+  background: linear-gradient(
+      90deg,
+      var(--muted) 0%,
+      var(--muted) 35%,
+      var(--fg) 50%,
+      var(--muted) 65%,
+      var(--muted) 100%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-sweep 1.8s linear infinite;
+}
+@keyframes shimmer-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    background: none;
+    color: var(--muted);
+  }
+}
+
+/* A fenced code block: a language bar above the code, one frame around both. */
+.md-prose .code-block {
+  margin: 1em 0;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+.md-prose .code-block pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-top: 0.25rem;
+}
+
+/* The message wrapper's overflow-wrap:anywhere lets min-content sizing
+   break inside KaTeX's stacked boxes, collapsing fractions onto their
+   numerators. */
+.md-prose .katex {
+  overflow-wrap: normal;
+}
+
+/* Typography's default backticks around inline code read as stray
+   characters and get copied along with the text. */
+.md-prose :not(pre) > code::before,
+.md-prose :not(pre) > code::after {
+  content: none;
 }

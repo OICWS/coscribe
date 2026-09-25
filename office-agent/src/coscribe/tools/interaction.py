@@ -65,7 +65,11 @@ def ask_user_question(
         options: the clickable choices, one per line (2-6 short labels,
             each a few words -- these render as clickable rows, not
             paragraphs)
-        multi_select: whether the user can pick more than one option at once
+        multi_select: true when the options aren't mutually exclusive and
+            the user may want several ("which sheets should I include?",
+            "which sections need changes?"); false when exactly one
+            answer makes sense ("which format?"). With true, the answer
+            comes back as the chosen labels joined by ", ".
     """
     raise RuntimeError(
         "ask_user_question must be resolved via HumanInTheLoopMiddleware's "

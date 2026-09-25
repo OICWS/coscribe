@@ -18,10 +18,6 @@ import { useFetchOnActive } from "../../lib/useFetchOnActive";
 
 const CONNECTOR_ICONS: Record<string, string> = {
   playwright: "🎭",
-  fetch: "🌐",
-  memory: "🧠",
-  "sequential-thinking": "🧩",
-  time: "🕐",
   slack: "💬",
   office365: "📧",
 };

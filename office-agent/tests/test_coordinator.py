@@ -248,3 +248,22 @@ def test_writable_dir_is_not_also_listed_as_read_only(tmp_path: Path) -> None:
     assert agent.instructions is not None
     assert agent.instructions.count(str(shared)) == 1
     assert "(read and write)" in agent.instructions
+
+
+def test_instructions_name_every_folder_attached_to_the_conversation(tmp_path: Path) -> None:
+    main = tmp_path / "reports"
+    extra = tmp_path / "downloads"
+
+    agent = build_coordinator_agent(
+        _settings(tmp_path), "t1", workspace_root=main, extra_folders=[extra]
+    )
+
+    assert f"- {main} (main folder: relative paths start inside it" in agent.instructions
+    assert "never prefix them with 'reports/'" in agent.instructions
+    assert f"- {extra} (read and write; pass the absolute path)" in agent.instructions
+
+
+def test_instructions_name_the_workspace_root_when_no_folders_were_added(tmp_path: Path) -> None:
+    agent = build_coordinator_agent(_settings(tmp_path), "t1")
+
+    assert f"relative paths resolve, is {tmp_path / 'workspace'}" in agent.instructions

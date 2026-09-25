@@ -72,6 +72,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset(
         "task_list",
         "ask_user_question",
         "web_search",
+        "read_web_page",
         "read_docx",
         "read_pdf",
         "read_pptx",
@@ -582,7 +583,9 @@ conversation once. list_scheduled_tasks/pause_scheduled_task/ \
 resume_scheduled_task/delete_scheduled_task manage every scheduled task, \
 not just ones this conversation created. \
 Use web_search(query) to look things up on the live web -- current events, \
-facts you're not sure of, anything beyond what you already know. It is not \
+facts you're not sure of, anything beyond what you already know -- and \
+read_web_page(url) to read a page in full (a search result, a link the user \
+gives); snippets alone are not the page. web_search is not \
 for finding things already in this workspace (use search_files/search_pdf \
 for that) and not a substitute for actually reading a document you've \
 already been given. Trust the real date given to you at the start of \
@@ -676,11 +679,28 @@ def _describe_extra_dirs(extra_readable: Sequence[Path], extra_writable: Sequenc
     return "\n".join(lines)
 
 
+def _describe_folders(root: Path, extra_folders: Sequence[Path]) -> str:
+    """Names the folders by path: a user refers to them by name ("the
+    reports folder"), and without the paths the model looks for a
+    subfolder called that inside the workspace and reports it missing."""
+    if not extra_folders:
+        return f"The workspace root, where relative paths resolve, is {root}."
+    lines = [
+        "The user attached these folders to this conversation. When they name one, "
+        "they mean it -- not a subfolder with that name:",
+        f"- {root} (main folder: relative paths start inside it, so never prefix "
+        f"them with {root.name + '/'!r})",
+    ]
+    lines += [f"- {folder} (read and write; pass the absolute path)" for folder in extra_folders]
+    return "\n".join(lines)
+
+
 def build_coordinator_agent(
     settings: Settings,
     thread_id: str,
     skill_names: set[str] | None = None,
     workspace_root: Path | None = None,
+    extra_folders: Sequence[Path] = (),
 ) -> Agent:
     """skill_names=None (the default) splices every skill found -- built-in
     plus the user-local settings.skills_dir -- exactly like before this
@@ -695,12 +715,14 @@ def build_coordinator_agent(
     a plain root path per call (nothing baked in below Settings), so a
     per-thread override just means passing a different Path here. Only
     web/app.py's _get_session passes an explicit override (the thread's
-    resolved per-session workspace, see web/app.py's _resolve_workspace);
+    resolved folders, see web/app.py's _resolve_folders);
     the /api/tools probe agent and any future CLI caller keep getting the
     global default."""
     root = workspace_root if workspace_root is not None else settings.workspace_root
-    extra_readable = settings.extra_readable_dirs
-    extra_writable = settings.extra_writable_dirs
+    # A conversation's other folders are as open to it as the configured
+    # extra directories, and described to the model the same way.
+    extra_readable = [*settings.extra_readable_dirs, *extra_folders]
+    extra_writable = [*settings.extra_writable_dirs, *extra_folders]
     # skills_dir is reachable via the file tools -- but only those, not
     # document/spreadsheet/etc. below -- so the skill-creator skill (see
     # builtin_skills/skill-creator/SKILL.md) can write_file a new SKILL.md
@@ -753,8 +775,10 @@ def build_coordinator_agent(
         + build_background_task_tools(thread_id, root, settings.state_dir)
         + build_subagent_task_tools(thread_id, settings.state_dir)
     )
-    instructions = INSTRUCTIONS
-    extra_dirs_note = _describe_extra_dirs(extra_readable, extra_writable)
+    instructions = f"{INSTRUCTIONS}\n\n{_describe_folders(root, extra_folders)}"
+    extra_dirs_note = _describe_extra_dirs(
+        settings.extra_readable_dirs, settings.extra_writable_dirs
+    )
     if extra_dirs_note:
         instructions = f"{instructions}\n\n{extra_dirs_note}"
     memory = load_memory(settings.memory_path)

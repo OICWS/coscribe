@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.constants import TAG_NOSTREAM
 from pydantic import ValidationError
 
 from ..runtime_lg.messages import serialize_history_for_ws_lg
@@ -281,7 +282,10 @@ async def draft_workflow(
     ]
     problem = ""
     for _attempt in range(MAX_ATTEMPTS):
-        reply = await model.ainvoke(conversation)
+        # Untagged, a call made inside the chat's own graph (the
+        # draft_workflow tool) streams into the chat as if the assistant
+        # were typing the draft.
+        reply = await model.ainvoke(conversation, config={"tags": [TAG_NOSTREAM]})
         text = _reply_text(reply)
         try:
             return _parse_reply(text, tools, name_hint)

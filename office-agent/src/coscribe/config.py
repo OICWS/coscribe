@@ -155,7 +155,12 @@ class Settings(BaseSettings):
     auto_compact_threshold" section.
     """
 
-    defer_tools: bool = False
+    auto_title_threads: bool = True
+    """Name a conversation from its first exchange (a short model call in
+    the background after the first finished turn), unless it already has
+    a title. Off keeps the first message as the sidebar's label."""
+
+    defer_tools: bool = True
     """When True, only `coordinator.CORE_TOOL_NAMES` stay bound to the
     top-level conversation's model by default -- everything else (most
     of coscribe's own 95 built-in tools, all MCP tools) is hidden until
@@ -165,14 +170,13 @@ class Settings(BaseSettings):
     ROADMAP.md's Phase 8ap for the measured cost this addresses (~27k
     tokens of tool JSON schema alone, before this).
 
-    Defaults to False, not because it's unproven -- the core mechanism
-    (hiding/revealing `ModelRequest.tools` per call, and that an
-    approval-gated deferred tool still pauses correctly once discovered)
-    was verified live against real LangChain internals before this
-    setting existed -- but because the real, harder-to-automatically-
-    catch risk is a *capability regression*: a model that doesn't search
-    for a tool it needed just silently doesn't use it, which reads
-    completely differently from a crash. Wired in via web/session.py's
+    On by default: connectors made it unaffordable to bind everything --
+    a first "hello" with Playwright, Office 365 and a few more connected
+    measured 393.8k tokens of context. The risk it trades against is a
+    *capability regression*: a model that doesn't search for a tool it
+    needed just silently doesn't use it. search_tools' own description
+    carries an index of what's hidden (each group, a count, a few names)
+    so the model knows what there is to search for. Wired in via web/session.py's
     ChatSessionLG._build_lg_agent, which passes this straight through to
     build_langgraph_agent's own `defer_tools`/`core_tool_names`
     parameters. Only applies to the top-level conversation loop --

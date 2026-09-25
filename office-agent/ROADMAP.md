@@ -5838,6 +5838,97 @@ formulas, multi-select guidance, one scrollbar style everywhere).
 
 ---
 
+## Phase 8bc -- Context cost, folders per conversation, titles (shipped)
+
+From testing a packaged build. The headline number: with Playwright,
+fetch, time and office365 connected, a first "你好" cost **393.8k tokens
+(39.4% of the window)**; every tool schema went out on every call.
+
+- [x] **Tool deferral on by default** (`Settings.defer_tools = True`):
+      only the core set is bound; everything else, connector tools
+      included, is found through `search_tools`, whose description now
+      carries a generated index (each category, its count, a few names)
+      so the model knows what exists without the schemas. The context
+      breakdown now counts what's actually bound. Measured on the same
+      thread with Playwright connected: **12,781 tokens with deferral vs
+      46,478 without**. Live (DeepSeek): asked to open a local page and
+      read its table, it called `search_tools`, got the Playwright tools,
+      and finished in about 26k tokens total.
+- [x] **Connector catalog trimmed** to playwright, slack and office365.
+      fetch is replaced by a built-in `read_web_page(url)` (HTML to
+      markdown, paged by `start`/`max_chars`) in the core set; memory,
+      sequential-thinking and time are gone. Existing connections stay
+      until the user removes them.
+- [x] **Default model** is picked from configured providers, not typed,
+      and applies to the next conversation without a restart (as does max
+      turns: `LIVE_SETTINGS` in `web/app.py`).
+- [x] **Folders per conversation, from the composer.** An "Add folder"
+      button between attach and the mode pill; its popover lists the
+      attached folders (checked) and recent ones, toggled by a click, plus
+      "Add folder…". Any number, changed at any time between turns
+      (`set_folders` over the socket; the first is the main one). The
+      workspace sidecar is now a JSON list (an old single-path one still
+      loads). The header's one-shot workspace badge is gone. The folders
+      are named in the instructions: without that, DeepSeek asked to
+      "read q3.txt in the reports folder" looked for `reports/` inside
+      the workspace and said it didn't exist; once named, it tried
+      `reports/q3.txt` relative to `reports` itself, so the note also
+      says not to prefix relative paths with the folder's name. After
+      both: one listing, one read, one write into the second folder.
+- [x] **AI-named conversations**: after the first reply the chat model
+      writes a short title (`.title` sidecar, `thread_titled` event),
+      replacing the raw first sentence. Off with
+      `COSCRIBE_AUTO_TITLE_THREADS=false`.
+- [x] **Task panel closed by default**: it opens by itself only for a
+      workflow run, a scheduled task, or a turn that made a plan.
+- [x] **Bug: the curator's JSON streamed into the chat** (what looked
+      like a chain of thought, overflowing sideways): the nested model
+      call inside `draft_workflow` is tagged `TAG_NOSTREAM`. Long
+      unbroken text in a reply now wraps. `draft_workflow` is told to run
+      once, at the end, and an earlier draft card in the same
+      conversation collapses to one line.
+
+UI batch, same round:
+
+- [x] **Tool calls, Claude Code style**: a run reads as one sentence
+      ("Listed files, ran 2 commands") with a chevron after it; opened, a
+      bordered list with a row per call, each opening to its result. A
+      call still running is in the present tense ("Running a command:
+      …") and the latest one shimmers. This needed a new `tool_started`
+      event: the page used to learn of a call only when its result
+      arrived, so nothing could ever show as running. It comes from
+      `stream_mode="updates"` (the model node's finished message lands
+      before its calls run); gated calls are announced from the approval
+      path only when nobody is asked, so a call awaiting approval is
+      still just its approval card.
+- [x] **Chat column 880px** (was 760).
+- [x] **Code blocks** get a bar with the language name; copy appears on
+      hover. **Tables** copy as tab-separated text (pastes into Excel as
+      cells); **display math** has a hover "Copy LaTeX", and copying any
+      selection containing math puts `$…$` source on the clipboard
+      instead of KaTeX's doubled text. Typography's literal backticks
+      around inline code are gone.
+- [x] **Formulas were misrendered**: rehype-katex rendered with its own
+      KaTeX 0.16.47 while the page loaded the 0.18 stylesheet, so
+      `\frac` drew its bar through the numerator. An npm `overrides` entry
+      makes every copy the same version.
+- [x] **One scrollbar style**: Chromium 121+ drops every
+      `::-webkit-scrollbar` rule on an element with `scrollbar-width` or
+      `scrollbar-color`, so the global `scrollbar-width: thin` meant the
+      native scrollbar (square, with arrows on Windows) in the sidebar.
+      The standard properties now apply only where `::-webkit-scrollbar`
+      isn't supported (Firefox).
+- [x] **`ask_user_question`'s `multi_select`** says when to use it
+      (options that aren't mutually exclusive) and how the answer comes
+      back.
+- [x] **Verified live** (DeepSeek): the running command showed "Running a
+      command: Sleep 4 seconds, …" shimmering, then "Ran 2 commands";
+      table copy gave `项目\t结果\n…`, a selection with inline math gave
+      `$\sum_{i=1}^{n} i^2 = \dfrac{…}{6}$`, display-math copy gave
+      `a^2 + b^2 = c^2`; light and dark checked.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ChatLog } from "./components/ChatLog";
 import { Composer, type ComposerSendPayload } from "./components/Composer";
 import { ContextRing } from "./components/ContextRing";
+import { FolderPicker } from "./components/FolderPicker";
 import { ModePill } from "./components/ModePill";
 import { ModelPicker } from "./components/ModelPicker";
 import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
@@ -10,7 +11,6 @@ import type { PptxShapeCapture } from "./components/PptxShapeOverlay";
 import { RunBreadcrumb } from "./components/RunBreadcrumb";
 import { RunPanel } from "./components/RunPanel";
 import { ScheduledTaskModal } from "./components/ScheduledTaskModal";
-import { DirBrowserModal } from "./components/settings/DirBrowserModal";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
@@ -31,7 +31,6 @@ import {
 import { goToThread, SCHEDULED_THREAD_PREFIX, startNewThread, THREAD_CHANGE_EVENT } from "./lib/nav";
 import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
-import { readStored, writeStored } from "./lib/storage";
 import type { WorkflowDraftResult } from "./lib/rest";
 import type { WorkflowDraftEntry } from "./lib/transcriptGrouping";
 import { EMPTY_WORKFLOW } from "./lib/workflowEdit";
@@ -44,18 +43,17 @@ import type { StepRecord, Workflow } from "./types/workflow";
 
 type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
 
-const TASK_PANEL_KEY = "coscribe.taskPanel.open";
-
 function App() {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const socketRef = useRef<AgentSocket | null>(null);
   const [threadId, setThreadId] = useState(resolveThreadId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [browserPanelOpen, setBrowserPanelOpen] = useState(false);
   const [subAgentsPanelOpen, setSubAgentsPanelOpen] = useState(false);
-  const [taskPanelWanted, setTaskPanelWanted] = useState(() => readStored(TASK_PANEL_KEY) !== "0");
+  // Per conversation, this page load: whether the panel was opened or
+  // closed by hand. Unset, it opens only when it has something to show.
+  const [taskPanelChoice, setTaskPanelChoice] = useState<Record<string, boolean>>({});
   // Set by BrowserPanel's "Send to chat" (an element it picked, screenshot
   // + a short description) -- Composer watches this prop and appends it to
   // its own pendingImages the moment it changes, same "external image
@@ -179,6 +177,10 @@ function App() {
     const socket = connect(
       threadId,
       (event) => {
+        if (event.type === "thread_titled") {
+          renameThreadLocally(threadId, event.title);
+          return;
+        }
         if (event.type !== "workflow_step") {
           dispatch(event);
           return;
@@ -204,7 +206,7 @@ function App() {
     );
     socketRef.current = socket;
     return () => socket.close();
-  }, [threadId]);
+  }, [threadId, renameThreadLocally]);
 
   // Flushes pendingLocalSendsRef the moment this connection's history is
   // in -- runs after the render that applied it, so each queued thunk's
@@ -253,18 +255,18 @@ function App() {
   const threadWorkflow = threadRun ? (threadTask?.workflow ?? null) : null;
   // Browser and Sub Agents take the same right-hand space, so either one
   // open hides this panel without forgetting that it's wanted.
+  const hasPlan = state.items.some((item) => item.kind === "tool" && item.toolName === "task_create");
+  const taskPanelWanted = taskPanelChoice[threadId] ?? (threadWorkflow !== null || isScheduledTaskThread || hasPlan);
   const taskPanelShown =
     navMode === "create" &&
     taskPanelWanted &&
     !browserPanelOpen &&
     !subAgentsPanelOpen &&
-    (threadWorkflow !== null ||
-      (state.historyReceived && (state.items.length > 0 || state.olderItems.length > 0)));
+    (threadWorkflow !== null || (state.historyReceived && (state.items.length > 0 || state.olderItems.length > 0)));
   const finishedToolCalls = state.items.filter((item) => item.kind === "tool" && item.result !== undefined).length;
   const toggleTaskPanel = () => {
     const next = !taskPanelShown;
-    setTaskPanelWanted(next);
-    writeStored(TASK_PANEL_KEY, next ? "1" : "0");
+    setTaskPanelChoice((choices) => ({ ...choices, [threadId]: next }));
     if (next) {
       setBrowserPanelOpen(false);
       setSubAgentsPanelOpen(false);
@@ -301,7 +303,7 @@ function App() {
   };
 
   // A task made from this conversation works in the conversation's folder.
-  const threadWorkspace = state.workspaceExplicit ? state.workspaceRoot : null;
+  const threadWorkspace = state.folders[0] ?? null;
 
   const startWorkflowDraft = (nameHint: string) => {
     setWorkflowDraft({ threadId, threadTitle: sessionLabel, nameHint, workspace: threadWorkspace });
@@ -486,7 +488,7 @@ function App() {
     socketRef.current?.send({ type: "load_older_messages" });
   };
 
-  const onSelectWorkspace = (path: string) => socketRef.current?.send({ type: "select_workspace", path });
+  const onSetFolders = (folders: string[]) => socketRef.current?.send({ type: "set_folders", folders });
   const onBrowserPanelCapture = (capture: BrowserCapture) => setPendingBrowserCapture(capture);
   const onPptxShapePicked = (capture: PptxShapeCapture) => setPendingPptxCapture(capture);
 
@@ -556,12 +558,7 @@ function App() {
               onOpenTask={showScheduledTaskPage}
             />
           ) : navMode === "create" ? (
-            <ThreadHeader
-              sessionLabel={sessionLabel}
-              workspaceRoot={state.workspaceRoot || null}
-              workspaceExplicit={state.workspaceExplicit}
-              onPickWorkspace={() => setWorkspacePickerOpen(true)}
-            />
+            <ThreadHeader sessionLabel={sessionLabel} />
           ) : (
             <div className="min-w-0 flex-1" />
           )}
@@ -627,6 +624,7 @@ function App() {
           <>
             <ChatLog
               items={state.items}
+              turnInFlight={state.turnInFlight}
               onApprove={onApprove}
               onAnswerQuestion={onAnswerQuestion}
               onEditMessage={state.turnInFlight ? undefined : onEditMessage}
@@ -646,16 +644,19 @@ function App() {
              * (e.g. hitting a token-usage limit) rendered as a raw red
              * line spanning edge-to-edge from the window's left border,
              * instead of aligning with the chat column like everything
-             * else on this page. mx-auto/max-w-[760px]/px-4 here match
+             * else on this page. mx-auto/max-w-[880px]/px-4 here match
              * ChatLog.tsx's own wrapper and Composer's root exactly. */}
             {state.error && (
-              <div className="mx-auto w-full max-w-[760px] px-4 py-1 text-sm text-red-500">{state.error}</div>
+              <div className="mx-auto w-full max-w-[880px] px-4 py-1 text-sm text-red-500">{state.error}</div>
             )}
             <Composer
               turnInFlight={state.turnInFlight}
               totalTokens={state.totalTokens}
               commands={commands}
               modePill={<ModePill planMode={state.planMode} acceptEdits={state.acceptEdits} sendRaw={sendRaw} />}
+              folderPicker={
+                <FolderPicker folders={state.folders} disabled={state.turnInFlight} onChange={onSetFolders} />
+              }
               modelPicker={<ModelPicker currentModel={state.model} onSwitch={onSwitchModel} />}
               usageRing={
                 <ContextRing
@@ -726,15 +727,6 @@ function App() {
           onClose={() => setSettingsOpen(false)}
         />
         {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
-        {workspacePickerOpen && (
-          <DirBrowserModal
-            onClose={() => setWorkspacePickerOpen(false)}
-            onSelect={(path) => {
-              setWorkspacePickerOpen(false);
-              onSelectWorkspace(path);
-            }}
-          />
-        )}
       </div>
       {taskPanelShown && (
         <TaskPanel
@@ -752,9 +744,7 @@ function App() {
       {browserPanelOpen && (
         <BrowserPanel onClose={() => setBrowserPanelOpen(false)} onSendToChat={onBrowserPanelCapture} />
       )}
-      {subAgentsPanelOpen && (
-        <SubAgentsPanel threadId={threadId} onClose={() => setSubAgentsPanelOpen(false)} />
-      )}
+      {subAgentsPanelOpen && <SubAgentsPanel threadId={threadId} onClose={() => setSubAgentsPanelOpen(false)} />}
     </div>
   );
 }

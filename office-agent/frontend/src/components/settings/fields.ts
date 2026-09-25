@@ -18,7 +18,8 @@ export const GENERAL_FIELDS: SettingsField[] = [
     key: "COSCRIBE_DEFAULT_MODEL",
     label: "Default Model",
     placeholder: "provider:model",
-    description: "The model a new session starts with. Switch models on any thread from its own picker.",
+    description:
+      "The model a new session starts with, from the providers you've set up. Switch models on any thread from its own picker.",
   },
   {
     key: "COSCRIBE_MAX_TURNS",

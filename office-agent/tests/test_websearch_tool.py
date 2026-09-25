@@ -108,8 +108,60 @@ def test_web_search_passes_no_proxy_when_unconfigured(
 
 def test_web_search_tool_metadata() -> None:
     tools = build_websearch_tools()
-    assert len(tools) == 1
-    metadata = get_tool_metadata(tools[0])
-    assert metadata.risk_category == "READ"
-    assert metadata.category == "web"
-    assert metadata.requires_approval is False
+    assert [t.__name__ for t in tools] == ["web_search", "read_web_page"]
+    for tool in tools:
+        metadata = get_tool_metadata(tool)
+        assert metadata.risk_category == "READ"
+        assert metadata.category == "web"
+        assert metadata.requires_approval is False
+
+
+def _serve(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
+    import httpx
+
+    real_client = httpx.Client
+
+    def client(**kwargs: Any) -> Any:
+        kwargs.pop("proxy", None)
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr("coscribe.tools.websearch.httpx.Client", client)
+
+
+def test_read_web_page_returns_the_main_text_as_markdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from coscribe.tools.websearch import read_web_page
+
+    html = (
+        "<html><head><title>Q3 results</title><script>track()</script></head><body>"
+        "<nav>Home | About</nav><main><h1>Q3 results</h1><p>Revenue grew <b>12%</b>.</p>"
+        "</main><footer>(c) 2026</footer></body></html>"
+    )
+    _serve(monkeypatch, lambda request: httpx.Response(200, html=html))
+
+    page = read_web_page("https://example.com/q3", max_chars=20)
+
+    assert page["title"] == "Q3 results"
+    assert page["content"] == "# Q3 results\n\nRevenu"
+    assert page["next_start"] == 20
+    rest = read_web_page("https://example.com/q3", start=20)
+    assert rest["content"] == "e grew **12%**." and rest["next_start"] is None
+    assert "Home" not in rest["content"] and "track" not in rest["content"]
+
+
+def test_read_web_page_refuses_what_isnt_a_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from coscribe.tools.websearch import read_web_page
+
+    _serve(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200, content=b"%PDF", headers={"content-type": "application/pdf"}
+        ),
+    )
+    with pytest.raises(ValueError, match="is application/pdf, not a page to read"):
+        read_web_page("https://example.com/report.pdf")
+    with pytest.raises(ValueError, match="isn't an http"):
+        read_web_page("file:///etc/passwd")

@@ -25,24 +25,18 @@ export interface StateEvent {
    * instructions -- freely re-toggleable any number of times per thread
    * (see SelectSkillsOut). */
   enabled_skills: string[];
-  /** This thread's file-tool root -- never null: an unset thread falls
-   * back to the server's global default (Settings > Workspace's "default
-   * for new sessions" value), so there's always a real path to show.
-   * Fixed once per thread (see SelectWorkspaceOut), not freely
-   * re-toggleable like enabled_skills. */
+  /** This thread's main folder -- never null: a thread with no folders
+   * falls back to the server's default workspace. */
   workspace_root: string;
+  /** The folders this conversation works in, the main one first; empty
+   * while it uses the default workspace. */
+  folders: string[];
   /** Only on the state sent right after connecting: whether a turn is
    * already running on this thread (typically a scheduled run executing
    * in the background), so the page can show it as running. */
   turn_in_flight?: boolean;
-  /** True iff workspace_root above came from a real per-thread choice
-   * (a SelectWorkspaceOut that already succeeded), false if it's still
-   * just settings.workspace_root's own global default -- the frontend's
-   * only way to tell those apart (workspace_root itself can't: a user
-   * can deliberately pick the same path the default already points at).
-   * Gates whether the workspace badge is still clickable to change it --
-   * see ThreadHeader.tsx -- since a second SelectWorkspaceOut on a
-   * thread that already has one is rejected server-side. */
+  /** Whether workspace_root is a folder this conversation chose, not the
+   * default -- a user can choose the same path the default points at. */
   workspace_explicit: boolean;
 }
 
@@ -90,6 +84,14 @@ export interface OlderMessagesEvent {
 export interface AgentDeltaEvent {
   type: "agent_delta";
   text: string;
+}
+
+/** A call about to run; its tool_result follows. Not sent for a call
+ * waiting on approval -- that one is shown by its approval_required. */
+export interface ToolStartedEvent {
+  type: "tool_started";
+  tool_name: string;
+  arguments: Record<string, unknown>;
 }
 
 export interface ToolResultEvent {
@@ -196,6 +198,12 @@ export interface TasksChangedEvent {
   type: "tasks_changed";
 }
 
+/** The conversation got a title from its first exchange. */
+export interface ThreadTitledEvent {
+  type: "thread_titled";
+  title: string;
+}
+
 export interface ErrorEvent {
   type: "error";
   message: string;
@@ -243,6 +251,7 @@ export type WsServerEvent =
   | HistoryEvent
   | OlderMessagesEvent
   | AgentDeltaEvent
+  | ToolStartedEvent
   | ToolResultEvent
   | ApprovalRequiredEvent
   | QuestionRequiredEvent
@@ -251,6 +260,7 @@ export type WsServerEvent =
   | TaskDraftRequiredEvent
   | UsageEvent
   | TasksChangedEvent
+  | ThreadTitledEvent
   | ErrorEvent
   | AgentMessageEvent
   | CompactedEvent
@@ -346,13 +356,13 @@ export interface SelectSkillsOut {
   skills: string[];
 }
 
-/** Only valid once per thread -- a thread that already has a workspace
- * (either explicitly chosen or via ?workspace= at connect time) rejects
- * a second call with an `error` event. Responds with a `state` event
- * reflecting the new workspace_root on success. */
-export interface SelectWorkspaceOut {
-  type: "select_workspace";
-  path: string;
+/** Replaces the conversation's folders, the main one first; empty goes
+ * back to the default workspace. Answered with a `state` event, or an
+ * `error` (a missing folder, a reply still running) leaving them as they
+ * were. */
+export interface SetFoldersOut {
+  type: "set_folders";
+  folders: string[];
 }
 
 /** No payload -- reveals one whole pre-/compact epoch's worth of older
@@ -372,5 +382,5 @@ export type WsClientMessage =
   | StopOut
   | SwitchModelOut
   | SelectSkillsOut
-  | SelectWorkspaceOut
+  | SetFoldersOut
   | LoadOlderMessagesOut;

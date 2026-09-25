@@ -92,6 +92,12 @@ directories on your machine directly. This is useful for, say, letting the
 Coordinator read a file a browser-automation MCP server just downloaded,
 without first copying it into the workspace by hand.
 
+A conversation can also have its own folders: **Add folder** under the
+message box attaches any number of them, and they can be removed or added
+between replies. The first is the main one (relative paths resolve there);
+the agent can read and write in all of them. A conversation with none uses
+the Workspace Root.
+
 Under the hood this is still two `.env` variables --
 `COSCRIBE_EXTRA_READABLE_DIRS` (read-only) and
 `COSCRIBE_EXTRA_WRITABLE_DIRS` (read+write; a writable directory doesn't
@@ -1404,7 +1410,7 @@ see `../ARCHITECTURE.md`):
 ```json
 {
   "mcpServers": {
-    "fetch": { "command": "uvx", "args": ["mcp-server-fetch"] },
+    "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] },
     "custom-db": {
       "command": "npx",
       "args": ["my-mcp-server"],
@@ -1685,9 +1691,9 @@ The **+** button next to the message box opens three things:
   message, so the Coordinator reaches for `read_docx`/`read_pdf`/
   `read_file` on it like any other workspace file -- both kinds show up
   as removable chips above the message box while queued.
-- **Add connectors** -- a small curated catalog (currently `playwright` for
-  browser automation and `fetch` for reading web pages -- both plain local
-  commands, no OAuth) plus a form for any custom MCP server, backed by
+- **Add connectors** -- a small curated catalog (`playwright` for browser
+  automation, plus `slack` and `office365`; reading a web page is the
+  built-in `read_web_page` tool, no connector needed) plus a form for any custom MCP server, backed by
   `GET`/`POST /api/mcp/servers` and `DELETE /api/mcp/servers/{name}` in
   `web/app.py`. These are the same stdio MCP servers the CLI's
   `COSCRIBE_MCP_CONFIG_PATH` config file already supports (see below) --

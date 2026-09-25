@@ -360,6 +360,9 @@ def _settings(tmp_path: Path, **overrides: object) -> Settings:
         "state_dir": tmp_path / "state",
         "skills_dir": tmp_path / "skills",
         "memory_path": tmp_path / "MEMORY.md",
+        # Its extra model call would take scripted responses meant for
+        # the test's own turns.
+        "auto_title_threads": False,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)  # type: ignore[call-arg, arg-type]
@@ -1472,8 +1475,7 @@ def test_concurrent_spawn_agent_approvals_resolve_independently(
             )
 
             for _ in range(2):
-                approval = ws.receive_json()
-                assert approval["type"] == "approval_required"
+                approval = _receive_until(ws, "approval_required")[-1]
                 assert approval["tool_name"] == "write_file"
                 approved = approval["arguments"]["path"] == "a.txt"
                 ws.send_json(
@@ -1994,6 +1996,7 @@ def test_plan_mode_toggle_updates_state(tmp_path: Path, monkeypatch: pytest.Monk
                 ],
                 "workspace_root": str(tmp_path / "workspace"),
                 "workspace_explicit": False,
+                "folders": [],
             }
             ws.send_json({"type": "user_message", "text": "/plan"})
             state = ws.receive_json()
@@ -3402,7 +3405,10 @@ def test_get_mcp_catalog_returns_curated_entries(
     assert response.status_code == 200
     entries = response.json()
     names = {entry["name"] for entry in entries}
-    assert {"playwright", "memory", "time", "slack", "office365"} <= names
+    assert {"playwright", "slack", "office365"} <= names
+    # What coscribe already covers itself (reading pages, memory, the
+    # date) isn't offered as a connector.
+    assert not names & {"fetch", "memory", "sequential-thinking", "time"}
 
     slack = next(entry for entry in entries if entry["name"] == "slack")
     # needs_config -- prefills the Custom tab (a Bot User OAuth Token the
@@ -4647,8 +4653,9 @@ def test_workspace_query_param_resolves_workspace_on_connect(
 
     assert state["workspace_root"] == str(chosen)
     assert state["workspace_explicit"] is True
+    assert state["folders"] == [str(chosen)]
     sidecar = tmp_path / "state" / "t_ws_qs.workspace"
-    assert sidecar.read_text(encoding="utf-8") == str(chosen)
+    assert json.loads(sidecar.read_text(encoding="utf-8")) == [str(chosen)]
 
 
 def test_new_thread_without_workspace_falls_back_to_settings_workspace_root(
@@ -4686,51 +4693,114 @@ def test_workspace_choice_persists_across_reconnect_without_the_query_param(
     assert state["workspace_root"] == str(chosen)
 
 
-def test_select_workspace_ws_message_switches_workspace_live(
+def test_set_folders_changes_a_conversations_folders_any_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    chosen = tmp_path / "project-c"
+    first = tmp_path / "project-first"
+    second = tmp_path / "project-second"
+    first.mkdir()
+    second.mkdir()
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_ws_select") as ws:
+        with client.websocket_connect("/ws/t_ws_folders") as ws:
             ws.receive_json()  # state (falls back to settings.workspace_root)
             ws.receive_json()  # history
 
-            ws.send_json({"type": "select_workspace", "path": str(chosen)})
-            updated_state = ws.receive_json()
+            ws.send_json({"type": "set_folders", "folders": [str(first)]})
+            one = ws.receive_json()
+            ws.send_json({"type": "set_folders", "folders": [str(first), str(second)]})
+            two = ws.receive_json()
+            ws.send_json({"type": "set_folders", "folders": [str(second)]})
+            swapped = ws.receive_json()
 
-    assert updated_state["workspace_root"] == str(chosen)
-    assert updated_state["workspace_explicit"] is True
-    sidecar = tmp_path / "state" / "t_ws_select.workspace"
-    assert sidecar.read_text(encoding="utf-8") == str(chosen)
+    assert one["workspace_root"] == str(first)
+    assert one["workspace_explicit"] is True
+    assert two["folders"] == [str(first), str(second)]
+    assert swapped["workspace_root"] == str(second)
+    assert swapped["folders"] == [str(second)]
+    sidecar = tmp_path / "state" / "t_ws_folders.workspace"
+    assert json.loads(sidecar.read_text(encoding="utf-8")) == [str(second)]
 
 
-def test_select_workspace_twice_is_rejected_and_does_not_corrupt_the_sidecar(
+def test_removing_every_folder_returns_to_the_default_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression test for a real bug caught in review: writing the
-    sidecar unconditionally after select_workspace would let a *rejected*
-    second call overwrite the sidecar with its own unapplied path,
-    desyncing it from the session's actual in-memory workspace_root."""
-    first = tmp_path / "project-first"
-    second = tmp_path / "project-second"
+    chosen = tmp_path / "project-gone"
+    chosen.mkdir()
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_ws_twice") as ws:
+        with client.websocket_connect(f"/ws/t_ws_clear?workspace={chosen}") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
+            ws.send_json({"type": "set_folders", "folders": []})
+            cleared = ws.receive_json()
 
-            ws.send_json({"type": "select_workspace", "path": str(first)})
-            first_state = ws.receive_json()
+    assert cleared["folders"] == []
+    assert cleared["workspace_explicit"] is False
+    assert cleared["workspace_root"] == str(tmp_path / "workspace")
+    assert not (tmp_path / "state" / "t_ws_clear.workspace").exists()
 
-            ws.send_json({"type": "select_workspace", "path": str(second)})
-            rejected = ws.receive_json()
 
-    assert first_state["workspace_root"] == str(first)
-    assert rejected["type"] == "error"
-    assert "already has a workspace" in rejected["message"]
-    sidecar = tmp_path / "state" / "t_ws_twice.workspace"
-    assert sidecar.read_text(encoding="utf-8") == str(first)
+def test_a_folder_that_does_not_exist_is_refused_and_nothing_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kept = tmp_path / "project-kept"
+    kept.mkdir()
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect(f"/ws/t_ws_bad?workspace={kept}") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            missing = tmp_path / "missing"
+            ws.send_json({"type": "set_folders", "folders": [str(kept), str(missing)]})
+            refused = ws.receive_json()
+
+    assert refused["type"] == "error"
+    assert "isn't an existing folder" in refused["message"]
+    sidecar = tmp_path / "state" / "t_ws_bad.workspace"
+    assert json.loads(sidecar.read_text(encoding="utf-8")) == [str(kept)]
+
+
+def test_a_single_path_sidecar_from_before_multiple_folders_still_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chosen = tmp_path / "project-legacy"
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state" / "t_ws_legacy.workspace").write_text(str(chosen), encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_ws_legacy") as ws:
+            state = ws.receive_json()
+            ws.receive_json()  # history
+
+    assert state["folders"] == [str(chosen)]
+
+
+def test_the_agent_can_write_into_a_conversations_second_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main = tmp_path / "project-main"
+    extra = tmp_path / "project-extra"
+    main.mkdir()
+    extra.mkdir()
+    call = _tool_call("call_1", "write_file", {"path": str(extra / "note.txt"), "content": "hi"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_ws_extra") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "set_folders", "folders": [str(main), str(extra)]})
+            ws.receive_json()  # state
+            ws.send_json({"type": "user_message", "text": "write hi into the second folder"})
+
+            approval = ws.receive_json()
+            assert approval["type"] == "approval_required"
+            ws.send_json({"type": "approval_response", "id": approval["id"], "approved": True})
+            _receive_until(ws, "tasks_changed")
+
+    assert (extra / "note.txt").read_text() == "hi"
 
 
 def test_delete_thread_removes_workspace_sidecar_too(
@@ -6389,7 +6459,13 @@ def test_the_chat_model_drafts_a_fixed_workflow_without_saving_it_lg(
         ]
     )
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        _run_turn(client, "t_chat_draft", "read input.txt, then make it a fixed workflow")
+        with client.websocket_connect("/ws/t_chat_draft") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "/accept-edits"})
+            _receive_until(ws, "state")
+            ws.send_json({"type": "user_message", "text": "read input.txt, then make it fixed"})
+            streamed = _receive_until(ws, "tasks_changed")
         with client.websocket_connect("/ws/t_chat_draft") as ws:
             ws.receive_json()  # state
             history = ws.receive_json()
@@ -6402,6 +6478,12 @@ def test_the_chat_model_drafts_a_fixed_workflow_without_saving_it_lg(
     curator_request = str(fake_model.received[2][-1].content)
     assert '[tool call #1] read_file({"path": "input.txt"})' in curator_request
     assert "draft_workflow(" not in curator_request
+    # The curator's own reply isn't the assistant talking.
+    chat_text = "".join(
+        str(m.get("text", "")) for m in streamed if m["type"] in ("agent_delta", "agent_message")
+    )
+    assert '"workflow"' not in chat_text
+    assert "Drafted -- review it on the card." in chat_text
     assert ScheduledTriggerStore(tmp_path / "state").list_all() == []
 
 
@@ -6434,3 +6516,107 @@ def test_a_tasks_runs_work_in_its_own_workspace_lg(
     assert task["workspace"] == str(folder)
     assert done["status"] == "completed", done.get("error")
     assert done["steps"][0]["output"] == "found me"
+
+
+def test_a_new_default_model_applies_to_the_next_session_without_a_restart_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post(
+            "/api/config",
+            json={"updates": {"COSCRIBE_DEFAULT_MODEL": "deepseek:deepseek-pro",
+                              "COSCRIBE_MAX_TURNS": "7"}},
+        )  # fmt: skip
+        with client.websocket_connect("/ws/t_after_default") as ws:
+            state = ws.receive_json()
+
+    assert response.json()["restart_required"] is False
+    assert state["model"] == "deepseek:deepseek-pro"
+    assert dotenv_values(tmp_path / ".env")["COSCRIBE_MAX_TURNS"] == "7"
+
+
+def test_a_conversation_is_named_after_its_first_exchange_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="Here's the summary."), AIMessage(content='"Q3 销售汇总"')]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model, auto_title_threads=True) as client:
+        with client.websocket_connect("/ws/t_named") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "帮我汇总一下第三季度的销售数据"})
+            _receive_until(ws, "tasks_changed")
+            titled = _receive_until(ws, "thread_titled")[-1]
+        threads = client.get("/api/threads").json()
+
+    assert titled == {"type": "thread_titled", "title": "Q3 销售汇总"}
+    [thread] = [t for t in threads if t["thread_id"] == "t_named"]
+    assert thread["preview"] == "Q3 销售汇总"
+    title_request = str(fake_model.received[-1][-1].content)
+    assert title_request.startswith("User: 帮我汇总一下第三季度的销售数据")
+
+
+def test_a_tool_call_is_announced_before_it_runs_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    call = _tool_call("call_1", "list_files", {"path": "."})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_tool_started") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "list files"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    types = [m["type"] for m in messages]
+    started = messages[types.index("tool_started")]
+    assert started["tool_name"] == "list_files"
+    assert started["arguments"] == {"path": "."}
+    assert types.index("tool_started") < types.index("tool_result")
+
+
+def test_a_call_waiting_for_approval_is_shown_only_as_its_approval_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_tool_started_gated") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "write it"})
+            before = _receive_until(ws, "approval_required")
+            ws.send_json({"type": "approval_response", "id": before[-1]["id"], "approved": True})
+            after = _receive_until(ws, "tasks_changed")
+
+    assert not any(m["type"] == "tool_started" for m in before + after)
+
+
+def test_an_auto_approved_call_is_announced_before_it_runs_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_tool_started_auto") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "/accept-edits"})
+            ws.receive_json()  # state
+            ws.send_json({"type": "user_message", "text": "write it"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    types = [m["type"] for m in messages]
+    assert "approval_required" not in types
+    assert types.index("tool_started") < types.index("tool_result")
+    assert messages[types.index("tool_started")]["tool_name"] == "write_file"

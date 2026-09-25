@@ -225,50 +225,6 @@ MCP_CATALOG: list[dict[str, Any]] = [
         "needs_browser_check": True,
     },
     {
-        "name": "fetch",
-        "description": "Fetch and read the text content of web pages.",
-        "command": "uvx",
-        # `--with "mcp<2.0.0"` pins a compatible mcp SDK version -- a real,
-        # live-reported bug: mcp-server-fetch's own declared dependency is
-        # just `mcp>=1.1.3`, no upper bound, so a bare `uvx mcp-server-
-        # fetch` resolves the newest published mcp (2.0.0 as of this
-        # writing), which renamed `McpError` to `MCPError`.
-        # mcp-server-fetch still imports the old name, so every connection
-        # attempt crashed immediately with `ImportError: cannot import
-        # name 'McpError'` inside the child process (surfaced to us only
-        # as an opaque "Connection closed" from the MCP handshake, not the
-        # real traceback) -- confirmed by reproducing the bare `uvx
-        # mcp-server-fetch` failure directly and finding this exact upper-
-        # bound gap in mcp-server-fetch's own published metadata. Not a
-        # coscribe bug; this pin works around it until upstream either
-        # updates mcp-server-fetch or mcp-server-fetch adds its own upper
-        # bound.
-        "args": ["--with", "mcp<2.0.0", "mcp-server-fetch"],
-    },
-    {
-        "name": "memory",
-        "description": "A persistent knowledge-graph memory store (entities, relations, "
-        "observations) -- separate from coscribe's own MEMORY.md file.",
-        "command": "npx",
-        "args": ["@modelcontextprotocol/server-memory@2026.7.4"],
-    },
-    {
-        "name": "sequential-thinking",
-        "description": "A structured step-by-step reasoning scaffold for working through "
-        "complex, multi-step problems.",
-        "command": "npx",
-        "args": ["@modelcontextprotocol/server-sequential-thinking@2026.7.4"],
-    },
-    {
-        "name": "time",
-        "description": "Current time and timezone conversions.",
-        "command": "uvx",
-        # Same upstream mcp<2.0.0 incompatibility as the fetch entry above
-        # -- confirmed live, identical ImportError from mcp-server-time's
-        # own unpinned mcp>=... dependency.
-        "args": ["--with", "mcp<2.0.0", "mcp-server-time"],
-    },
-    {
         "name": "slack",
         "description": "Post messages, read channels and threads, react to messages -- "
         "needs a Slack app you create yourself (a few minutes on api.slack.com) and "
@@ -843,6 +799,12 @@ COSCRIBE_ENV_VARS = [
     "COSCRIBE_MAX_TURNS",
 ]
 
+# Settings update_config applies to the running server as well as .env.
+LIVE_SETTINGS = {
+    "COSCRIBE_DEFAULT_MODEL": "default_model",
+    "COSCRIBE_MAX_TURNS": "max_turns",
+}
+
 # Desktop-shell-consumed, not Settings-backed (see office-agent-desktop's
 # sidecar.ts's shouldKeepRunningInBackground(), which reads this same
 # .env file directly -- this Python process never branches on it; the
@@ -1095,9 +1057,26 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     def _workspace_sidecar_path(thread_id: str) -> Path:
         return settings.state_dir / f"{thread_id}.workspace"
 
-    def _write_workspace_sidecar(thread_id: str, path: str) -> None:
+    def _write_workspace_sidecar(thread_id: str, folders: list[str]) -> None:
+        if not folders:
+            _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
+            return
         settings.state_dir.mkdir(parents=True, exist_ok=True)
-        _workspace_sidecar_path(thread_id).write_text(path, encoding="utf-8")
+        _workspace_sidecar_path(thread_id).write_text(json.dumps(folders), encoding="utf-8")
+
+    def _read_workspace_sidecar(thread_id: str) -> list[str]:
+        sidecar = _workspace_sidecar_path(thread_id)
+        if not sidecar.is_file():
+            return []
+        text = sidecar.read_text(encoding="utf-8").strip()
+        # Threads from before multi-folder conversations hold one bare path.
+        if not text.startswith("["):
+            return [text] if text else []
+        try:
+            saved = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        return [str(folder) for folder in saved if isinstance(folder, str) and folder]
 
     def _run_workspace(thread_id: str) -> str | None:
         """A scheduled run's thread works in its task's folder."""
@@ -1107,34 +1086,19 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         trigger = ScheduledTriggerStore(settings.state_dir).load(parsed[0])
         return trigger.workspace if trigger is not None else None
 
-    def _resolve_workspace(thread_id: str, workspace_param: str | None) -> tuple[Path, bool]:
-        """"First choice wins, then sticks" -- the ?workspace= query
-        param only matters the *first* time a thread_id is seen; a
-        reconnect with no query param falls back to the sidecar file
-        written that first time. Always has a fallback value
-        (settings.workspace_root) though, so an unset thread is never
-        left with "no workspace" -- every thread that never explicitly
-        picked one behaves exactly like today (single global
-        workspace_root).
-
-        Returns (resolved_path, explicit) -- explicit is True iff a real
-        per-thread choice exists (sidecar written this call or already on
-        disk), False for the settings.workspace_root fallback. Callers
-        need this alongside the path itself: comparing the resolved path
-        against settings.workspace_root by value would be wrong (a user
-        can deliberately choose the same directory as the default), so
-        ChatSessionLG.select_workspace's "already set" guard needs this
-        explicit flag, not a path comparison."""
-        sidecar = _workspace_sidecar_path(thread_id)
-        if workspace_param is None and not sidecar.is_file():
+    def _resolve_folders(thread_id: str, workspace_param: str | None) -> list[Path]:
+        """The ?workspace= query param only counts the first time a thread
+        is seen; after that the sidecar (changed through set_folders) wins.
+        Empty means the app's default workspace -- kept distinct from an
+        explicit choice of that same folder, which the UI shows as chosen."""
+        if _workspace_sidecar_path(thread_id).is_file():
+            return [Path(folder) for folder in _read_workspace_sidecar(thread_id)]
+        if workspace_param is None:
             workspace_param = _run_workspace(thread_id)
-        if workspace_param is None and sidecar.is_file():
-            workspace_param = sidecar.read_text(encoding="utf-8").strip()
-        elif workspace_param is not None and not sidecar.is_file():
-            _write_workspace_sidecar(thread_id, workspace_param)
-        if workspace_param:
-            return Path(workspace_param), True
-        return settings.workspace_root, False
+        if not workspace_param:
+            return []
+        _write_workspace_sidecar(thread_id, [workspace_param])
+        return [Path(workspace_param)]
 
     def _skills_by_name() -> dict[str, SkillInfo]:
         # Re-scanned on every call, not a closure snapshot -- the same
@@ -1180,7 +1144,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         _skills_sidecar_path(thread_id).write_text(payload, encoding="utf-8")
 
     def _resolve_enabled_skills(thread_id: str, skills_param: str | None) -> set[str]:
-        """No "first time wins" restriction, unlike _resolve_workspace --
+        """No "first time wins" restriction, unlike _resolve_folders --
         skills are meant to be toggled anytime, so an explicit ?skills=
         query param on (re)connect always wins over the sidecar and
         rewrites it; only a reconnect with no query param at all falls back
@@ -1227,9 +1191,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             }
             for command in hooks_config["SessionStart"]:
                 run_hook(command, session_start_payload)
-            resolved_workspace, workspace_explicit = _resolve_workspace(
-                thread_id, workspace_param
-            )
+            folders = _resolve_folders(thread_id, workspace_param)
             sessions[thread_id] = ChatSessionLG(
                 thread_id=thread_id,
                 settings=settings,
@@ -1239,8 +1201,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 checkpointer=checkpointer_holder["checkpointer"],
                 hooks_config=hooks_config,
                 enabled_skill_names=_resolve_enabled_skills(thread_id, skills_param),
-                workspace_root=resolved_workspace,
-                workspace_explicit=workspace_explicit,
+                workspace_root=folders[0] if folders else settings.workspace_root,
+                workspace_explicit=bool(folders),
+                extra_folders=folders[1:],
             )
         return sessions[thread_id]
 
@@ -1608,11 +1571,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 if getattr(message, "type", None) == "human":
                     preview = strip_mode_note(extract_text(message.content))
                     break
-            workspace_sidecar = _workspace_sidecar_path(thread_id)
-            workspace_root = (
-                workspace_sidecar.read_text(encoding="utf-8").strip()
-                if workspace_sidecar.is_file()
-                else str(settings.workspace_root)
+            workspace_root = next(
+                iter(_read_workspace_sidecar(thread_id)), str(settings.workspace_root)
             )
             title_sidecar = _title_sidecar_path(thread_id)
             if title_sidecar.is_file():
@@ -2223,14 +2183,21 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 os.environ[key] = value
             else:
                 set_key(".env", key, value)
+                if key in LIVE_SETTINGS:
+                    # Read afresh whenever a session starts, so the running
+                    # server can take the new value without a restart.
+                    live_value: str | int = int(value) if key == "COSCRIBE_MAX_TURNS" else value
+                    setattr(settings, LIVE_SETTINGS[key], live_value)
             applied.add(key)
-        restart_required = any(key in COSCRIBE_ENV_VARS for key in applied)
+        restart_required = any(
+            key in COSCRIBE_ENV_VARS and key not in LIVE_SETTINGS for key in applied
+        )
         return {"restart_required": restart_required, "rejected": rejected}
 
     @app.get("/api/memory")
     async def get_memory() -> dict[str, Any]:
-        # Settings.memory_path can change mid-session (a workspace switch
-        # re-resolves it, see select_workspace) -- reading settings.memory_path
+        # Settings.memory_path can change mid-session (a folder change
+        # re-resolves it, see set_folders) -- reading settings.memory_path
         # fresh here rather than caching it at app-build time keeps this
         # endpoint honest about whichever file the *next* new thread would
         # actually load, same "read fresh, no stale cache" posture
@@ -2890,18 +2857,12 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     requested = {n for n in data.get("skills", []) if n in _skills_by_name()}
                     await session.set_enabled_skills(requested, websocket)
                     _write_skills_sidecar(thread_id, requested)
-                elif message_type == "select_workspace":
-                    # In-app "new session" picker's path: the socket is
-                    # already open by the time the user picks a folder (see
-                    # ?workspace= on ws_endpoint above for the other,
-                    # connect-time path), and ChatSessionLG.select_workspace
-                    # itself guards against a second call on an
-                    # already-explicit thread. Only persists the sidecar on
-                    # success (True) -- see select_workspace's own
-                    # docstring for why an unconditional write here would
-                    # desync the sidecar from a rejected/failed switch.
-                    if await session.select_workspace(data["path"], websocket):
-                        _write_workspace_sidecar(thread_id, data["path"])
+                elif message_type == "set_folders":
+                    folders = [str(folder) for folder in data.get("folders", [])]
+                    # Persisted only once the session took them, so the
+                    # sidecar never names folders the agent isn't using.
+                    if await session.set_folders(folders, websocket):
+                        _write_workspace_sidecar(thread_id, [str(f) for f in session.folders])
                 elif message_type == "load_older_messages":
                     # Directly awaited, not asyncio.create_task like
                     # user_message -- same reasoning as switch_model above:

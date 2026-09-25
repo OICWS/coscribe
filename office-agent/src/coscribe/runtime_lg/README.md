@@ -3424,3 +3424,15 @@ leaning towards **(A)** -- deliberately not started yet, this section
 exists purely to preserve the research (real measured numbers, the
 verified official mechanism, and the exact gap found in its source) so
 the next round doesn't have to re-derive any of it.
+
+**Built as (A), now on by default.** `runtime_lg/tool_deferral.py`'s
+`DeferredToolMiddleware` binds `coordinator.py`'s `CORE_TOOL_NAMES` plus
+whatever `search_tools` has returned so far in the thread, on every
+provider alike. It shipped off by default and was switched on after a
+packaged-build test: with four connectors attached, a first "你好" cost
+393.8k tokens (39.4% of the window). `search_tools`' own description now
+carries a generated index of what can be found (category, count, a few
+names), since a bare "search for tools" gave the model no reason to
+expect, say, a browser. Measured on one thread with Playwright
+connected: 12,781 tokens bound with deferral, 46,478 without. See
+ROADMAP Phase 8bc.

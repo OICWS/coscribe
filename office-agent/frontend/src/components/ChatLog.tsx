@@ -3,6 +3,8 @@ import {
   groupHasPendingApproval,
   groupToolRuns,
   groupTurns,
+  latestWorkflowDraftId,
+  isRunning,
   summarizeGroupParts,
   summarizeItemParts,
   type SummaryParts,
@@ -13,7 +15,7 @@ import {
 import type { LogItem } from "../state/reducer";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
-import { ChevronDownIcon, PencilIcon, RetryIcon, RewindIcon } from "./icons";
+import { ChevronRightIcon, PencilIcon, RetryIcon, RewindIcon } from "./icons";
 import { ImageLightbox } from "./ImageLightbox";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { QuestionCard } from "./QuestionCard";
@@ -58,6 +60,9 @@ type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
 
 interface ChatLogProps {
   items: LogItem[];
+  /** A reply is being generated -- its tool calls without a result yet
+   * are shown as running. */
+  turnInFlight?: boolean;
   onApprove: (id: string, approved: boolean) => void;
   onAnswerQuestion: (id: string, answer: string) => void;
   /** Undefined while a turn is in flight -- editing mid-turn would race
@@ -113,11 +118,13 @@ export function ChatLog({
   olderItems,
   olderStatus,
   onLoadOlder,
+  turnInFlight = false,
 }: ChatLogProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const turns = groupTurns(items);
   const olderTurns = groupTurns(olderItems);
+  const latestDraftId = latestWorkflowDraftId([...olderItems, ...items]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -192,7 +199,7 @@ export function ChatLog({
 
   return (
     <div data-testid="chat-log" className="flex-1 overflow-y-auto" ref={scrollRef}>
-      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-4 py-4">
+      <div className="mx-auto flex w-full max-w-[880px] flex-col gap-3 px-4 py-4">
         {olderStatus === "loading" && (
           <p className="self-center text-xs text-[var(--muted)]">Loading earlier messages...</p>
         )}
@@ -223,6 +230,8 @@ export function ChatLog({
             onReviewTaskDraft={onReviewTaskDraft}
             onDismissTaskDraft={onDismissTaskDraft}
             onReviewWorkflowDraft={onReviewWorkflowDraft}
+            latestDraftId={latestDraftId}
+            live={turnInFlight && i === turns.length - 1}
             onPptxShapePicked={onPptxShapePicked}
           />
         ))}
@@ -277,10 +286,14 @@ function TurnView({
   onReviewTaskDraft,
   onDismissTaskDraft,
   onReviewWorkflowDraft,
+  latestDraftId = null,
+  live = false,
   onPptxShapePicked,
 }: {
   turn: Turn;
   isLastTurn?: boolean;
+  /** This turn is the one a reply is still being generated for. */
+  live?: boolean;
   onApprove: (id: string, approved: boolean) => void;
   onAnswerQuestion: (id: string, answer: string) => void;
   onEditMessage?: (turnIndex: number, text: string) => void;
@@ -288,6 +301,7 @@ function TurnView({
   onReviewTaskDraft?: (item: TaskDraftItem) => void;
   onDismissTaskDraft?: (item: TaskDraftItem) => void;
   onReviewWorkflowDraft?: (entry: WorkflowDraftEntry) => void;
+  latestDraftId?: string | null;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const entries = groupToolRuns(turn.items);
@@ -304,13 +318,24 @@ function TurnView({
        * so there's no case for it here anymore. */}
       {entries.map((entry) =>
         entry.kind === "tool_run" ? (
-          <ToolRunGroupView key={entry.id} group={entry} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
+          <ToolRunGroupView
+            key={entry.id}
+            group={entry}
+            live={live}
+            onApprove={onApprove}
+            onPptxShapePicked={onPptxShapePicked}
+          />
         ) : entry.kind === "question" ? (
           <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
         ) : entry.kind === "task_draft" ? (
           <TaskDraftCard key={entry.id} item={entry} onReview={onReviewTaskDraft} onDismiss={onDismissTaskDraft} />
         ) : entry.kind === "workflow_draft" ? (
-          <WorkflowDraftCard key={entry.id} entry={entry} onReview={onReviewWorkflowDraft} />
+          <WorkflowDraftCard
+            key={entry.id}
+            entry={entry}
+            onReview={onReviewWorkflowDraft}
+            superseded={latestDraftId !== null && entry.id !== latestDraftId}
+          />
         ) : (
           <LogItemView key={entry.id} item={entry} onEditMessage={isLastTurn ? onEditMessage : undefined} />
         ),
@@ -348,25 +373,33 @@ function TurnView({
   );
 }
 
-/** Renders a SummaryParts as "verb ⟨object chip⟩" -- the object (a
- * filename, query, task name, ...) gets its own light monospaced chip so
- * it visually pops out of the plain-text verb, the same "emphasized
- * keyword" treatment Claude Code's own transcript rows use for a path or
- * identifier inside an action description. `parts.failed` (one call that
- * itself errored) renders the whole label in --danger red; `parts.
- * failedCount` (an aggregated "Ran N commands" clause -- see
- * summarizeGroupParts) instead appends a red "(M failed)" suffix while
- * the verb itself stays the normal muted color, matching the reference
- * UI's "Ran 3 commands (1 failed)" -- only the failure count is red, not
- * the whole clause. */
+/** Clauses after the first read as one sentence ("Ran 3 commands, read a
+ * file"); an acronym-led verb ("PDF ...") keeps its capitals. */
+function inSentence(parts: SummaryParts, index: number): SummaryParts {
+  if (index === 0 || !/^[A-Z][a-z]/.test(parts.verb)) return parts;
+  return { ...parts, verb: parts.verb[0].toLowerCase() + parts.verb.slice(1) };
+}
+
+/** "verb ⟨object chip⟩". A failed call is red as a whole; an aggregated
+ * clause shows only its "(N failed)" count in red. The running call's
+ * object is plain text so the shimmer (clipped to the text) runs through
+ * it too. */
 function SummaryLabel({ parts }: { parts: SummaryParts }) {
+  if (parts.shimmer) {
+    return (
+      <span className="shimmer-text">
+        {parts.verb}
+        {parts.object && `${parts.glue ?? " "}${parts.object}`}
+      </span>
+    );
+  }
   const label = (
     <>
       {parts.verb}
       {parts.object && (
         <>
           {parts.glue ?? " "}
-          <code className="rounded bg-[var(--panel-bg)] px-1 py-0.5 font-mono text-[0.85em]">{parts.object}</code>
+          <code className="rounded bg-[var(--code-bg)] px-1 py-0.5 font-mono text-[0.85em]">{parts.object}</code>
         </>
       )}
       {parts.diffStat && <DiffStat added={parts.diffStat.added} removed={parts.diffStat.removed} />}
@@ -378,13 +411,8 @@ function SummaryLabel({ parts }: { parts: SummaryParts }) {
   return parts.failed ? <span className="text-[var(--danger)]">{label}</span> : label;
 }
 
-/** "+N -M" line-count badge, green/red -- the one deliberate exception to
- * this app's own mono-red palette (see index.css's "there is no separate
- * success color" note): a diff stat is a near-universal convention (git
- * --stat, GitHub, Claude Code's own transcript) readers already recognize
- * by color, distinct from a generic app-chrome "success" state. Either
- * half is omitted when 0 (an edit that's pure addition or pure removal
- * shouldn't show a "-0"/"+0" no-op). */
+/** "+N -M", green/red: the one exception to the app's mono-red palette,
+ * since diff-stat colors are a convention readers already know. */
 function DiffStat({ added, removed }: { added: number; removed: number }) {
   return (
     <span className="ml-1.5 font-mono text-[0.85em] tabular-nums">
@@ -394,26 +422,35 @@ function DiffStat({ added, removed }: { added: number; removed: number }) {
   );
 }
 
-/** A run containing an unresolved approval always renders its items
- * directly, unwrapped -- an approval-required action must never be hidden
- * behind a disclosure the user has to think to open. Once resolved (or
- * for a pure-tool-only run), collapses to one summary line by default;
- * `group.id` is stable across that transition (derived from the run's
- * first item id), so this component isn't remounted when a pending
- * approval resolves -- `manuallyOpen`'s own state survives it. */
+function Disclosure({ open }: { open: boolean }) {
+  return (
+    <ChevronRightIcon
+      aria-hidden="true"
+      className={`h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+    />
+  );
+}
+
+/** A run of tool calls: one sentence-like summary with a chevron after
+ * it; opened, a bordered list with a row per call, each opening to its
+ * result. A run holding an unresolved approval is shown unwrapped
+ * instead -- an action waiting on the user must never sit behind a
+ * disclosure. `group.id` is stable across that change, so the open state
+ * survives the approval resolving. */
 function ToolRunGroupView({
   group,
+  live,
   onApprove,
   onPptxShapePicked,
 }: {
   group: ToolRunGroup;
+  live: boolean;
   onApprove: (id: string, approved: boolean) => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
-  const [manuallyOpen, setManuallyOpen] = useState(false);
-  const hasPendingApproval = groupHasPendingApproval(group);
+  const [open, setOpen] = useState(false);
 
-  if (hasPendingApproval) {
+  if (groupHasPendingApproval(group)) {
     return (
       <div className="flex flex-col gap-1.5 self-start">
         {group.items.map((item) => (
@@ -423,154 +460,188 @@ function ToolRunGroupView({
     );
   }
 
-  // Real, live-reported bug: a "run" of exactly one item still built the
-  // full group-header-plus-expand-to-reveal-a-child structure below,
-  // which for one item means a group header repeating the *exact same*
-  // label its own (compact) child row shows again once expanded --
-  // duplicated text, and two clicks (open the group, then open the
-  // child's own result toggle) to see anything. Skipping straight to
-  // ToolCallRow here means one row, one label, one click straight to the
-  // result -- ToolCallRow's own chevron/label/expand already *is* the
-  // exact interaction a length-1 "group" needs, no group wrapper adds
-  // anything real for a single item.
-  if (group.items.length === 1) {
-    return (
-      <div className="max-w-[92%]">
-        <ToolCallRow item={group.items[0]} compact onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
-      </div>
-    );
-  }
-
-  const open = manuallyOpen;
-  const header = summarizeGroupParts(group.items);
+  const header = summarizeGroupParts(group.items, live);
+  const single = group.items.length === 1 ? group.items[0] : null;
   return (
-    <div className="self-start max-w-[92%] text-sm">
+    <div className="w-full max-w-[92%] self-start text-sm">
       <button
         type="button"
-        className="flex items-start gap-1.5 text-left text-[var(--muted)] hover:text-[var(--fg)]"
-        onClick={() => setManuallyOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex max-w-full items-center gap-1 text-left text-[var(--muted)] hover:text-[var(--fg)]"
+        onClick={() => setOpen((v) => !v)}
       >
-        <ChevronDownIcon
-          className={`mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
-        />
-        {/* Real, live-reported bug: `truncate` forces `white-space: nowrap`,
-         * which doesn't shrink long text -- it just runs the whole summary
-         * (e.g. "Listed X, Listed X, Listed X, and 2 more") off the right
-         * edge of the screen with no way to see the rest short of a
-         * horizontal scroll nobody expects on a chat log. Dropping it lets
-         * this wrap normally within the parent's own max-w-[92%] cap. */}
-        <span>
+        <span className="min-w-0">
           {header.shown.map((parts, index) => (
             <span key={index}>
               {index > 0 && ", "}
-              <SummaryLabel parts={parts} />
+              <SummaryLabel parts={inSentence(parts, index)} />
             </span>
           ))}
           {header.more > 0 && `, and ${header.more} more`}
+          {header.active && (
+            <>
+              {header.shown.length > 0 && ", "}
+              <SummaryLabel parts={inSentence(header.active, header.shown.length)} />
+            </>
+          )}
         </span>
+        <Disclosure open={open} />
       </button>
-      {/* Sub-items nest under a thin left rule (the same "connected list"
-       * treatment Claude Code's own expanded tool-run uses) rather than a
-       * repeat of ToolCallRow's own bordered-card look -- one bordered
-       * card *per step* inside an already-bordered-implying disclosure
-       * read as a wall of boxes with dead space between them, a real
-       * complaint from a real user testing this. `compact` on ToolCallRow
-       * strips that card down to a plain text row; this is the only
-       * place that prop is ever passed. */}
+      {single && <ToolPreview item={single} onPptxShapePicked={onPptxShapePicked} />}
       {open && (
-        <div className="mt-1 ml-[7px] flex flex-col border-l border-[var(--border)] pl-3">
-          {group.items.map((item) => (
-            <ToolCallRow
-              key={item.id}
-              item={item}
-              compact
-              onApprove={onApprove}
-              onPptxShapePicked={onPptxShapePicked}
-            />
-          ))}
+        <div className="mt-2 overflow-hidden rounded-xl border border-[var(--border)]">
+          {single ? (
+            <ToolDetail item={single} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
+          ) : (
+            group.items.map((item, index) => (
+              <ToolStepRow
+                key={item.id}
+                item={item}
+                running={isRunning(item, live)}
+                first={index === 0}
+                onApprove={onApprove}
+                onPptxShapePicked={onPptxShapePicked}
+              />
+            ))
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/** One row per tool/approval item, rendered inside ToolRunGroupView's
- * own expanded list (the `compact` treatment -- a plain, tightly-spaced
- * text row, no border/background) or, for a still-pending approval,
- * unwrapped and visible with no disclosure to open (the *default*,
- * bordered-card treatment -- an actionable item with Approve/Deny
- * buttons warrants real visual weight, unlike a plain history row).
- * Since groupToolRuns always wraps every tool/approval run into a
- * ToolRunGroup now (even a run of one -- see its own comment), the
- * bordered-card treatment is only ever reached via that pending-
- * approval path; every already-resolved item, whether it was ever
- * "grouped" with anything else or not, renders through the same
- * `compact` row every other one does -- no more inconsistency between
- * an isolated tool call and one that happened to land next to others. */
-function ToolCallRow({
+/** One call inside an opened run. */
+function ToolStepRow({
   item,
-  compact = false,
+  running,
+  first,
   onApprove,
   onPptxShapePicked,
 }: {
   item: ToolOrApprovalItem;
-  compact?: boolean;
+  running: boolean;
+  first: boolean;
+  onApprove: (id: string, approved: boolean) => void;
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={first ? "" : "border-t border-[var(--border)]"}>
+      <button
+        type="button"
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--card-bg)]"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="min-w-0 flex-1 truncate">
+          <SummaryLabel parts={summarizeItemParts(item, running)} />
+        </span>
+        <span className="text-[var(--muted)]">
+          <Disclosure open={open} />
+        </span>
+      </button>
+      <div className="px-3">
+        <ToolPreview item={item} onPptxShapePicked={onPptxShapePicked} />
+      </div>
+      {open && (
+        <div className="border-t border-[var(--border)]">
+          <ToolDetail item={item} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A finished write_docx/xlsx/pptx call's thumbnail; a .pptx one is
+ * clickable to target a shape in a follow-up edit. */
+function ToolPreview({
+  item,
+  onPptxShapePicked,
+}: {
+  item: ToolOrApprovalItem;
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
+}) {
+  const previewPath = previewPathOf(item.result);
+  if (!previewPath) return null;
+  const pptxTarget = pptxOverlayTargetOf(item.arguments);
+  const src = `/api/previews/${encodeURIComponent(previewPath)}`;
+  const className = "my-1.5 block max-h-32 rounded-lg border border-[var(--border)]";
+  return pptxTarget ? (
+    <PptxShapeOverlay
+      src={src}
+      alt={`${item.toolName} preview`}
+      className={className}
+      path={pptxTarget.path}
+      slide={pptxTarget.slide}
+      onPick={onPptxShapePicked}
+    />
+  ) : (
+    <img src={src} alt={`${item.toolName} preview`} className={className} />
+  );
+}
+
+/** What an opened call shows: its result, or for an approval, what was
+ * asked and decided. */
+function ToolDetail({
+  item,
+  onApprove,
+  onPptxShapePicked,
+}: {
+  item: ToolOrApprovalItem;
+  onApprove: (id: string, approved: boolean) => void;
+  onPptxShapePicked: (capture: PptxShapeCapture) => void;
+}) {
+  if (item.kind === "approval") {
+    return (
+      <div className="px-3 py-2">
+        <ApprovalDetail item={item} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
+      </div>
+    );
+  }
+  if (item.result === undefined) {
+    return <p className="px-3 py-2 text-[var(--muted)]">No result yet.</p>;
+  }
+  return (
+    <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all bg-[var(--code-bg)] px-3 py-2 font-mono text-xs leading-relaxed">
+      {typeof item.result === "string" ? item.result : JSON.stringify(item.result, null, 2)}
+    </pre>
+  );
+}
+
+/** A call waiting on the user's approval: a bordered card, open by
+ * default, with the Approve/Deny controls. */
+function ToolCallRow({
+  item,
+  onApprove,
+  onPptxShapePicked,
+}: {
+  item: ToolOrApprovalItem;
   onApprove: (id: string, approved: boolean) => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const [open, setOpen] = useState(() => item.kind === "approval" && item.status === "pending");
-  // An approval item carries a result too, once its (approved) call
-  // actually executes -- see reducer.ts's tool_result case, which merges
-  // onto the same item rather than pushing a second "tool" one. Same
-  // previewPathOf check either way, so a completed write_pptx/write_docx/
-  // write_xlsx call gets its thumbnail here exactly like an ungated one.
-  const previewPath = previewPathOf(item.result);
-  const pptxTarget = pptxOverlayTargetOf(item.arguments);
   const isPendingApproval = item.kind === "approval" && item.status === "pending";
 
   return (
     <div
-      className={
-        compact
-          ? "self-start w-full py-1 text-sm"
-          : isPendingApproval
-            ? "self-start max-w-[92%] rounded-xl border border-[var(--accent)] bg-[var(--card-bg)] px-3 py-2 text-sm"
-            : "self-start max-w-[92%] rounded-xl border border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm hover:bg-[var(--panel-bg)]"
-      }
+      className={`max-w-[92%] self-start rounded-xl border bg-[var(--card-bg)] px-3 py-2 text-sm ${
+        isPendingApproval ? "border-[var(--accent)]" : "border-[var(--border)] hover:bg-[var(--panel-bg)]"
+      }`}
     >
       <button
         type="button"
-        className={
-          compact
-            ? "flex w-full items-center gap-1.5 text-left text-[var(--muted)] hover:text-[var(--fg)]"
-            : "flex w-full items-center gap-1.5 text-left text-[var(--fg)]"
-        }
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 text-left text-[var(--fg)]"
         onClick={() => setOpen((v) => !v)}
       >
-        <ChevronDownIcon
-          className={`shrink-0 ${compact ? "h-3 w-3" : "h-3.5 w-3.5 text-[var(--muted)]"} transition-transform ${open ? "" : "-rotate-90"}`}
-        />
         <span className="truncate">
           <SummaryLabel parts={summarizeItemParts(item)} />
         </span>
+        <span className="text-[var(--muted)]">
+          <Disclosure open={open} />
+        </span>
       </button>
-      {previewPath &&
-        (pptxTarget ? (
-          <PptxShapeOverlay
-            src={`/api/previews/${encodeURIComponent(previewPath)}`}
-            alt={`${item.toolName} preview`}
-            className="mt-1 block max-h-32 rounded-lg border border-[var(--border)]"
-            path={pptxTarget.path}
-            slide={pptxTarget.slide}
-            onPick={onPptxShapePicked}
-          />
-        ) : (
-          <img
-            src={`/api/previews/${encodeURIComponent(previewPath)}`}
-            alt={`${item.toolName} preview`}
-            className="mt-1 block max-h-32 rounded-lg border border-[var(--border)]"
-          />
-        ))}
+      <ToolPreview item={item} onPptxShapePicked={onPptxShapePicked} />
       {open && (
         <div className="mt-1.5">
           {item.kind === "tool" ? (
@@ -873,7 +944,7 @@ function LogItemView({
   if (item.kind === "agent") {
     const text = item.streaming ? `${item.text} ▍` : item.text;
     return (
-      <div className="max-w-[92%]">
+      <div className="min-w-0 max-w-[92%] [overflow-wrap:anywhere]">
         {/* No border/bubble at all, like claude.ai's own assistant replies
          * -- the earlier border-l-2 "anchor" (dc76b88) was real, live
          * user feedback at the time, but became its own live complaint
