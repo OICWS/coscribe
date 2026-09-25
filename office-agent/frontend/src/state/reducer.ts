@@ -82,15 +82,10 @@ export interface ChatState {
    * model's own empty-string-until-hydrated convention below), never null
    * after that. */
   workspaceRoot: string;
-  /** See wire.ts's StateEvent.workspace_explicit -- gates whether
-   * ThreadHeader's workspace badge is still clickable to pick a
-   * different folder for this thread (a second pick is rejected server-
-   * side once one has already succeeded). Meaningless before the first
-   * real "state" event lands, same as workspaceRoot's own empty-string
-   * default -- but the badge doesn't render at all until then anyway
-   * (gated on workspaceRoot being non-empty), so there's nothing to get
-   * wrong in the meantime. */
+  /** See wire.ts's StateEvent.workspace_explicit. */
   workspaceExplicit: boolean;
+  /** See wire.ts's StateEvent.folders. */
+  folders: string[];
   items: LogItem[];
   totalTokens: number;
   /** Prompt-cache stats from the most recent "usage" event, null when
@@ -149,6 +144,7 @@ export const initialChatState: ChatState = {
   enabledSkills: [],
   workspaceRoot: "",
   workspaceExplicit: false,
+  folders: [],
   items: [],
   totalTokens: 0,
   cacheStats: null,
@@ -234,6 +230,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         enabledSkills: state.enabledSkills,
         workspaceRoot: state.workspaceRoot,
         workspaceExplicit: state.workspaceExplicit,
+        folders: state.folders,
         turnTick: state.turnTick,
       };
 
@@ -271,9 +268,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // approval), the "error" case below surfaces it same as any other
       // failed turn -- this optimistic truncation isn't rolled back, the
       // same posture local_user_message already takes.
-      const cutIndex = state.items.findIndex(
-        (item) => item.kind === "user" && item.turnIndex === action.turnIndex,
-      );
+      const cutIndex = state.items.findIndex((item) => item.kind === "user" && item.turnIndex === action.turnIndex);
       const kept = cutIndex === -1 ? state.items : state.items.slice(0, cutIndex);
       return {
         ...state,
@@ -288,12 +283,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // pure undo. The turn's own question text goes to the composer
       // instead (App.tsx's onRewindMessage, via setPendingComposerText),
       // not back into the log, and no turn is running afterward.
-      const cutIndex = state.items.findIndex(
-        (item) => item.kind === "user" && item.turnIndex === action.turnIndex,
-      );
+      const cutIndex = state.items.findIndex((item) => item.kind === "user" && item.turnIndex === action.turnIndex);
       return cutIndex === -1 ? state : { ...state, items: state.items.slice(0, cutIndex) };
     }
-
 
     case "local_approval_resolved":
       return {
@@ -336,6 +328,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         enabledSkills: action.enabled_skills,
         workspaceRoot: action.workspace_root,
         workspaceExplicit: action.workspace_explicit,
+        folders: action.folders,
       };
 
     case "history": {
@@ -438,6 +431,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       }
       return { ...state, items, turnInFlight: false };
     }
+
+    case "tool_started":
+      return {
+        ...state,
+        items: [
+          ...closeStreamingBubble(state.items),
+          { id: genId(), kind: "tool", toolName: action.tool_name, arguments: action.arguments },
+        ],
+      };
 
     case "tool_result": {
       // Copied again after closeStreamingBubble, which returns state.items
@@ -618,6 +620,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           },
         ],
       };
+
+    case "thread_titled":
+      // Applied to the thread list in App.tsx.
+      return state;
 
     case "tasks_changed":
       return { ...state, turnInFlight: false, turnTick: state.turnTick + 1 };

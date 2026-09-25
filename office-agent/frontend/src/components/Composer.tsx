@@ -69,6 +69,7 @@ interface ComposerProps {
   totalTokens: number;
   commands: CommandInfo[];
   modePill: ReactNode;
+  folderPicker: ReactNode;
   modelPicker: ReactNode;
   usageRing: ReactNode;
   onSend: (payload: ComposerSendPayload) => void;
@@ -102,6 +103,7 @@ export function Composer({
   totalTokens,
   commands,
   modePill,
+  folderPicker,
   modelPicker,
   usageRing,
   onSend,
@@ -421,7 +423,7 @@ export function Composer({
     <>
     <div
       data-testid="composer"
-      className="mx-auto w-full max-w-[760px] px-4 pb-4"
+      className="mx-auto w-full max-w-[880px] px-4 pb-4"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -594,6 +596,7 @@ export function Composer({
           >
             <PlusIcon className="h-[18px] w-[18px]" />
           </button>
+          {folderPicker}
           {modePill}
         </div>
         <RunStatus turnInFlight={turnInFlight} totalTokens={totalTokens} />

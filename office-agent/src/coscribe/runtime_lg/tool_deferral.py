@@ -157,6 +157,7 @@ def build_search_tools_tool(
     tool count, but no reason to re-tokenize every description on every
     query within one conversation."""
     entries = [_build_entry(tool) for tool in deferred_tools]
+    index = _catalog_index(deferred_tools)
 
     def search_tools(query: str) -> str:
         """Find a tool that isn't currently available by keyword -- most
@@ -184,7 +185,42 @@ def build_search_tools_tool(
             [{"name": entry.name, "description": entry.description} for _, entry in top]
         )
 
+    if index:
+        # The model can't search for what it doesn't know exists; a short
+        # map of what's hidden (not the schemas) costs little context.
+        search_tools.__doc__ = (search_tools.__doc__ or "") + "\n\n" + index
     return search_tools
+
+
+_INDEX_EXAMPLES = 6
+
+
+def _catalog_index(tools: Sequence[Callable[..., Any] | BaseTool]) -> str:
+    """What the hidden tools are, by group: each built-in category and
+    each connector, with a count and a few names to search by."""
+    from ..runtime.types import get_tool_metadata
+
+    groups: dict[str, list[str]] = {}
+    for tool in tools:
+        category = get_tool_metadata(tool).category or "other"  # type: ignore[arg-type]
+        connector = category.removeprefix("mcp:")
+        label = f"connector {connector}" if connector != category else category
+        groups.setdefault(label, []).append(_tool_name(tool))
+    if not groups:
+        return ""
+    lines = ["Hidden tools you can find with this, by group:"]
+    for label, names in sorted(groups.items(), key=lambda item: (-len(item[1]), item[0])):
+        step = max(1, len(names) // _INDEX_EXAMPLES)
+        examples = ", ".join(names[::step][:_INDEX_EXAMPLES])
+        count = f"{len(names)} tool" + ("" if len(names) == 1 else "s")
+        lines.append(f"- {label} ({count}), e.g. {examples}")
+    return "\n".join(lines)
+
+
+def bound_tool_names(core_tool_names: Iterable[str], messages: Sequence[BaseMessage]) -> set[str]:
+    """The tools whose schemas a request actually sends: the core set,
+    search_tools itself, and whatever search_tools has surfaced so far."""
+    return {*core_tool_names, SEARCH_TOOLS_NAME, *_discovered_tool_names(messages)}
 
 
 def _discovered_tool_names(messages: Sequence[BaseMessage]) -> set[str]:

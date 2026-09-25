@@ -100,6 +100,16 @@ export interface WorkflowDraftEntry {
 
 export type TranscriptEntry = Exclude<LogItem, ToolOrApprovalItem> | ToolRunGroup | WorkflowDraftEntry;
 
+/** The id of the newest workflow draft among `items` -- a card for any
+ * earlier one is superseded. */
+export function latestWorkflowDraftId(items: LogItem[]): string | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind === "tool" && workflowDraftOf(item)) return item.id;
+  }
+  return null;
+}
+
 function workflowDraftOf(item: ToolOrApprovalItem): WorkflowDraftEntry | null {
   if (item.kind !== "tool" || item.toolName !== "draft_workflow" || item.result === undefined) return null;
   let result: unknown = item.result;
@@ -208,6 +218,10 @@ export interface SummaryParts {
    * with `failed` in practice: an aggregated clause is never also a
    * single failed item. */
   failedCount?: number;
+  /** Still running: the verb is in the present tense ("Reading"). */
+  running?: boolean;
+  /** The latest running call -- the one the UI animates. */
+  shimmer?: boolean;
 }
 
 /** The one generic, works-for-every-tool failure signal this app has --
@@ -307,6 +321,9 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   spawn_agent: () => ({ verb: "Delegated to a sub-agent", object: null }),
   review_work: () => ({ verb: "Asked a reviewer to check the work", object: null }),
   load_skill: (a) => ({ verb: "Loaded skill", object: str(a, "name") ?? null }),
+  draft_workflow: () => ({ verb: "Drafted a workflow", object: null }),
+  search_tools: (a) => ({ verb: "Searched tools", object: str(a, "query") ?? null, glue: ": " }),
+  read_web_page: (a) => ({ verb: "Read", object: str(a, "url") ?? "a web page" }),
 };
 
 const PREFIX_VERBS: [prefix: string, verb: string][] = [
@@ -343,8 +360,56 @@ function summarizeToolNameParts(toolName: string, args: ArgRecord): SummaryParts
   return { verb: toolName, object: null };
 }
 
-function partsFor(item: ToolOrApprovalItem): SummaryParts {
-  const base = TOOL_SUMMARIES[item.toolName]?.(item.arguments) ?? summarizeToolNameParts(item.toolName, item.arguments);
+const PRESENT_TENSE: Record<string, string> = {
+  Wrote: "Writing",
+  Read: "Reading",
+  Edited: "Editing",
+  Listed: "Listing",
+  Searched: "Searching",
+  Downloaded: "Downloading",
+  Added: "Adding",
+  Updated: "Updating",
+  Deleted: "Deleting",
+  Removed: "Removing",
+  Installed: "Installing",
+  Uninstalled: "Uninstalling",
+  Created: "Creating",
+  Ran: "Running",
+  Started: "Starting",
+  Checked: "Checking",
+  Killed: "Stopping",
+  Formatted: "Formatting",
+  Recalculated: "Recalculating",
+  Saved: "Saving",
+  Asked: "Asking",
+  Delegated: "Delegating",
+  Loaded: "Loading",
+  Set: "Setting",
+  Tested: "Testing",
+  Opened: "Opening",
+  Fetched: "Fetching",
+  Drafted: "Drafting",
+};
+
+/** "Wrote" -> "Writing"; a verb with no known present form stays as is. */
+export function presentTense(verb: string): string {
+  const space = verb.indexOf(" ");
+  const first = space === -1 ? verb : verb.slice(0, space);
+  const present = PRESENT_TENSE[first];
+  return present ? present + verb.slice(first.length) : verb;
+}
+
+/** A call counts as running while a live turn hasn't returned its result;
+ * a denied or still-pending approval never ran. */
+export function isRunning(item: ToolOrApprovalItem, live: boolean): boolean {
+  if (!live || item.result !== undefined || item.isError !== undefined) return false;
+  return item.kind === "tool" || item.status === "approved";
+}
+
+function partsFor(item: ToolOrApprovalItem, running = false): SummaryParts {
+  const summarized =
+    TOOL_SUMMARIES[item.toolName]?.(item.arguments) ?? summarizeToolNameParts(item.toolName, item.arguments);
+  const base = running ? { ...summarized, verb: presentTense(summarized.verb), running: true } : summarized;
   const diffStat = diffStatOf(item.result);
   let parts = diffStat ? { ...base, diffStat } : base;
   if (isFailure(item)) {
@@ -370,8 +435,8 @@ function partsFor(item: ToolOrApprovalItem): SummaryParts {
  * caller (ToolCallRow's collapsed label, a ToolRunGroup's header) that
  * wants to render the object as a distinct inline chip rather than plain
  * text. */
-export function summarizeItemParts(item: ToolOrApprovalItem): SummaryParts {
-  return partsFor(item);
+export function summarizeItemParts(item: ToolOrApprovalItem, running = false): SummaryParts {
+  return partsFor(item, running);
 }
 
 /** Flat-string form of summarizeItemParts, for places that just need
@@ -389,6 +454,9 @@ export interface GroupHeaderParts {
   shown: SummaryParts[];
   /** Count of additional items past the cap, 0 if none ("and 2 more"). */
   more: number;
+  /** The latest call, while it's still running -- always shown, after the
+   * capped clauses, whatever the cap hides. */
+  active: SummaryParts | null;
 }
 
 /** Structured headline for a ToolRunGroup's collapsed header -- the same
@@ -403,20 +471,25 @@ export interface GroupHeaderParts {
  * gets its own normal "Ran a command"/"Failed to run" clause, same as
  * before. The *expanded* per-step list (ToolRunGroupView) is unaffected
  * -- it always renders every individual item, never this aggregation. */
-export function summarizeGroupParts(items: ToolOrApprovalItem[]): GroupHeaderParts {
+export function summarizeGroupParts(items: ToolOrApprovalItem[], live = false): GroupHeaderParts {
+  const last = items[items.length - 1];
+  const active = last && isRunning(last, live) ? { ...partsFor(last, true), shimmer: true } : null;
+  if (active) items = items.slice(0, -1);
   const clauses: SummaryParts[] = [];
   let run: ToolOrApprovalItem[] = [];
 
   const flushRun = () => {
     if (run.length === 0) return;
     if (run.length === 1) {
-      clauses.push(partsFor(run[0]));
+      clauses.push(partsFor(run[0], isRunning(run[0], live)));
     } else {
       const failedCount = run.filter(isFailure).length;
+      const running = run.some((item) => isRunning(item, live));
       clauses.push({
-        verb: `Ran ${run.length} commands`,
+        verb: `${running ? "Running" : "Ran"} ${run.length} commands`,
         object: null,
         failedCount: failedCount > 0 ? failedCount : undefined,
+        running,
       });
     }
     run = [];
@@ -427,11 +500,11 @@ export function summarizeGroupParts(items: ToolOrApprovalItem[]): GroupHeaderPar
       run.push(item);
     } else {
       flushRun();
-      clauses.push(partsFor(item));
+      clauses.push(partsFor(item, isRunning(item, live)));
     }
   }
   flushRun();
 
-  if (clauses.length <= SUMMARY_CAP) return { shown: clauses, more: 0 };
-  return { shown: clauses.slice(0, SUMMARY_CAP), more: clauses.length - SUMMARY_CAP };
+  if (clauses.length <= SUMMARY_CAP) return { shown: clauses, more: 0, active };
+  return { shown: clauses.slice(0, SUMMARY_CAP), more: clauses.length - SUMMARY_CAP, active };
 }

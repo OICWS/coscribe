@@ -25,10 +25,14 @@ escape hatch for exactly this, not a fallback that needs building later.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
+import httpx
+from bs4 import BeautifulSoup
 from ddgs import DDGS
+from markdownify import markdownify
 
 from ..runtime.proxy import configured_proxy
 from ..runtime.types import tool_metadata
@@ -71,5 +75,68 @@ def web_search(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[
     ]
 
 
+DEFAULT_PAGE_CHARS = 20_000
+_PAGE_TIMEOUT_SECONDS = 20.0
+# Page chrome that isn't the content, dropped before converting.
+_CHROME_TAGS = ("script", "style", "noscript", "svg", "nav", "footer", "header", "aside", "form")
+_USER_AGENT = "Mozilla/5.0 (compatible; coscribe)"
+
+
+def _page_text(html: str) -> tuple[str, str]:
+    """(title, the page's main text as markdown)."""
+    soup = BeautifulSoup(html, "html.parser")
+    title = soup.title.get_text(" ", strip=True) if soup.title else ""
+    for tag in soup(_CHROME_TAGS):
+        tag.decompose()
+    root = soup.find("main") or soup.find("article") or soup.body or soup
+    text = markdownify(str(root), heading_style="ATX")
+    return title, re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def read_web_page(url: str, start: int = 0, max_chars: int = DEFAULT_PAGE_CHARS) -> dict[str, Any]:
+    """Read a web page's text, as markdown -- an article, documentation, a
+    result from web_search. For a page you need to log in to, click
+    through, or that only renders in a browser, use the browser connector
+    instead, if one is connected.
+
+    Args:
+        url: the page's full http(s) address
+        start: where to continue from in a long page -- the previous
+            call's next_start
+        max_chars: how much text to return at most (default 20000)
+    """
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"{url!r} isn't an http(s) address")
+    with httpx.Client(
+        proxy=configured_proxy(),
+        follow_redirects=True,
+        timeout=_PAGE_TIMEOUT_SECONDS,
+        headers={"User-Agent": _USER_AGENT},
+    ) as client:
+        response = client.get(url)
+    response.raise_for_status()
+    content_type = response.headers.get("content-type", "").lower()
+    if "html" in content_type or not content_type:
+        title, text = _page_text(response.text)
+    elif content_type.startswith("text/") or "json" in content_type:
+        title, text = "", response.text
+    else:
+        raise ValueError(
+            f"{url} is {content_type.split(';')[0]}, not a page to read -- download it instead"
+        )
+    chunk = text[start : start + max_chars]
+    end = start + len(chunk)
+    return {
+        "url": str(response.url),
+        "title": title,
+        "content": chunk,
+        "total_chars": len(text),
+        "next_start": end if end < len(text) else None,
+    }
+
+
 def build_websearch_tools() -> list[Callable[..., Any]]:
-    return [tool_metadata(web_search, risk_category="READ", category="web")]
+    return [
+        tool_metadata(web_search, risk_category="READ", category="web"),
+        tool_metadata(read_web_page, risk_category="READ", category="web"),
+    ]

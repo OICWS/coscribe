@@ -59,6 +59,7 @@ from langchain_core.messages import (
 )
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.tools import BaseTool, StructuredTool
+from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import END
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.prebuilt import InjectedState
@@ -97,7 +98,9 @@ from ..runtime_lg.messages import (
     NORMAL_MODE_NOTE,
     PLAN_MODE_NOTE,
     current_date_note,
+    strip_mode_note,
 )
+from ..runtime_lg.tool_deferral import bound_tool_names, build_search_tools_tool
 from ..tools import (
     QUESTION_TOOL_NAMES,
     format_skill_listing,
@@ -228,7 +231,7 @@ def _build_instructions(agent_instructions: str | None, *, defer_tools: bool) ->
     """Appends _SEARCH_TOOLS_NOTE (only when defer_tools is on) to
     whatever build_coordinator_agent already
     assembled -- shared by every one of this class's own call sites that
-    (re)build self._instructions (__init__, select_workspace,
+    (re)build self._instructions (__init__, set_folders,
     set_enabled_skills -- switch_model doesn't, since it never rebuilds
     the coordinator Agent itself), so the search_tools note can never
     end up added in one place and forgotten in another."""
@@ -353,6 +356,18 @@ _SEARCH_TOOLS_NOTE = (
 )
 
 
+_TITLE_INSTRUCTIONS = (
+    "Name this conversation for a sidebar: at most 6 words (or 14 characters "
+    "in Chinese or Japanese), in the language the user wrote in, saying what "
+    "it's about. Reply with the title only -- no quotes, no ending punctuation."
+)
+
+
+def _clean_title(text: str) -> str:
+    title = " ".join(text.strip().splitlines()[0].split()) if text.strip() else ""
+    return title.strip("\"'“”「」《》*#。.").strip()[:80]
+
+
 class ChatSessionLG:
     def __init__(
         self,
@@ -367,6 +382,7 @@ class ChatSessionLG:
         enabled_skill_names: set[str] | None = None,
         workspace_root: Path | None = None,
         workspace_explicit: bool = False,
+        extra_folders: list[Path] | None = None,
     ) -> None:
         self.thread_id = thread_id
         self.settings = settings
@@ -375,13 +391,12 @@ class ChatSessionLG:
         # settings.workspace_root -- see coordinator.py's identical
         # fallback in build_coordinator_agent.
         self.workspace_root: Path = workspace_root or settings.workspace_root
-        # True iff app.py's _resolve_workspace found a real per-thread
-        # choice (sidecar file), not the settings.workspace_root fallback
-        # -- select_workspace's "already set" guard needs this sentinel,
-        # not a path comparison, since a user can legitimately choose the
-        # same directory as the default (see _resolve_workspace's
-        # docstring).
+        # A flag, not a comparison with settings.workspace_root: a user can
+        # deliberately choose the default folder, and the UI should show it
+        # as chosen.
         self._workspace_explicit = workspace_explicit
+        # Folders added after the first; readable and writable like it.
+        self.extra_folders: list[Path] = list(extra_folders or [])
         self._context_window_client = context_window_client
         self._context_window: int | None = None
         self._pending_approvals: dict[str, Future[bool]] = {}
@@ -439,12 +454,7 @@ class ChatSessionLG:
         self.pending_save_skill_proposal: dict[str, Any] | None = None
 
         self.enabled_skill_names: set[str] = set(enabled_skill_names or ())
-        agent = build_coordinator_agent(
-            settings,
-            thread_id,
-            skill_names=self.enabled_skill_names,
-            workspace_root=self.workspace_root,
-        )
+        agent = self._build_agent()
         # Unrestricted by enabled_skill_names deliberately -- a /<slug>
         # slash command is an explicit, one-off user request to follow
         # that skill for this message, distinct from the passive "is it
@@ -483,6 +493,7 @@ class ChatSessionLG:
         # that. Combined back in by _build_lg_tools below (same treatment
         # spawn_agent/review_work already get).
         self._extra_tools: list[Callable[..., Any] | BaseTool] = list(extra_tools)
+        self._title_task: asyncio.Task[None] | None = None
         self._instructions = _build_instructions(
             agent.instructions, defer_tools=settings.defer_tools
         )
@@ -565,6 +576,57 @@ class ChatSessionLG:
             self._build_draft_workflow_tool(),
         ]
 
+    def _title_path(self) -> Path:
+        # The same sidecar app.py's rename endpoint writes and list_threads
+        # reads.
+        return Path(self.settings.state_dir) / f"{self.thread_id}.title"
+
+    def _wants_title(self) -> bool:
+        return (
+            self.settings.auto_title_threads
+            and not self._stop_requested
+            and parse_run_thread_id(self.thread_id) is None
+            and not self._title_path().exists()
+            and (self._title_task is None or self._title_task.done())
+        )
+
+    async def _name_thread(self, websocket: WebSocket) -> None:
+        """A short title from the conversation's first exchange."""
+        try:
+            state = await self.lg_agent.aget_state(self.config)
+            messages = list(state.values.get("messages", [])) if state.values else []
+            first_user = next(
+                (strip_mode_note(_extract_text(m.content)) for m in messages if m.type == "human"),
+                "",
+            )
+            last_reply = next(
+                (
+                    _extract_text(m.content)
+                    for m in reversed(messages)
+                    if m.type == "ai" and _extract_text(m.content)
+                ),
+                "",
+            )
+            if not first_user.strip():
+                return
+            reply = await self.model.ainvoke(
+                [
+                    SystemMessage(content=_TITLE_INSTRUCTIONS),
+                    HumanMessage(
+                        content=f"User: {first_user[:1500]}\n\nAssistant: {last_reply[:1500]}"
+                    ),
+                ],
+                config={"tags": [TAG_NOSTREAM]},
+            )
+            title = _clean_title(_extract_text(reply.content))
+            if not title or self._title_path().exists():
+                return
+            self._title_path().parent.mkdir(parents=True, exist_ok=True)
+            self._title_path().write_text(title, encoding="utf-8")
+            await websocket.send_json({"type": "thread_titled", "title": title})
+        except Exception:  # noqa: BLE001 -- a missing title is harmless; the first message stays the label
+            logger.info("could not name thread %s", self.thread_id, exc_info=True)
+
     def _build_draft_workflow_tool(self) -> BaseTool:
         async def draft_workflow_tool(
             state: Annotated[dict[str, Any], InjectedState], name: str = ""
@@ -598,8 +660,11 @@ class ChatSessionLG:
                 "checks, and a model step only where judgment was used. For a task the "
                 "user wants to repeat exactly -- a fixed, stable workflow. Nothing is "
                 "saved: the user reviews the draft on a card and saves it. Needs this "
-                "conversation to have done the task with tools already. `name`: a short "
-                "name for it, or empty to let the draft name itself."
+                "conversation to have done the task with tools already. Call it once, "
+                "as the last thing in your reply, after the work is finished -- a draft "
+                "made before more changes is already out of date. Call it again only "
+                "when the user asks for a new draft. `name`: a short name for it, or "
+                "empty to let the draft name itself."
             ),
         )
 
@@ -842,57 +907,70 @@ class ChatSessionLG:
             self.lg_agent = new_lg_agent
             self._gated_tool_risks = _risks_of_gated_tools(lg_tools)
 
-    async def select_workspace(self, path: str, websocket: WebSocket) -> bool:
-        """The WS-message counterpart to passing ?workspace= at connect
-        time (see app.py's ws_endpoint/_resolve_workspace) -- lets the
-        new-session workspace picker fire *after* the socket is already
-        open (the picker only shows once the first "state" event confirms
-        this is a genuinely fresh thread, by which point _get_session
-        already built this session against the fallback
-        settings.workspace_root).
+    def _build_agent(self) -> Any:
+        return build_coordinator_agent(
+            self.settings,
+            self.thread_id,
+            skill_names=self.enabled_skill_names,
+            workspace_root=self.workspace_root,
+            extra_folders=self.extra_folders,
+        )
 
-        Rebuilds self._base_tools/self.lg_agent from scratch via
-        build_coordinator_agent with the new root, same revert-on-failure
-        shape as set_enabled_skills below (a bad path -- e.g. one that
-        can't be created -- must not corrupt an otherwise-working
-        session).
+    @property
+    def folders(self) -> list[Path]:
+        """The folders this conversation works in, the main one first;
+        empty while it uses the app's default workspace."""
+        return [self.workspace_root, *self.extra_folders] if self._workspace_explicit else []
 
-        Returns whether the switch actually took effect -- unlike
-        set_enabled_skills (whose caller in app.py's ws_endpoint always
-        persists the sidecar unconditionally), a rejected workspace
-        change must NOT have its (different, unapplied) path written to
-        the sidecar --
-        that would desync the sidecar from this session's actual
-        in-memory workspace_root, and a later reconnect reading the
-        sidecar fresh would try to rebuild against the bad/rejected path
-        with no revert-on-failure safety net at that point (a startup
-        crash, not a soft in-turn error). The caller only writes the
-        sidecar when this returns True."""
-        if self._workspace_explicit:
-            await websocket.send_json(
-                {"type": "error", "message": "This thread already has a workspace set."}
-            )
-            return False
-        previous_workspace_root = self.workspace_root
-        previous_instructions = self._instructions
-        previous_base_tools = self._base_tools
-        previous_lg_agent = self.lg_agent
-        previous_gated_tool_risks = self._gated_tool_risks
+    async def set_folders(self, paths: list[str], websocket: WebSocket) -> bool:
+        """Replace this conversation's folders -- any time between turns.
+        The first is the main one (relative paths resolve there); none
+        means the app's default workspace. Rebuilds the tools against them,
+        leaving the session as it was if that fails. Returns whether it
+        took effect, so the caller persists only what's in use."""
+        # A short wait, not an immediate refusal: resume_after_reconnect
+        # holds the lock for a moment right after every connect. Waiting for
+        # a real turn instead would stall this socket's receive loop, and
+        # with it the approval that turn may be waiting on. Polled rather
+        # than wait_for(acquire()): on 3.11 a timeout racing the acquire can
+        # leave the lock held with nobody to release it.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 2
+        while self._turn_lock.locked():
+            if loop.time() >= deadline:
+                message = "Wait for the reply to finish, then change folders."
+                await websocket.send_json({"type": "error", "message": message})
+                return False
+            await asyncio.sleep(0.05)
+        async with self._turn_lock:
+            return await self._apply_folders(paths, websocket)
+
+    async def _apply_folders(self, paths: list[str], websocket: WebSocket) -> bool:
+        chosen: list[Path] = []
+        for raw in paths:
+            folder = Path(raw).expanduser()
+            if not folder.is_absolute() or not folder.is_dir():
+                await websocket.send_json(
+                    {"type": "error", "message": f"{raw!r} isn't an existing folder."}
+                )
+                return False
+            if folder not in chosen:
+                chosen.append(folder)
+        previous = (
+            self.workspace_root,
+            self.extra_folders,
+            self._workspace_explicit,
+            self._instructions,
+            self._base_tools,
+            self.lg_agent,
+            self._gated_tool_risks,
+        )
         self._context_window = None
         try:
-            # Unlike set_enabled_skills, build_coordinator_agent itself is
-            # inside this try -- a folder a WorkspaceScope can't mkdir into
-            # (permission denied, invalid path syntax) is a real, easily
-            # user-triggered failure mode for a folder-picker-driven path
-            # in a way a skill lookup rarely is, and it must be caught
-            # here rather than crashing the WS message loop.
-            self.workspace_root = Path(path)
-            agent = build_coordinator_agent(
-                self.settings,
-                self.thread_id,
-                skill_names=self.enabled_skill_names,
-                workspace_root=self.workspace_root,
-            )
+            self.workspace_root = chosen[0] if chosen else Path(self.settings.workspace_root)
+            self.extra_folders = chosen[1:]
+            self._workspace_explicit = bool(chosen)
+            agent = self._build_agent()
             self._instructions = _build_instructions(
                 agent.instructions, defer_tools=self.settings.defer_tools
             )
@@ -900,20 +978,22 @@ class ChatSessionLG:
             lg_tools = self._build_lg_tools(self.model)
             new_gated_tool_risks = _risks_of_gated_tools(lg_tools)
             new_lg_agent = self._build_lg_agent(self.model, self._model_string, lg_tools)
-        except Exception as exc:  # noqa: BLE001 -- a bad workspace path must not corrupt session state
-            self.workspace_root = previous_workspace_root
-            self._instructions = previous_instructions
-            self._base_tools = previous_base_tools
-            self.lg_agent = previous_lg_agent
-            self._gated_tool_risks = previous_gated_tool_risks
-            self._context_window = None
+        except Exception as exc:  # noqa: BLE001 -- a bad folder must not corrupt session state
+            (
+                self.workspace_root,
+                self.extra_folders,
+                self._workspace_explicit,
+                self._instructions,
+                self._base_tools,
+                self.lg_agent,
+                self._gated_tool_risks,
+            ) = previous
             await websocket.send_json(
-                {"type": "error", "message": f"Could not switch to workspace {path!r}: {exc}"}
+                {"type": "error", "message": f"Could not use those folders: {exc}"}
             )
             return False
         self.lg_agent = new_lg_agent
         self._gated_tool_risks = new_gated_tool_risks
-        self._workspace_explicit = True
         await self.send_state(websocket)
         return True
 
@@ -936,9 +1016,7 @@ class ChatSessionLG:
         previous_gated_tool_risks = self._gated_tool_risks
         previous_enabled_skill_names = self.enabled_skill_names
         self.enabled_skill_names = set(skill_names)
-        agent = build_coordinator_agent(
-            self.settings, self.thread_id, skill_names=self.enabled_skill_names
-        )
+        agent = self._build_agent()
         self._instructions = _build_instructions(
             agent.instructions, defer_tools=self.settings.defer_tools
         )
@@ -989,6 +1067,7 @@ class ChatSessionLG:
             "enabled_skills": sorted(self.enabled_skill_names),
             "workspace_root": str(self.workspace_root),
             "workspace_explicit": self._workspace_explicit,
+            "folders": [str(folder) for folder in self.folders],
         }
         if on_connect:
             # A tab opening mid-turn (most often: a scheduled run executing
@@ -1001,8 +1080,8 @@ class ChatSessionLG:
     def workspace_scope(self) -> WorkspaceScope:
         return WorkspaceScope(
             self.workspace_root,
-            extra_readable=self.settings.extra_readable_dirs,
-            extra_writable=self.settings.extra_writable_dirs,
+            extra_readable=[*self.settings.extra_readable_dirs, *self.extra_folders],
+            extra_writable=[*self.settings.extra_writable_dirs, *self.extra_folders],
         )
 
     def workflow_context(self, model: str | None) -> StepContext:
@@ -1102,12 +1181,24 @@ class ChatSessionLG:
         last_total = (
             self._last_usage_metadata["total_tokens"] if self._last_usage_metadata else None
         )
+        base_tools = list(self._base_tools)
+        mcp_tools = list(self._extra_tools)
+        if self.settings.defer_tools:
+            # Only what a request sends counts; the rest waits behind
+            # search_tools.
+            state = await self.lg_agent.aget_state(self.config)
+            messages = list(state.values.get("messages", [])) if state.values else []
+            bound = bound_tool_names(CORE_TOOL_NAMES, messages)
+            deferred = [t for t in [*base_tools, *mcp_tools] if tool_name(t) not in bound]
+            base_tools = [t for t in base_tools if tool_name(t) in bound]
+            base_tools.append(build_search_tools_tool(deferred))
+            mcp_tools = [t for t in mcp_tools if tool_name(t) in bound]
         return await asyncio.to_thread(
             build_context_breakdown,
             instructions=self._instructions,
             skills_listing=skills_listing,
-            base_tools=list(self._base_tools),
-            mcp_tools=list(self._extra_tools),
+            base_tools=base_tools,
+            mcp_tools=mcp_tools,
             context_window=self._context_window or 0,
             auto_compact_threshold=self.settings.auto_compact_threshold,
             last_total_tokens=last_total,
@@ -1393,9 +1484,14 @@ class ChatSessionLG:
                 await websocket.send_json(_usage_event(segment.usage_metadata))
             segment = None
 
-        stream = agent.astream(turn_input, config=config, stream_mode=["messages"])
+        # "updates" is only for the model node's finished message: it lands
+        # before any of its tool calls run, which "messages" has no event for.
+        stream = agent.astream(turn_input, config=config, stream_mode=["messages", "updates"])
         try:
-            async for _mode, chunk in stream:
+            async for mode, chunk in stream:
+                if mode == "updates":
+                    await self._announce_started_tools(chunk, websocket)
+                    continue
                 message, _metadata = chunk
                 if isinstance(message, AIMessageChunk):
                     text = _extract_text(message.content)
@@ -1482,6 +1578,30 @@ class ChatSessionLG:
         _flush_accumulated()
         await _capture_segment_usage()
         return "".join(text_parts)
+
+    async def _announce_started_tools(self, update: Any, websocket: WebSocket) -> None:
+        """Tells the page which ungated calls are about to run, so it can
+        show them running. Gated ones are announced by the approval path
+        instead, and only when nobody is asked: a call waiting for approval
+        shows as its approval card."""
+        if not isinstance(update, dict):
+            return
+        for node_update in update.values():
+            if not isinstance(node_update, dict):
+                continue
+            for message in node_update.get("messages", []) or []:
+                if not isinstance(message, AIMessage):
+                    continue
+                for call in message.tool_calls:
+                    if call["name"] not in self._gated_tool_risks:
+                        await self._send_tool_started(call["name"], call["args"], websocket)
+
+    async def _send_tool_started(
+        self, name: str, args: dict[str, Any], websocket: WebSocket
+    ) -> None:
+        if name in QUESTION_TOOL_NAMES or name in TASK_DRAFT_TOOL_NAMES:
+            return
+        await websocket.send_json({"type": "tool_started", "tool_name": name, "arguments": args})
 
     async def _run_pre_tool_use_hooks(self, name: str, args: dict[str, Any]) -> str | None:
         """Returns a denial reason if any configured PreToolUse hook vetoes
@@ -1794,6 +1914,7 @@ class ChatSessionLG:
                 reason="exec_policy",
                 detail=exec_policy_detail,
             )
+            await self._send_tool_started(name, args, websocket)
             return {"type": "approve"}
         auto_reason = self._auto_approves(name)
         if auto_reason is not None:
@@ -1805,6 +1926,7 @@ class ChatSessionLG:
                 decision="approve",
                 reason=auto_reason,
             )
+            await self._send_tool_started(name, args, websocket)
             return {"type": "approve"}
         if not _can_resolve_approvals(websocket):
             # Reached only when this call is genuinely gated and neither
@@ -2707,3 +2829,6 @@ class ChatSessionLG:
         if self._last_usage_metadata is not None:
             await websocket.send_json(_usage_event(self._last_usage_metadata))
         await websocket.send_json({"type": "tasks_changed"})
+        if self._wants_title():
+            # Off the turn's own path: the reply is done, the title can lag.
+            self._title_task = asyncio.create_task(self._name_thread(websocket))

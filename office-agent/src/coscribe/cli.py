@@ -334,6 +334,9 @@ def chat(
 ) -> None:
     """Start an interactive chat session on the LangGraph-based runtime."""
     settings = _load_settings()
+    # Titles only show in the web sidebar; here they'd cost a model call per
+    # conversation for nothing on screen.
+    settings.auto_title_threads = False
     logging.basicConfig(level=settings.log_level)
     if check_wakes:
         asyncio.run(_check_wakes_async(settings))

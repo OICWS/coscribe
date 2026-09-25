@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { getProviders } from "../../lib/rest";
 import { ToggleSwitch } from "../ToggleSwitch";
 import { BACKGROUND_ON_CLOSE_KEY, GENERAL_FIELDS, LOG_LEVEL_KEY, LOG_LEVELS } from "./fields";
 import { GlobalInstructionsSection } from "./GlobalInstructionsSection";
@@ -10,6 +12,45 @@ interface GeneralTabProps {
 }
 
 type LogLevel = (typeof LOG_LEVELS)[number]["value"];
+
+const DEFAULT_MODEL_KEY = "COSCRIBE_DEFAULT_MODEL";
+
+/** "provider:model" for every provider set up with a default model. */
+function useConfiguredModels(): string[] {
+  const [models, setModels] = useState<string[]>([]);
+  useEffect(() => {
+    getProviders()
+      .then((providers) =>
+        setModels(
+          Object.entries(providers)
+            .filter(([, info]) => info.default_model)
+            .map(([key, info]) => `${key}:${info.default_model}`),
+        ),
+      )
+      .catch(() => {});
+  }, []);
+  return models;
+}
+
+function DefaultModelSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const models = useConfiguredModels();
+  const options = value && !models.includes(value) ? [value, ...models] : models;
+  return (
+    <select
+      aria-label="Default model"
+      className="w-56 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none focus:border-[var(--accent)]"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {options.length === 0 && <option value="">Set up a provider first</option>}
+      {options.map((model) => (
+        <option key={model} value={model}>
+          {model.split(":").slice(1).join(":")} · {model.split(":")[0]}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 /** Coerces a stored value into one SegmentedControl actually recognizes,
  * so a case difference (config.py stores/accepts either case) or an
@@ -25,8 +66,8 @@ export function GeneralTab({ values, onChange }: GeneralTabProps) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-xs text-[var(--muted)]">
-        These write to <code>.env</code> and require restarting coscribe-web to take effect.
-        <code>HTTPS_PROXY</code>/<code>HTTP_PROXY</code> aren't configurable here.
+        These write to <code>.env</code>. Default Model and Max Turns apply to new sessions right away; Log Level needs
+        a restart of coscribe-web. <code>HTTPS_PROXY</code>/<code>HTTP_PROXY</code> aren't configurable here.
       </p>
       <div className="flex flex-col divide-y divide-[var(--border)]">
         {GENERAL_FIELDS.map((field) => (
@@ -35,11 +76,15 @@ export function GeneralTab({ values, onChange }: GeneralTabProps) {
             label={field.label}
             description={field.description}
             control={
-              <SettingRowInput
-                value={values[field.key] ?? ""}
-                placeholder={field.placeholder}
-                onChange={(v) => onChange(field.key, v)}
-              />
+              field.key === DEFAULT_MODEL_KEY ? (
+                <DefaultModelSelect value={values[field.key] ?? ""} onChange={(v) => onChange(field.key, v)} />
+              ) : (
+                <SettingRowInput
+                  value={values[field.key] ?? ""}
+                  placeholder={field.placeholder}
+                  onChange={(v) => onChange(field.key, v)}
+                />
+              )
             }
           />
         ))}
@@ -60,7 +105,9 @@ export function GeneralTab({ values, onChange }: GeneralTabProps) {
           control={
             <ToggleSwitch
               on={values[BACKGROUND_ON_CLOSE_KEY] !== "false"}
-              onClick={() => onChange(BACKGROUND_ON_CLOSE_KEY, values[BACKGROUND_ON_CLOSE_KEY] === "false" ? "true" : "false")}
+              onClick={() =>
+                onChange(BACKGROUND_ON_CLOSE_KEY, values[BACKGROUND_ON_CLOSE_KEY] === "false" ? "true" : "false")
+              }
             />
           }
         />
