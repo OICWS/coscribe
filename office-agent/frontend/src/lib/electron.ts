@@ -108,12 +108,17 @@ export function setTitleBarColors(color: string, symbolColor: string): void {
   window.coscribeDesktop?.setTitleBarColors?.(color, symbolColor);
 }
 
+export function onShowShortcuts(callback: () => void): void {
+  window.coscribeDesktop?.onShowShortcuts?.(callback);
+}
+
 declare global {
   interface Window {
     coscribeDesktop: {
       platform?: string;
       showAppMenu?(x: number, y: number): void;
       setTitleBarColors?(color: string, symbolColor: string): void;
+      onShowShortcuts?(callback: () => void): void;
       pickFolder(): Promise<string | null>;
       browserPanelOpen(rect: BrowserPanelRect): Promise<void>;
       browserPanelReposition(rect: BrowserPanelRect): Promise<void>;

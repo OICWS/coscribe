@@ -6136,6 +6136,35 @@ limited to file edits, Auto decided by a reviewer model.
       stale (Log Level input, the "Approved" label, Auto as default);
       updated, plus a Back/Forward test. 12/12 pass.
 
+## Phase 8bk -- Title bar fixes from the first Windows build; centered home (shipped)
+
+First packaged Windows test of 8bj: colors, dragging, snapping and Alt
+all fine, but ☰ and the sidebar toggle couldn't be clicked or hovered.
+
+- [x] **Cause**: Windows computes the drag area in page order, each
+      no-drag element subtracting from what came before. The main top
+      row (draggable, full width under the collapsed sidebar cluster)
+      came after the sidebar in the page, so it turned the sidebar's
+      buttons back into drag area. Reproduced under Xvfb with real
+      xdotool clicks on the 8bj build (hover and click both dead);
+      8bj's own check had clicked through CDP, which bypasses this.
+- [x] **Fix, and Claude's layout**: a 40px title bar across the whole
+      window (drag area, "⋮" for Settings, the OS buttons), the sidebar
+      rendered last in the page; the session title, task-panel,
+      Browser and Sub Agents buttons on a second row below it. The "?"
+      button left the desktop layout for Help > Keyboard Shortcuts
+      (Ctrl+/) in the app menu. Side panels open below the title bar.
+      Real-input checks: hover/click on the toggle, ☰, ⋮, the Help
+      menu item.
+- [x] **Home screen**: a new conversation shows "Good morning/
+      afternoon/evening!" (serif, plain text color) with the message box
+      centered below it -- +, Add folder and the model picker; the mode
+      pill and context ring appear once the conversation starts.
+- [x] **Windows only**: the macOS branches (traffic-light spacing, hiding
+      ☰) are gone.
+- [ ] Known: a dialog's dimmed backdrop doesn't cover the OS buttons'
+      area at the top-right, which stays at the page color.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

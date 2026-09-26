@@ -68,6 +68,7 @@ interface BrowserPanelPickedPayload {
 
 const SHOW_APP_MENU_CHANNEL = "window:show-app-menu";
 const SET_TITLE_BAR_COLORS_CHANNEL = "window:set-title-bar-colors";
+const SHOW_SHORTCUTS_CHANNEL = "app:show-shortcuts";
 
 contextBridge.exposeInMainWorld("coscribeDesktop", {
   /** The page draws the window's top bar (see main/windowChrome.ts). */
@@ -78,10 +79,14 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
     ipcRenderer.send(SHOW_APP_MENU_CHANNEL, { x, y });
   },
 
-  /** Recolors the OS window buttons to match the page's theme, as
-   * #rrggbb. No effect on macOS, whose traffic lights keep their colors. */
+  /** Recolors the OS window buttons to match the page's theme, as #rrggbb. */
   setTitleBarColors(color: string, symbolColor: string): void {
     ipcRenderer.send(SET_TITLE_BAR_COLORS_CHANNEL, { color, symbolColor });
+  },
+
+  /** Help > Keyboard Shortcuts in the application menu. */
+  onShowShortcuts(callback: () => void): void {
+    ipcRenderer.on(SHOW_SHORTCUTS_CHANNEL, () => callback());
   },
 
   /** Fires once, only on a real startup failure (sidecar process

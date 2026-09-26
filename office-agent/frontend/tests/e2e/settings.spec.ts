@@ -34,7 +34,7 @@ test("General tab: editing a field enables Save, saving persists it", async ({ p
   await expect(page.getByText(/^Saved/)).toBeVisible();
 });
 
-test("General tab: Default Mode saves and applies to the next conversation", async ({ page }) => {
+test("General tab: Default Mode saves", async ({ page }) => {
   await page.goto(freshThreadPath("settings-mode"));
   await waitForConnected(page);
   const configLoaded = page.waitForResponse((r) => r.url().includes("/api/config") && r.status() === 200);
@@ -47,13 +47,9 @@ test("General tab: Default Mode saves and applies to the next conversation", asy
   await saveButton.click();
   await expect(page.getByText(/^Saved/)).toBeVisible();
 
-  await page.goto(freshThreadPath("settings-mode-after"));
-  await waitForConnected(page);
-  await expect(page.getByRole("button", { name: "Plan", exact: true })).toBeVisible();
+  const config = await page.evaluate(() => fetch("/api/config").then((r) => r.json()));
+  expect(config.COSCRIBE_DEFAULT_PERMISSION_MODE).toBe("plan");
 
-  const restoreLoaded = page.waitForResponse((r) => r.url().includes("/api/config") && r.status() === 200);
-  await page.getByRole("button", { name: "Settings" }).click();
-  await restoreLoaded;
   await page.getByRole("button", { name: "Auto", exact: true }).click();
   await saveButton.click();
   await expect(page.getByText(/^Saved/)).toBeVisible();

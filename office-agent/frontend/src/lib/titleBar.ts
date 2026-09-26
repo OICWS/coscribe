@@ -5,14 +5,10 @@ import { setTitleBarColors, titleBarPlatform } from "./electron";
  * page (office-agent-desktop's main/windowChrome.ts). */
 export const TITLE_BAR_PLATFORM = titleBarPlatform();
 export const DRAWS_TITLE_BAR = TITLE_BAR_PLATFORM !== null;
-export const MAC_TITLE_BAR = TITLE_BAR_PLATFORM === "darwin";
-
-/** Room kept clear for macOS's traffic lights at the row's left. */
-export const TRAFFIC_LIGHTS_WIDTH = MAC_TITLE_BAR ? 78 : 0;
 
 /** Width of the top-left cluster (menu, sidebar toggle, back, forward)
  * while the sidebar is collapsed: 36px buttons, 2px gaps, 6px padding. */
-export const COLLAPSED_CLUSTER_WIDTH = DRAWS_TITLE_BAR ? TRAFFIC_LIGHTS_WIDTH + (MAC_TITLE_BAR ? 3 : 4) * 38 + 10 : 48;
+export const COLLAPSED_CLUSTER_WIDTH = DRAWS_TITLE_BAR ? 4 * 38 + 10 : 48;
 
 function sendThemeColors() {
   const styles = getComputedStyle(document.documentElement);

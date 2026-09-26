@@ -1,18 +1,19 @@
 /**
  * The main window draws its own top bar: the OS title bar and menu bar
- * are hidden, the OS keeps drawing minimize/maximize/close (Windows,
- * Linux) or the traffic lights (macOS), and the page's top row is the
- * drag area. The application menu still exists -- its shortcuts keep
- * working -- and the page opens it from its "☰" button.
+ * are hidden, Windows keeps drawing minimize/maximize/close, and the
+ * page's top row is the drag area. The application menu still exists --
+ * its shortcuts keep working -- and the page opens it from its "☰"
+ * button.
  */
 
 import { BrowserWindow, Menu, ipcMain, nativeTheme, shell, type BrowserWindowConstructorOptions } from "electron";
 
-/** Matches the frontend's top row (h-12) so the OS buttons sit centered in it. */
-export const TITLE_BAR_HEIGHT = 48;
+/** Matches the frontend's title bar (h-10) so the OS buttons sit centered in it. */
+export const TITLE_BAR_HEIGHT = 40;
 
 const SHOW_APP_MENU_CHANNEL = "window:show-app-menu";
 const SET_TITLE_BAR_COLORS_CHANNEL = "window:set-title-bar-colors";
+const SHOW_SHORTCUTS_CHANNEL = "app:show-shortcuts";
 
 interface TitleBarColors {
   color: string;
@@ -29,12 +30,12 @@ function defaultColors(): TitleBarColors {
 
 export function titleBarWindowOptions(): BrowserWindowConstructorOptions {
   const colors = defaultColors();
-  const common = { titleBarStyle: "hidden" as const, backgroundColor: colors.color };
-  if (process.platform === "darwin") {
-    // Traffic lights are 12px tall with ~20px spacing; centered in the row.
-    return { ...common, trafficLightPosition: { x: 18, y: (TITLE_BAR_HEIGHT - 12) / 2 } };
-  }
-  return { ...common, autoHideMenuBar: true, titleBarOverlay: { ...colors, height: TITLE_BAR_HEIGHT } };
+  return {
+    titleBarStyle: "hidden",
+    backgroundColor: colors.color,
+    autoHideMenuBar: true,
+    titleBarOverlay: { ...colors, height: TITLE_BAR_HEIGHT },
+  };
 }
 
 function goBy(win: BrowserWindow | undefined, offset: 1 | -1): void {
@@ -45,9 +46,7 @@ function goBy(win: BrowserWindow | undefined, offset: 1 | -1): void {
 }
 
 function buildAppMenu(): Menu {
-  const mac = process.platform === "darwin";
   return Menu.buildFromTemplate([
-    ...(mac ? [{ role: "appMenu" as const }] : []),
     { role: "fileMenu" },
     { role: "editMenu" },
     { role: "viewMenu" },
@@ -56,12 +55,12 @@ function buildAppMenu(): Menu {
       submenu: [
         {
           label: "Back",
-          accelerator: mac ? "Cmd+[" : "Alt+Left",
+          accelerator: "Alt+Left",
           click: (_item, win) => goBy(win as BrowserWindow | undefined, -1),
         },
         {
           label: "Forward",
-          accelerator: mac ? "Cmd+]" : "Alt+Right",
+          accelerator: "Alt+Right",
           click: (_item, win) => goBy(win as BrowserWindow | undefined, 1),
         },
       ],
@@ -70,6 +69,12 @@ function buildAppMenu(): Menu {
     {
       role: "help",
       submenu: [
+        {
+          label: "Keyboard Shortcuts",
+          accelerator: "Ctrl+/",
+          click: (_item, win) => (win as BrowserWindow | undefined)?.webContents.send(SHOW_SHORTCUTS_CHANNEL),
+        },
+        { type: "separator" },
         {
           label: "coscribe on GitHub",
           click: () => void shell.openExternal("https://github.com/OICWS/coscribe"),
@@ -98,7 +103,7 @@ export function registerWindowChromeHandlers(): void {
 
   ipcMain.on(SET_TITLE_BAR_COLORS_CHANNEL, (event, colors: TitleBarColors) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || process.platform === "darwin") return;
+    if (!win) return;
     if (!isColor(colors?.color) || !isColor(colors?.symbolColor)) return;
     win.setBackgroundColor(colors.color);
     win.setTitleBarOverlay({ color: colors.color, symbolColor: colors.symbolColor, height: TITLE_BAR_HEIGHT });

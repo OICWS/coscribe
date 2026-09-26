@@ -4,12 +4,14 @@ import { freshThreadPath, waitForConnected } from "./helpers";
 test("approval-gated tool call: approve card appears, approving runs the tool and finishes the turn", async ({
   page,
 }) => {
+  // New conversations start in Auto, where a reviewer model decides
+  // instead of asking; the mode pill only appears once a conversation
+  // has started, so this sets the default instead.
+  const setDefaultMode = (mode: string) =>
+    page.request.post("/api/config", { data: { updates: { COSCRIBE_DEFAULT_PERMISSION_MODE: mode } } });
+  await setDefaultMode("manual");
   await page.goto(freshThreadPath("approval"));
   await waitForConnected(page);
-  // New conversations start in Auto, where a reviewer model decides instead of asking.
-  await page.getByRole("button", { name: "Auto", exact: true }).click();
-  await page.getByRole("menuitemradio", { name: /^Manual/ }).click();
-  await expect(page.getByRole("button", { name: "Manual", exact: true })).toBeVisible();
   const textarea = page.locator("textarea");
   await textarea.click();
   await textarea.fill(
@@ -33,4 +35,6 @@ test("approval-gated tool call: approve card appears, approving runs the tool an
   // summary) before turnInFlight clears -- two chained LLM calls, longer
   // timeout than a single-turn reply.
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Manual", exact: true })).toBeVisible();
+  await setDefaultMode("auto");
 });
