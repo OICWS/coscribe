@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   groupHasPendingApproval,
   groupToolRuns,
@@ -373,6 +373,43 @@ function TurnView({
   );
 }
 
+/** The Sub Agents panel leaves out the "+N -M" line counts. */
+const ShowDiffStats = createContext(true);
+
+/** A read-only transcript -- a sub-agent's, in the Sub Agents panel --
+ * drawn with the chat's own components. `live` shows its last call as
+ * running. */
+export function TranscriptItems({
+  items,
+  live,
+  onApprove,
+}: {
+  items: LogItem[];
+  live: boolean;
+  onApprove: (id: string, approved: boolean) => void;
+}) {
+  const entries = groupToolRuns(items);
+  return (
+    <ShowDiffStats.Provider value={false}>
+      <div className="flex flex-col gap-3">
+        {entries.map((entry) =>
+          entry.kind === "tool_run" ? (
+            <ToolRunGroupView
+              key={entry.id}
+              group={entry}
+              live={live}
+              onApprove={onApprove}
+              onPptxShapePicked={() => {}}
+            />
+          ) : entry.kind === "agent" ? (
+            <LogItemView key={entry.id} item={entry} />
+          ) : null,
+        )}
+      </div>
+    </ShowDiffStats.Provider>
+  );
+}
+
 /** Clauses after the first read as one sentence ("Ran 3 commands, read a
  * file"); an acronym-led verb ("PDF ...") keeps its capitals. */
 function inSentence(parts: SummaryParts, index: number): SummaryParts {
@@ -385,6 +422,7 @@ function inSentence(parts: SummaryParts, index: number): SummaryParts {
  * object is plain text so the shimmer (clipped to the text) runs through
  * it too. */
 function SummaryLabel({ parts }: { parts: SummaryParts }) {
+  const showDiffStats = useContext(ShowDiffStats);
   if (parts.shimmer) {
     return (
       <span className="shimmer-text">
@@ -402,7 +440,7 @@ function SummaryLabel({ parts }: { parts: SummaryParts }) {
           <code className="rounded bg-[var(--code-bg)] px-1 py-0.5 font-mono text-[0.85em]">{parts.object}</code>
         </>
       )}
-      {parts.diffStat && <DiffStat added={parts.diffStat.added} removed={parts.diffStat.removed} />}
+      {showDiffStats && parts.diffStat && <DiffStat added={parts.diffStat.added} removed={parts.diffStat.removed} />}
       {parts.failedCount !== undefined && (
         <span className="ml-1 text-[var(--danger)]">({parts.failedCount} failed)</span>
       )}

@@ -126,6 +126,18 @@ export interface ApprovalRequiredEvent {
    * an error, just nothing to show beside the raw arguments below. */
   before_preview: string | null;
   after_preview: string | null;
+  /** Set when a sub-agent is the one asking: the Sub Agents panel shows
+   * it, not the chat. */
+  subagent_id?: string;
+  subagent?: string;
+}
+
+/** A sub-agent of this conversation started, progressed, asked for
+ * approval or finished. */
+export interface SubAgentsChangedEvent {
+  type: "subagents_changed";
+  task_id: string;
+  status: string;
 }
 
 /** ask_user_question's own interrupt -- unlike approval_required, there's
@@ -252,6 +264,7 @@ export type WsServerEvent =
   | OlderMessagesEvent
   | AgentDeltaEvent
   | ToolStartedEvent
+  | SubAgentsChangedEvent
   | ToolResultEvent
   | ApprovalRequiredEvent
   | QuestionRequiredEvent

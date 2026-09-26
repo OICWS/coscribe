@@ -23,9 +23,9 @@ from .scheduled_tasks import (
 from .selfwake import poll_due_wakes
 from .skill_authoring import SkillSaveProposal, propose_skill_save_lg, write_skill_lg
 from .subagents import (
+    SubAgentHost,
+    build_delegation_tools,
     build_review_work_tool,
-    build_spawn_agent_background_tool,
-    build_spawn_agent_tool,
 )
 
 __all__ = [
@@ -33,9 +33,9 @@ __all__ = [
     "EXEC_POLICY_TOOL_NAMES",
     "ExecPolicy",
     "build_langgraph_agent",
+    "SubAgentHost",
+    "build_delegation_tools",
     "build_review_work_tool",
-    "build_spawn_agent_background_tool",
-    "build_spawn_agent_tool",
     "connect_mcp_tools_lg",
     "continue_workflow_run",
     "extract_text",

@@ -3436,3 +3436,49 @@ names), since a bare "search for tools" gave the model no reason to
 expect, say, a browser. Measured on one thread with Playwright
 connected: 12,781 tokens bound with deferral, 46,478 without. See
 ROADMAP Phase 8bc.
+
+## Sub-agents: approvals through the session, not through the parent's graph (2026-09-26)
+
+The nested-interrupt bridge described above (a synchronous `spawn_agent`
+calling `interrupt()` from inside the parent's tool node to pass a
+child's approval up, and the shared child checkpointer that fixed its
+replay bug) is gone, along with `scripts/verify_nested_interrupt.py` and
+`scripts/verify_concurrent_spawn_agent.py`. Both delegation tools now start
+the child as its own asyncio task (`runtime_lg/subagents.py`'s `_drive`),
+and a child's pending action requests go to `SubAgentHost.decide` -- the
+session's own `_decide_action_request`, given a stand-in socket
+(`_SubAgentApprovalChannel`) that records the approval on the task for the
+Sub Agents panel. Why:
+
+- The user answers a sub-agent's approvals in the panel, and a background
+  run can ask long after the parent's turn has ended. The bridge only
+  worked while the parent was blocked in the tool call.
+- Plan mode, Accept Edits, exec policy and hooks now apply to children
+  through the same code path as the parent, not by construction.
+- Two concurrent children can each have an approval pending at the same
+  time (the old path decided them one after another).
+
+Found while building it:
+
+- `asyncio.create_task` copies contextvars, and LangChain keeps the running
+  call's config there, so a child started from inside the parent's tool
+  call streamed its own messages into the parent's `stream_mode="messages"`
+  -- the same leak the old test comment called "a real LangGraph
+  behavior". Runners start in a fresh `contextvars.Context()`.
+- The approval middleware re-emits the model's message in its own
+  `updates` chunk, so tool uses were counted twice until messages were
+  de-duplicated.
+- Stopping a waited-on child from the panel raised `CancelledError` inside
+  the parent's `await asyncio.shield(runner)` and would have cancelled the
+  parent's whole turn. The parent now checks
+  `asyncio.current_task().cancelling()` to tell "only the child was
+  stopped" from "my own turn is ending".
+- Live (DeepSeek): a background child asked for approval after the tab had
+  closed; forwarding it to the finished turn's socket threw and failed the
+  run. The forward is best-effort now; the approval waits on the task.
+- A record with no live runner reads as cut off by a restart and is
+  settled to "stopped" on read. A stress run caught that racing the
+  runner's own final save (read "running", runner saves "succeeded" and
+  leaves the registry, reader overwrites with "stopped", 2 in 15 runs);
+  settling now re-reads under the store's write lock, and a new run is
+  saved only after its runner is registered. 40/40 afterwards.

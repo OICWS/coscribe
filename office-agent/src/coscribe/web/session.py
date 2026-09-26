@@ -78,10 +78,10 @@ from ..runtime import (
 from ..runtime.provider_config import load_custom_providers
 from ..runtime_lg import (
     SkillSaveProposal,
+    SubAgentHost,
+    build_delegation_tools,
     build_langgraph_agent,
     build_review_work_tool,
-    build_spawn_agent_background_tool,
-    build_spawn_agent_tool,
     propose_skill_save_lg,
     resolve_chat_model,
     serialize_history_for_ws_lg,
@@ -118,6 +118,7 @@ from ..tools.scheduled_tasks import (
     parse_run_thread_id,
 )
 from ..tools.spreadsheets import SpreadsheetToolkit
+from ..tools.subagent_tasks import SubAgentTask, SubAgentTaskStore, running_subagent
 from ..workflows.engine import StepContext
 from ..workflows.solidify import DraftFailed, WorkflowDraft, draft_workflow
 from .activity import summarize_activity, summarize_workflow_run
@@ -368,6 +369,42 @@ def _clean_title(text: str) -> str:
     return title.strip("\"'“”「」《》*#。.").strip()[:80]
 
 
+class _SubAgentApprovalChannel:
+    """Stands in for the websocket when a sub-agent's call is decided: an
+    approval it needs is recorded on its task (the panel shows it from
+    there), announced to the watching tab, and forwarded to the turn's own
+    socket when no tab is watching -- the CLI answers approvals right
+    inside send_json."""
+
+    def __init__(self, session: ChatSessionLG, task: SubAgentTask) -> None:
+        self._session = session
+        self._task = task
+
+    @property
+    def can_resolve_approvals(self) -> bool:
+        socket = self._session._live_websocket or self._session._turn_websocket
+        return socket is not None and _can_resolve_approvals(socket)
+
+    async def send_json(self, payload: dict[str, Any]) -> None:
+        if payload.get("type") != "approval_required":
+            return
+        task = self._task
+        task.pending_approval = {k: v for k, v in payload.items() if k != "type"}
+        task.status = "needs_approval"
+        SubAgentTaskStore(self._session.settings.state_dir).save(task)
+        await self._session._subagent_changed(task)
+        socket = self._session._live_websocket or self._session._turn_websocket
+        if socket is None:
+            return
+        try:
+            await socket.send_json(
+                {**payload, "subagent_id": task.task_id, "subagent": task.description}
+            )
+        except Exception:  # noqa: BLE001 -- e.g. the finished turn's closed socket
+            # The approval waits on the task; the panel shows it when opened.
+            logger.debug("sub-agent approval not forwarded", exc_info=True)
+
+
 class ChatSessionLG:
     def __init__(
         self,
@@ -383,8 +420,18 @@ class ChatSessionLG:
         workspace_root: Path | None = None,
         workspace_explicit: bool = False,
         extra_folders: list[Path] | None = None,
+        configured_models: Callable[[], list[str]] | None = None,
     ) -> None:
         self.thread_id = thread_id
+        # "provider:model" for every configured provider -- what a sub-agent
+        # may be run on.
+        self._configured_models = configured_models or (lambda: [self._model_string])
+        # The socket of the turn now (or last) running: where a sub-agent's
+        # approval goes when no browser tab is watching (the CLI).
+        self._turn_websocket: Any = None
+        # Approval request ids that belong to sub-agents, which a Stop of
+        # the parent's turn must not deny.
+        self._subagent_request_ids: set[str] = set()
         self.settings = settings
         # None (the old default, still used by anything that hasn't been
         # taught about per-thread workspaces) falls back to the global
@@ -550,10 +597,7 @@ class ChatSessionLG:
         # extends agent.tools with MCP tools before build_subagent_tools'
         # own available_tools=agent.tools call).
         combined_tools = [*self._base_tools, *self._extra_tools]
-        spawn_agent_tool = build_spawn_agent_tool(model, combined_tools)
-        spawn_agent_background_tool = build_spawn_agent_background_tool(
-            model, combined_tools, self.thread_id, self.settings.state_dir
-        )
+        delegation_tools = build_delegation_tools(self._subagent_host(model), combined_tools)
         # The reviewer only ever gets read-only "documents" tools (read_docx/
         # read_pdf/search_pdf/read_xlsx/read_pptx today) -- independent
         # verification of a generated file's real content, never a way for
@@ -570,11 +614,56 @@ class ChatSessionLG:
         review_work_tool = build_review_work_tool(model, reviewer_tools, self.settings.state_dir)
         return [
             *combined_tools,
-            spawn_agent_tool,
-            spawn_agent_background_tool,
+            *delegation_tools,
             review_work_tool,
             self._build_draft_workflow_tool(),
         ]
+
+    def _subagent_host(self, model: Any) -> SubAgentHost:
+        def resolve_model(requested: str) -> tuple[str, Any]:
+            if not requested or requested == self._model_string:
+                return self._model_string, model
+            configured = self._configured_models()
+            if requested not in configured:
+                raise ValueError(
+                    f"{requested!r} isn't a configured model. Configured: {', '.join(configured)}"
+                )
+            return requested, resolve_chat_model(requested, self._custom_providers)
+
+        async def decide(request: dict[str, Any], task: SubAgentTask) -> Any:
+            channel = _SubAgentApprovalChannel(self, task)
+            return await self._decide_action_request(request, channel, honor_stop=False)
+
+        return SubAgentHost(
+            thread_id=self.thread_id,
+            state_dir=Path(self.settings.state_dir),
+            resolve_model=resolve_model,
+            configured_models=self._configured_models,
+            decide=decide,
+            changed=self._subagent_changed,
+            defer_tools=self.settings.defer_tools,
+            core_tool_names=CORE_TOOL_NAMES,
+            interrupt_all=bool(self.hooks_config["PreToolUse"]),
+        )
+
+    async def _subagent_changed(self, task: SubAgentTask) -> None:
+        websocket = self._live_websocket
+        if websocket is None:
+            return
+        try:
+            await websocket.send_json(
+                {"type": "subagents_changed", "task_id": task.task_id, "status": task.status}
+            )
+        except Exception:  # noqa: BLE001 -- a closing tab mustn't fail the sub-agent's run
+            logger.debug("subagents_changed not delivered", exc_info=True)
+
+    def _stop_waited_on_subagents(self) -> None:
+        """Stop the sub-agents a turn is waiting on; background ones were
+        handed off and keep going."""
+        for task in SubAgentTaskStore(self.settings.state_dir).list_for_thread(self.thread_id):
+            runner = running_subagent(task.task_id)
+            if runner is not None and not task.background:
+                runner.cancel()
 
     def _title_path(self) -> Path:
         # The same sidecar app.py's rename endpoint writes and list_threads
@@ -757,8 +846,11 @@ class ChatSessionLG:
         which reasons through exactly this for the WebSocket-disconnect
         case and deliberately avoids it there too."""
         self._stop_requested = True
+        self._stop_waited_on_subagents()
         has_pending_interrupt = False
-        for future in list(self._pending_approvals.values()):
+        for request_id, future in list(self._pending_approvals.items()):
+            if request_id in self._subagent_request_ids:
+                continue
             if not future.done():
                 future.set_result(False)
                 has_pending_interrupt = True
@@ -1449,6 +1541,7 @@ class ChatSessionLG:
         updating once the whole turn is over."""
         agent = self.lg_agent
         config = self.config
+        self._turn_websocket = websocket
         if not isinstance(turn_input, Command):
             await _close_orphaned_tool_calls(agent, config)
         text_parts: list[str] = []
@@ -1764,7 +1857,9 @@ class ChatSessionLG:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         return before_name, after_name
 
-    async def _decide_action_request(self, request: dict[str, Any], websocket: WebSocket) -> Any:
+    async def _decide_action_request(
+        self, request: dict[str, Any], websocket: Any, *, honor_stop: bool = True
+    ) -> Any:
         """Decide one pending action request, in precedence order: a
         configured PreToolUse hook can veto it outright (same precedence as
         runtime/policies.py's HookToolPolicy, which always runs before the
@@ -1833,7 +1928,7 @@ class ChatSessionLG:
                 return {"type": "respond", "message": message}
             return {"type": "reject", "message": message}
 
-        if self._stop_requested:
+        if honor_stop and self._stop_requested:
             return _denied("Stopped by user.")
         args = request["args"]
         audit_log = AuditLog(self.settings.state_dir)
@@ -1952,6 +2047,8 @@ class ChatSessionLG:
         request_id = uuid.uuid4().hex
         future: Future[bool] = get_running_loop().create_future()
         self._pending_approvals[request_id] = future
+        if isinstance(websocket, _SubAgentApprovalChannel):
+            self._subagent_request_ids.add(request_id)
         # Only worth building for a socket that can actually show it to
         # someone -- for an unattended selfwake/Scheduled Task turn (see
         # _can_resolve_approvals's own docstring), this would just spend a
@@ -1976,6 +2073,7 @@ class ChatSessionLG:
             approved = await future
         finally:
             self._pending_approvals.pop(request_id, None)
+            self._subagent_request_ids.discard(request_id)
         record_decision(
             audit_log,
             thread_id=self.thread_id,

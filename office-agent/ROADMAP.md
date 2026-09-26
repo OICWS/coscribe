@@ -5958,6 +5958,41 @@ it offered to redraft a copy. Not intended; see the next phase.
 
 ---
 
+## Phase 8be -- Sub-agents you can watch, stop and approve (shipped)
+
+Asked for Claude Code's "Background tasks" view for sub-agents: a list of
+the running ones, each opening to its model, its prompt (folded, "Show
+more") and its steps drawn like the chat; approvals answered there; the
+model chosen by the user from the configured ones; the conversation's
+approval mode and folders carried over.
+
+- [x] **One runner for both tools** (`runtime_lg/subagents.py`):
+      `spawn_agent` waits for the report, `spawn_agent_background` doesn't;
+      both run the child as its own task, recorded with model, tokens, tool
+      uses, the latest call and any pending approval. The nested-interrupt
+      bridge is removed (why, and what was found building this: runtime_lg/
+      README.md's last section). Pause/resume replaced by Stop.
+- [x] **Approvals through the session's own policy**, answered in the panel,
+      which opens itself to the run that's asking. Plan mode refuses a
+      child's writes, Accept Edits approves them, as for the parent.
+- [x] **Model per sub-agent**: `model` is any configured `provider:model`
+      (listed in the tool's description); with more than one configured the
+      Coordinator asks once per conversation. An unconfigured one is refused.
+- [x] **Tools and folders**: by default the child gets the parent's tools
+      (bound to the conversation's folders), found through `search_tools`.
+- [x] **Panel** redone after the reference: Running cards (description,
+      "Agent" + elapsed, model · tokens · tool uses · current activity,
+      View transcript, Stop), "Finished N" folded with a clear button; the
+      detail view reuses the chat's tool-call rows without diff stats.
+- [x] **Verified live** (DeepSeek, two providers configured): asked to
+      delegate, the model asked which model, the child ran on the one
+      picked, its write_file approval opened the panel on that run,
+      approving it wrote the file and the parent relayed the report. Two
+      background children in Accept Edits ran side by side (31.4k tokens /
+      7 tool uses and 90.7k / 12), then folded under "Finished 2".
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

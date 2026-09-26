@@ -37,9 +37,9 @@ from .subagent_tasks import (
     SubAgentTask,
     SubAgentTaskStore,
     build_subagent_task_tools,
+    forget_finished_subagents,
     get_subagent_transcript,
-    pause_subagent_task,
-    resume_subagent_task,
+    stop_subagent_task,
 )
 from .tasks import build_task_tools
 from .websearch import build_websearch_tools
@@ -86,8 +86,8 @@ __all__ = [
     "load_memory",
     "load_pptx_templates",
     "load_skills",
-    "pause_subagent_task",
-    "resume_subagent_task",
+    "stop_subagent_task",
+    "forget_finished_subagents",
     "save_uploaded_skill",
     "slugify_skill_name",
 ]

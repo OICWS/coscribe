@@ -25,7 +25,7 @@ from typing import Any
 
 from ..tools.background_tasks import BackgroundTaskStore
 from ..tools.selfwake import SignalStore, WakeRequest, WakeStore
-from ..tools.subagent_tasks import SubAgentTaskStore
+from ..tools.subagent_tasks import FINISHED_STATUSES, SubAgentTaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +87,9 @@ def _is_due(
         if wake.subagent_task_id is None:
             return False
         subagent_task = subagent_task_store.load(wake.subagent_task_id)
-        # Same "vanished/non-running counts as due" reasoning as "task"
-        # above -- "paused" and "blocked_on_approval" both count as due
-        # too, not just the two terminal statuses "task" has: the human
-        # (or lack of one to answer an approval) is the reason nothing's
-        # progressing, and the main thread should get a chance to react
-        # to that instead of waiting for an eventual success/failure that
-        # a paused/stuck sub-agent may never reach on its own.
-        return subagent_task is None or subagent_task.status != "running"
+        # A run waiting on the user's approval isn't done: the user answers
+        # it in the panel and it carries on.
+        return subagent_task is None or subagent_task.status in FINISHED_STATUSES
     if wake.kind == "event":
         if wake.event_key is None:
             return False

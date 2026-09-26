@@ -93,13 +93,13 @@ automatically once the private commit is right.
 
 ## Delegating simple code changes
 
-Mechanical, well-specified edits (remove an entry, rename, adjust a
-test, drop an icon) can go to a Sonnet subagent (`Agent` with
-`model: "sonnet"`) to save tokens -- give it the exact files, the change,
-the repo's comment rule, and the lint/test commands to run. Keep design
-decisions, prompt/instruction wording and anything needing live
-verification in the main session, and review the subagent's diff before
-committing.
+Simple, well-specified edits (remove an entry, rename, adjust a test,
+drop an icon) go to a Sonnet subagent (`Agent` with `model: "sonnet"`)
+to save tokens -- give it the exact files, the change, the repo's comment
+rule, and the lint/test commands to run. The main session keeps the core
+thinking and design, complex or high-risk backend code, all frontend
+code, prompt/instruction wording, and live verification -- and reviews
+the subagent's diff before committing.
 
 ## Dual-repo sync -- every commit goes to both
 

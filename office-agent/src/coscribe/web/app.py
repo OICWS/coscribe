@@ -134,9 +134,9 @@ from ..tools.script_env import (
 )
 from ..tools.subagent_tasks import (
     SubAgentTaskStore,
+    forget_finished_subagents,
     get_subagent_transcript,
-    pause_subagent_task,
-    resume_subagent_task,
+    stop_subagent_task,
 )
 from ..tools.tasks import TaskToolkit
 from ..workflows.catalog import describe_params, tool_description
@@ -1178,6 +1178,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 workspace_root=folders[0] if folders else settings.workspace_root,
                 workspace_explicit=bool(folders),
                 extra_folders=folders[1:],
+                configured_models=_configured_models,
             )
         return sessions[thread_id]
 
@@ -1660,13 +1661,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         session = _get_session(thread_id)
         return await session.get_context_breakdown()
 
-    # -- Sub Agents panel: background spawn_agent_background runs. GET
-    # here is a plain polling read (see this feature's own design
-    # discussion -- no push channel needed while the panel is open, a
-    # few-second poll is the same trade-off both Claude Code's own
-    # documented remote-sync model and claude-code-best's goal service
-    # make); pause/resume are direct REST actions from the panel's own
-    # button, not model tools (see pause_subagent_task's docstring).
+    # -- Sub Agents panel. Reads are polled; a running session also nudges
+    # the tab with "subagents_changed". Stopping is the user's call, so it's
+    # a REST action here, not a model tool.
 
     @app.get("/api/threads/{thread_id}/subagents")
     async def list_subagents_endpoint(thread_id: str) -> list[dict[str, Any]]:
@@ -1682,23 +1679,18 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         entries = (transcript or {}).get("entries", [])
         return JSONResponse({"task": task.to_dict(), "entries": entries})
 
-    @app.post("/api/subagents/{task_id}/pause")
-    async def pause_subagent_endpoint(task_id: str) -> JSONResponse:
+    @app.post("/api/subagents/{task_id}/stop")
+    async def stop_subagent_endpoint(task_id: str) -> JSONResponse:
         try:
-            return JSONResponse(pause_subagent_task(settings.state_dir, task_id))
+            return JSONResponse(stop_subagent_task(settings.state_dir, task_id))
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
-        except (ValueError, RuntimeError) as exc:
+        except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
 
-    @app.post("/api/subagents/{task_id}/resume")
-    async def resume_subagent_endpoint(task_id: str) -> JSONResponse:
-        try:
-            return JSONResponse(resume_subagent_task(settings.state_dir, task_id))
-        except KeyError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        except (ValueError, RuntimeError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=409)
+    @app.delete("/api/threads/{thread_id}/subagents")
+    async def forget_finished_subagents_endpoint(thread_id: str) -> dict[str, int]:
+        return {"removed": forget_finished_subagents(settings.state_dir, thread_id)}
 
     # -- /api/scheduled-tasks -- the Settings > Scheduled Tasks panel's
     # create-without-a-conversation entry point; direct ScheduledTriggerStore
@@ -2462,6 +2454,16 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/providers")
     async def get_providers() -> dict[str, Any]:
+        return _providers_info()
+
+    def _configured_models() -> list[str]:
+        return [
+            f"{name}:{info['default_model']}"
+            for name, info in _providers_info().items()
+            if info["default_model"]
+        ]
+
+    def _providers_info() -> dict[str, Any]:
         env_values = dotenv_values(".env")
         # Fallback for an existing .env from before /api/setup started also
         # writing the per-provider default (see setup() above) -- without

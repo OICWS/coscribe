@@ -1332,18 +1332,32 @@ and more urgent problem than a short memory file).
 
 ## Subagent delegation and review
 
-The Coordinator has two more tools, built on runtime_lg's own
-`build_spawn_agent_tool`/`build_review_work_tool` (a fresh
-`build_langgraph_agent(...)` invocation under the hood -- the same
-mechanism the Coordinator itself runs on):
+The Coordinator can hand a self-contained task to a sub-agent
+(`runtime_lg/subagents.py`'s `build_delegation_tools`):
 
-- `spawn_agent(instructions, prompt, tool_names="")` -- delegates a
-  self-contained sub-task to an independent agent with its own context
-  window and a tool whitelist (comma-separated names, e.g.
-  `"read_file,search_files"`) drawn from the Coordinator's own tools. Only
-  the sub-agent's final summary re-enters the conversation; its own
-  intermediate steps and tool calls never touch the parent's context or get
-  persisted to disk (no `--thread`-resumable state for a sub-agent run).
+- `spawn_agent(description, prompt, instructions="", model="", tool_names="")`
+  waits for the sub-agent's report; `spawn_agent_background(...)` returns a
+  `task_id` at once, to be picked up with `wake_on_subagent` or
+  `check_subagent_task`. Only the report re-enters the conversation.
+- **Model**: any configured model (`provider:model`); empty means the
+  conversation's own. When more than one is configured, the Coordinator asks
+  the user which to use the first time it delegates.
+- **Tools and folders**: by default the sub-agent gets the Coordinator's own
+  tools (found through `search_tools` when tool deferral is on), bound to the
+  conversation's folders; `tool_names` narrows that to a list.
+- **Approvals** go through the conversation's own policy -- plan mode,
+  Accept Edits, exec policy and hooks apply as they do to the Coordinator --
+  and a call that needs the user is answered in the **Sub Agents** panel,
+  which opens by itself to it. A background sub-agent can ask after the
+  parent's turn has ended, or with no tab open; it waits until answered.
+- **Sub Agents panel** (the header's branch icon): running sub-agents as
+  cards with elapsed time, model, tokens, tool uses, what each is doing and
+  a Stop button; finished ones folded under "Finished N" with a clear
+  button. Opening one shows its model, the prompt it was given, and its
+  transcript drawn like the chat. Stop on the parent's turn also stops the
+  sub-agents it's waiting for; background ones keep going.
+- A sub-agent's transcript lives in memory, so a server restart loses it
+  (its record and report stay).
 - `review_work(original_request, summary_of_work, file_path="", preview_name="")`
   -- runs a fixed Reviewer persona (a fresh agent that didn't do the work)
   to check a result against what was actually asked, before the Coordinator
@@ -1393,12 +1407,10 @@ fixed roster of named agent types, it's `spawn_agent` used ad hoc with
 whatever instructions and tool subset fit the sub-task at hand. The Reviewer
 is the one genuinely new, dedicated agent role.
 
-A sub-agent's own tool calls still go through the same approval/Plan-Mode/
-Hooks gating as the Coordinator's -- delegating to a sub-agent is not a way
-around them, including for modes toggled *after* the sub-agent tools were
-set up (mid-session `/plan`/`/accept-edits` changes still apply to calls a
-sub-agent makes afterwards). A sub-agent can never be granted `spawn_agent`
-or `review_work` itself, so delegation can't recurse.
+A sub-agent can never be given `spawn_agent`, `review_work`,
+`ask_user_question`, `create_scheduled_task` or `draft_workflow`, so
+delegation can't recurse and questions stay with the user's own
+conversation.
 
 ## MCP servers
 

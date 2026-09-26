@@ -299,10 +299,10 @@ export const getSubAgentTasks = (threadId: string) =>
   getJson<SubAgentTasksResponse>(`/api/threads/${encodeURIComponent(threadId)}/subagents`);
 export const getSubAgentTranscript = (taskId: string) =>
   getJson<SubAgentTranscriptResponse>(`/api/subagents/${encodeURIComponent(taskId)}/transcript`);
-export const pauseSubAgentTask = (taskId: string) =>
-  postJson<SubAgentActionResult>(`/api/subagents/${encodeURIComponent(taskId)}/pause`, {});
-export const resumeSubAgentTask = (taskId: string) =>
-  postJson<SubAgentActionResult>(`/api/subagents/${encodeURIComponent(taskId)}/resume`, {});
+export const stopSubAgentTask = (taskId: string) =>
+  postJson<SubAgentActionResult>(`/api/subagents/${encodeURIComponent(taskId)}/stop`, {});
+export const clearFinishedSubAgents = (threadId: string) =>
+  del<{ removed: number }>(`/api/threads/${encodeURIComponent(threadId)}/subagents`);
 
 // -- Context-window breakdown -------------------------------------------
 

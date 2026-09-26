@@ -1,4 +1,4 @@
-import type { TaskDraft, WsServerEvent } from "../types/wire";
+import type { HistoryEntry, TaskDraft, WsServerEvent } from "../types/wire";
 
 /** The answer the frontend sends for a saved draft starts with this --
  * also how a replayed create_scheduled_task call tells "saved" apart
@@ -208,6 +208,37 @@ function closeStreamingBubble(items: LogItem[]): LogItem[] {
   return closed;
 }
 
+/** A checkpointed transcript as chat items -- the main conversation's
+ * history, and a sub-agent's in the Sub Agents panel. */
+export function historyToItems(entries: HistoryEntry[]): LogItem[] {
+  let userTurnIndex = 0;
+  return entries.map((entry): LogItem => {
+    if (entry.kind === "user") {
+      return { id: genId(), kind: "user", text: entry.text, turnIndex: userTurnIndex++, images: entry.images };
+    }
+    if (entry.kind === "agent") {
+      return { id: genId(), kind: "agent", text: entry.text, streaming: false };
+    }
+    if (entry.tool_name === "create_scheduled_task") {
+      const saved = typeof entry.result === "string" && entry.result.startsWith(TASK_DRAFT_SAVED_PREFIX);
+      return {
+        id: genId(),
+        kind: "task_draft",
+        draft: entry.arguments as TaskDraft,
+        status: saved ? "saved" : "dismissed",
+      };
+    }
+    return {
+      id: genId(),
+      kind: "tool",
+      toolName: entry.tool_name,
+      arguments: entry.arguments,
+      result: entry.result,
+      isError: entry.is_error,
+    };
+  });
+}
+
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "local_connection_reset":
@@ -332,49 +363,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
 
     case "history": {
-      let userTurnIndex = 0;
       return {
         ...state,
         historyReceived: true,
         olderStatus: action.has_older ? "idle" : "none",
-        items: action.entries.map((entry) => {
-          if (entry.kind === "user") {
-            // entry.images, when present, is the same data-URL list the
-            // composer originally attached -- real, user-reported bug
-            // this closes: the backend's own history entries used to
-            // never carry them back out (see runtime_lg/messages.py's
-            // serialize_history_for_ws_lg), so a sent image's thumbnail
-            // only survived for the rest of *that* live session, not a
-            // reload/reconnect/thread-switch-and-back.
-            return {
-              id: genId(),
-              kind: "user",
-              text: entry.text,
-              turnIndex: userTurnIndex++,
-              images: entry.images,
-            } as const;
-          }
-          if (entry.kind === "agent") {
-            return { id: genId(), kind: "agent", text: entry.text, streaming: false } as const;
-          }
-          if (entry.tool_name === "create_scheduled_task") {
-            const saved = typeof entry.result === "string" && entry.result.startsWith(TASK_DRAFT_SAVED_PREFIX);
-            return {
-              id: genId(),
-              kind: "task_draft",
-              draft: entry.arguments as TaskDraft,
-              status: saved ? "saved" : "dismissed",
-            } as const;
-          }
-          return {
-            id: genId(),
-            kind: "tool",
-            toolName: entry.tool_name,
-            arguments: entry.arguments,
-            result: entry.result,
-            isError: entry.is_error,
-          } as const;
-        }),
+        items: historyToItems(action.entries),
       };
     }
 
@@ -494,6 +487,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
 
     case "approval_required":
+      // A sub-agent's approval is shown in the Sub Agents panel.
+      if (action.subagent_id) return state;
       return {
         ...state,
         items: [
@@ -621,8 +616,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ],
       };
 
+    case "subagents_changed":
     case "thread_titled":
-      // Applied to the thread list in App.tsx.
+      // Handled in App.tsx.
       return state;
 
     case "tasks_changed":
