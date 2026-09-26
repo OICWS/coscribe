@@ -62,7 +62,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
 
 import uvicorn
 from dotenv import dotenv_values, load_dotenv, set_key
@@ -74,7 +74,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import __version__
 from ..cli import _dotenv_path, _load_settings_or_none
-from ..config import Settings
+from ..config import PermissionMode, Settings
 from ..coordinator import build_coordinator_agent
 from ..runtime import (
     LLMClient,
@@ -771,12 +771,14 @@ COSCRIBE_ENV_VARS = [
     "COSCRIBE_EXTRA_READABLE_DIRS",
     "COSCRIBE_EXTRA_WRITABLE_DIRS",
     "COSCRIBE_MAX_TURNS",
+    "COSCRIBE_DEFAULT_PERMISSION_MODE",
 ]
 
 # Settings update_config applies to the running server as well as .env.
 LIVE_SETTINGS = {
     "COSCRIBE_DEFAULT_MODEL": "default_model",
     "COSCRIBE_MAX_TURNS": "max_turns",
+    "COSCRIBE_DEFAULT_PERMISSION_MODE": "default_permission_mode",
 }
 
 # Desktop-shell-consumed, not Settings-backed (see office-agent-desktop's
@@ -805,6 +807,7 @@ BLANK_UNSAFE_ENV_VARS = {
     "COSCRIBE_MEMORY_PATH",
     "COSCRIBE_LOG_LEVEL",
     "COSCRIBE_MAX_TURNS",
+    "COSCRIBE_DEFAULT_PERMISSION_MODE",
 }
 
 
@@ -2126,6 +2129,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 continue
             if key == "COSCRIBE_MAX_TURNS" and not (value.strip().isdigit() and int(value) > 0):
                 rejected[key] = "must be a positive integer"
+                continue
+            if key == "COSCRIBE_DEFAULT_PERMISSION_MODE" and value not in get_args(PermissionMode):
+                rejected[key] = f"must be one of {', '.join(get_args(PermissionMode))}"
                 continue
             if key in PROVIDER_DEFAULT_MODEL_ENV_VARS and ":" in value:
                 rejected[key] = (

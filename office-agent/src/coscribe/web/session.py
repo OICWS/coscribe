@@ -102,6 +102,7 @@ from ..runtime_lg.messages import (
     current_date_note,
     strip_mode_note,
 )
+from ..runtime_lg.providers import with_prompt_cache_key
 from ..runtime_lg.tool_deferral import bound_tool_names, build_search_tools_tool
 from ..tools import (
     QUESTION_TOOL_NAMES,
@@ -462,6 +463,8 @@ class ChatSessionLG:
         self._auto_blocks_in_row = 0
         self._auto_blocks_total = 0
         self._auto_paused = False
+        if settings.default_permission_mode != "manual" and parse_run_thread_id(thread_id) is None:
+            self._toggle_mode(settings.default_permission_mode)
         # Reset at the top of every handle_user_message call -- see
         # _stream_turn's docstring for why this exists (recovering a tool
         # call's arguments for the PostToolUse hook payload, which the
@@ -557,7 +560,9 @@ class ChatSessionLG:
         )
         self._model_string = settings.default_model
 
-        self.model = resolve_chat_model(self._model_string, custom_providers)
+        self.model = with_prompt_cache_key(
+            resolve_chat_model(self._model_string, custom_providers), thread_id
+        )
         lg_tools = self._build_lg_tools(self.model)
         # The *original* requires_approval set, computed independently of
         # what actually ends up in HumanInTheLoopMiddleware's interrupt_on
@@ -1007,7 +1012,9 @@ class ChatSessionLG:
         try:
             if self.settings.providers_config_path is not None:
                 self._custom_providers = load_custom_providers(self.settings.providers_config_path)
-            new_model = resolve_chat_model(model, self._custom_providers)
+            new_model = with_prompt_cache_key(
+                resolve_chat_model(model, self._custom_providers), self.thread_id
+            )
             lg_tools = self._build_lg_tools(new_model)
             new_lg_agent = self._build_lg_agent(new_model, model, lg_tools)
             self.model = new_model
@@ -1623,6 +1630,12 @@ class ChatSessionLG:
                 if call_id is not None and call_id not in registered_ids:
                     self._pending_tool_args[call["name"]].append(call["args"])
                     registered_ids.add(call_id)
+            # Providers number each response's tool calls from index 0 and
+            # send a call's later argument pieces without its id; adding
+            # chunks joins such a piece to the first call with that index.
+            # Carried into the next response, its pieces would join this
+            # response's call and the new call would lose its arguments.
+            accumulated = None
 
         async def _capture_segment_usage() -> None:
             nonlocal segment
@@ -2091,7 +2104,7 @@ class ChatSessionLG:
             await self._send_tool_started(name, args, websocket)
             return {"type": "approve"}
         reviewer_note: str | None = None
-        if self.auto_mode and not self._auto_paused:
+        if self._auto_review_active():
             verdict = await self._auto_review(name, args)
             if verdict is not None and verdict.allow:
                 self._auto_blocks_in_row = 0
@@ -2249,6 +2262,13 @@ class ChatSessionLG:
             self._auto_blocks_in_row = 0
             self._auto_paused = False
 
+    def _auto_review_active(self) -> bool:
+        """A scheduled run keeps the approval tier its task was saved with;
+        the conversation's Auto mode applies only outside one."""
+        return (
+            self.auto_mode and not self._auto_paused and self._effective_run_approval_mode() is None
+        )
+
     async def _auto_review(self, name: str, args: dict[str, Any]) -> Verdict | None:
         state = await self.lg_agent.aget_state(self.config)
         messages = list(state.values.get("messages", [])) if state.values else []
@@ -2270,7 +2290,7 @@ class ChatSessionLG:
     def _auto_approval_active(self) -> bool:
         return (
             self.accept_edits
-            or self.auto_mode
+            or self._auto_review_active()
             or self._effective_run_approval_mode() in ("auto", "skip")
         )
 
@@ -2286,7 +2306,7 @@ class ChatSessionLG:
             return True
         if self._auto_approves(name) is not None:
             return True
-        if self.auto_mode and not self._auto_paused:
+        if self._auto_review_active():
             return True
         if name in EXEC_POLICY_TOOL_NAMES:
             exec_policy = load_exec_policy(self.settings.exec_policy_path)
@@ -3077,8 +3097,9 @@ class ChatSessionLG:
                 if not retried_after_grpc_metadata_overflow and is_grpc_metadata_overflow:
                     retried_after_grpc_metadata_overflow = True
                     try:
-                        self.model = resolve_chat_model(
-                            self._model_string, self._custom_providers
+                        self.model = with_prompt_cache_key(
+                            resolve_chat_model(self._model_string, self._custom_providers),
+                            self.thread_id,
                         )
                         lg_tools = self._build_lg_tools(self.model)
                         self.lg_agent = self._build_lg_agent(

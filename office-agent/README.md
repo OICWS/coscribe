@@ -125,8 +125,12 @@ Several commands are typed as a message mid-session (not startup flags):
 
 The permission modes follow Claude Code's
 (code.claude.com/docs/en/permission-modes). One is on at a time; typing a
-mode's command again returns to **Manual**, the default, which asks before
-every change, script or outside action.
+mode's command again returns to **Manual**, which asks before every
+change, script or outside action. A new conversation starts in **Auto**,
+as Claude Code does; change that under Settings > General > Default Mode
+(`COSCRIBE_DEFAULT_PERMISSION_MODE`: `manual`, `accept-edits`, `plan` or
+`auto`, applied to new conversations without a restart). A scheduled
+task's run follows the task's own approval setting instead.
 
 - `/accept-edits` -- Accept Edits: file edits in the conversation's folders
   (and other local changes: `WRITE_LOCAL` tools) run without asking; running

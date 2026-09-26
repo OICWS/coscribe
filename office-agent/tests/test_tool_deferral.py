@@ -134,6 +134,16 @@ def test_search_tools_caps_at_max_results() -> None:
     assert len(result) <= 8
 
 
+def test_search_tools_leaves_out_weak_matches() -> None:
+    tools = [
+        _FakeTool("run_python_script", "Run a Python script."),
+        _FakeTool("add_pptx_hyperlink", "Link text on a slide to a script or page. " * 5),
+    ]
+    search_tools = build_search_tools_tool(tools)
+    names = [entry["name"] for entry in json.loads(search_tools("run python script"))]
+    assert names == ["run_python_script"]
+
+
 # -- _discovered_tool_names -----------------------------------------------
 
 
@@ -149,7 +159,25 @@ def test_discovered_tool_names_parses_search_tools_results() -> None:
         ToolMessage(content="not json at all", tool_call_id="c2", name=SEARCH_TOOLS_NAME),
         ToolMessage(content="irrelevant", tool_call_id="c3", name="some_other_tool"),
     ]
-    assert _discovered_tool_names(messages) == {"write_pptx_chart"}
+    assert _discovered_tool_names(messages) == ["write_pptx_chart"]
+
+
+def test_found_tools_are_sent_after_every_tool_already_sent() -> None:
+    from types import SimpleNamespace
+
+    from langchain_core.messages import ToolMessage
+
+    from coscribe.runtime_lg.tool_deferral import DeferredToolMiddleware
+
+    def found(*names: str) -> ToolMessage:
+        entries = [{"name": name, "description": ""} for name in names]
+        return ToolMessage(content=json.dumps(entries), tool_call_id="c", name=SEARCH_TOOLS_NAME)
+
+    tools = [SimpleNamespace(name=name) for name in ["a", "x", "b", "y", "z"]]
+    request = SimpleNamespace(tools=tools, messages=[found("z"), found("x", "z")])
+    sent = DeferredToolMiddleware(["a", "b"])._filtered_tools(request)  # type: ignore[arg-type]
+
+    assert [tool.name for tool in sent] == ["a", "b", "z", "x"]
 
 
 # -- End-to-end: build_langgraph_agent(defer_tools=True) ------------------

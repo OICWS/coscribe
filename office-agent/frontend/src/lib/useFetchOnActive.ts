@@ -24,15 +24,20 @@ export type FetchOnActiveStatus = "idle" | "loading" | "error" | "success";
 export function useFetchOnActive<T>(active: boolean, fetcher: () => Promise<T>, initial: T) {
   const [data, setData] = useState<T>(initial);
   const [status, setStatus] = useState<FetchOnActiveStatus>("idle");
+  const [error, setError] = useState<string | null>(null);
 
   const run = useCallback(() => {
     setStatus("loading");
     fetcher()
       .then((result) => {
         setData(result);
+        setError(null);
         setStatus("success");
       })
-      .catch(() => setStatus("error"));
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : null);
+        setStatus("error");
+      });
     // fetcher is expected to be stable enough not to need tracking as a
     // dependency (same assumption every existing fetch-on-active tab this
     // replaces already made, just implicitly) -- re-running run() itself
@@ -45,5 +50,5 @@ export function useFetchOnActive<T>(active: boolean, fetcher: () => Promise<T>, 
     if (active && status === "idle") run();
   }, [active, status, run]);
 
-  return { data, status, retry: run };
+  return { data, status, error, retry: run };
 }

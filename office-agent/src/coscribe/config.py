@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+PermissionMode = Literal["manual", "accept-edits", "plan", "auto"]
 
 
 class Settings(BaseSettings):
@@ -154,6 +156,12 @@ class Settings(BaseSettings):
     runtime's Runner used. See runtime_lg/README.md's "max_turns and
     auto_compact_threshold" section.
     """
+
+    default_permission_mode: PermissionMode = "auto"
+    """The mode a new conversation starts in -- one of the mode pill's four.
+    Auto, as in Claude Code: a reviewer model lets routine work run and
+    stops risky actions. A scheduled task's run thread ignores this and
+    follows the task's own approval setting."""
 
     auto_title_threads: bool = True
     """Name a conversation from its first exchange (a short model call in

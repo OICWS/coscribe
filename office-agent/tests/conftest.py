@@ -32,3 +32,11 @@ def _fast_libreoffice_by_default(
             "skipped_reason": "disabled in the test suite for speed -- see tests/conftest.py",
         },
     )
+
+
+@pytest.fixture(autouse=True)
+def _manual_permission_mode_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most tests script the model's exact replies, and Auto mode (the
+    shipped default) adds a reviewer call before each gated action. Tests
+    of the default itself override this."""
+    monkeypatch.setenv("COSCRIBE_DEFAULT_PERMISSION_MODE", "manual")

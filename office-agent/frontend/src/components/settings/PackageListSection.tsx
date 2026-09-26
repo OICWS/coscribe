@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useFetchOnActive } from "../../lib/useFetchOnActive";
 import type { ScriptEnvInstallResult, ScriptEnvPackage } from "../../types/settings";
+import { FetchRetry } from "./FetchRetry";
 
 // Extracted from what used to be EnvironmentTab.tsx's entire body, so the
 // same add/list/remove list can be rendered twice (Python packages for
@@ -33,33 +35,15 @@ export function PackageListSection({
   installPackage,
   removePackage,
 }: PackageListSectionProps) {
-  const [packages, setPackages] = useState<ScriptEnvPackage[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const { data: packages, status: loadStatus, error: loadError, retry: refresh } = useFetchOnActive(
+    active,
+    getPackages,
+    [] as ScriptEnvPackage[],
+  );
   const [query, setQuery] = useState("");
   const [installing, setInstalling] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
-
-  const refresh = () => {
-    getPackages()
-      .then((res) => {
-        setPackages(res);
-        setLoaded(true);
-      })
-      .catch((err) => {
-        // Same silent-failure shape as install()/remove() before their
-        // catch was added: a failed GET (e.g. the venv itself failing to
-        // create) used to leave the list stuck looking like it was still
-        // loading forever, with the real error never surfacing.
-        setLoaded(true);
-        setStatus({ text: err instanceof Error ? err.message : "Could not load packages.", error: true });
-      });
-  };
-
-  useEffect(() => {
-    if (active) refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
 
   const install = async () => {
     const name = query.trim();
@@ -148,6 +132,8 @@ export function PackageListSection({
         </div>
       )}
 
+      <FetchRetry status={loadStatus} error={loadError} onRetry={refresh} />
+
       <div className="flex flex-col gap-1">
         {packages.map((pkg) => (
           <div
@@ -169,7 +155,7 @@ export function PackageListSection({
             </button>
           </div>
         ))}
-        {loaded && packages.length === 0 && (
+        {loadStatus === "success" && packages.length === 0 && (
           <div className="rounded-lg border border-dashed border-[var(--border)] px-3 py-4 text-center text-sm text-[var(--muted)]">
             {emptyStateText}
           </div>
