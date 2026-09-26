@@ -90,6 +90,15 @@ _DESCRIPTION_TOKEN_WEIGHT = 1.0
 # could produce for a single short query, so it reliably wins ties.
 _NAME_SUBSTRING_BONUS = 5.0
 _MAX_RESULTS = 8
+# Every tool a search returns is bound for the rest of the conversation,
+# so a weak match costs its schema on every later request, and binding it
+# changes the tool list, which makes the provider re-read the whole
+# conversation uncached. Measured on the real catalog: without these, a
+# search for "run python script" also bound add_pptx_hyperlink and
+# delete_file. Matches under this share of the best match's score, or
+# under the floor, are left out.
+_MIN_SHARE_OF_BEST = 0.4
+_MIN_SCORE = 2.0
 
 _STOPWORDS = frozenset(
     {"a", "an", "the", "to", "of", "for", "and", "or", "in", "on", "with", "this", "that",
@@ -138,12 +147,15 @@ def _build_entry(tool: Callable[..., Any] | BaseTool) -> _ToolEntry:
 
 
 def _score(entry: _ToolEntry, query_tokens: Sequence[str], query_lower: str) -> float:
+    # Presence, not counts: a long description that repeats "pptx" or
+    # "cells" ten times isn't ten times more relevant, and counting ranked
+    # edit_pptx_xml above recalc_xlsx for "edit xlsx cells format".
     score = 0.0
     if query_lower and query_lower in entry.name.lower():
         score += _NAME_SUBSTRING_BONUS
-    for token in query_tokens:
-        score += _NAME_TOKEN_WEIGHT * entry.name_tokens.count(token)
-        score += _DESCRIPTION_TOKEN_WEIGHT * entry.description_tokens.count(token)
+    for token in set(query_tokens):
+        score += _NAME_TOKEN_WEIGHT * (token in entry.name_tokens)
+        score += _DESCRIPTION_TOKEN_WEIGHT * (token in entry.description_tokens)
     return score
 
 
@@ -177,8 +189,10 @@ def build_search_tools_tool(
         query_tokens = _tokenize(query)
         query_lower = query.strip().lower()
         scored = [(_score(entry, query_tokens, query_lower), entry) for entry in entries]
+        best = max((score for score, _ in scored), default=0.0)
+        floor = max(_MIN_SCORE, best * _MIN_SHARE_OF_BEST)
         matches = sorted(
-            (pair for pair in scored if pair[0] > 0), key=lambda pair: pair[0], reverse=True
+            (pair for pair in scored if pair[0] >= floor), key=lambda pair: pair[0], reverse=True
         )
         top = matches[:_MAX_RESULTS]
         return json.dumps(
@@ -223,12 +237,13 @@ def bound_tool_names(core_tool_names: Iterable[str], messages: Sequence[BaseMess
     return {*core_tool_names, SEARCH_TOOLS_NAME, *_discovered_tool_names(messages)}
 
 
-def _discovered_tool_names(messages: Sequence[BaseMessage]) -> set[str]:
+def _discovered_tool_names(messages: Sequence[BaseMessage]) -> list[str]:
     """Every tool name any `search_tools` call in this conversation has
-    ever surfaced, derived fresh from the message history each time --
-    see this module's own docstring for why that's the replay-safe
-    choice over tracking it as mutable middleware state."""
-    found: set[str] = set()
+    ever surfaced, in the order first surfaced, derived fresh from the
+    message history each time -- see this module's own docstring for why
+    that's the replay-safe choice over tracking it as mutable middleware
+    state."""
+    found: dict[str, None] = {}
     for message in messages:
         if not isinstance(message, ToolMessage) or message.name != SEARCH_TOOLS_NAME:
             continue
@@ -243,8 +258,8 @@ def _discovered_tool_names(messages: Sequence[BaseMessage]) -> set[str]:
             continue
         for entry in entries:
             if isinstance(entry, dict) and isinstance(entry.get("name"), str):
-                found.add(entry["name"])
-    return found
+                found.setdefault(entry["name"], None)
+    return list(found)
 
 
 def _request_tool_allowed(tool: Any, allowed_names: set[str]) -> bool:
@@ -273,8 +288,17 @@ class DeferredToolMiddleware(AgentMiddleware):
         self._core_names = set(core_tool_names) | {SEARCH_TOOLS_NAME}
 
     def _filtered_tools(self, request: ModelRequest[Any]) -> list[Any]:
-        allowed = self._core_names | _discovered_tool_names(request.messages)
-        return [tool for tool in request.tools if _request_tool_allowed(tool, allowed)]
+        # Providers cache the prompt by prefix, and the tool list comes
+        # before the conversation. A newly found tool goes after every tool
+        # already sent, so what was sent before stays byte-identical.
+        core = [tool for tool in request.tools if _request_tool_allowed(tool, self._core_names)]
+        by_name = {getattr(tool, "name", None): tool for tool in request.tools}
+        found = [
+            by_name[name]
+            for name in _discovered_tool_names(request.messages)
+            if name in by_name and name not in self._core_names
+        ]
+        return core + found
 
     def wrap_model_call(
         self, request: ModelRequest[Any], handler: Callable[[ModelRequest[Any]], ModelResponse[Any]]

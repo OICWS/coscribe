@@ -7007,6 +7007,90 @@ def test_approving_a_plan_leaves_plan_mode_for_auto_lg(
     assert "approved the plan and switched to auto mode" in result
 
 
+class _IndexedToolCallModel(FakeToolCallingChatModel):
+    """Streams tool calls the way real providers do: numbered from index 0
+    in every response, the arguments split across chunks where only the
+    first carries the call's id and name."""
+
+    def _stream(self, messages: list[BaseMessage], *args: Any, **kwargs: Any) -> Any:
+        self.received.append(list(messages))
+        message = self.responses[self.i]
+        self.i += 1
+        yield ChatGenerationChunk(message=AIMessageChunk(content=message.content or ""))
+        for index, call in enumerate(message.tool_calls):
+            text = json.dumps(call["args"])
+            half = len(text) // 2
+            for piece, first in ((text[:half], True), (text[half:], False)):
+                chunk = {
+                    "name": call["name"] if first else None,
+                    "args": piece,
+                    "id": call["id"] if first else None,
+                    "index": index,
+                }
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(content="", tool_call_chunks=[chunk])  # type: ignore[list-item]
+                )
+
+
+def test_each_tool_result_carries_its_own_arguments_across_responses_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "workspace" / "a.txt").write_text("A", encoding="utf-8")
+    (tmp_path / "workspace" / "b.txt").write_text("B", encoding="utf-8")
+    fake_model = _IndexedToolCallModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_tool_call("c1", "read_file", {"path": "a.txt"})]),
+            AIMessage(content="", tool_calls=[_tool_call("c2", "read_file", {"path": "b.txt"})]),
+            AIMessage(content="done"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_two_reads") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "read a then b"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    results = [m["arguments"] for m in messages if m["type"] == "tool_result"]
+    assert results == [{"path": "a.txt"}, {"path": "b.txt"}]
+
+
+def test_a_new_conversation_starts_in_the_default_mode_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model, default_permission_mode="auto") as client:
+        with client.websocket_connect("/ws/t_default_auto") as ws:
+            chat = ws.receive_json()
+        with client.websocket_connect("/ws/scheduled-trig_x-run1") as ws:
+            run = ws.receive_json()
+
+    assert (chat["plan_mode"], chat["accept_edits"], chat["auto_mode"]) == (False, False, True)
+    assert (run["plan_mode"], run["accept_edits"], run["auto_mode"]) == (False, False, False)
+
+
+def test_the_default_mode_is_set_live_and_checked_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        bad = client.post(
+            "/api/config", json={"updates": {"COSCRIBE_DEFAULT_PERMISSION_MODE": "yolo"}}
+        )
+        good = client.post(
+            "/api/config", json={"updates": {"COSCRIBE_DEFAULT_PERMISSION_MODE": "plan"}}
+        )
+        with client.websocket_connect("/ws/t_default_plan") as ws:
+            state = ws.receive_json()
+
+    assert "COSCRIBE_DEFAULT_PERMISSION_MODE" in bad.json()["rejected"]
+    assert good.json()["restart_required"] is False
+    assert state["plan_mode"] is True
+
+
 def test_modes_are_one_at_a_time_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:

@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { getProviders } from "../../lib/rest";
 import { ToggleSwitch } from "../ToggleSwitch";
-import { BACKGROUND_ON_CLOSE_KEY, GENERAL_FIELDS, LOG_LEVEL_KEY, LOG_LEVELS } from "./fields";
+import {
+  BACKGROUND_ON_CLOSE_KEY,
+  GENERAL_FIELDS,
+  LOG_LEVEL_KEY,
+  LOG_LEVELS,
+  PERMISSION_MODE_KEY,
+  PERMISSION_MODES,
+} from "./fields";
 import { GlobalInstructionsSection } from "./GlobalInstructionsSection";
 import { SegmentedControl } from "./SegmentedControl";
 import { SettingRow, SettingRowInput } from "./SettingRow";
@@ -12,6 +19,7 @@ interface GeneralTabProps {
 }
 
 type LogLevel = (typeof LOG_LEVELS)[number]["value"];
+type PermissionMode = (typeof PERMISSION_MODES)[number]["value"];
 
 const DEFAULT_MODEL_KEY = "COSCRIBE_DEFAULT_MODEL";
 
@@ -62,11 +70,15 @@ function currentLogLevel(raw: string | undefined): LogLevel {
   return (LOG_LEVELS.find((level) => level.value === upper)?.value ?? "INFO") as LogLevel;
 }
 
+function currentPermissionMode(raw: string | undefined): PermissionMode {
+  return PERMISSION_MODES.find((mode) => mode.value === raw)?.value ?? "auto";
+}
+
 export function GeneralTab({ values, onChange }: GeneralTabProps) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-xs text-[var(--muted)]">
-        These write to <code>.env</code>. Default Model and Max Turns apply to new sessions right away; Log Level needs
+        These write to <code>.env</code>. Default Model, Default Mode and Max Turns apply to new sessions right away; Log Level needs
         a restart of coscribe-web. <code>HTTPS_PROXY</code>/<code>HTTP_PROXY</code> aren't configurable here.
       </p>
       <div className="flex flex-col divide-y divide-[var(--border)]">
@@ -88,6 +100,17 @@ export function GeneralTab({ values, onChange }: GeneralTabProps) {
             }
           />
         ))}
+        <SettingRow
+          label="Default Mode"
+          description="The permission mode a new conversation starts in. Auto lets a reviewer model run routine work and stop risky actions; Manual asks before every change. Switch any conversation from the mode button under the message box. Scheduled tasks keep their own approval setting."
+          control={
+            <SegmentedControl
+              value={currentPermissionMode(values[PERMISSION_MODE_KEY])}
+              options={PERMISSION_MODES}
+              onChange={(v) => onChange(PERMISSION_MODE_KEY, v)}
+            />
+          }
+        />
         <SettingRow
           label="Log Level"
           description="How much detail coscribe-web writes to its terminal/log file -- doesn't affect what you see in the chat UI itself. Info is the right choice for normal use; switch to Debug only while troubleshooting something (e.g. a connector that won't connect), since it prints every tool call's raw arguments and every provider request. Warning/Error trim it down to problems only."

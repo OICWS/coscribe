@@ -3482,3 +3482,55 @@ Found while building it:
   leaves the registry, reader overwrites with "stopped", 2 in 15 runs);
   settling now re-reads under the store's write lock, and a new run is
   saved only after its runner is registered. 40/40 afterwards.
+
+## Prompt-cache hit rate: where it broke, measured (2026-09-26)
+
+Captured every chat request of one 4-turn DeepSeek conversation (read a
+workbook, add a sheet with formulas, summarize notes, a follow-up) at the
+HTTP layer and diffed each request against the previous one. The message
+history is append-only across turns, so turns themselves never broke the
+cache. What did: a `search_tools` discovery. The tool list is rendered
+before the conversation, and the found tools were inserted into the
+middle of it in catalog order, so the request after each discovery
+re-read nearly everything uncached. Three discoveries were 67.8k of the
+95.9k missed tokens in that conversation (88.5% hit overall).
+
+How Codex handles the same thing (read in `codex-rs/core`): a
+`prompt_cache_key` per session on every request, context changes
+appended as new messages rather than rewritten, and discovered tools
+delivered as history items through OpenAI's own tool search, so the
+tool list never changes.
+
+What changed here, re-measured on the same conversation each time:
+
+- Found tools are appended after every tool already sent, in the order
+  found (`DeferredToolMiddleware._filtered_tools`), so the previous tool
+  list stays a byte-identical prefix. A discovery went from re-reading
+  51-76% of that request to 30-45%. 90.9% overall.
+- `search_tools` scores a word's presence rather than its count and
+  drops matches below 40% of the best (or under 2 points). "run python
+  script" had also bound `add_pptx_hyperlink`, `wake_on_task` and
+  `delete_file`; it now binds the three script tools. Fewer tools bound
+  means fewer discoveries and a smaller prompt on every later request:
+  43 tools bound at the end before, 30 after. 92.9% overall.
+- OpenAI's own endpoint gets `prompt_cache_key` set to the thread id
+  (`providers.with_prompt_cache_key`), as Codex does. Other
+  OpenAI-compatible providers don't get it: they may reject an unknown
+  parameter. Anthropic already had cache breakpoints
+  (`AnthropicPromptCachingMiddleware`); Gemini and DeepSeek cache by
+  prefix on their own.
+
+Not done: a discovery still re-reads the conversation after the tool
+list. Keeping the tool list fixed would mean returning found tools'
+schemas as a tool result and running them through one stable proxy tool
+(`claude-code-best`'s `ExecuteExtraTool`), or, per provider, the native
+tool search Anthropic and OpenAI offer. The proxy touches approvals,
+hooks, audit and every place a tool call is shown by name, so it is its
+own decision.
+
+Found along the way: every tool call after the first model response of
+a turn reached the frontend with empty arguments ("Read a file" instead
+of the file name) -- `_stream_turn` kept adding streamed chunks across
+responses, and a later response's argument pieces (index 0, no id) were
+joined to the first response's call. Reset per response now; the
+regression test streams arguments in pieces as real providers do.

@@ -119,3 +119,17 @@ def resolve_chat_model(
         f"Unsupported provider {provider_key!r} in runtime_lg Phase 1 -- "
         "only anthropic/gemini/openai/custom-openai-compatible are wired up."
     )
+
+
+def with_prompt_cache_key(model: Any, key: str) -> Any:
+    """OpenAI routes requests that share a prompt_cache_key to the same
+    cache, so one key per conversation keeps its growing prefix warm
+    (Codex sends its session id the same way). Only OpenAI's own endpoint:
+    an OpenAI-compatible provider may reject a parameter it doesn't know."""
+    from langchain_openai import ChatOpenAI
+
+    if not isinstance(model, ChatOpenAI) or model.openai_api_base is not None:
+        return model
+    return model.model_copy(
+        update={"model_kwargs": {**model.model_kwargs, "prompt_cache_key": key}}
+    )

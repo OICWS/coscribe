@@ -1,20 +1,27 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { addProvider, getProviders, getProvidersCatalog, removeProvider } from "../../lib/rest";
+import { useFetchOnActive } from "../../lib/useFetchOnActive";
 import type { ProviderCatalogEntry, ProvidersResponse } from "../../types/settings";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { FetchRetry } from "./FetchRetry";
 
 /** Mirrors the backend's builtin-provider name list (app.py's BUILTIN_PROVIDERS) --
  * a name matching one of these (case-insensitively) routes through the
  * builtin branch server-side regardless of what base_url was typed. */
 const BUILTIN_PROVIDER_NAMES = ["anthropic", "openai", "gemini"];
 
+const EMPTY: { catalog: ProviderCatalogEntry[]; configured: ProvidersResponse } = { catalog: [], configured: {} };
+
+const loadProviders = () =>
+  Promise.all([getProvidersCatalog(), getProviders()]).then(([catalog, configured]) => ({ catalog, configured }));
+
 interface ProvidersTabProps {
   active: boolean;
 }
 
 export function ProvidersTab({ active }: ProvidersTabProps) {
-  const [catalog, setCatalog] = useState<ProviderCatalogEntry[]>([]);
-  const [configured, setConfigured] = useState<ProvidersResponse>({});
+  const { data, status: loadStatus, error: loadError, retry: refresh } = useFetchOnActive(active, loadProviders, EMPTY);
+  const { catalog, configured } = data;
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -22,18 +29,6 @@ export function ProvidersTab({ active }: ProvidersTabProps) {
   const [baseUrlDisabled, setBaseUrlDisabled] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
-
-  const refresh = () => {
-    Promise.all([getProvidersCatalog(), getProviders()]).then(([cat, conf]) => {
-      setCatalog(cat);
-      setConfigured(conf);
-    });
-  };
-
-  useEffect(() => {
-    if (active) refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
 
   const prefillFrom = (entry: ProviderCatalogEntry) => {
     setName(entry.name);
@@ -72,7 +67,13 @@ export function ProvidersTab({ active }: ProvidersTabProps) {
       setStatus({ text: "Base URL cannot be blank.", error: true });
       return;
     }
-    const result = await addProvider(trimmedName, baseUrl, apiKey, defaultModel);
+    let result;
+    try {
+      result = await addProvider(trimmedName, baseUrl, apiKey, defaultModel);
+    } catch (err) {
+      setStatus({ text: err instanceof Error ? err.message : "Not added.", error: true });
+      return;
+    }
     const rejectedEntries = Object.entries(result.rejected);
     if (rejectedEntries.length > 0) {
       setStatus({ text: `Not added -- ${rejectedEntries[0][1]}`, error: true });
@@ -87,7 +88,11 @@ export function ProvidersTab({ active }: ProvidersTabProps) {
     if (!removeTarget) return;
     const providerName = removeTarget;
     setRemoveTarget(null);
-    await removeProvider(providerName);
+    try {
+      await removeProvider(providerName);
+    } catch (err) {
+      setStatus({ text: err instanceof Error ? err.message : `Couldn't remove ${providerName}.`, error: true });
+    }
     refresh();
   };
 
@@ -97,6 +102,7 @@ export function ProvidersTab({ active }: ProvidersTabProps) {
         Anthropic, OpenAI, and Gemini are built in. Any other OpenAI-compatible API can be added as a custom
         provider. Set Default Model on the General tab as <code>name:model</code> once configured here.
       </p>
+      <FetchRetry status={loadStatus} error={loadError} onRetry={refresh} />
 
       <div>
         <h4 className="mb-2 text-sm font-medium">Catalog</h4>
@@ -144,7 +150,7 @@ export function ProvidersTab({ active }: ProvidersTabProps) {
               </button>
             </div>
           ))}
-          {Object.keys(configured).length === 0 && <div className="text-sm text-[var(--muted)]">No providers configured.</div>}
+          {loadStatus === "success" && Object.keys(configured).length === 0 && <div className="text-sm text-[var(--muted)]">No providers configured.</div>}
         </div>
       </div>
 

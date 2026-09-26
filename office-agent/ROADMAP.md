@@ -2371,11 +2371,13 @@ than the two numbers below).
       confirmed the status line appears the instant a turn starts and
       fully disappears (0 DOM matches) the instant it ends, no leftover
       state. No console/page errors either run.
-- [ ] **Not built yet, on purpose**: the expandable running action-list
-      (Claude Code's "Editing Fundamentals.md ▾" dropdown with a Read/
-      Ran a command/Editing history underneath) -- you asked to discuss
-      it separately later rather than build it alongside these two
-      numbers.
+- [x] **The expandable running action-list** (Claude Code's "Editing
+      Fundamentals.md ▾" dropdown with a Read/Ran a command/Editing
+      history underneath) -- arrived with the tool-call groups (Phase
+      8bb's UI batch): a group's summary line names what is running now
+      and opens to a row per call. Confirmed live in Phase 8bh, which
+      also fixed calls after a turn's first response showing "Read a
+      file" instead of the file name.
 
 ---
 
@@ -2547,12 +2549,10 @@ everything else.
       written -- turned out to be testing against a stale prebuilt
       `web/static/` bundle from before this fix; rebuilding and re-
       running confirmed the real fix.
-- [ ] **Not fixed here, same class of bug**: `WorkflowsTab.tsx`,
-      `ProvidersTab.tsx`, and `PackageListSection.tsx` (the Environment
-      tab's package lists) all have the identical unguarded-fetch
-      pattern -- not reported broken, left alone this pass rather than
-      widening scope beyond what was actually hit live; flagged to you as
-      candidates for the same fix if they ever show the same symptom.
+- [x] **Same class of bug, fixed in Phase 8bh**: `ProvidersTab.tsx` and
+      `PackageListSection.tsx` (the Environment tab's package lists) had
+      the identical unguarded-fetch pattern; `WorkflowsTab.tsx` was
+      removed with recorded workflows before that.
 
 ---
 
@@ -6064,6 +6064,35 @@ limited to file edits, Auto decided by a reviewer model.
 
 ---
 
+## Phase 8bh -- Auto by default, cache hit rate, settings loading (shipped)
+
+- [x] **Default mode**: Settings > General > Default Mode
+      (`COSCRIBE_DEFAULT_PERMISSION_MODE`, applied live), Auto by
+      default as in Claude Code. A scheduled run's thread ignores it and
+      keeps the task's own approval tier; the Auto reviewer never
+      overrides that tier. The test suite pins Manual in `conftest.py`.
+- [x] **Prompt cache**: measured by capturing every request of a real
+      DeepSeek conversation and diffing each against the previous one --
+      see `runtime_lg/README.md`'s "Prompt-cache hit rate" section.
+      Turns never broke the cache; `search_tools` discoveries did (71% of
+      all missed tokens). Found tools are now appended after the tools
+      already sent; search keeps only strong matches; OpenAI's endpoint
+      gets a per-thread `prompt_cache_key` (as Codex does). Same
+      conversation: 88.5% -> 90.9% -> 92.9% hit, 43 -> 30 tools bound.
+      One run per step, so read these as direction, not precise gains.
+- [x] **Providers and Environment package lists**: moved onto
+      `useFetchOnActive` + `FetchRetry` (now showing the error text). A
+      failed load showed "No providers configured." / the empty-package
+      text before; verified live by aborting the first request, then
+      Retry.
+- [x] **Live tool rows lost their arguments** after a turn's first model
+      response (see the cache section above for the cause). Found while
+      checking the running action list.
+- [ ] **Keeping the tool list fixed after a discovery** (a proxy tool,
+      or per-provider native tool search) -- would remove the remaining
+      discovery misses; touches approvals, hooks, audit and tool display.
+      Not started; needs a decision.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
@@ -6147,7 +6176,8 @@ a concrete reason to prioritize a new surface.
   recalled.
 
 - **Prompt-cache hit rate could likely be improved, not just displayed**
-  -- not started; noted here per your request. The display feature
+  -- **done in Phase 8bh** (measured, then fixed where it broke); what
+  follows is the original note. The display feature
   itself (this file's Phase 8ae, Eleventh finding) is confirmed working
   (92% after several turns in one real GLM conversation), but no
   investigation has happened yet into *raising* that rate (e.g. whether

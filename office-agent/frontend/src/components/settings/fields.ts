@@ -41,6 +41,14 @@ export const LOG_LEVELS = [
   { value: "ERROR", label: "Error" },
 ] as const;
 
+export const PERMISSION_MODE_KEY = "COSCRIBE_DEFAULT_PERMISSION_MODE";
+export const PERMISSION_MODES = [
+  { value: "manual", label: "Manual" },
+  { value: "accept-edits", label: "Accept Edits" },
+  { value: "plan", label: "Plan" },
+  { value: "auto", label: "Auto" },
+] as const;
+
 // Skills Directory is a real folder (unlike the file-path fields below it in
 // this array), so it's the one WORKSPACE_FIELDS entry GeneralTab/WorkspaceTab
 // pairs with a DirBrowserModal "Browse..." button -- see WorkspaceTab.tsx.
