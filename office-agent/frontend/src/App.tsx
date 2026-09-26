@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { HomeGreeting } from "./components/EmptyState";
 import { ChatLog } from "./components/ChatLog";
 import { Composer, type ComposerSendPayload } from "./components/Composer";
 import { ContextRing } from "./components/ContextRing";
 import { FolderPicker } from "./components/FolderPicker";
 import { ModePill } from "./components/ModePill";
+import { isElectron, onShowShortcuts } from "./lib/electron";
 import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR, useTitleBarColors } from "./lib/titleBar";
 import type { PlanChoice, PlanItem } from "./components/PlanCard";
 import { ModelPicker } from "./components/ModelPicker";
@@ -20,7 +22,7 @@ import { SubAgentsPanel } from "./components/SubAgentsPanel";
 import { TaskPanel } from "./components/TaskPanel";
 import { WorkflowDraftPage } from "./components/workflow/WorkflowDraftPage";
 import { WorkflowRunView } from "./components/workflow/WorkflowRunView";
-import { BrowserIcon, HelpIcon, PanelRightIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
+import { BrowserIcon, HelpIcon, MoreIcon, PanelRightIcon, SettingsIcon, SubAgentsIcon } from "./components/icons";
 import { ThreadHeader } from "./components/ThreadHeader";
 import {
   answerWorkflowStep,
@@ -162,6 +164,10 @@ function App() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  useEffect(() => {
+    if (isElectron()) onShowShortcuts(() => setShortcutsOpen(true));
+  }, []);
+
   useTitleBarColors();
 
   const threadIdRef = useRef(threadId);
@@ -290,7 +296,13 @@ function App() {
   // open hides this panel without forgetting that it's wanted.
   const hasPlan = state.items.some((item) => item.kind === "tool" && item.toolName === "task_create");
   const taskPanelWanted = taskPanelChoice[threadId] ?? (threadWorkflow !== null || isScheduledTaskThread || hasPlan);
-  const otherPanelOpen = browserPanelOpen || subAgentsPanelOpen;
+  const onHome =
+    state.historyReceived &&
+    state.items.length === 0 &&
+    state.olderItems.length === 0 &&
+    !state.turnInFlight &&
+    !isScheduledTaskThread &&
+    threadWorkflow === null;
   const taskPanelShown =
     navMode === "create" &&
     taskPanelWanted &&
@@ -561,6 +573,47 @@ function App() {
 
   if (!bootstrapped) return <StartupSplash />;
 
+  const composer = (
+    <Composer
+      turnInFlight={state.turnInFlight}
+      totalTokens={state.totalTokens}
+      commands={commands}
+      modePill={
+        onHome ? null : (
+          <ModePill
+            planMode={state.planMode}
+            acceptEdits={state.acceptEdits}
+            autoMode={state.autoMode}
+            sendRaw={sendRaw}
+          />
+        )
+      }
+      folderPicker={
+        <FolderPicker folders={state.folders} disabled={state.turnInFlight} onChange={onSetFolders} />
+      }
+      modelPicker={<ModelPicker currentModel={state.model} onSwitch={onSwitchModel} />}
+      usageRing={
+        onHome ? null : (
+          <ContextRing
+            threadId={threadId}
+            totalTokens={state.totalTokens}
+            contextWindow={state.contextWindow}
+            cacheStats={state.cacheStats}
+          />
+        )
+      }
+      onSend={onSend}
+      onStop={onStop}
+      onLocalError={onLocalError}
+      externalImage={pendingBrowserCapture}
+      onExternalImageConsumed={() => setPendingBrowserCapture(null)}
+      externalPptxCapture={pendingPptxCapture}
+      onExternalPptxCaptureConsumed={() => setPendingPptxCapture(null)}
+      externalText={pendingComposerText}
+      onExternalTextConsumed={() => setPendingComposerText(null)}
+    />
+  );
+
   const sidePanels = (
     <>
       {taskPanelShown && (
@@ -596,28 +649,30 @@ function App() {
   );
 
   return (
-    <div className="relative flex h-full">
+    <div className="relative flex h-full flex-col">
+      {DRAWS_TITLE_BAR && (
+        // The window's title bar: the sidebar's top row covers its left
+        // end, the OS window buttons its right end.
+        <div className="flex h-10 shrink-0 items-center">
+          <div className="shrink-0" style={{ width: navPinned ? NAV_RAIL_EXPANDED_WIDTH : COLLAPSED_CLUSTER_WIDTH }} />
+          <div className="titlebar-drag h-full min-w-0 flex-1" />
+          <button
+            type="button"
+            title="Settings"
+            aria-label="Settings"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <MoreIcon className="h-[18px] w-[18px]" />
+          </button>
+          <div className="titlebar-controls-space" />
+        </div>
+      )}
+      <div className="flex min-h-0 flex-1">
       <div
         className="flex h-full min-w-0 flex-1 flex-col"
         style={navPinned ? { paddingLeft: NAV_RAIL_EXPANDED_WIDTH } : undefined}
       >
-        <NavRail
-          threadId={threadId}
-          pinned={navPinned}
-          onPinnedChange={setNavPinned}
-          threads={threads ?? []}
-          onThreadsChanged={refreshThreads}
-          onThreadRenamed={renameThreadLocally}
-          mode={showingScheduled ? "run" : "create"}
-          onModeChange={onNavModeChange}
-          scheduledTasks={scheduledTasks}
-          onScheduledTasksChanged={refreshScheduledTasks}
-          activeTaskId={navMode === "run" ? selectedTaskId : (threadTask?.trigger_id ?? null)}
-          onOpenScheduledTask={openScheduledTask}
-          onEditScheduledTask={(task) => setScheduledTaskModal({ task })}
-          onRunScheduledTaskNow={runTaskNow}
-          onNewScheduledTask={createTaskWithCoscribe}
-        />
         {/* pl-12 lives here, not on the page-level wrapper above -- it only
          * needs to clear NavRail's own collapsed footprint (a 48px-square
          * toggle button pinned to the top-left corner, `absolute` so it
@@ -627,8 +682,7 @@ function App() {
          * it just pushed their own mx-auto-centered content off-center
          * from the window's true center for no reason. */}
         <div
-          className={`titlebar-drag flex h-12 shrink-0 items-center gap-1 pr-4 ${navPinned ? "pl-4" : "pl-12"}`}
-          style={!navPinned && DRAWS_TITLE_BAR ? { paddingLeft: COLLAPSED_CLUSTER_WIDTH + 8 } : undefined}
+          className={`flex h-12 shrink-0 items-center gap-1 pr-4 ${navPinned || DRAWS_TITLE_BAR ? "pl-4" : "pl-12"}`}
         >
           {/* Only in Chat mode -- a chat thread's own label/workspace
            * badge has no meaning while Run mode's Scheduled portal/
@@ -644,14 +698,14 @@ function App() {
               onOpenPortal={() => showScheduledTaskPage(null)}
               onOpenTask={showScheduledTaskPage}
             />
-          ) : navMode === "create" ? (
+          ) : navMode === "create" && !onHome ? (
             <ThreadHeader sessionLabel={sessionLabel} />
           ) : selectedTask && !workflowDraft ? (
             <TaskPageBreadcrumb task={selectedTask} onOpenPortal={() => showScheduledTaskPage(null)} />
           ) : (
             <div className="min-w-0 flex-1" />
           )}
-          {navMode === "create" && (
+          {navMode === "create" && !onHome && (
             <button
               type="button"
               title={taskPanelShown ? "Hide task details" : "Show task details"}
@@ -678,24 +732,27 @@ function App() {
           >
             <SubAgentsIcon className="h-[18px] w-[18px]" />
           </button>
-          <button
-            type="button"
-            title="Keyboard shortcuts (?)"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
-            onClick={() => setShortcutsOpen(true)}
-          >
-            <HelpIcon className="h-[18px] w-[18px]" />
-          </button>
-          <button
-            type="button"
-            title="Settings"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <SettingsIcon className="h-[18px] w-[18px]" />
-          </button>
-          {DRAWS_TITLE_BAR && !otherPanelOpen && (
-            <div className={`titlebar-controls-space ${taskPanelShown ? "lg:hidden" : ""}`} />
+          {/* In the desktop shell these live in the title bar (Settings)
+           * and the app menu (Help > Keyboard Shortcuts). */}
+          {!DRAWS_TITLE_BAR && (
+            <>
+              <button
+                type="button"
+                title="Keyboard shortcuts (?)"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+                onClick={() => setShortcutsOpen(true)}
+              >
+                <HelpIcon className="h-[18px] w-[18px]" />
+              </button>
+              <button
+                type="button"
+                title="Settings"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <SettingsIcon className="h-[18px] w-[18px]" />
+              </button>
+            </>
           )}
         </div>
         {connectionStatus === "reconnecting" && (
@@ -712,6 +769,15 @@ function App() {
             onAnswer={(approved, note) => answerWorkflow(threadTask, threadRun, approved, note)}
             onEditStep={(stepId) => editWorkflowStep(threadTask, stepId)}
           />
+        ) : navMode === "create" && onHome ? (
+          // A new conversation: greeting and message box centered in the page.
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center pb-[6vh]">
+            <HomeGreeting />
+            {state.error && (
+              <div className="mx-auto w-full max-w-[880px] px-4 py-1 text-sm text-red-500">{state.error}</div>
+            )}
+            {composer}
+          </div>
         ) : navMode === "create" ? (
           <>
             <ChatLog
@@ -742,38 +808,7 @@ function App() {
             {state.error && (
               <div className="mx-auto w-full max-w-[880px] px-4 py-1 text-sm text-red-500">{state.error}</div>
             )}
-            <Composer
-              turnInFlight={state.turnInFlight}
-              totalTokens={state.totalTokens}
-              commands={commands}
-              modePill={<ModePill
-                  planMode={state.planMode}
-                  acceptEdits={state.acceptEdits}
-                  autoMode={state.autoMode}
-                  sendRaw={sendRaw}
-                />}
-              folderPicker={
-                <FolderPicker folders={state.folders} disabled={state.turnInFlight} onChange={onSetFolders} />
-              }
-              modelPicker={<ModelPicker currentModel={state.model} onSwitch={onSwitchModel} />}
-              usageRing={
-                <ContextRing
-                  threadId={threadId}
-                  totalTokens={state.totalTokens}
-                  contextWindow={state.contextWindow}
-                  cacheStats={state.cacheStats}
-                />
-              }
-              onSend={onSend}
-              onStop={onStop}
-              onLocalError={onLocalError}
-              externalImage={pendingBrowserCapture}
-              onExternalImageConsumed={() => setPendingBrowserCapture(null)}
-              externalPptxCapture={pendingPptxCapture}
-              onExternalPptxCaptureConsumed={() => setPendingPptxCapture(null)}
-              externalText={pendingComposerText}
-              onExternalTextConsumed={() => setPendingComposerText(null)}
-            />
+            {composer}
           </>
         ) : workflowDraft ? (
           <WorkflowDraftPage
@@ -828,19 +863,28 @@ function App() {
         />
         {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       </div>
-      {DRAWS_TITLE_BAR && (taskPanelShown || otherPanelOpen) ? (
-        // The OS window buttons sit at the window's top-right, over the
-        // panels when one is open: they start below a strip of their own.
-        <div className={`h-full shrink-0 flex-col ${otherPanelOpen ? "flex" : "hidden lg:flex"}`}>
-          <div className="titlebar-drag flex h-12 shrink-0">
-            <div className="flex-1" />
-            <div className="titlebar-controls-space" />
-          </div>
-          <div className="flex min-h-0 flex-1">{sidePanels}</div>
-        </div>
-      ) : (
-        sidePanels
-      )}
+      {sidePanels}
+      </div>
+      {/* Last in the page: the desktop shell works out which parts of the
+       * window drag it in page order, so the sidebar's own buttons must
+       * come after every drag area they sit on. */}
+      <NavRail
+        threadId={threadId}
+        pinned={navPinned}
+        onPinnedChange={setNavPinned}
+        threads={threads ?? []}
+        onThreadsChanged={refreshThreads}
+        onThreadRenamed={renameThreadLocally}
+        mode={showingScheduled ? "run" : "create"}
+        onModeChange={onNavModeChange}
+        scheduledTasks={scheduledTasks}
+        onScheduledTasksChanged={refreshScheduledTasks}
+        activeTaskId={navMode === "run" ? selectedTaskId : (threadTask?.trigger_id ?? null)}
+        onOpenScheduledTask={openScheduledTask}
+        onEditScheduledTask={(task) => setScheduledTaskModal({ task })}
+        onRunScheduledTaskNow={runTaskNow}
+        onNewScheduledTask={createTaskWithCoscribe}
+      />
     </div>
   );
 }

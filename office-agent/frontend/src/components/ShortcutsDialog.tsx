@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import { DRAWS_TITLE_BAR } from "../lib/titleBar";
 import { CloseIcon } from "./icons";
 
 interface Shortcut {
@@ -9,6 +10,13 @@ interface Shortcut {
 
 const GENERAL_SHORTCUTS: Shortcut[] = [
   { keys: ["?"], description: "Show this shortcuts list" },
+  ...(DRAWS_TITLE_BAR
+    ? [
+        { keys: ["Ctrl", "/"], description: "Show this shortcuts list (also Help > Keyboard Shortcuts)" },
+        { keys: ["Alt", "←"], description: "Back to the previous page" },
+        { keys: ["Alt", "→"], description: "Forward again" },
+      ]
+    : []),
   { keys: ["Esc"], description: "Close a dialog, or cancel editing a message" },
 ];
 

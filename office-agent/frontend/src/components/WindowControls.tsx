@@ -1,6 +1,5 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { showAppMenu } from "../lib/electron";
-import { MAC_TITLE_BAR } from "../lib/titleBar";
 import { ArrowLeftIcon, ArrowRightIcon, MenuIcon } from "./icons";
 
 const iconButton =
@@ -36,7 +35,6 @@ function useHistoryAvailability(): { back: boolean; forward: boolean } {
 
 /** The application menu (File/Edit/View/Go/Window/Help); the OS menu bar is hidden. */
 export function AppMenuButton() {
-  if (MAC_TITLE_BAR) return null;
   const open = (event: MouseEvent<HTMLButtonElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     showAppMenu(rect.left, rect.bottom + 4);

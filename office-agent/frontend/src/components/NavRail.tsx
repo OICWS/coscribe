@@ -8,7 +8,7 @@ import type { ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { RunStatusIcon } from "./RunStatusIcon";
-import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR, TRAFFIC_LIGHTS_WIDTH } from "../lib/titleBar";
+import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR } from "../lib/titleBar";
 import { AppMenuButton, HistoryButtons } from "./WindowControls";
 import {
   ClockIcon,
@@ -251,6 +251,9 @@ function ScheduledTaskRow({ task, active, onSelect, onEdit, onRunNow, onChanged 
 
 export const NAV_RAIL_EXPANDED_WIDTH = 272;
 
+// In the desktop shell the top row is the title bar's left end.
+const TOP_ROW_HEIGHT = DRAWS_TITLE_BAR ? "h-10" : "h-12";
+
 interface NavRailProps {
   threadId: string;
   pinned: boolean;
@@ -311,7 +314,7 @@ export function NavRail({
     <>
       <div
         className={`absolute left-0 top-0 z-30 flex flex-col transition-[width] duration-150 ease-out ${
-          expanded ? "h-full border-r border-[var(--border)] bg-[var(--panel-bg)]" : "h-12"
+          expanded ? "h-full border-r border-[var(--border)] bg-[var(--panel-bg)]" : TOP_ROW_HEIGHT
         }`}
         style={{ width: expanded ? NAV_RAIL_EXPANDED_WIDTH : COLLAPSED_CLUSTER_WIDTH }}
         onMouseEnter={DRAWS_TITLE_BAR ? undefined : () => setHovering(true)}
@@ -322,10 +325,9 @@ export function NavRail({
          * pair joins it -- they only need to be reachable once the panel
          * is already open (hover or pinned). */}
         <div
-          className={`titlebar-drag flex h-12 shrink-0 items-center gap-0.5 px-1.5 ${
+          className={`titlebar-drag flex ${TOP_ROW_HEIGHT} shrink-0 items-center gap-0.5 px-1.5 ${
             expanded ? "justify-between" : DRAWS_TITLE_BAR ? "justify-start" : "justify-center"
           }`}
-          style={TRAFFIC_LIGHTS_WIDTH ? { paddingLeft: TRAFFIC_LIGHTS_WIDTH } : undefined}
         >
           <div className="flex items-center gap-0.5">
             {DRAWS_TITLE_BAR && <AppMenuButton />}

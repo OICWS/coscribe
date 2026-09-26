@@ -42,13 +42,22 @@ The window has no OS title bar or menu bar (`src/main/windowChrome.ts`):
 `titleBarStyle: "hidden"` plus `titleBarOverlay`, so Windows still draws
 minimize/maximize/close -- snapping and double-click-to-maximize keep
 working -- on the page's own background color, which the page re-sends
-when the theme changes. The page's top row is the drag area and holds
-"☰" (pops up the application menu: File/Edit/View/Go/Window/Help, whose
-shortcuts still work with the menu bar hidden), the sidebar toggle, and
-Back/Forward through the pages visited (`Go` menu: Alt+Left/Alt+Right).
-The splash page is cleared from history once the app loads, so Back
-never returns to it. Only the desktop shell's preload exposes
-`platform`, so a browser tab keeps its plain layout.
+when the theme changes. The page draws a 40px title bar across the whole
+window: on the left, the sidebar's top row ("☰", which pops up the
+application menu -- File/Edit/View/Go/Window/Help, whose shortcuts still
+work with the menu bar hidden -- the sidebar toggle, and Back/Forward
+through the pages visited); on the right, "⋮" (Settings) beside the OS
+buttons; the rest drags the window. Help > Keyboard Shortcuts (Ctrl+/)
+opens the page's shortcuts list. The splash page is cleared from history
+once the app loads, so Back never returns to it. Only the desktop
+shell's preload exposes `platform`, so a browser tab keeps its plain
+layout.
+
+Windows computes the drag area in page order -- each no-drag element
+subtracts from the drag regions before it -- so the sidebar (whose
+buttons sit over the title bar) is rendered last in the page. A test
+that clicks through Playwright/CDP skips this hit-testing entirely;
+check clicks with real input (xdotool under Xvfb, or Windows itself).
 
 ## Compared to the original Tauri shell
 
