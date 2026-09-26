@@ -75,6 +75,32 @@ that isn't a "why" removed, and whether a reader with zero memory of
 this conversation still needs it. If not, it goes in the commit
 message or gets deleted outright -- never both.
 
+## Commit authorship
+
+Commits are authored as the user, not as Claude (decided 2026-09-26).
+A fresh container starts with git's identity set to Claude, so set it in
+both clones before the first commit:
+
+```bash
+for r in /home/user/project /home/user/coscribe; do
+  git -C $r config user.name "OICWS"
+  git -C $r config user.email "OICW1803508708@outlook.com"
+done
+```
+
+Cherry-picks keep the original author, so the public repo follows
+automatically once the private commit is right.
+
+## Delegating simple code changes
+
+Mechanical, well-specified edits (remove an entry, rename, adjust a
+test, drop an icon) can go to a Sonnet subagent (`Agent` with
+`model: "sonnet"`) to save tokens -- give it the exact files, the change,
+the repo's comment rule, and the lint/test commands to run. Keep design
+decisions, prompt/instruction wording and anything needing live
+verification in the main session, and review the subagent's diff before
+committing.
+
 ## Dual-repo sync -- every commit goes to both
 
 Private (`OICWS/project`, branch `claude/local-office-agent-system-k2cle1-13gepc`)

@@ -1692,7 +1692,7 @@ The **+** button next to the message box opens three things:
   `read_file` on it like any other workspace file -- both kinds show up
   as removable chips above the message box while queued.
 - **Add connectors** -- a small curated catalog (`playwright` for browser
-  automation, plus `slack` and `office365`; reading a web page is the
+  automation, plus `office365`; Slack is set up by hand in the Custom tab; reading a web page is the
   built-in `read_web_page` tool, no connector needed) plus a form for any custom MCP server, backed by
   `GET`/`POST /api/mcp/servers` and `DELETE /api/mcp/servers/{name}` in
   `web/app.py`. These are the same stdio MCP servers the CLI's

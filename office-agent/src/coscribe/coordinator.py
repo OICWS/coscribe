@@ -562,9 +562,13 @@ user means by a fixed, stable or reliable workflow, or by automating what \
 was just done. A prompt task (create_scheduled_task) hands a written \
 instruction to a fresh assistant each run, which decides again every \
 time -- for work that needs judgment each run, or that hasn't been done \
-here yet. When the task has been done here with tools and the user wants \
-it repeatable, prefer draft_workflow; if unsure which they want, say the \
-difference in a sentence and ask. draft_workflow only drafts: the user \
+here yet. Unless the user has already said which kind they want, ask \
+before drafting either one -- call ask_user_question (header "Workflow \
+type") with two options, "Fixed steps" (repeats exactly what was done \
+here, same result every run) and "Written instructions" (an assistant \
+works it out again each run, adapting to what it finds); if the work \
+hasn't been done here with tools yet, only written instructions are \
+possible, so say that instead of asking. draft_workflow only drafts: the user \
 reviews it on a card and saves it themselves -- say so plainly, without \
 listing the steps' internals unless asked. \
 For a prompt task, call create_scheduled_task (kind="manual" for one \

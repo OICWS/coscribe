@@ -18,7 +18,6 @@ import { useFetchOnActive } from "../../lib/useFetchOnActive";
 
 const CONNECTOR_ICONS: Record<string, string> = {
   playwright: "🎭",
-  slack: "💬",
   office365: "📧",
 };
 
@@ -520,8 +519,7 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
       // No prefill sub-step needed anymore -- the manual form already
       // lives on this same Add view; the user just fills it in with the
       // catalog entry's own required env keys as a hint via the
-      // description above it. Simplest correct thing given needs_config
-      // only applies to one entry (slack) today.
+      // description above it.
       setStatus({ text: `${entry.name} needs its own token -- fill in "Add manually" below with the required env vars.`, error: false });
       return;
     }
