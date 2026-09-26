@@ -1,11 +1,21 @@
-import { useRef, useState, type MouseEvent } from "react";
+import { useMemo, useRef, useState, type MouseEvent } from "react";
 import { deleteScheduledTask, pauseScheduledTask, resumeScheduledTask } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
 import { capitalize, formatRunTime, latestRun, RUN_STATUS_LABEL } from "../lib/runLabels";
 import { describeSchedule } from "../lib/scheduleLabels";
 import type { ScheduledTask } from "../types/settings";
 import { ScheduledTaskDetail } from "./ScheduledTaskDetail";
-import { ChevronDownIcon, MoreIcon, PauseIcon, PencilIcon, PlayIcon, SearchIcon, TrashIcon } from "./icons";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  CloseIcon,
+  MoreIcon,
+  PauseIcon,
+  PencilIcon,
+  PlayIcon,
+  SearchIcon,
+  TrashIcon,
+} from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { RunStatusIcon } from "./RunStatusIcon";
 
@@ -125,6 +135,39 @@ function LastRunLine({ task }: { task: ScheduledTask }) {
   );
 }
 
+type SortKey = "next" | "name";
+
+const SORT_LABEL: Record<SortKey, string> = { next: "Next run", name: "Name" };
+const SORT_STORAGE_KEY = "coscribe.scheduledSort";
+
+function storedSort(): SortKey {
+  try {
+    return localStorage.getItem(SORT_STORAGE_KEY) === "name" ? "name" : "next";
+  } catch {
+    return "next";
+  }
+}
+
+function byName(a: ScheduledTask, b: ScheduledTask): number {
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+}
+
+/** Soonest first; tasks with no next run (paused or run by hand) after
+ * every scheduled one, by name. */
+function byNextRun(a: ScheduledTask, b: ScheduledTask): number {
+  if (a.next_run_at && b.next_run_at) return a.next_run_at.localeCompare(b.next_run_at) || byName(a, b);
+  if (a.next_run_at) return -1;
+  if (b.next_run_at) return 1;
+  return byName(a, b);
+}
+
+function matchesQuery(task: ScheduledTask, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const haystack = [task.name, task.prompt, ...(task.workflow?.steps.map((step) => step.title) ?? [])];
+  return haystack.some((text) => text?.toLowerCase().includes(needle));
+}
+
 interface RunPanelProps {
   tasks: ScheduledTask[];
   onScheduledTasksChanged: () => void;
@@ -157,6 +200,32 @@ export function RunPanel({
   const [newTaskMenuOpen, setNewTaskMenuOpen] = useState(false);
   const newTaskMenuRef = useRef<HTMLDivElement>(null);
   useClickOutside(newTaskMenuRef, () => setNewTaskMenuOpen(false), newTaskMenuOpen);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
+  useClickOutside(sortMenuRef, () => setSortMenuOpen(false), sortMenuOpen);
+  const [sort, setSort] = useState<SortKey>(storedSort);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const shownTasks = useMemo(
+    () => tasks.filter((task) => matchesQuery(task, query)).sort(sort === "name" ? byName : byNextRun),
+    [tasks, query, sort],
+  );
+
+  const chooseSort = (key: SortKey) => {
+    setSort(key);
+    setSortMenuOpen(false);
+    try {
+      localStorage.setItem(SORT_STORAGE_KEY, key);
+    } catch {
+      // Unavailable storage only costs remembering the choice.
+    }
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setQuery("");
+  };
 
   if (selectedTask) {
     return (
@@ -187,20 +256,70 @@ export function RunPanel({
             <p className="mt-1 text-sm text-[var(--muted)]">Run tasks on a schedule or whenever you need them.</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              aria-label="Search"
-              className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)]"
-            >
-              <SearchIcon className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              className="flex items-center gap-1 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--muted)]"
-            >
-              Sort by <span className="font-medium text-[var(--fg)]">Next run</span>{" "}
-              <ChevronDownIcon className="h-3.5 w-3.5" />
-            </button>
+            {searchOpen ? (
+              <div className="flex h-9 w-56 items-center gap-1.5 rounded-md border border-[var(--border)] px-2.5 focus-within:border-[var(--border-hover)]">
+                <SearchIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+                <input
+                  autoFocus
+                  aria-label="Search tasks"
+                  placeholder="Search tasks"
+                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && closeSearch()}
+                />
+                <button
+                  type="button"
+                  aria-label="Close search"
+                  className="shrink-0 rounded text-[var(--muted)] hover:text-[var(--fg)]"
+                  onClick={closeSearch}
+                >
+                  <CloseIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                aria-label="Search"
+                title="Search"
+                className="flex h-9 w-9 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+                onClick={() => setSearchOpen(true)}
+              >
+                <SearchIcon className="h-4 w-4" />
+              </button>
+            )}
+            <div className="relative" ref={sortMenuRef}>
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={sortMenuOpen}
+                className={`flex h-9 items-center gap-1 rounded-md border border-[var(--border)] px-3 text-sm text-[var(--muted)] hover:bg-[var(--card-bg)] ${sortMenuOpen ? "bg-[var(--card-bg)]" : ""}`}
+                onClick={() => setSortMenuOpen((v) => !v)}
+              >
+                Sort by <span className="font-medium text-[var(--fg)]">{SORT_LABEL[sort]}</span>{" "}
+                <ChevronDownIcon className="h-3.5 w-3.5" />
+              </button>
+              {sortMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-10 mt-1 w-40 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] p-1 shadow-[var(--shadow)]"
+                >
+                  {(Object.keys(SORT_LABEL) as SortKey[]).map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sort === key}
+                      className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
+                      onClick={() => chooseSort(key)}
+                    >
+                      {SORT_LABEL[key]}
+                      {sort === key && <CheckIcon className="h-4 w-4 text-[var(--accent)]" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="relative" ref={newTaskMenuRef}>
               <button
                 type="button"
@@ -267,9 +386,11 @@ export function RunPanel({
               Create with coscribe
             </button>
           </div>
+        ) : shownTasks.length === 0 ? (
+          <p className="mt-10 text-center text-sm text-[var(--muted)]">No tasks match &ldquo;{query.trim()}&rdquo;</p>
         ) : (
           <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {tasks.map((task) => (
+            {shownTasks.map((task) => (
               <div
                 key={task.trigger_id}
                 role="button"

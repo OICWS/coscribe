@@ -109,3 +109,23 @@ export function RunBreadcrumb({ task, threadId, onOpenPortal, onOpenTask, status
     </div>
   );
 }
+
+/** "Scheduled tasks / <task>" above a task's own page; the first part
+ * goes back to the task list. */
+export function TaskPageBreadcrumb({ task, onOpenPortal }: { task: ScheduledTask; onOpenPortal: () => void }) {
+  return (
+    <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
+      <button
+        type="button"
+        className="shrink-0 rounded-md bg-[var(--card-bg)] px-2 py-1 hover:bg-[var(--border)]"
+        onClick={onOpenPortal}
+      >
+        Scheduled tasks
+      </button>
+      <span className="text-[var(--muted)]">/</span>
+      <span aria-current="page" className="min-w-0 truncate px-1">
+        {task.name}
+      </span>
+    </nav>
+  );
+}

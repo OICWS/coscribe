@@ -6088,10 +6088,24 @@ limited to file edits, Auto decided by a reviewer model.
 - [x] **Live tool rows lost their arguments** after a turn's first model
       response (see the cache section above for the cause). Found while
       checking the running action list.
-- [ ] **Keeping the tool list fixed after a discovery** (a proxy tool,
-      or per-provider native tool search) -- would remove the remaining
-      discovery misses; touches approvals, hooks, audit and tool display.
-      Not started; needs a decision.
+- [ ] **Keeping the tool list fixed after a discovery** -- would remove
+      the remaining discovery misses. Deferred by decision (2026-09-26).
+      When picked up, the chosen direction is the provider-neutral one:
+      `search_tools` returns the found tools' descriptions and schemas as
+      its result, and one fixed proxy tool runs them by name -- not
+      per-provider native tool search. It has to keep approvals, hooks,
+      audit and the chat's tool rows keyed on the real tool name.
+
+## Phase 8bi -- Task page breadcrumb, portal search and sort (shipped)
+
+- [x] **"Scheduled tasks / <task>" above a task's own page**; the first
+      part returns to the portal. A run's conversation already had its
+      own "Scheduled / <task> ⌄" breadcrumb; the task page never had one.
+- [x] **Portal search and sort**, replacing the placeholders: search
+      matches name, instructions and workflow step titles (Esc clears);
+      sort by Next run (soonest first; manual/paused after, by name) or
+      Name (numbers in order: "report 2" before "report 10"), remembered
+      per browser.
 
 ## Later -- real intentions, not actively scheduled
 
