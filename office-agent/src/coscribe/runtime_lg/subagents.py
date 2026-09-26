@@ -1,112 +1,326 @@
-"""spawn_agent for runtime_lg -- closes Phase 1's open question: does an
-interrupt() raised inside a sub-agent's own tool node correctly bridge up
-through a parent tool node that synchronously invokes it?
+"""Delegated sub-agents: spawn_agent (the parent waits for the reply) and
+spawn_agent_background (it doesn't). Both run the child as its own
+asyncio task, visible in the Sub Agents panel while it works.
 
-**Answer, live-verified against Gemini (see scripts/verify_nested_interrupt.py):
-not automatically -- a sub-agent built via build_langgraph_agent is a
-separately-compiled graph with its own checkpointer/thread_id.** When one of
-its tools triggers HumanInTheLoopMiddleware's own interrupt(), the
-sub-agent's own Pregel executor catches that GraphInterrupt internally and
-returns *normally* from `.invoke()`, with `sub_agent.get_state(...).next`
-populated -- nothing propagates to the parent automatically. A naive
-spawn_agent that just does `sub_agent.invoke(...)` and returns the last
-message would silently swallow the pending approval: the parent tool node
-would report back whatever partial/stale text is in the last message (often
-none at all), and the sub-agent would be left permanently stuck waiting for
-an approval nobody will ever see.
-
-The fix below manually bridges *one* pending child approval per spawn_agent
-call: after invoking the child, it checks the child's own
-`get_state().next`, and if paused, calls `interrupt()` **itself** (the
-parent's own primitive, from inside the parent's own tool-node execution)
-using the same payload shape `HumanInTheLoopMiddleware` already uses -- so
-the existing approval UI/wire protocol needs zero changes to render a
-nested approval identically to a top-level one. On resume, the decision is
-fed back into the child via `Command(resume=...)` against the *same*,
-deterministic child thread_id (derived from the parent tool call's own
-injected `tool_call_id`, which is stable across the parent's own
-interrupt/resume replay -- see LangGraph's documented re-run-from-the-top
-node semantics; anything derived from *random* state, like a freshly
-generated uuid, would silently lose track of the child's checkpoint the
-moment the parent itself gets resumed).
-
-**Multi-round nested approval (a sub-agent needing two separate approvals in
-one spawn_agent call) was suspected to be broken by this same "code after
-interrupt() re-executes on replay" reasoning -- checked live, and the
-suspicion turned out to be right, just not in the way first assumed.**
-scripts/verify_nested_interrupt.py's two-round scenario (two *sequential*
-approval-gated write_file calls, decided APPROVE then REJECT to rule out
-"round 2 silently reuses round 1's cached decision") passed -- both times
-this docstring originally took that as proof the replay model was wrong.
-**It wasn't: later testing with *concurrent* spawn_agent calls (two
-proposed in one AIMessage) surfaced the real bug the two-round scenario
-had been masking by luck.** `interrupt()`'s re-execution really does apply
-to spawn_agent's *entire* function body on every resume, including
-`sub_agent = build_langgraph_agent(...)` -- and that line used to build a
-*fresh* `InMemorySaver()` on every single call (checkpointer=None
-defaulted to one). So on resume, `state.values` read back empty, `if not
-state.values: sub_agent.invoke(...)` silently re-asked the child *from
-scratch*, and the resume decision meant for the *original* pending
-question got applied to whatever *new* question that fresh ask produced
-instead. Debug instrumentation confirmed it directly: `id(sub_agent)`
-differs between the pre-interrupt and post-resume executions of the same
-spawn_agent call, and a second, redundant child invocation really does
-happen on every resume. This was invisible in every prior test (both
-single- and two-round) purely because the redundant re-ask, by chance,
-proposed the *same* tool call the second time -- re-approving/re-rejecting
-a duplicate that looked identical to the original produces a correct-
-looking result even though the mechanism underneath is wrong. The
-concurrent-call test broke that luck: after both concurrent calls
-successfully completed, a *third*, unexpected `approval_required` for one
-of them appeared, tracing back to exactly this. **Fixed** by giving each
-`build_spawn_agent_tool` closure one `InMemorySaver` shared across every
-call it ever makes (`child_checkpointer`, module-scoped inside the
-closure, not per-call) -- `sub_agent`'s *compiled graph* object still gets
-rebuilt on every replay (cheap, harmless), but `get_state`/`invoke` against
-the *same* checkpointer now correctly finds the real, already-persisted
-checkpoint for a given child thread_id, so a replay resumes the actual
-pending question instead of silently asking a new one. Live-verified
-against real Gemini after the fix: two concurrent spawn_agent calls, one
-approved and one rejected, resolved correctly and independently with no
-further spurious approvals -- see runtime_lg/README.md.
-
-`max_rounds` is kept as a parameter (not hardcoded to 1) so a sub-agent
-needing multiple real approval rounds can still be verified without a
-second copy of this function.
+A child's approvals go through its host's decide() -- the session's own
+approval policy -- rather than being bridged up through the parent's
+graph with interrupt(). So a child waiting on approval is answered from
+the panel whether or not its parent is still waiting, and plan mode,
+accept-edits, exec policy and hooks apply to it exactly as they do to the
+parent.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
+import logging
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
-from langchain_core.tools import BaseTool, InjectedToolCallId, tool
+from langchain_core.messages import AIMessage
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
 
+from ..runtime.types import tool_metadata
 from ..tools import QUESTION_TOOL_NAMES
 from ..tools.scheduled_tasks import TASK_DRAFT_TOOL_NAMES
 from ..tools.subagent_tasks import (
     SubAgentTask,
     SubAgentTaskStore,
-    register_live_subagent,
-    run_supervised_subagent,
-    track_supervisor_task,
+    register_subagent_run,
 )
 from .agent import build_langgraph_agent
 from .agent import tool_name as _tool_name
 from .messages import extract_text
 
-# build_review_work_tool's fixed Reviewer persona. Used to live in
-# tools/subagents.py alongside the old runtime's own spawn_agent/
-# review_work tool factory -- moved here when that old factory was deleted
-# as dead code (see runtime_lg/README.md's "audit + delete old runtime"
-# section), since this was its only real consumer left.
+logger = logging.getLogger(__name__)
+
+DEFAULT_SUBAGENT_INSTRUCTIONS = (
+    "You are doing one task delegated to you by another assistant. Do the "
+    "task with your tools, then reply with a short, complete report of what "
+    "you did and found -- that reply is all the other assistant will see."
+)
+
+# Tools that need a person on the parent's side of the conversation, or
+# would let a child start children of its own.
+_NOT_FOR_SUBAGENTS = frozenset(
+    {
+        "spawn_agent",
+        "spawn_agent_background",
+        "draft_workflow",
+        *QUESTION_TOOL_NAMES,
+        *TASK_DRAFT_TOOL_NAMES,
+    }
+)
+
+
+@dataclass
+class SubAgentHost:
+    """What the conversation that delegates provides to its sub-agents."""
+
+    thread_id: str
+    state_dir: Path
+    # "" means the conversation's own model. Returns (model string, chat
+    # model); raises ValueError for a model that isn't configured.
+    resolve_model: Callable[[str], tuple[str, Any]]
+    configured_models: Callable[[], list[str]]
+    # Decides one pending action request -- approve, reject, or ask the
+    # user -- for the given run.
+    decide: Callable[[dict[str, Any], SubAgentTask], Awaitable[Any]]
+    # The run's record changed; tell whoever is watching.
+    changed: Callable[[SubAgentTask], Awaitable[None]]
+    defer_tools: bool = False
+    core_tool_names: frozenset[str] = frozenset()
+    # Route every call through decide(), not only gated ones (a PreToolUse
+    # hook needs to see them all).
+    interrupt_all: bool = False
+    max_turns: int | None = None
+
+
+def _record_progress(task: SubAgentTask, update: Any, seen: set[str]) -> bool:
+    """Folds one stream_mode="updates" chunk into the run's counters. The
+    approval middleware re-emits the model's message in its own update, so
+    each message is counted once, by `seen`."""
+    if not isinstance(update, dict):
+        return False
+    changed = False
+    for node_update in update.values():
+        if not isinstance(node_update, dict):
+            continue
+        for message in node_update.get("messages", []) or []:
+            if not isinstance(message, AIMessage):
+                continue
+            key = message.id or "|".join(
+                [str(call.get("id")) for call in message.tool_calls] + [str(message.content)]
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            usage: dict[str, Any] = dict(message.usage_metadata or {})
+            task.tokens += int(usage.get("total_tokens", 0) or 0)
+            if message.tool_calls:
+                task.tool_uses += len(message.tool_calls)
+                last = message.tool_calls[-1]
+                task.last_tool = {"tool_name": last["name"], "arguments": last["args"]}
+            changed = True
+    return changed
+
+
+async def _drive(
+    host: SubAgentHost,
+    store: SubAgentTaskStore,
+    task: SubAgentTask,
+    sub_agent: Any,
+    child_config: dict[str, Any],
+) -> None:
+    async def save() -> None:
+        store.save(task)
+        await host.changed(task)
+
+    turn_input: Any = {"messages": [{"role": "user", "content": task.prompt}]}
+    seen: set[str] = set()
+    try:
+        while True:
+            async for update in sub_agent.astream(
+                turn_input, config=child_config, stream_mode="updates"
+            ):
+                if _record_progress(task, update, seen):
+                    await save()
+            state = await sub_agent.aget_state(child_config)
+            if not state.next:
+                break
+            resume: dict[str, Any] = {}
+            for pending in state.tasks:
+                for interrupt in pending.interrupts:
+                    decisions = []
+                    for request in interrupt.value.get("action_requests", []):
+                        decisions.append(await host.decide(request, task))
+                        if task.pending_approval is not None or task.status != "running":
+                            task.pending_approval = None
+                            task.status = "running"
+                            await save()
+                    resume[interrupt.id] = {"decisions": decisions}
+            if not resume:
+                raise RuntimeError("the sub-agent stopped partway with nothing to resume")
+            turn_input = Command(resume=resume)
+    except asyncio.CancelledError:
+        task.status = "stopped"
+        task.pending_approval = None
+        task.finished_at = datetime.now(UTC).isoformat()
+        await save()
+        raise
+    except Exception as exc:  # noqa: BLE001 -- a failed child is reported, not raised into the parent
+        logger.warning("sub-agent %s failed", task.task_id, exc_info=True)
+        task.status = "failed"
+        task.error = (str(exc) or type(exc).__name__)[:2000]
+        task.pending_approval = None
+        task.finished_at = datetime.now(UTC).isoformat()
+        await save()
+        return
+
+    state = await sub_agent.aget_state(child_config)
+    messages = state.values.get("messages", []) if state.values else []
+    reply = extract_text(getattr(messages[-1], "content", None)) if messages else ""
+    task.result = reply or "(the sub-agent gave no reply)"
+    task.status = "succeeded"
+    task.finished_at = datetime.now(UTC).isoformat()
+    await save()
+
+
+def _outcome(task: SubAgentTask) -> str:
+    if task.status == "succeeded":
+        return task.result or "(the sub-agent gave no reply)"
+    if task.status == "stopped":
+        return "(the user stopped this sub-agent before it finished)"
+    return f"(the sub-agent failed: {task.error or 'unknown error'})"
+
+
+def build_delegation_tools(
+    host: SubAgentHost, available_tools: Sequence[Callable[..., Any] | BaseTool]
+) -> list[Callable[..., Any]]:
+    """spawn_agent and spawn_agent_background, bound to `host`."""
+    tools_by_name = {
+        _tool_name(t): t for t in available_tools if _tool_name(t) not in _NOT_FOR_SUBAGENTS
+    }
+    store = SubAgentTaskStore(host.state_dir)
+
+    def start(
+        description: str,
+        prompt: str,
+        instructions: str,
+        model: str,
+        tool_names: str,
+        background: bool,
+    ) -> tuple[SubAgentTask, asyncio.Task[None]]:
+        requested = [n.strip() for n in tool_names.split(",") if n.strip()]
+        unknown = [n for n in requested if n not in tools_by_name]
+        if unknown:
+            raise ValueError(f"Unknown tool for a sub-agent: {', '.join(unknown)}")
+        selected = [tools_by_name[n] for n in requested] or list(tools_by_name.values())
+        model_string, chat_model = host.resolve_model(model.strip())
+        sub_agent = build_langgraph_agent(
+            chat_model,
+            selected,
+            instructions.strip() or DEFAULT_SUBAGENT_INSTRUCTIONS,
+            checkpointer=InMemorySaver(),
+            extra_interrupt_tool_names=[_tool_name(t) for t in selected]
+            if host.interrupt_all
+            else (),
+            max_turns=host.max_turns,
+            # Only a child given the full set searches for tools; a hand-picked
+            # set is small enough to bind as is.
+            defer_tools=host.defer_tools and not requested,
+            core_tool_names=host.core_tool_names,
+        )
+        task = SubAgentTask(
+            task_id=uuid.uuid4().hex[:12],
+            thread_id=host.thread_id,
+            instructions=instructions,
+            prompt=prompt,
+            tool_names=tool_names,
+            description=description.strip() or prompt.strip().splitlines()[0][:80],
+            status="running",
+            started_at=datetime.now(UTC).isoformat(),
+            model=model_string,
+            background=background,
+        )
+        child_config = {"configurable": {"thread_id": f"subagent-{task.task_id}"}}
+        # A fresh context: LangChain keeps the running call's config in
+        # contextvars, and a copied one would stream the child's messages
+        # into the parent's own chat stream.
+        runner = asyncio.create_task(
+            _drive(host, store, task, sub_agent, child_config), context=contextvars.Context()
+        )
+        register_subagent_run(task.task_id, runner, sub_agent, child_config)
+        # Saved only once registered: a record with no live runner reads as
+        # cut off by a restart.
+        store.save(task)
+        return task, runner
+
+    models_note = ", ".join(host.configured_models()) or "only this conversation's"
+
+    async def spawn_agent(
+        description: str,
+        prompt: str,
+        instructions: str = "",
+        model: str = "",
+        tool_names: str = "",
+    ) -> str:
+        """Hand a self-contained task to a sub-agent with its own context
+        and wait for its report -- only that report comes back, so its
+        steps don't crowd this conversation. The user watches it, and
+        answers its approvals, in the Sub Agents panel.
+
+        Args:
+            description: a few plain words for the panel, e.g. "Check the
+                Q3 figures in sales.xlsx".
+            prompt: the complete task -- the sub-agent sees nothing of this
+                conversation, so include every path, fact and constraint.
+            instructions: its role, if it needs one beyond doing the task.
+            model: which model runs it, as "provider:model"; empty for this
+                conversation's own model.
+            tool_names: comma-separated names of your tools to give it; empty
+                gives it all of them (it finds the ones it needs).
+        """
+        task, runner = start(description, prompt, instructions, model, tool_names, False)
+        try:
+            await asyncio.shield(runner)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is None or not current.cancelling():
+                # Only the sub-agent was stopped (from the panel): the parent
+                # carries on with that as its report.
+                return _outcome(task)
+            # The parent's turn is ending. A Stop stops the sub-agent too (the
+            # session cancels it); a dropped connection leaves it running as a
+            # background run whose report waits in the panel.
+            if not runner.done() and not runner.cancelling():
+                task.background = True
+                store.save(task)
+            raise
+        return _outcome(task)
+
+    async def spawn_agent_background(
+        description: str,
+        prompt: str,
+        instructions: str = "",
+        model: str = "",
+        tool_names: str = "",
+    ) -> dict[str, Any]:
+        """Like spawn_agent, but returns at once with a task_id instead of
+        waiting, so this conversation can go on. Then either end your turn
+        with wake_on_subagent(task_id, reason) to be resumed when it's done,
+        or check on it with check_subagent_task(task_id).
+
+        Args:
+            description: a few plain words for the panel.
+            prompt: the complete task -- it sees nothing of this conversation.
+            instructions: its role, if it needs one beyond doing the task.
+            model: which model runs it, as "provider:model"; empty for this
+                conversation's own model.
+            tool_names: comma-separated names of your tools to give it; empty
+                gives it all of them.
+        """
+        task, _runner = start(description, prompt, instructions, model, tool_names, True)
+        return {"task_id": task.task_id, "status": task.status, "description": task.description}
+
+    for delegate in (spawn_agent, spawn_agent_background):
+        head, _, args = (delegate.__doc__ or "").partition("        Args:")
+        delegate.__doc__ = f"{head}        Configured models: {models_note}.\n\n        Args:{args}"
+    return [
+        tool_metadata(spawn_agent, risk_category="READ", category="subagents"),
+        tool_metadata(spawn_agent_background, risk_category="READ", category="subagents"),
+    ]
+
+
+# build_review_work_tool's fixed Reviewer persona.
 REVIEWER_INSTRUCTIONS = """\
 You are a reviewer. You did not do the work being reviewed -- look at it \
 with fresh eyes. Given the user's original request and a summary of what \
@@ -125,246 +339,6 @@ direct assessment: either confirm it looks correct, or list specific, \
 concrete problems to fix (not vague "could be better" -- name what's \
 actually wrong and where). Do not redo the work yourself.
 """
-
-
-def build_spawn_agent_tool(
-    model: Any,
-    available_tools: Sequence[Callable[..., Any] | BaseTool],
-    *,
-    max_rounds: int = 4,
-) -> BaseTool:
-    """Return a spawn_agent tool bound to `model`/`available_tools`, mirroring
-    tools/subagents.py's spawn_agent signature (instructions/prompt/
-    tool_names) as closely as the injected-id requirement allows.
-
-    `available_tools` may mix plain functions, aisuite's MCPToolWrapper
-    (`__name__`, no `.name`), and LangChain `BaseTool`/`StructuredTool`
-    instances -- e.g. runtime_lg/mcp.py's MCP tools, which have `.name` but
-    no `__name__` -- agent.py's `tool_name` helper handles all three.
-
-    `max_rounds` bounds how many separate approval round-trips one
-    spawn_agent call will bridge before giving up and reporting the
-    sub-agent as still stuck (a safety cap against a sub-agent that never
-    stops asking for approvals, not evidence of a correctness limit --
-    verified live for 1 and 2 rounds, see module docstring).
-    """
-    # Excludes itself defensively -- callers are expected to pass their own
-    # tool list *before* adding spawn_agent to it (cli.py/session.py
-    # both do), but this guards against unbounded self-recursion even if a
-    # caller ever includes it by mistake, same reasoning as tools/
-    # subagents.py's _DISALLOWED_SUBAGENT_TOOLS. Also excludes
-    # QUESTION_TOOL_NAMES/TASK_DRAFT_TOOL_NAMES (ask_user_question,
-    # create_scheduled_task) -- this sub-agent's own graph never registers
-    # them in question_tool_names (see
-    # build_langgraph_agent below, called with no question_tool_names
-    # argument), so calling it here would just run its defensive
-    # RuntimeError body instead of pausing for a real person the way it
-    # does for the top-level Coordinator.
-    excluded_names = {"spawn_agent", *QUESTION_TOOL_NAMES, *TASK_DRAFT_TOOL_NAMES}
-    tools_by_name = {
-        _tool_name(t): t for t in available_tools if _tool_name(t) not in excluded_names
-    }
-    # Shared across every spawn_agent call this tool instance ever makes
-    # (one per session, since build_spawn_agent_tool itself is called once
-    # per ChatSessionLG/cli.py chat()) -- not per-call. A real bug, found
-    # by testing concurrent spawn_agent calls and confirmed with debug
-    # instrumentation, not assumed: `interrupt()`'s own documented
-    # re-execution semantics ("resumes from the start of the node,
-    # re-executing all logic") apply to spawn_agent's *entire* function body,
-    # not just the code after interrupt() -- so `sub_agent = build_
-    # langgraph_agent(...)` below reruns on every resume too. If it built a
-    # *fresh* checkpointer each time (the previous behavior, checkpointer=
-    # None defaulting to a new InMemorySaver()), the child's progress from
-    # before the interrupt would vanish: `state.values` would read back
-    # empty, `if not state.values: sub_agent.invoke(...)` would silently
-    # re-ask the child from scratch, and the *new* pending interrupt that
-    # produces would immediately (and incorrectly) receive the decision the
-    # user gave for the *original* one -- invisible when the child's second
-    # response happens to match its first (why this shipped without being
-    # caught: every existing single-round/two-round live verification
-    # produced a matching duplicate by chance), but a real risk of silently
-    # executing something other than what the user actually approved
-    # whenever the model's second attempt doesn't reproduce the first
-    # exactly. One InMemorySaver shared across all of this closure's calls
-    # fixes it: build_langgraph_agent still constructs a fresh *compiled
-    # graph* object per call (cheap, harmless), but get_state/invoke against
-    # the *same* checkpointer correctly finds the real, persisted checkpoint
-    # for a given child thread_id regardless of how many times spawn_agent's
-    # own function body has replayed.
-    child_checkpointer = InMemorySaver()
-
-    @tool
-    def spawn_agent(
-        instructions: str,
-        prompt: str,
-        tool_call_id: Annotated[str, InjectedToolCallId],
-        tool_names: str = "",
-    ) -> str:
-        """Delegate a self-contained sub-task to an independent agent with
-        its own context window -- only its final summary comes back, so its
-        intermediate steps don't clutter your own conversation.
-
-        Args:
-            instructions: the sub-agent's system prompt / role.
-            prompt: the specific task for the sub-agent to do.
-            tool_names: comma-separated names of your own tools to grant the
-                sub-agent, e.g. "read_file,write_file". Empty for a
-                pure-reasoning sub-agent with no tools.
-        """
-        selected = []
-        for name in (n.strip() for n in tool_names.split(",")):
-            if not name:
-                continue
-            if name not in tools_by_name:
-                raise ValueError(f"Unknown tool for a sub-agent: {name!r}")
-            selected.append(tools_by_name[name])
-
-        sub_agent = build_langgraph_agent(
-            model, selected, instructions, checkpointer=child_checkpointer
-        )
-        # Deterministic across parent reruns -- tool_call_id is injected by
-        # LangChain from the actual ToolCall and stays identical across the
-        # parent tool node's own interrupt/resume replays (see docstring).
-        child_config = {"configurable": {"thread_id": f"spawn-{tool_call_id}"}}
-
-        state = sub_agent.get_state(child_config)
-        if not state.values:
-            sub_agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]}, config=child_config
-            )
-
-        rounds = 0
-        while rounds < max_rounds:
-            state = sub_agent.get_state(child_config)
-            if not state.next:
-                break
-            pending = state.tasks[0].interrupts[0].value
-            decision = interrupt(pending)
-            sub_agent.invoke(Command(resume=decision), config=child_config)
-            rounds += 1
-
-        final_state = sub_agent.get_state(child_config)
-        last = final_state.values["messages"][-1]
-        # extract_text, not raw .content -- a Gemini "thinking" reply's
-        # content is a list of blocks including a large opaque signature
-        # blob, not a plain string; returning that raw would leak a huge,
-        # useless payload into the parent conversation's tool result
-        # (confirmed live: a real Gemini call produced exactly this shape).
-        content = extract_text(getattr(last, "content", None))
-        if final_state.next:
-            return (
-                f"(sub-agent still had a pending approval after the {max_rounds}-round cap -- "
-                "raise max_rounds if this sub-task genuinely needs more approval round-trips)"
-            )
-        return content or "(sub-agent produced no text reply)"
-
-    return spawn_agent
-
-
-def build_spawn_agent_background_tool(
-    model: Any,
-    available_tools: Sequence[Callable[..., Any] | BaseTool],
-    thread_id: str,
-    state_dir: Path,
-) -> Callable[..., Any]:
-    """Return spawn_agent_background, the non-blocking counterpart to
-    spawn_agent above -- for a self-contained sub-task expected to take a
-    while, where the model would rather end its own turn (freeing the
-    user to keep talking, or the thread to genuinely go idle) than sit
-    blocked on a synchronous `.invoke()` the way spawn_agent does.
-
-    Deliberately a *separate* tool rather than a `background: bool` flag
-    on spawn_agent itself -- same reasoning tools/background_tasks.py's
-    own docstring gives for run_background_script vs run_python_script:
-    "started" (a task_id) and "the complete final reply" are different
-    enough result shapes that cramming both into one tool's return type
-    makes it ambiguous depending on a boolean the model has to remember
-    to check.
-
-    No nested-interrupt bridging here (contrast spawn_agent's own
-    docstring) -- see tools/subagent_tasks.py's module docstring for why
-    that mechanism fundamentally can't apply to a backgrounded run, and
-    what happens instead (status="blocked_on_approval") when a
-    background sub-agent's own tool call needs approval.
-    """
-    excluded_names = {
-        "spawn_agent",
-        "spawn_agent_background",
-        *QUESTION_TOOL_NAMES,
-        *TASK_DRAFT_TOOL_NAMES,
-    }
-    tools_by_name = {
-        _tool_name(t): t for t in available_tools if _tool_name(t) not in excluded_names
-    }
-    store = SubAgentTaskStore(state_dir)
-
-    async def spawn_agent_background(
-        instructions: str,
-        prompt: str,
-        description: str,
-        tool_names: str = "",
-    ) -> dict[str, Any]:
-        """Delegate a self-contained sub-task to an independent agent with
-        its own context window, running in the background -- returns
-        immediately with a task_id instead of waiting for it to finish.
-        Use this instead of spawn_agent when the sub-task is expected to
-        take a while and you'd rather not block this whole conversation
-        on it. Follow up with wake_on_subagent(task_id, reason) to end
-        this turn and get automatically resumed once it finishes, or
-        check_subagent_task(task_id) to poll yourself. Note: if the
-        sub-agent needs your approval for one of its tool calls, it
-        pauses (status="blocked_on_approval") rather than asking you
-        mid-background-run -- only give it tool_names that don't need
-        approval unless you're prepared to check back and notice that.
-
-        Args:
-            instructions: the sub-agent's system prompt / role.
-            prompt: the specific task for the sub-agent to do.
-            description: one sentence, plain language, what this
-                sub-agent is doing -- shown in the Sub Agents panel.
-            tool_names: comma-separated names of your own tools to grant
-                the sub-agent, e.g. "read_file,write_file". Empty for a
-                pure-reasoning sub-agent with no tools.
-        """
-        selected = []
-        for name in (n.strip() for n in tool_names.split(",")):
-            if not name:
-                continue
-            if name not in tools_by_name:
-                raise ValueError(f"Unknown tool for a sub-agent: {name!r}")
-            selected.append(tools_by_name[name])
-
-        # One InMemorySaver per call (not shared across calls the way
-        # spawn_agent's child_checkpointer is) -- each background run gets
-        # its own permanent task_id/thread up front, so there's no
-        # interrupt()-replay reason to share one across multiple calls the
-        # way spawn_agent's own docstring explains it needs to.
-        child_checkpointer = InMemorySaver()
-        sub_agent = build_langgraph_agent(
-            model, selected, instructions, checkpointer=child_checkpointer
-        )
-        task_id = uuid.uuid4().hex[:12]
-        child_config = {"configurable": {"thread_id": f"bgspawn-{task_id}"}}
-        task = SubAgentTask(
-            task_id=task_id,
-            thread_id=thread_id,
-            instructions=instructions,
-            prompt=prompt,
-            tool_names=tool_names,
-            description=description,
-            status="running",
-            started_at=datetime.now(UTC).isoformat(),
-        )
-        store.save(task)
-        register_live_subagent(task_id, sub_agent, child_config)
-        supervisor = asyncio.create_task(
-            run_supervised_subagent(store, task, sub_agent, child_config)
-        )
-        track_supervisor_task(supervisor)
-
-        return {"task_id": task_id, "status": "running", "description": description}
-
-    return spawn_agent_background
 
 
 # LibreOffice's own PNG export (render_pptx_preview et al) has no
@@ -522,9 +496,8 @@ def build_review_work_tool(
             config={"configurable": {"thread_id": thread_id}},
         )
         last = result["messages"][-1]
-        # extract_text, not raw .content -- see build_spawn_agent_tool's
-        # identical comment; confirmed live against Gemini that a plain
-        # attribute read on a "thinking" reply leaks a huge signature blob.
+        # extract_text, not raw .content: a Gemini "thinking" reply's content
+        # carries a large signature blob (confirmed live).
         reply = extract_text(getattr(last, "content", None))
         return reply or "(reviewer produced no text reply)"
 

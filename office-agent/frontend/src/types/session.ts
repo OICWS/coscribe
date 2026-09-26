@@ -25,8 +25,8 @@ export type CommandsResponse = CommandInfo[];
 
 export type UploadResult = { path: string; bytes_written: number } | { error: string };
 
-/** A background spawn_agent_background run -- mirrors tools/
- * subagent_tasks.py's SubAgentTask.to_dict() exactly. */
+/** A delegated sub-agent run -- tools/subagent_tasks.py's
+ * SubAgentTask.to_dict(). */
 export interface SubAgentTask {
   task_id: string;
   thread_id: string;
@@ -34,11 +34,26 @@ export interface SubAgentTask {
   prompt: string;
   tool_names: string;
   description: string;
-  status: "running" | "paused" | "blocked_on_approval" | "succeeded" | "failed";
+  status: "running" | "needs_approval" | "succeeded" | "failed" | "stopped";
   started_at: string;
   finished_at: string | null;
   result: string | null;
   error: string | null;
+  /** "provider:model" it runs on. */
+  model: string;
+  tokens: number;
+  tool_uses: number;
+  last_tool: { tool_name: string; arguments: Record<string, unknown> } | null;
+  /** The approval_required payload it's waiting on. */
+  pending_approval: {
+    id: string;
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    before_preview: string | null;
+    after_preview: string | null;
+  } | null;
+  /** The parent went on without waiting for it. */
+  background: boolean;
 }
 
 export type SubAgentTasksResponse = SubAgentTask[];

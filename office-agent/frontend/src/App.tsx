@@ -51,6 +51,8 @@ function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [browserPanelOpen, setBrowserPanelOpen] = useState(false);
   const [subAgentsPanelOpen, setSubAgentsPanelOpen] = useState(false);
+  const [subAgentsTick, setSubAgentsTick] = useState(0);
+  const [subAgentFocus, setSubAgentFocus] = useState<{ threadId: string; taskId: string } | null>(null);
   // Per conversation, this page load: whether the panel was opened or
   // closed by hand. Unset, it opens only when it has something to show.
   const [taskPanelChoice, setTaskPanelChoice] = useState<Record<string, boolean>>({});
@@ -179,6 +181,18 @@ function App() {
       (event) => {
         if (event.type === "thread_titled") {
           renameThreadLocally(threadId, event.title);
+          return;
+        }
+        if (event.type === "subagents_changed") {
+          setSubAgentsTick((tick) => tick + 1);
+          return;
+        }
+        if (event.type === "approval_required" && event.subagent_id) {
+          // Its approval card lives in the Sub Agents panel.
+          setSubAgentFocus({ threadId, taskId: event.subagent_id });
+          setSubAgentsPanelOpen(true);
+          setBrowserPanelOpen(false);
+          setSubAgentsTick((tick) => tick + 1);
           return;
         }
         if (event.type !== "workflow_step") {
@@ -744,7 +758,19 @@ function App() {
       {browserPanelOpen && (
         <BrowserPanel onClose={() => setBrowserPanelOpen(false)} onSendToChat={onBrowserPanelCapture} />
       )}
-      {subAgentsPanelOpen && <SubAgentsPanel threadId={threadId} onClose={() => setSubAgentsPanelOpen(false)} />}
+      {subAgentsPanelOpen && (
+        <SubAgentsPanel
+          key={threadId}
+          threadId={threadId}
+          refreshKey={subAgentsTick}
+          focusTaskId={subAgentFocus?.threadId === threadId ? subAgentFocus.taskId : null}
+          onApprove={onApprove}
+          onClose={() => {
+            setSubAgentsPanelOpen(false);
+            setSubAgentFocus(null);
+          }}
+        />
+      )}
     </div>
   );
 }

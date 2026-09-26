@@ -19,11 +19,9 @@ hypothetical:
   wake nothing could ever resolve is never registered.
 - "subagent": wake_on_subagent(task_id) -- task_id is a tools/
   subagent_tasks.py SubAgentTask.task_id, a background spawn_agent_
-  background run -- a separate id space from "task". Unlike a background script (only ever
-  "running" or a terminal status), a sub-agent task can also be
-  "paused" or "blocked_on_approval" -- both non-"running", so _is_due
-  treats them as due too, same as any other terminal status (see
-  runtime_lg/selfwake.py's _is_due for "subagent").
+  background run -- a separate id space from "task". Due once the run
+  has finished (succeeded, failed or stopped); one waiting on the user's
+  approval isn't done yet (see runtime_lg/selfwake.py's _is_due).
 - "event": wake_on_event(event_key) -- resolved by a signal_event call
   (this thread, another thread, or -- once ROADMAP.md Phase 5c's Slack/
   webhook work lands -- an external event source calling the same

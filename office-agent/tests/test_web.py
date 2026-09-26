@@ -56,6 +56,7 @@ from coscribe.config import Settings
 from coscribe.runtime import secrets as secrets_module
 from coscribe.runtime_lg.audit import AuditLog
 from coscribe.tools.presentations import PresentationToolkit
+from coscribe.tools.subagent_tasks import SubAgentTaskStore
 from coscribe.web.app import ScriptEnvPackageInstall, create_app_lg
 
 
@@ -243,7 +244,7 @@ class ConcurrentSpawnFakeModel(BaseChatModel):
                         "call_spawn_a",
                         "spawn_agent",
                         {
-                            "instructions": "write files",
+                            "description": "write a.txt",
                             "prompt": "write a.txt containing exactly: AAA marker",
                             "tool_names": "write_file",
                         },
@@ -252,7 +253,7 @@ class ConcurrentSpawnFakeModel(BaseChatModel):
                         "call_spawn_b",
                         "spawn_agent",
                         {
-                            "instructions": "write files",
+                            "description": "write b.txt",
                             "prompt": "write b.txt containing exactly: BBB marker",
                             "tool_names": "write_file",
                         },
@@ -1439,30 +1440,13 @@ def test_pending_approval_is_redelivered_on_reconnect(
     assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
 
 
-def test_concurrent_spawn_agent_approvals_resolve_independently(
+def test_concurrent_sub_agents_ask_for_approval_in_the_panel_independently(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Regression test for a real bug: two spawn_agent calls proposed in
-    the same AIMessage run as concurrent LangGraph tasks, each
-    independently bridging its own child's approval via interrupt() (see
-    runtime_lg/subagents.py). Each task's interrupt gets its own id, and
-    LangGraph *requires* resuming each individually once more than one is
-    pending at once -- the single-shared-resume-value approach
-    _resolve_pending_approvals used before this test existed raised
-    "When there are multiple pending interrupts, you must specify the
-    interrupt id when resuming" the moment this scenario actually
-    happened (live-verified against real Gemini before the fix -- see
-    runtime_lg/README.md). Approves one, rejects the other, and confirms
-    each outcome is independent with no cross-contamination.
-
-    Approvals are requested and answered one at a time, not collected
-    up front -- _resolve_pending_approvals decides each pending task
-    *sequentially* (see its own docstring), so the second
-    approval_required isn't even sent until the first one has been
-    answered; receiving both before responding to either deadlocks
-    against this method, not against LangGraph."""
+    """Two sub-agents delegated in one step run side by side; each one's
+    approval is its own, answered by id, and neither leaks its messages
+    into the parent's chat stream."""
     fake_model = ConcurrentSpawnFakeModel()
-    approvals = []
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         with client.websocket_connect("/ws/t_concurrent") as ws:
             ws.receive_json()  # state
@@ -1474,29 +1458,33 @@ def test_concurrent_spawn_agent_approvals_resolve_independently(
                 }
             )
 
-            for _ in range(2):
-                approval = _receive_until(ws, "approval_required")[-1]
-                assert approval["tool_name"] == "write_file"
+            messages: list[dict[str, Any]] = []
+            approvals: list[dict[str, Any]] = []
+            while len(approvals) < 2:
+                message = ws.receive_json()
+                messages.append(message)
+                if message["type"] == "approval_required":
+                    approvals.append(message)
+            for approval in approvals:
                 approved = approval["arguments"]["path"] == "a.txt"
                 ws.send_json(
                     {"type": "approval_response", "id": approval["id"], "approved": approved}
                 )
-                approvals.append(approval)
+            messages += _receive_until(ws, "tasks_changed")
 
-            messages = _receive_until(ws, "tasks_changed")
-
-    paths = {a["arguments"]["path"] for a in approvals}
-    assert paths == {"a.txt", "b.txt"}
+    assert {a["arguments"]["path"] for a in approvals} == {"a.txt", "b.txt"}
+    assert all(a["subagent_id"] for a in approvals)
+    assert any(m["type"] == "subagents_changed" for m in messages)
     assert not any(m["type"] == "error" for m in messages)
+    streamed = "".join(m["text"] for m in messages if m["type"] == "agent_delta")
+    assert "sub-agent" not in streamed
     agent_message = next(m for m in messages if m["type"] == "agent_message")
-    # Ends with the parent's own final reply -- but also contains each
-    # sub-agent's own narration, streamed as agent_delta too: a real
-    # LangGraph behavior (nested/sub-graph runs invoked from a tool
-    # surface their own streamed messages through the parent's own
-    # astream(stream_mode=["messages"]) call), not a bug in this fix.
-    assert agent_message["text"].endswith("parent done")
+    assert agent_message["text"] == "parent done"
     assert (tmp_path / "workspace" / "a.txt").read_text() == "AAA"
     assert not (tmp_path / "workspace" / "b.txt").exists()
+    tasks = SubAgentTaskStore(tmp_path / "state").list_for_thread("t_concurrent")
+    assert sorted(t.status for t in tasks) == ["succeeded", "succeeded"]
+    assert all(t.pending_approval is None and t.tool_uses == 1 for t in tasks)
 
 
 def test_write_file_denied_is_not_executed(
@@ -6613,3 +6601,166 @@ def test_an_auto_approved_call_is_announced_before_it_runs_lg(
     assert "approval_required" not in types
     assert types.index("tool_started") < types.index("tool_result")
     assert messages[types.index("tool_started")]["tool_name"] == "write_file"
+
+
+def _delegating_model(child_reply: str = "child done") -> FakeToolCallingChatModel:
+    spawn = _tool_call(
+        "call_spawn",
+        "spawn_agent",
+        {"description": "write the note", "prompt": "write note.txt", "tool_names": "write_file"},
+    )
+    write = _tool_call("call_write", "write_file", {"path": "note.txt", "content": "hi"})
+    return FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[spawn]),
+            AIMessage(content="", tool_calls=[write]),
+            AIMessage(content=child_reply),
+            AIMessage(content="parent done"),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "written"), [("/accept-edits", True), ("/plan", False)], ids=["accept-edits", "plan"]
+)
+def test_a_sub_agent_follows_the_conversations_approval_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, written: bool
+) -> None:
+    with _client_lg(tmp_path, monkeypatch, _delegating_model()) as client:
+        with client.websocket_connect("/ws/t_sub_mode") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": mode})
+            ws.receive_json()  # state
+            ws.send_json({"type": "user_message", "text": "delegate the note"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert not any(m["type"] == "approval_required" for m in messages)
+    assert (tmp_path / "workspace" / "note.txt").exists() is written
+    [task] = SubAgentTaskStore(tmp_path / "state").list_for_thread("t_sub_mode")
+    assert task.status == "succeeded"
+
+
+def test_finished_sub_agents_can_be_cleared_and_a_finished_one_cant_be_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _client_lg(tmp_path, monkeypatch, _delegating_model()) as client:
+        with client.websocket_connect("/ws/t_sub_clear") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "/accept-edits"})
+            ws.receive_json()  # state
+            ws.send_json({"type": "user_message", "text": "delegate the note"})
+            _receive_until(ws, "tasks_changed")
+
+        [task] = client.get("/api/threads/t_sub_clear/subagents").json()
+        transcript = client.get(f"/api/subagents/{task['task_id']}/transcript").json()
+        stop = client.post(f"/api/subagents/{task['task_id']}/stop")
+        cleared = client.delete("/api/threads/t_sub_clear/subagents").json()
+        after = client.get("/api/threads/t_sub_clear/subagents").json()
+
+    assert task["model"] == "fake:model"
+    assert [e["kind"] for e in transcript["entries"]] == ["user", "tool", "agent"]
+    assert stop.status_code == 409
+    assert cleared == {"removed": 1}
+    assert after == []
+
+
+class _BackgroundDelegationModel(ConcurrentSpawnFakeModel):
+    """The parent hands off a background run and ends its turn; the child
+    then writes a file. Routed by content, since both use one model."""
+
+    def _respond(self, messages: list[BaseMessage]) -> AIMessage:
+        text = " ".join(str(getattr(m, "content", "")) for m in messages)
+        has_tool_result = any(isinstance(m, ToolMessage) for m in messages)
+        if "BG marker" in text:
+            if has_tool_result:
+                return AIMessage(content="child done")
+            call = _tool_call("call_w", "write_file", {"path": "bg.txt", "content": "BG"})
+            return AIMessage(content="", tool_calls=[call])
+        if has_tool_result:
+            return AIMessage(content="it's running")
+        spawn = _tool_call(
+            "call_bg",
+            "spawn_agent_background",
+            {"description": "write bg.txt", "prompt": "write bg.txt -- BG marker"},
+        )
+        return AIMessage(content="", tool_calls=[spawn])
+
+
+def test_a_background_sub_agent_waits_for_approval_after_the_tab_closes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = SubAgentTaskStore(tmp_path / "state")
+
+    def wait_for(status: str) -> Any:
+        for _ in range(500):
+            tasks = store.list_for_thread("t_sub_bg")
+            if tasks and tasks[0].status == status:
+                return tasks[0]
+            time.sleep(0.01)
+        raise AssertionError(f"never reached {status}: {tasks}")
+
+    with _client_lg(tmp_path, monkeypatch, _BackgroundDelegationModel()) as client:
+        with client.websocket_connect("/ws/t_sub_bg") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "delegate it in the background"})
+            _receive_until(ws, "tasks_changed")
+
+        waiting = wait_for("needs_approval")
+        with client.websocket_connect("/ws/t_sub_bg") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            approval_id = waiting.pending_approval["id"]
+            ws.send_json({"type": "approval_response", "id": approval_id, "approved": True})
+            done = wait_for("succeeded")
+
+    assert done.result == "child done"
+    assert (tmp_path / "workspace" / "bg.txt").read_text() == "BG"
+
+
+async def test_a_sub_agents_approval_survives_a_closed_turn_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from coscribe.tools import subagent_tasks
+    from coscribe.tools.subagent_tasks import SubAgentTask
+    from coscribe.web.session import _SubAgentApprovalChannel
+
+    monkeypatch.setitem(subagent_tasks._RUNNING, "t1", asyncio.get_running_loop().create_future())
+
+    class _ClosedSocket:
+        async def send_json(self, payload: dict[str, Any]) -> None:
+            raise RuntimeError('Cannot call "send" once a close message has been sent.')
+
+    changed: list[str] = []
+
+    async def subagent_changed(task: SubAgentTask) -> None:
+        changed.append(task.status)
+
+    session = SimpleNamespace(
+        _live_websocket=None,
+        _turn_websocket=_ClosedSocket(),
+        settings=SimpleNamespace(state_dir=tmp_path),
+        _subagent_changed=subagent_changed,
+    )
+    task = SubAgentTask(
+        task_id="t1",
+        thread_id="thread",
+        instructions="",
+        prompt="p",
+        tool_names="",
+        description="d",
+        status="running",
+        started_at="2026-09-26T00:00:00+00:00",
+    )
+    channel = _SubAgentApprovalChannel(session, task)  # type: ignore[arg-type]
+
+    await channel.send_json({"type": "approval_required", "id": "r1", "tool_name": "write_file"})
+
+    saved = SubAgentTaskStore(tmp_path).load("t1")
+    assert saved is not None and saved.status == "needs_approval"
+    assert saved.pending_approval == {"id": "r1", "tool_name": "write_file"}
+    assert changed == ["needs_approval"]

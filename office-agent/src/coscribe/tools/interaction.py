@@ -17,12 +17,9 @@ failed to wire this tool into `question_tool_names` for whichever graph
 called it, and that should fail loudly, not hang forever waiting on a
 Future nobody will ever resolve.
 
-Deliberately excluded from spawn_agent's own available_tools (see
-runtime_lg/subagents.py's build_spawn_agent_tool) -- a sub-agent's
-approval-bridging back to a live human is real but untested for a
-"respond"-shaped interrupt specifically, and review_work's reviewer
-already only ever gets a curated read-only tool set that never included
-this either.
+Not given to sub-agents (runtime_lg/subagents.py's _NOT_FOR_SUBAGENTS):
+a question belongs to the person talking to the parent, not to a
+delegated run.
 """
 
 from __future__ import annotations

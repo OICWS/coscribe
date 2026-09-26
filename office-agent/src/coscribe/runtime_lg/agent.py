@@ -35,7 +35,7 @@ def tool_name(tool: Callable[..., Any] | BaseTool) -> str:
     `BaseTool` (spawn_agent/review_work, or an MCP tool converted by
     langchain-mcp-adapters) has `.name` but no `__name__`. Shared here
     rather than duplicated inline in both this module and subagents.py's
-    build_spawn_agent_tool, which needs the identical lookup for its own
+    build_delegation_tools, which needs the identical lookup for its own
     tool_names selection."""
     return str(getattr(tool, "name", None) or getattr(tool, "__name__", ""))
 
@@ -199,7 +199,7 @@ def build_langgraph_agent(
     *own* independent turn cap (a `spawn_agent` function parameter, default
     6, unrelated to `Settings.max_turns`) and never ran auto-compact at
     all, so leaving both `None` (the default) at `runtime_lg/subagents.py`'s
-    `build_spawn_agent_tool`/`build_review_work_tool` call sites preserves
+    `build_delegation_tools`/`build_review_work_tool` call sites preserves
     that same scope exactly, rather than silently widening what these
     settings apply to.
 

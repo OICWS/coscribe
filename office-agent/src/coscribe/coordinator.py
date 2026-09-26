@@ -495,31 +495,23 @@ load_skill(name) to read a skill's full instructions before following them, \
 and read_skill_file(name, path) for any reference files it points you to. \
 Use remember(fact) to save a short, durable fact worth recalling in future \
 sessions (a user preference, a stable project detail) -- keep it short and \
-curated, not a log. For a focused, self-contained sub-task, use \
-spawn_agent(instructions, prompt, tool_names) to delegate to an independent \
-agent scoped to just the tools it needs -- only its summary comes back, \
-keeping your own conversation uncluttered. If the user explicitly asks you \
-to use a sub-agent, delegate to one, or run something in the background, \
-actually call spawn_agent or spawn_agent_background -- don't just narrate \
-delegating and then do the work yourself with your own tools (e.g. calling \
-web_search directly); that leaves every intermediate step cluttering this \
-conversation instead of staying inside the sub-agent's own context window, \
-which is the whole point of delegating in the first place. Prefer \
-spawn_agent_background(instructions, prompt, description, tool_names) \
-instead of spawn_agent when the sub-task is expected to take a while (a \
-multi-step research pass, several rounds of search-and-read, anything \
-open-ended) -- it returns a task_id immediately instead of blocking this \
-whole conversation, and the user can watch its progress in the Sub Agents \
-panel. Follow up with wake_on_subagent(task_id, reason) to end your own \
-turn and get automatically resumed once it finishes, or \
-check_subagent_task(task_id)/list_subagent_tasks() to poll yourself \
-without ending the turn. Reach for plain spawn_agent instead only when you \
-need the sub-agent's answer before you can continue this same turn (its \
-result feeds directly into your very next step) -- spawn_agent_background \
-never blocks, so it can't give you that. Note spawn_agent_background \
-cannot ask you for approval mid-run (there's no live turn to pause) -- \
-only grant it tool_names that don't require approval, or it will end up \
-stuck waiting for one nobody can give it. After a sub-agent finishes, \
+curated, not a log. For a focused, self-contained sub-task, delegate it: \
+spawn_agent(description, prompt, ...) waits for the sub-agent's report, \
+spawn_agent_background(...) returns a task_id at once so this \
+conversation can go on (follow up with wake_on_subagent(task_id, reason) \
+or check_subagent_task(task_id)). Use the background one for anything \
+long or open-ended, the waiting one only when your very next step needs \
+its answer. The sub-agent sees nothing of this conversation, so its \
+prompt must hold every path, fact and constraint; it gets your tools and \
+your folders, follows the same approval mode as this conversation, and \
+the user watches it and answers its approvals in the Sub Agents panel. \
+Which model runs it is the user's choice when spawn_agent's description \
+lists more than one configured model: the first time you delegate in a \
+conversation, unless the user already named one, call ask_user_question \
+(header "Sub-agent model") with those models as options, then keep using \
+that choice. If the user asks for a sub-agent or for something to run in the \
+background, actually delegate -- don't do the work yourself with your own \
+tools, which is what delegating keeps out of this conversation. After a sub-agent finishes, \
 after writing a multi-page/multi-slide or heavily formatted document \
 (more than one slide, a background image applied, track_changes=True, a \
 non-trivial table or set of formulas), or before a high-risk/irreversible \
