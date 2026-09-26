@@ -218,6 +218,51 @@ async def test_wake_hitting_a_gated_tool_call_resolves_promptly_not_hangs(
     assert not (tmp_path / "workspace" / "note.txt").exists()
 
 
+@pytest.mark.parametrize(("decision", "written"), [("allow", True), ("block", False)])
+async def test_unattended_wake_in_auto_mode_lets_the_reviewer_decide(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, decision: str, written: bool
+) -> None:
+    import json
+
+    from langchain_core.messages import ToolCall
+
+    settings = _settings(tmp_path)
+    call = ToolCall(name="write_file", args={"path": "note.txt", "content": "hi"}, id="call_1")
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[call]),
+            AIMessage(content=json.dumps({"decision": decision, "reason": "because"})),
+            AIMessage(content="done"),
+        ]
+    )
+    checkpoint_path = tmp_path / "checkpoints.sqlite"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
+        make_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)
+
+        async def get_session(thread_id: str) -> ChatSessionLG:
+            session = await make_session(thread_id)
+            session.auto_mode = True
+            return session
+
+        WakeStore(settings.state_dir).save(
+            WakeRequest(
+                wake_id="wake-auto",
+                thread_id="thread-1",
+                kind="timer",
+                reason="write a note",
+                created_at=datetime.now(UTC).isoformat(),
+                status="pending",
+                wake_at=(datetime.now(UTC) - timedelta(minutes=5)).isoformat(),
+            )
+        )
+
+        fired = await asyncio.wait_for(poll_due_wakes(settings.state_dir, get_session), timeout=5)
+
+    assert [w.wake_id for w in fired] == ["wake-auto"]
+    assert (tmp_path / "workspace" / "note.txt").exists() is written
+    assert fake_model.i == 3
+
+
 async def test_task_wake_fires_once_the_background_task_is_no_longer_running(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

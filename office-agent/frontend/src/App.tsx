@@ -4,6 +4,7 @@ import { Composer, type ComposerSendPayload } from "./components/Composer";
 import { ContextRing } from "./components/ContextRing";
 import { FolderPicker } from "./components/FolderPicker";
 import { ModePill } from "./components/ModePill";
+import type { PlanChoice, PlanItem } from "./components/PlanCard";
 import { ModelPicker } from "./components/ModelPicker";
 import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
 import { NAV_RAIL_EXPANDED_WIDTH, NavRail, type NavMode } from "./components/NavRail";
@@ -503,6 +504,15 @@ function App() {
     socketRef.current?.send({ type: "approval_response", id, approved });
   };
 
+  const onAnswerPlan = (item: PlanItem, choice: PlanChoice, feedback: string) => {
+    dispatch({ type: "local_plan_answered", id: item.id, status: choice });
+    socketRef.current?.send({
+      type: "question_response",
+      id: item.id,
+      answer: choice === "revise" ? `revise:${feedback}` : choice,
+    });
+  };
+
   const onAnswerQuestion = (id: string, answer: string) => {
     dispatch({ type: "local_question_answered", id, answer });
     socketRef.current?.send({ type: "question_response", id, answer });
@@ -660,6 +670,7 @@ function App() {
               turnInFlight={state.turnInFlight}
               onApprove={onApprove}
               onAnswerQuestion={onAnswerQuestion}
+              onAnswerPlan={onAnswerPlan}
               onEditMessage={state.turnInFlight ? undefined : onEditMessage}
               onRewindMessage={state.turnInFlight ? undefined : onRewindMessage}
               loading={!state.historyReceived}
@@ -686,7 +697,12 @@ function App() {
               turnInFlight={state.turnInFlight}
               totalTokens={state.totalTokens}
               commands={commands}
-              modePill={<ModePill planMode={state.planMode} acceptEdits={state.acceptEdits} sendRaw={sendRaw} />}
+              modePill={<ModePill
+                  planMode={state.planMode}
+                  acceptEdits={state.acceptEdits}
+                  autoMode={state.autoMode}
+                  sendRaw={sendRaw}
+                />}
               folderPicker={
                 <FolderPicker folders={state.folders} disabled={state.turnInFlight} onChange={onSetFolders} />
               }

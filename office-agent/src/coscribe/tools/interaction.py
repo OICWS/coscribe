@@ -29,7 +29,12 @@ from typing import Any
 
 from ..runtime.types import tool_metadata
 
-QUESTION_TOOL_NAMES: frozenset[str] = frozenset({"ask_user_question"})
+QUESTION_TOOL_NAMES: frozenset[str] = frozenset({"ask_user_question", "exit_plan_mode"})
+
+# exit_plan_mode's answers, as the frontend sends them.
+PLAN_CHOICE_AUTO = "auto"
+PLAN_CHOICE_MANUAL = "manual"
+PLAN_CHOICE_REVISE = "revise:"
 
 
 def ask_user_question(
@@ -75,6 +80,24 @@ def ask_user_question(
     )
 
 
+def exit_plan_mode(plan: str) -> str:
+    """In plan mode, present your finished plan for the user's approval.
+    They choose: approve and carry it out in auto mode, approve and carry it
+    out approving each change themselves, or keep planning with feedback.
+    The result says which; plan mode ends when they approve.
+
+    Args:
+        plan: the plan in markdown -- what you found, the steps you'll take
+            in order, the files or places each touches, and what you'll
+            check at the end. Complete enough to approve without asking.
+    """
+    raise RuntimeError(
+        "exit_plan_mode must be resolved via HumanInTheLoopMiddleware's 'respond' "
+        "decision -- reaching this body means the graph never registered it in "
+        "question_tool_names."
+    )
+
+
 def build_interaction_tools() -> list[Callable[..., Any]]:
     """Return the interaction tool callables. No state to bind -- unlike
     every other build_*_tools factory in this package, this one takes no
@@ -83,4 +106,5 @@ def build_interaction_tools() -> list[Callable[..., Any]]:
     function body)."""
     return [
         tool_metadata(ask_user_question, risk_category="READ", category="interaction"),
+        tool_metadata(exit_plan_mode, risk_category="READ", category="interaction"),
     ]

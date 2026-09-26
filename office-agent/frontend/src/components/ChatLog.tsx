@@ -18,6 +18,7 @@ import { EmptyState } from "./EmptyState";
 import { ChevronRightIcon, PencilIcon, RetryIcon, RewindIcon } from "./icons";
 import { ImageLightbox } from "./ImageLightbox";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
+import { type PlanChoice, PlanCard, type PlanItem } from "./PlanCard";
 import { QuestionCard } from "./QuestionCard";
 import { RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
 import { TaskDraftCard } from "./TaskDraftCard";
@@ -65,6 +66,7 @@ interface ChatLogProps {
   turnInFlight?: boolean;
   onApprove: (id: string, approved: boolean) => void;
   onAnswerQuestion: (id: string, answer: string) => void;
+  onAnswerPlan?: (item: PlanItem, choice: PlanChoice, feedback: string) => void;
   /** Undefined while a turn is in flight -- editing mid-turn would race
    * the very history the edit is about to truncate, so the affordance is
    * hidden entirely rather than left clickable-but-erroring. */
@@ -108,6 +110,7 @@ export function ChatLog({
   items,
   onApprove,
   onAnswerQuestion,
+  onAnswerPlan,
   onEditMessage,
   onRewindMessage,
   loading,
@@ -225,6 +228,7 @@ export function ChatLog({
             isLastTurn={i === turns.length - 1}
             onApprove={onApprove}
             onAnswerQuestion={onAnswerQuestion}
+            onAnswerPlan={onAnswerPlan}
             onEditMessage={onEditMessage}
             onRewindMessage={onRewindMessage}
             onReviewTaskDraft={onReviewTaskDraft}
@@ -281,6 +285,7 @@ function TurnView({
   isLastTurn = false,
   onApprove,
   onAnswerQuestion,
+  onAnswerPlan,
   onEditMessage,
   onRewindMessage,
   onReviewTaskDraft,
@@ -296,6 +301,7 @@ function TurnView({
   live?: boolean;
   onApprove: (id: string, approved: boolean) => void;
   onAnswerQuestion: (id: string, answer: string) => void;
+  onAnswerPlan?: (item: PlanItem, choice: PlanChoice, feedback: string) => void;
   onEditMessage?: (turnIndex: number, text: string) => void;
   onRewindMessage?: (turnIndex: number, text: string) => void;
   onReviewTaskDraft?: (item: TaskDraftItem) => void;
@@ -327,6 +333,8 @@ function TurnView({
           />
         ) : entry.kind === "question" ? (
           <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
+        ) : entry.kind === "plan" ? (
+          <PlanCard key={entry.id} item={entry} onAnswer={onAnswerPlan} />
         ) : entry.kind === "task_draft" ? (
           <TaskDraftCard key={entry.id} item={entry} onReview={onReviewTaskDraft} onDismiss={onDismissTaskDraft} />
         ) : entry.kind === "workflow_draft" ? (
@@ -783,6 +791,9 @@ function ApprovalDetail({
   const pptxTarget = pptxOverlayTargetOf(item.arguments);
   return (
     <>
+      {item.reviewerNote && item.status === "pending" && (
+        <p className="mb-1.5 text-[13px] text-[var(--muted)]">{item.reviewerNote}</p>
+      )}
       {hasPreview && (
         <ApprovalPreview
           beforePreview={item.beforePreview}

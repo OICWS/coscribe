@@ -38,6 +38,8 @@ export type LogItem =
        * event (these are never persisted, only ever sent live). */
       beforePreview?: string | null;
       afterPreview?: string | null;
+      /** Why auto mode asked instead of deciding. */
+      reviewerNote?: string | null;
       /** Set once the approved call actually executes -- the
        * "tool_result" reducer case merges it onto this same item rather
        * than pushing a separate "tool" one (see that case's own
@@ -59,6 +61,14 @@ export type LogItem =
     }
   | {
       id: string;
+      kind: "plan";
+      plan: string;
+      /** How the user answered: approved into auto or manual mode, or sent
+       * back to keep planning. */
+      status: "pending" | "auto" | "manual" | "revise";
+    }
+  | {
+      id: string;
       kind: "task_draft";
       draft: TaskDraft;
       status: "pending" | "saved" | "dismissed";
@@ -71,6 +81,7 @@ export type LogItem =
 export interface ChatState {
   planMode: boolean;
   acceptEdits: boolean;
+  autoMode: boolean;
   model: string;
   contextWindow: number;
   /** Skills currently spliced into this thread's instructions -- freely
@@ -139,6 +150,7 @@ export interface ChatState {
 export const initialChatState: ChatState = {
   planMode: false,
   acceptEdits: false,
+  autoMode: false,
   model: "",
   contextWindow: 0,
   enabledSkills: [],
@@ -166,6 +178,7 @@ export type LocalAction =
   | { type: "local_rewind_message"; turnIndex: number }
   | { type: "local_approval_resolved"; id: string; approved: boolean }
   | { type: "local_question_answered"; id: string; answer: string }
+  | { type: "local_plan_answered"; id: string; status: "auto" | "manual" | "revise" }
   | { type: "local_task_draft_resolved"; id: string; status: "saved" | "dismissed"; savedName?: string }
   | { type: "local_connection_reset" }
   | { type: "local_switch_thread" }
@@ -208,6 +221,14 @@ function closeStreamingBubble(items: LogItem[]): LogItem[] {
   return closed;
 }
 
+/** How the user answered a plan, read back from exit_plan_mode's result
+ * (web/session.py's _decide_plan_request writes these sentences). */
+function planStatusOf(result: string): "auto" | "manual" | "revise" {
+  if (result.includes("switched to auto mode")) return "auto";
+  if (result.includes("approved the plan")) return "manual";
+  return "revise";
+}
+
 /** A checkpointed transcript as chat items -- the main conversation's
  * history, and a sub-agent's in the Sub Agents panel. */
 export function historyToItems(entries: HistoryEntry[]): LogItem[] {
@@ -218,6 +239,10 @@ export function historyToItems(entries: HistoryEntry[]): LogItem[] {
     }
     if (entry.kind === "agent") {
       return { id: genId(), kind: "agent", text: entry.text, streaming: false };
+    }
+    if (entry.tool_name === "exit_plan_mode") {
+      const status = planStatusOf(typeof entry.result === "string" ? entry.result : "");
+      return { id: genId(), kind: "plan", plan: String(entry.arguments.plan ?? ""), status };
     }
     if (entry.tool_name === "create_scheduled_task" || entry.tool_name === "edit_scheduled_task") {
       const saved = typeof entry.result === "string" && entry.result.startsWith(TASK_DRAFT_SAVED_PREFIX);
@@ -338,6 +363,23 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ),
       };
 
+    case "local_plan_answered":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.kind === "plan" && item.id === action.id ? { ...item, status: action.status } : item,
+        ),
+      };
+
+    case "plan_ready":
+      return {
+        ...state,
+        items: [
+          ...closeStreamingBubble(state.items),
+          { id: action.id, kind: "plan", plan: action.plan, status: "pending" },
+        ],
+      };
+
     case "local_task_draft_resolved":
       return {
         ...state,
@@ -354,6 +396,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         turnInFlight: action.turn_in_flight ?? state.turnInFlight,
         planMode: action.plan_mode,
         acceptEdits: action.accept_edits,
+        autoMode: action.auto_mode ?? false,
         model: action.model,
         contextWindow: action.context_window,
         enabledSkills: action.enabled_skills,
@@ -500,6 +543,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             arguments: action.arguments,
             status: "pending",
             beforePreview: action.before_preview,
+            reviewerNote: action.reviewer_note ?? null,
             afterPreview: action.after_preview,
           },
         ],
