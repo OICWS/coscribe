@@ -401,3 +401,19 @@ body {
 .md-prose :not(pre) > code::after {
   content: none;
 }
+
+/* Desktop shell only (browsers ignore app-region): the top row moves the
+   window, except where there's something to click or type in. */
+.titlebar-drag {
+  app-region: drag;
+}
+.titlebar-drag :is(button, input, textarea, select, a, [role="menu"], [role="button"], [role="dialog"]) {
+  app-region: no-drag;
+}
+
+/* Keeps the row's content clear of the OS window buttons drawn over its
+   right end (Window Controls Overlay); zero everywhere else. */
+.titlebar-controls-space {
+  flex-shrink: 0;
+  width: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}

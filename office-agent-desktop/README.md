@@ -36,6 +36,20 @@ actually exists for. The private `OICWS/project` repo keeps the
 retired Tauri shell as a rollback net for one release cycle; this repo
 doesn't need one.
 
+## Window chrome
+
+The window has no OS title bar or menu bar (`src/main/windowChrome.ts`):
+`titleBarStyle: "hidden"` plus `titleBarOverlay`, so Windows still draws
+minimize/maximize/close -- snapping and double-click-to-maximize keep
+working -- on the page's own background color, which the page re-sends
+when the theme changes. The page's top row is the drag area and holds
+"☰" (pops up the application menu: File/Edit/View/Go/Window/Help, whose
+shortcuts still work with the menu bar hidden), the sidebar toggle, and
+Back/Forward through the pages visited (`Go` menu: Alt+Left/Alt+Right).
+The splash page is cleared from history once the app loads, so Back
+never returns to it. Only the desktop shell's preload exposes
+`platform`, so a browser tab keeps its plain layout.
+
 ## Compared to the original Tauri shell
 
 - **No Rust toolchain, no `tauri-plugin-*` crates, no `capabilities/`

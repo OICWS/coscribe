@@ -66,7 +66,24 @@ interface BrowserPanelPickedPayload {
   tag: string;
 }
 
+const SHOW_APP_MENU_CHANNEL = "window:show-app-menu";
+const SET_TITLE_BAR_COLORS_CHANNEL = "window:set-title-bar-colors";
+
 contextBridge.exposeInMainWorld("coscribeDesktop", {
+  /** The page draws the window's top bar (see main/windowChrome.ts). */
+  platform: process.platform,
+
+  /** Opens the application menu at a point in the window, in CSS pixels. */
+  showAppMenu(x: number, y: number): void {
+    ipcRenderer.send(SHOW_APP_MENU_CHANNEL, { x, y });
+  },
+
+  /** Recolors the OS window buttons to match the page's theme, as
+   * #rrggbb. No effect on macOS, whose traffic lights keep their colors. */
+  setTitleBarColors(color: string, symbolColor: string): void {
+    ipcRenderer.send(SET_TITLE_BAR_COLORS_CHANNEL, { color, symbolColor });
+  },
+
   /** Fires once, only on a real startup failure (sidecar process
    * exited, or a 180s timeout) -- mirrors the splash page's own
    * "sidecar-status" Tauri-event listener, see mainWindow.ts. */
