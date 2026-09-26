@@ -16,6 +16,8 @@ import { ConnectorsTab } from "./ConnectorsTab";
 import {
   BACKGROUND_ON_CLOSE_KEY,
   GENERAL_FIELDS,
+  LOG_LEVEL_KEY,
+  PERMISSION_MODE_KEY,
   READABLE_DIRS_KEY,
   WORKSPACE_FIELDS,
   WORKSPACE_ROOT_KEY,
@@ -80,8 +82,11 @@ const GROUPS: { label: string; categories: CategoryDef[] }[] = [
   },
 ];
 
+// Every key a tab edits must be here, or Save never sees the change.
 const CONFIG_KEYS = [
   ...GENERAL_FIELDS.map((f) => f.key),
+  LOG_LEVEL_KEY,
+  PERMISSION_MODE_KEY,
   ...WORKSPACE_FIELDS.map((f) => f.key),
   WORKSPACE_ROOT_KEY,
   BACKGROUND_ON_CLOSE_KEY,

@@ -93,9 +93,27 @@ export function onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPaylo
   window.coscribeDesktop.onBrowserPanelPicked(callback);
 }
 
+/** The OS the desktop shell runs on when it draws its own title bar, or
+ * null in a browser tab or a shell from before the title bar moved into
+ * the page. */
+export function titleBarPlatform(): string | null {
+  return isElectron() ? (window.coscribeDesktop.platform ?? null) : null;
+}
+
+export function showAppMenu(x: number, y: number): void {
+  window.coscribeDesktop?.showAppMenu?.(x, y);
+}
+
+export function setTitleBarColors(color: string, symbolColor: string): void {
+  window.coscribeDesktop?.setTitleBarColors?.(color, symbolColor);
+}
+
 declare global {
   interface Window {
     coscribeDesktop: {
+      platform?: string;
+      showAppMenu?(x: number, y: number): void;
+      setTitleBarColors?(color: string, symbolColor: string): void;
       pickFolder(): Promise<string | null>;
       browserPanelOpen(rect: BrowserPanelRect): Promise<void>;
       browserPanelReposition(rect: BrowserPanelRect): Promise<void>;

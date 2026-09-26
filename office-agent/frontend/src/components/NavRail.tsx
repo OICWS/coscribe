@@ -8,6 +8,8 @@ import type { ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { RunStatusIcon } from "./RunStatusIcon";
+import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR, TRAFFIC_LIGHTS_WIDTH } from "../lib/titleBar";
+import { AppMenuButton, HistoryButtons } from "./WindowControls";
 import {
   ClockIcon,
   MessageCircleIcon,
@@ -311,26 +313,37 @@ export function NavRail({
         className={`absolute left-0 top-0 z-30 flex flex-col transition-[width] duration-150 ease-out ${
           expanded ? "h-full border-r border-[var(--border)] bg-[var(--panel-bg)]" : "h-12"
         }`}
-        style={{ width: expanded ? NAV_RAIL_EXPANDED_WIDTH : 48 }}
-        onMouseEnter={() => setHovering(true)}
+        style={{ width: expanded ? NAV_RAIL_EXPANDED_WIDTH : COLLAPSED_CLUSTER_WIDTH }}
+        onMouseEnter={DRAWS_TITLE_BAR ? undefined : () => setHovering(true)}
         onMouseLeave={() => setHovering(false)}
       >
-        {/* Collapsed (48px), this row is just the pin toggle, centered like
-         * the old lone toggle button. Expanded, the mode-icon pair joins it
-         * on the same row -- they only need to be reachable once the panel
-         * is already open (hover or pinned), not squeezed into the 48px
-         * sliver too. */}
-        <div className={`flex h-12 shrink-0 items-center px-1.5 ${expanded ? "justify-between" : "justify-center"}`}>
-          <button
-            type="button"
-            title={pinned ? "Unpin navigation" : "Pin navigation open"}
-            className={`flex h-9 w-9 items-center justify-center rounded-md hover:bg-[var(--card-bg)] ${
-              pinned ? "text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
-            }`}
-            onClick={() => onPinnedChange(!pinned)}
-          >
-            <SidebarIcon className="h-[18px] w-[18px]" />
-          </button>
+        {/* Collapsed, this row is the pin toggle (plus, in the desktop
+         * shell, the app menu and Back/Forward). Expanded, the mode-icon
+         * pair joins it -- they only need to be reachable once the panel
+         * is already open (hover or pinned). */}
+        <div
+          className={`titlebar-drag flex h-12 shrink-0 items-center gap-0.5 px-1.5 ${
+            expanded ? "justify-between" : DRAWS_TITLE_BAR ? "justify-start" : "justify-center"
+          }`}
+          style={TRAFFIC_LIGHTS_WIDTH ? { paddingLeft: TRAFFIC_LIGHTS_WIDTH } : undefined}
+        >
+          <div className="flex items-center gap-0.5">
+            {DRAWS_TITLE_BAR && <AppMenuButton />}
+            <button
+              type="button"
+              title={pinned ? "Unpin navigation" : "Pin navigation open"}
+              className={`flex h-9 w-9 items-center justify-center rounded-md hover:bg-[var(--card-bg)] ${
+                pinned ? "text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
+              }`}
+              onClick={() => onPinnedChange(!pinned)}
+              // The desktop row also holds the menu and Back/Forward, which
+              // mustn't pop the panel open; only this button does.
+              onMouseEnter={DRAWS_TITLE_BAR ? () => setHovering(true) : undefined}
+            >
+              <SidebarIcon className="h-[18px] w-[18px]" />
+            </button>
+            {DRAWS_TITLE_BAR && <HistoryButtons />}
+          </div>
           {expanded && (
             <div className="flex gap-0.5">
               <button

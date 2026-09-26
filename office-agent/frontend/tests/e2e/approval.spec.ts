@@ -6,6 +6,10 @@ test("approval-gated tool call: approve card appears, approving runs the tool an
 }) => {
   await page.goto(freshThreadPath("approval"));
   await waitForConnected(page);
+  // New conversations start in Auto, where a reviewer model decides instead of asking.
+  await page.getByRole("button", { name: "Auto", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: /^Manual/ }).click();
+  await expect(page.getByRole("button", { name: "Manual", exact: true })).toBeVisible();
   const textarea = page.locator("textarea");
   await textarea.click();
   await textarea.fill(
@@ -19,16 +23,11 @@ test("approval-gated tool call: approve card appears, approving runs the tool an
   // colliding with the real action button below it.
   await page.getByRole("button", { name: "Approve", exact: true }).click();
 
-  await expect(page.getByText("Approved")).toBeVisible();
-  await expect(page.getByText(/bytes_written/)).toBeVisible({ timeout: 20_000 });
+  // Once approved and run, the card folds into the tool row it became.
+  await expect(page.getByRole("button", { name: /^Wrote e2e-approval-test\.txt/ })).toBeVisible({ timeout: 20_000 });
   // reducer.ts's tool_result case merges an approved call's result onto
-  // the *same* approval item rather than pushing a second "tool" one --
-  // a real bug found live: it used to push a second item describing the
-  // same edit, so a collapsed tool-run group's summary read "Wrote
-  // e2e-approval-test.txt, Wrote e2e-approval-test.txt". Asserting
-  // against the page's own full text rather than a specific locator's
-  // count, since the exact element nesting SummaryLabel produces isn't
-  // this test's concern -- only that the doubled phrase never appears.
+  // the *same* approval item rather than pushing a second "tool" one, so
+  // the row never names the same edit twice.
   await expect(page.getByText("Wrote e2e-approval-test.txt, Wrote e2e-approval-test.txt")).not.toBeVisible();
   // The tool result still needs a second real model turn (the follow-up
   // summary) before turnInFlight clears -- two chained LLM calls, longer

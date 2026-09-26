@@ -25,6 +25,7 @@ import { BrowserWindow, app } from "electron";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { splashPagePath } from "./paths";
+import { titleBarWindowOptions } from "./windowChrome";
 import { sidecarProcess, shouldKeepRunningInBackground } from "./sidecar";
 
 const STARTUP_TIMEOUT_MS = 180_000;
@@ -92,6 +93,9 @@ async function waitForSidecarThenNavigate(win: BrowserWindow, port: number): Pro
     if (await portIsOpen(port)) {
       try {
         await win.loadURL(`http://127.0.0.1:${port}/`);
+        // The splash page stays behind in history otherwise, one Back
+        // away from the app.
+        win.webContents.navigationHistory.clear();
         return;
       } catch (err) {
         console.error("loadURL failed, will retry:", err);
@@ -120,6 +124,7 @@ export function createMainWindow(port: number, preloadPath: string): BrowserWind
     height: 860,
     minWidth: 960,
     minHeight: 620,
+    ...titleBarWindowOptions(),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

@@ -6107,6 +6107,35 @@ limited to file edits, Auto decided by a reviewer model.
       Name (numbers in order: "report 2" before "report 10"), remembered
       per browser.
 
+## Phase 8bj -- One top bar in the desktop window; Back/Forward between pages (built, awaiting Windows check)
+
+- [x] **No OS title bar or menu bar** (`office-agent-desktop/src/main/
+      windowChrome.ts`): `titleBarStyle: "hidden"` + `titleBarOverlay`
+      (48px, the page's `--bg`/`--muted`, re-sent on theme change), the
+      application menu kept for its shortcuts and opened from a "☰"
+      button, `autoHideMenuBar`. The splash page is draggable.
+- [x] **Top-left cluster**: ☰, sidebar toggle, Back, Forward, in the
+      sidebar's top row whether it's collapsed or open; only the toggle
+      opens the sidebar on hover. The whole top row is the drag area.
+      With a side panel open, the panel starts below a 48px strip that
+      the window buttons sit on.
+- [x] **Back/Forward are page navigation**, as in Claude's desktop app:
+      the Scheduled portal and a task's page are now in the URL
+      (`?thread=…&view=scheduled&task=…`), so every page change is a
+      history entry; the buttons use the Navigation API to grey out at
+      either end, and the `Go` menu adds Alt+Left/Alt+Right. Reload keeps
+      the page too.
+- [x] **Verified under Xvfb** in the real Electron 33 app on Linux:
+      layout, hover, ☰ menu, Back/Forward through chat → portal → task
+      page, Alt+Left through the real window, a side panel below the
+      window buttons, dark theme. Windows itself is for the user's
+      packaged build.
+- [x] **Found with the e2e suite**: Settings' Save ignored Log Level and
+      Default Mode (not in `CONFIG_KEYS`), so neither could be changed
+      from the UI; fixed with a regression test. Three e2e tests were
+      stale (Log Level input, the "Approved" label, Auto as default);
+      updated, plus a Back/Forward test. 12/12 pass.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

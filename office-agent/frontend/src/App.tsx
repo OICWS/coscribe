@@ -4,6 +4,7 @@ import { Composer, type ComposerSendPayload } from "./components/Composer";
 import { ContextRing } from "./components/ContextRing";
 import { FolderPicker } from "./components/FolderPicker";
 import { ModePill } from "./components/ModePill";
+import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR, useTitleBarColors } from "./lib/titleBar";
 import type { PlanChoice, PlanItem } from "./components/PlanCard";
 import { ModelPicker } from "./components/ModelPicker";
 import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
@@ -31,7 +32,15 @@ import {
   updateScheduledTask,
   type WorkflowDraftResult,
 } from "./lib/rest";
-import { goToThread, SCHEDULED_THREAD_PREFIX, startNewThread, THREAD_CHANGE_EVENT } from "./lib/nav";
+import {
+  goToThread,
+  readPage,
+  SCHEDULED_THREAD_PREFIX,
+  showChat,
+  showScheduled,
+  startNewThread,
+  THREAD_CHANGE_EVENT,
+} from "./lib/nav";
 import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
 import { taskPayload } from "./lib/taskPayload";
@@ -73,7 +82,7 @@ function App() {
   // Same pattern again, for SkillsTab's "Create a skill" prefilling the
   // composer's own text (not an image) -- see onCreateSkill below.
   const [pendingComposerText, setPendingComposerText] = useState<string | null>(null);
-  const [navMode, setNavMode] = useState<NavMode>("create");
+  const [navMode, setNavMode] = useState<NavMode>(() => (readPage().view === "scheduled" ? "run" : "create"));
   // Not persisted -- a per-page-load convenience, not a remembered
   // setting. Pinned, the rail takes layout space instead of overlaying
   // the header (see the column's paddingLeft below); hover-expanded it
@@ -81,7 +90,7 @@ function App() {
   const [navPinned, setNavPinned] = useState(false);
   // Which task Scheduled mode shows the page for (null = the portal) --
   // an id, not a copy of the task, so it always reads the latest list.
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => readPage().task);
   // A workflow step to open on the task page -- set by a run's "Edit step".
   const [focusStepId, setFocusStepId] = useState<string | null>(null);
   // null = closed. { task: null } = create. { task } = editing that task.
@@ -153,13 +162,18 @@ function App() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  useTitleBarColors();
+
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
   useEffect(() => {
     const syncFromUrl = () => {
       const id = resolveThreadId();
-      setNavMode("create");
-      setSelectedTaskId(null);
+      const page = readPage();
+      setNavMode(page.view === "scheduled" ? "run" : "create");
+      setSelectedTaskId(page.task);
+      setWorkflowDraft(null);
+      setFocusStepId(null);
       if (id === threadIdRef.current) return;
       pendingLocalSendsRef.current = [];
       dispatch({ type: "local_switch_thread" });
@@ -276,6 +290,7 @@ function App() {
   // open hides this panel without forgetting that it's wanted.
   const hasPlan = state.items.some((item) => item.kind === "tool" && item.toolName === "task_create");
   const taskPanelWanted = taskPanelChoice[threadId] ?? (threadWorkflow !== null || isScheduledTaskThread || hasPlan);
+  const otherPanelOpen = browserPanelOpen || subAgentsPanelOpen;
   const taskPanelShown =
     navMode === "create" &&
     taskPanelWanted &&
@@ -316,9 +331,7 @@ function App() {
       goToThread(run.thread_id);
       return;
     }
-    setWorkflowDraft(null);
-    setSelectedTaskId(task.trigger_id);
-    setNavMode("run");
+    showScheduled(task.trigger_id);
   };
 
   // A task made from this conversation works in the conversation's folder.
@@ -345,17 +358,11 @@ function App() {
 
   const leaveWorkflowDraft = () => {
     const draftThread = workflowDraft?.threadId;
-    setWorkflowDraft(null);
     if (draftThread && draftThread !== threadId) goToThread(draftThread);
-    setNavMode("create");
+    else showChat();
   };
 
-  const showScheduledTaskPage = (task: ScheduledTask | null) => {
-    setWorkflowDraft(null);
-    setSelectedTaskId(task?.trigger_id ?? null);
-    setFocusStepId(null);
-    setNavMode("run");
-  };
+  const showScheduledTaskPage = (task: ScheduledTask | null) => showScheduled(task?.trigger_id ?? null);
 
   const editWorkflowStep = (task: ScheduledTask, stepId: string) => {
     showScheduledTaskPage(task);
@@ -444,7 +451,7 @@ function App() {
       else startNewThread();
       return;
     }
-    setNavMode("create");
+    showChat();
   };
 
   /** Sends a bare user_message with no chat-log bubble -- for commands the
@@ -548,11 +555,45 @@ function App() {
    * sent, so the user can review or add context before hitting Enter. */
   const onCreateSkill = () => {
     setSettingsOpen(false);
-    setNavMode("create");
+    showChat();
     setPendingComposerText("/skill-creator ");
   };
 
   if (!bootstrapped) return <StartupSplash />;
+
+  const sidePanels = (
+    <>
+      {taskPanelShown && (
+        <TaskPanel
+          threadId={threadId}
+          title={sessionLabel}
+          task={threadTask}
+          run={threadRun}
+          workflowSteps={threadWorkflow && threadRun ? workflowProgress(threadWorkflow, threadRun) : null}
+          refreshSignal={`${state.turnTick}:${finishedToolCalls}:${threadRun?.steps.length ?? 0}:${threadRun?.status ?? ""}`}
+          onOpenTask={showScheduledTaskPage}
+          onSaveAsWorkflow={threadTask ? undefined : () => startWorkflowDraft("")}
+          busy={state.turnInFlight}
+        />
+      )}
+      {browserPanelOpen && (
+        <BrowserPanel onClose={() => setBrowserPanelOpen(false)} onSendToChat={onBrowserPanelCapture} />
+      )}
+      {subAgentsPanelOpen && (
+        <SubAgentsPanel
+          key={threadId}
+          threadId={threadId}
+          refreshKey={subAgentsTick}
+          focusTaskId={subAgentFocus?.threadId === threadId ? subAgentFocus.taskId : null}
+          onApprove={onApprove}
+          onClose={() => {
+            setSubAgentsPanelOpen(false);
+            setSubAgentFocus(null);
+          }}
+        />
+      )}
+    </>
+  );
 
   return (
     <div className="relative flex h-full">
@@ -585,7 +626,10 @@ function App() {
          * row below (ChatLog/Composer) had no such collision to avoid --
          * it just pushed their own mx-auto-centered content off-center
          * from the window's true center for no reason. */}
-        <div className={`flex items-center gap-1 py-2.5 pr-4 ${navPinned ? "pl-4" : "pl-12"}`}>
+        <div
+          className={`titlebar-drag flex h-12 shrink-0 items-center gap-1 pr-4 ${navPinned ? "pl-4" : "pl-12"}`}
+          style={!navPinned && DRAWS_TITLE_BAR ? { paddingLeft: COLLAPSED_CLUSTER_WIDTH + 8 } : undefined}
+        >
           {/* Only in Chat mode -- a chat thread's own label/workspace
            * badge has no meaning while Run mode's Scheduled portal/
            * detail page is showing instead (a real, previously-confirmed
@@ -650,6 +694,9 @@ function App() {
           >
             <SettingsIcon className="h-[18px] w-[18px]" />
           </button>
+          {DRAWS_TITLE_BAR && !otherPanelOpen && (
+            <div className={`titlebar-controls-space ${taskPanelShown ? "lg:hidden" : ""}`} />
+          )}
         </div>
         {connectionStatus === "reconnecting" && (
           <div className="bg-yellow-500/20 px-4 py-1 text-center text-sm text-yellow-700 dark:text-yellow-300">
@@ -781,34 +828,18 @@ function App() {
         />
         {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       </div>
-      {taskPanelShown && (
-        <TaskPanel
-          threadId={threadId}
-          title={sessionLabel}
-          task={threadTask}
-          run={threadRun}
-          workflowSteps={threadWorkflow && threadRun ? workflowProgress(threadWorkflow, threadRun) : null}
-          refreshSignal={`${state.turnTick}:${finishedToolCalls}:${threadRun?.steps.length ?? 0}:${threadRun?.status ?? ""}`}
-          onOpenTask={showScheduledTaskPage}
-          onSaveAsWorkflow={threadTask ? undefined : () => startWorkflowDraft("")}
-          busy={state.turnInFlight}
-        />
-      )}
-      {browserPanelOpen && (
-        <BrowserPanel onClose={() => setBrowserPanelOpen(false)} onSendToChat={onBrowserPanelCapture} />
-      )}
-      {subAgentsPanelOpen && (
-        <SubAgentsPanel
-          key={threadId}
-          threadId={threadId}
-          refreshKey={subAgentsTick}
-          focusTaskId={subAgentFocus?.threadId === threadId ? subAgentFocus.taskId : null}
-          onApprove={onApprove}
-          onClose={() => {
-            setSubAgentsPanelOpen(false);
-            setSubAgentFocus(null);
-          }}
-        />
+      {DRAWS_TITLE_BAR && (taskPanelShown || otherPanelOpen) ? (
+        // The OS window buttons sit at the window's top-right, over the
+        // panels when one is open: they start below a strip of their own.
+        <div className={`h-full shrink-0 flex-col ${otherPanelOpen ? "flex" : "hidden lg:flex"}`}>
+          <div className="titlebar-drag flex h-12 shrink-0">
+            <div className="flex-1" />
+            <div className="titlebar-controls-space" />
+          </div>
+          <div className="flex min-h-0 flex-1">{sidePanels}</div>
+        </div>
+      ) : (
+        sidePanels
       )}
     </div>
   );

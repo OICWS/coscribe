@@ -12,6 +12,7 @@ import { watchBackgroundEvents } from "./backgroundEvents";
 import { createMainWindow, showMainWindow, preloadPath, iconsDirFromApp, markQuitting } from "./mainWindow";
 import { createTray } from "./tray";
 import { registerDialogHandlers } from "./dialog";
+import { registerWindowChromeHandlers } from "./windowChrome";
 import { registerBrowserPanelHandlers, destroyBrowserPanel } from "./browserPanel";
 
 // MUST run before anything else touches the window: a second launch
@@ -33,6 +34,7 @@ if (!gotLock) {
     startSidecar(port);
     void watchBackgroundEvents(port);
 
+    registerWindowChromeHandlers();
     const win = createMainWindow(port, preloadPath());
     registerDialogHandlers(win);
     registerBrowserPanelHandlers(win);

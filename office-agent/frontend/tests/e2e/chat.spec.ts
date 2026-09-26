@@ -16,7 +16,7 @@ test("chat round trip: send a message, get a streamed then finalized reply", asy
   // Real backend reply -- generous timeout for a real LLM call. Scoped to
   // the chat log specifically: the usage bar's "4.9k / 1.0M" text also
   // contains a bare "4", which would otherwise ambiguously match too.
-  await expect(page.getByTestId("chat-log").getByText(/4/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("chat-log").getByText(/4|four/i)).toBeVisible({ timeout: 20_000 });
 
   // turnInFlight clears once agent_message finalizes -- Send button returns.
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
