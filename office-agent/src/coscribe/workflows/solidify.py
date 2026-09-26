@@ -29,18 +29,7 @@ _RESULT_CHARS = 600
 _TEXT_CHARS = 1500
 _TRANSCRIPT_CHARS = 60_000
 
-CURATOR_INSTRUCTIONS = """\
-You turn a conversation in which an assistant did a task with tools into a \
-workflow: a fixed list of steps that repeats the same task without an \
-assistant deciding anything along the way. Reply with one JSON object and \
-nothing else:
-
-{"name": "<a few plain words, e.g. Monthly PDF error audit>", \
-"workflow": {"version": 1, "inputs": [...], "steps": [...]}, \
-"notes": ["<one line per thing the reviewer should check>"]}
-
-If the conversation holds no repeatable task, reply {"error": "<why>"} instead.
-
+STEP_FORMAT = """\
 Inputs -- values that change from run to run (usually file paths, dates, \
 names): {"name": "pdf_path", "label": "PDF to audit", "type": "text" | \
 "file" | "number", "default": <the value used in the conversation>}.
@@ -107,6 +96,44 @@ the conversation showed to work.
 into inputs, steps you dropped on purpose.
 """
 
+CURATOR_INSTRUCTIONS = (
+    """\
+You turn a conversation in which an assistant did a task with tools into a \
+workflow: a fixed list of steps that repeats the same task without an \
+assistant deciding anything along the way. Reply with one JSON object and \
+nothing else:
+
+{"name": "<a few plain words, e.g. Monthly PDF error audit>", \
+"workflow": {"version": 1, "inputs": [...], "steps": [...]}, \
+"notes": ["<one line per thing the reviewer should check>"]}
+
+If the conversation holds no repeatable task, reply {"error": "<why>"} instead.
+
+"""
+    + STEP_FORMAT
+)
+
+REVISER_INSTRUCTIONS = (
+    """\
+You change a saved workflow -- a fixed list of steps that runs without an \
+assistant deciding anything -- the way the user asks. You get the workflow \
+as JSON, the user's request, and the conversation around it for context. \
+Reply with one JSON object and nothing else:
+
+{"workflow": {"version": 1, "inputs": [...], "steps": [...]}, \
+"changes": ["<one short line per change, in the user's language>"], \
+"notes": ["<one line per thing the reviewer should check>"]}
+
+Change only what the request needs: every other input and step, and every \
+id, stays exactly as it is. If the request can't be done with the step \
+kinds and tools below, reply {"error": "<why, in the user's language>"}.
+
+The step format ("the conversation" below means the one you're given):
+
+"""
+    + STEP_FORMAT
+)
+
 
 class DraftFailed(Exception):
     """The conversation couldn't be turned into a workflow."""
@@ -117,9 +144,14 @@ class WorkflowDraft:
     name: str
     workflow: dict[str, Any]
     notes: list[str]
+    # For a revision of a saved workflow: what was changed, one line each.
+    changes: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "workflow": self.workflow, "notes": self.notes}
+        data: dict[str, Any] = {"name": self.name, "workflow": self.workflow, "notes": self.notes}
+        if self.changes is not None:
+            data["changes"] = self.changes
+        return data
 
 
 def _clip(text: str, limit: int) -> str:
@@ -298,3 +330,85 @@ async def draft_workflow(
     raise DraftFailed(
         f"Couldn't draft a valid workflow ({problem}). Try again, or build it by hand."
     )
+
+
+def _lines(value: Any) -> list[str]:
+    items = [value] if isinstance(value, str) else (value or [])
+    return [str(item) for item in items if str(item).strip()]
+
+
+def _parse_revision(text: str, tools: dict[str, Any], name: str) -> WorkflowDraft:
+    data = _reply_object(text)
+    if "error" in data and "workflow" not in data:
+        raise DraftFailed(str(data["error"]))
+    try:
+        workflow = parse_workflow(data.get("workflow"))
+    except ValidationError as exc:
+        raise ValueError(workflow_error(exc, data.get("workflow"))) from exc
+    problems = check_draft(workflow, tools)
+    if problems:
+        raise ValueError("; ".join(problems))
+    changes = _lines(data.get("changes"))
+    if not changes:
+        raise ValueError('list what you changed in "changes"')
+    return WorkflowDraft(
+        name=name,
+        workflow=workflow.model_dump(mode="json"),
+        notes=_lines(data.get("notes")),
+        changes=changes,
+    )
+
+
+def _tools_in(workflow: dict[str, Any]) -> list[str]:
+    try:
+        parsed = parse_workflow(workflow)
+    except ValidationError:
+        return []
+    return [p.step.tool for p in walk(parsed.steps) if isinstance(p.step, ToolStep)]
+
+
+async def revise_workflow(
+    model: Any,
+    name: str,
+    workflow: dict[str, Any],
+    request: str,
+    messages: list[Any],
+    tools: dict[str, Any],
+) -> WorkflowDraft:
+    """The saved `workflow` changed as `request` asks, checked like a new
+    draft, with a line per change for the person reviewing it."""
+    transcript, used = render_conversation(messages)
+    if "temperature" in getattr(type(model), "model_fields", {}):
+        model = model.model_copy(update={"temperature": 0})
+    described = list(dict.fromkeys([*_tools_in(workflow), *used, SCRIPT_TOOL]))
+    others = sorted(t for t in tools if t not in described and t not in UNAVAILABLE_TOOLS)
+    conversation: list[Any] = [
+        SystemMessage(REVISER_INSTRUCTIONS),
+        HumanMessage(
+            f"The workflow, {name!r}:\n{json.dumps(workflow, ensure_ascii=False)}\n\n"
+            f"The user's request: {request}\n\n"
+            f"Tools:\n{describe_tools(described, tools)}\n"
+            f"Other tools (you'll get their parameters if you use one): {', '.join(others)}\n\n"
+            f"The conversation:\n\n{transcript or '(nothing yet)'}"
+        ),
+    ]
+    problem = ""
+    for _attempt in range(MAX_ATTEMPTS):
+        reply = await model.ainvoke(conversation, config={"tags": [TAG_NOSTREAM]})
+        text = _reply_text(reply)
+        try:
+            return _parse_revision(text, tools, name)
+        except (ValueError, TypeError) as exc:
+            problem = str(exc)
+        try:
+            proposed = _tools_in(_reply_object(text).get("workflow") or {})
+        except (ValueError, TypeError):
+            proposed = []
+        newly_used = [t for t in dict.fromkeys(proposed) if t not in described]
+        described += newly_used
+        extra = f"\n\nThose tools take:\n{describe_tools(newly_used, tools)}" if newly_used else ""
+        conversation += [
+            AIMessage(text),
+            HumanMessage(f"That doesn't work: {problem}. Reply with the corrected JSON.{extra}"),
+        ]
+    raise DraftFailed(f"Couldn't revise the workflow ({problem}). Try again, or edit it by hand.")

@@ -14,6 +14,7 @@ from coscribe.workflows.solidify import (
     check_draft,
     draft_workflow,
     render_conversation,
+    revise_workflow,
 )
 from coscribe.workflows.spec import parse_workflow
 
@@ -220,3 +221,66 @@ def test_check_draft_wants_a_field_not_a_whole_model_result_collected() -> None:
     ]
     loop["collect"] = "summary.text"
     assert check_draft(parse_workflow(data), TOOLS) == []
+
+
+SAVED = {
+    "steps": [
+        {"id": "find", "kind": "tool", "title": "Find errors", "tool": "search_pdf",
+         "args": {"path": "big.pdf", "query": "Error code"}, "save_as": "hits"},
+    ],
+}  # fmt: skip
+
+
+async def test_a_revision_keeps_the_saved_steps_and_lists_its_changes() -> None:
+    revised = {
+        "workflow": {
+            "steps": [
+                SAVED["steps"][0],
+                {"id": "save", "kind": "tool", "title": "Save report", "tool": "write_file",
+                 "args": {"path": "report.md", "content": "{{hits}}"}},
+            ],
+        },
+        "changes": ["Writes the hits to report.md"],
+    }  # fmt: skip
+    model = ScriptedModel(replies=[json.dumps(revised)], received=[])
+
+    draft = await revise_workflow(model, "Error audit", SAVED, "save them to report.md", [], TOOLS)
+
+    assert draft.name == "Error audit"
+    assert draft.changes == ["Writes the hits to report.md"]
+    assert [s["id"] for s in draft.workflow["steps"]] == ["find", "save"]
+    request = str(model.received[0][-1].content)
+    assert "save them to report.md" in request
+    assert "search_pdf(path: text" in request
+
+
+async def test_a_revision_using_an_undescribed_tool_gets_its_parameters_on_retry() -> None:
+    missing_content = {
+        "workflow": {
+            "steps": [
+                SAVED["steps"][0],
+                {"id": "save", "kind": "tool", "title": "Save", "tool": "write_file",
+                 "args": {"path": "report.md"}},
+            ],
+        },
+        "changes": ["Saves a report"],
+    }  # fmt: skip
+    fixed = json.loads(json.dumps(missing_content))
+    fixed["workflow"]["steps"][1]["args"]["content"] = "{{hits}}"
+    model = ScriptedModel(replies=[json.dumps(missing_content), json.dumps(fixed)], received=[])
+
+    draft = await revise_workflow(model, "Error audit", SAVED, "save a report", [], TOOLS)
+
+    first_request = str(model.received[0][-1].content)
+    assert "Other tools (you'll get their parameters if you use one): write_file" in first_request
+    retry = str(model.received[1][-1].content)
+    assert "write_file needs content" in retry
+    assert "write_file(path: text" in retry
+    assert draft.workflow["steps"][1]["args"]["content"] == "{{hits}}"
+
+
+async def test_a_revision_the_reviser_refuses_explains_why() -> None:
+    model = ScriptedModel(replies=[json.dumps({"error": "There's no email tool."})], received=[])
+
+    with pytest.raises(DraftFailed, match="no email tool"):
+        await revise_workflow(model, "Error audit", SAVED, "email it to me", [], TOOLS)

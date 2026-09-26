@@ -219,7 +219,7 @@ export function historyToItems(entries: HistoryEntry[]): LogItem[] {
     if (entry.kind === "agent") {
       return { id: genId(), kind: "agent", text: entry.text, streaming: false };
     }
-    if (entry.tool_name === "create_scheduled_task") {
+    if (entry.tool_name === "create_scheduled_task" || entry.tool_name === "edit_scheduled_task") {
       const saved = typeof entry.result === "string" && entry.result.startsWith(TASK_DRAFT_SAVED_PREFIX);
       return {
         id: genId(),

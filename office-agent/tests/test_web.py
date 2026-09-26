@@ -6764,3 +6764,108 @@ async def test_a_sub_agents_approval_survives_a_closed_turn_socket(
     assert saved is not None and saved.status == "needs_approval"
     assert saved.pending_approval == {"id": "r1", "tool_name": "write_file"}
     assert changed == ["needs_approval"]
+
+
+def _saved_workflow_task(tmp_path: Path) -> Any:
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore, create_trigger
+
+    workflow = {
+        "steps": [{"id": "read", "kind": "tool", "title": "Read it", "tool": "read_file",
+                   "args": {"path": "input.txt"}, "save_as": "text"}],
+    }  # fmt: skip
+    return create_trigger(
+        ScheduledTriggerStore(tmp_path / "state"),
+        name="Read the input",
+        kind="manual",
+        at="",
+        prompt="",
+        workflow=workflow,
+    )
+
+
+def test_revising_a_saved_workflow_proposes_changes_without_saving_them_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
+
+    task = _saved_workflow_task(tmp_path)
+    revised = {
+        "workflow": {
+            "steps": [
+                {"id": "read", "kind": "tool", "title": "Read it", "tool": "read_file",
+                 "args": {"path": "input.txt"}, "save_as": "text"},
+                {"id": "check", "kind": "check", "title": "Not empty",
+                 "conditions": [{"left": {"ref": "text"}, "op": "not_empty"}]},
+            ],
+        },
+        "changes": ["Stops the run when the file is empty"],
+        "notes": [],
+    }  # fmt: skip
+    revise = _tool_call(
+        "c1", "revise_workflow", {"task_id": task.trigger_id, "request": "stop if it's empty"}
+    )
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[revise]),
+            AIMessage(content=json.dumps(revised)),
+            AIMessage(content="Review the changes on the card."),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_revise") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "make it stop if the file is empty"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    [result] = [m for m in messages if m.get("tool_name") == "revise_workflow" and "result" in m]
+    raw = result["result"]
+    proposal = json.loads(raw) if isinstance(raw, str) else raw
+    assert proposal["status"] == "drafted", proposal
+    assert proposal["trigger_id"] == task.trigger_id
+    assert proposal["changes"] == ["Stops the run when the file is empty"]
+    assert [s["id"] for s in proposal["workflow"]["steps"]] == ["read", "check"]
+    reviser_request = str(fake_model.received[1][-1].content)
+    assert "stop if it's empty" in reviser_request
+    assert '"id": "read"' in reviser_request
+    saved = ScheduledTriggerStore(tmp_path / "state").load(task.trigger_id)
+    assert saved is not None and len(saved.workflow["steps"]) == 1
+
+
+def test_editing_a_saved_task_asks_the_user_with_the_whole_task_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore, create_trigger
+
+    store = ScheduledTriggerStore(tmp_path / "state")
+    task = create_trigger(
+        store, name="Morning digest", kind="daily", at="09:00", prompt="Summarize the news."
+    )
+    edit = _tool_call(
+        "c1", "edit_scheduled_task", {"trigger_id": task.trigger_id, "at": "08:00"}
+    )
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[edit]), AIMessage(content="Left it as is.")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_edit_task") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "run it at 8 instead"})
+            draft_event = _receive_until(ws, "task_draft_required")[-1]
+            ws.send_json(
+                {
+                    "type": "question_response",
+                    "id": draft_event["id"],
+                    "answer": "The user dismissed the draft without saving it.",
+                }
+            )
+            _receive_until(ws, "tasks_changed")
+
+    draft = draft_event["draft"]
+    assert draft["trigger_id"] == task.trigger_id
+    assert draft["changed"] == ["at"]
+    assert (draft["name"], draft["kind"], draft["at"]) == ("Morning digest", "daily", "08:00")
+    assert draft["prompt"] == "Summarize the news."
+    unchanged = store.load(task.trigger_id)
+    assert unchanged is not None and unchanged.schedule.at == "09:00"

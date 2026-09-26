@@ -563,6 +563,11 @@ hasn't been done here with tools yet, only written instructions are \
 possible, so say that instead of asking. draft_workflow only drafts: the user \
 reviews it on a card and saves it themselves -- say so plainly, without \
 listing the steps' internals unless asked. \
+To change a task that's already saved, change it in place -- never make \
+a second copy: revise_workflow(task_id, request) edits a fixed workflow's \
+steps, edit_scheduled_task(trigger_id, ...) its instructions, name, \
+schedule, model or approval setting (ids from list_scheduled_tasks). Both \
+only propose: the user reviews the change and saves it. \
 For a prompt task, call create_scheduled_task (kind="manual" for one \
 that only runs when the user starts it). The user reviews and can edit \
 your draft before it's saved; the tool result says whether they saved \

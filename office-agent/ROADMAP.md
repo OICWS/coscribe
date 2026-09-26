@@ -5993,6 +5993,36 @@ approval mode and folders carried over.
 
 ---
 
+## Phase 8bf -- Changing saved tasks from chat (shipped)
+
+The user asked the model to adjust a saved workflow; it could only list,
+pause, resume, delete or make another one, so it offered to redraft a copy.
+
+- [x] **`revise_workflow(task_id, request)`** (session tool): a reviser
+      (`workflows/solidify.py`, sharing the curator's step format) changes
+      the saved workflow as asked, keeping other steps and ids; checked
+      like a draft, up to three tries, and a tool it newly uses is
+      described to it on the retry. Returns the revised workflow and a line
+      per change; the task is untouched.
+- [x] **`edit_scheduled_task(trigger_id, ...)`**: a task-draft tool like
+      `create_scheduled_task`, but the review gets the whole task as it
+      would be saved (`edit_draft`) with the changed fields named, and
+      Save updates in place. The CLI's review updates too.
+- [x] Frontend: a **Workflow changes** card and a revision mode of the
+      draft page ("What changes", **Save changes** -> PUT on the same
+      task); the task-draft card reads "Changes to a scheduled task" and
+      opens the edit form titled **Review changes**.
+- [x] **Verified live** (DeepSeek): "add a check that stops if the
+      summary is empty, and write to summaries/q3-summary.md" on a saved
+      3-step workflow -- the model found it through search_tools and
+      list_scheduled_tasks, the reviser added one check step between the
+      right two and changed only the write step's path (ids kept); saved
+      in place, 4 steps. "Run 晨报 at 8 and only read the txt files" gave a
+      review form with 08:00 and rewritten instructions; saved in place. No
+      duplicate tasks either way.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

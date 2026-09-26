@@ -36,6 +36,7 @@ export function WorkflowDraftCard({
       </div>
     );
   }
+  if (entry.triggerId) return <WorkflowRevisionCard entry={entry} onReview={onReview} />;
   const placed = placeSteps(entry.workflow.steps);
   const top = entry.workflow.steps.slice(0, SHOWN_STEPS);
   const more = entry.workflow.steps.length - top.length;
@@ -71,6 +72,51 @@ export function WorkflowDraftCard({
       <div className="mt-3.5 flex flex-wrap items-center gap-3">
         <button type="button" className={primaryButton} disabled={!onReview} onClick={() => onReview?.(entry)}>
           Review and save
+        </button>
+        {entry.notes.length > 0 && (
+          <span className="flex items-center gap-1.5 text-[13px] text-[var(--muted)]">
+            <AlertCircleIcon className="h-3.5 w-3.5 text-[var(--warning)]" />
+            {entry.notes.length} {entry.notes.length === 1 ? "thing" : "things"} worth checking
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const SHOWN_CHANGES = 4;
+
+/** Proposed changes to a saved workflow; the task stays as it is until the
+ * user reviews them and saves. */
+function WorkflowRevisionCard({
+  entry,
+  onReview,
+}: {
+  entry: WorkflowDraftEntry;
+  onReview?: (entry: WorkflowDraftEntry) => void;
+}) {
+  const shown = entry.changes.slice(0, SHOWN_CHANGES);
+  const more = entry.changes.length - shown.length;
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] p-4">
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
+        <WorkflowIcon className="h-3.5 w-3.5" />
+        Workflow changes
+      </div>
+      <div className="font-medium">{entry.name}</div>
+      <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-[13px] leading-relaxed marker:text-[var(--muted)]">
+        {shown.map((change, index) => (
+          <li key={index}>{change}</li>
+        ))}
+        {more > 0 && (
+          <li className="list-none text-[var(--muted)]">
+            and {more} more {more === 1 ? "change" : "changes"}
+          </li>
+        )}
+      </ul>
+      <div className="mt-3.5 flex flex-wrap items-center gap-3">
+        <button type="button" className={primaryButton} disabled={!onReview} onClick={() => onReview?.(entry)}>
+          Review changes
         </button>
         {entry.notes.length > 0 && (
           <span className="flex items-center gap-1.5 text-[13px] text-[var(--muted)]">

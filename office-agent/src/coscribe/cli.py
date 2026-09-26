@@ -84,7 +84,7 @@ from .runtime import (
 from .runtime.provider_config import load_custom_providers
 from .runtime_lg import poll_due_scheduled_tasks, poll_due_wakes
 from .tools import load_builtin_skills, load_skills
-from .tools.scheduled_tasks import ScheduledTriggerStore, create_trigger
+from .tools.scheduled_tasks import ScheduledTriggerStore, create_trigger, update_trigger
 
 app = typer.Typer(add_completion=False, no_args_is_help=False)
 logger = logging.getLogger(__name__)
@@ -225,7 +225,8 @@ class _CliSocket:
             f"({draft.get('kind')}{' at ' + draft['at'] if draft.get('at') else ''})\n"
             f"{draft.get('prompt', '')}\n"
         )
-        if not typer.confirm("Save this scheduled task?", default=False):
+        question = "Save these changes?" if draft.get("trigger_id") else "Save this scheduled task?"
+        if not typer.confirm(question, default=False):
             return "The user dismissed the draft without saving it."
         fields = {
             key: draft[key]
@@ -244,7 +245,18 @@ class _CliSocket:
         }
         try:
             store = ScheduledTriggerStore(self._session.settings.state_dir)
-            trigger = create_trigger(store, **fields)
+            existing = store.load(draft["trigger_id"]) if draft.get("trigger_id") else None
+            if existing is not None:
+                trigger = update_trigger(
+                    store,
+                    existing.trigger_id,
+                    **fields,
+                    notes_enabled=existing.notes_enabled,
+                    workflow=existing.workflow,
+                    workspace=existing.workspace,
+                )
+            else:
+                trigger = create_trigger(store, **fields)
         except (TypeError, ValueError) as exc:
             typer.echo(f"Couldn't save it: {exc}", err=True)
             return f"The draft couldn't be saved: {exc}"

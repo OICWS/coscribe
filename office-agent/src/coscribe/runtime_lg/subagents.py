@@ -55,6 +55,7 @@ _NOT_FOR_SUBAGENTS = frozenset(
         "spawn_agent",
         "spawn_agent_background",
         "draft_workflow",
+        "revise_workflow",
         *QUESTION_TOOL_NAMES,
         *TASK_DRAFT_TOOL_NAMES,
     }
