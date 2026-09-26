@@ -65,10 +65,9 @@ export function FolderPicker({ folders, disabled, onChange }: FolderPickerProps)
         disabled={disabled}
         title={folders.length > 0 ? folders.join("\n") : "Let the agent work in a folder on this computer"}
         aria-expanded={open}
-        className="flex h-8 max-w-48 items-center gap-1.5 rounded-lg px-2 text-sm text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-50 disabled:hover:bg-transparent"
+        className="flex h-8 max-w-48 items-center rounded-lg px-2 text-sm text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-50 disabled:hover:bg-transparent"
         onClick={() => setOpen((v) => !v)}
       >
-        <FolderIcon className="h-4 w-4 shrink-0" />
         <span className="truncate">{buttonLabel(folders)}</span>
       </button>
       {open && (

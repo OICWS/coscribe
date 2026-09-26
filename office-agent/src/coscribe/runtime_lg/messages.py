@@ -29,7 +29,13 @@ ACCEPT_EDITS_MODE_NOTE = "[accept-edits mode is ON: tool calls run without askin
 NORMAL_MODE_NOTE = "[normal mode: risky tool calls ask for approval as usual] "
 _MODE_NOTES = (PLAN_MODE_NOTE, ACCEPT_EDITS_MODE_NOTE, NORMAL_MODE_NOTE)
 
-_DATE_NOTE_RE = re.compile(r"^Today's real date is \d{4}-\d{2}-\d{2}\.\s+")
+# Also matches the older date-only note, which checkpointed history still
+# carries.
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_DATE_NOTE_RE = re.compile(
+    r"^Today's real date is \d{4}-\d{2}-\d{2}"
+    r"(?: \([A-Za-z]+\); local time \d{2}:\d{2} \(UTC[+-]\d{2}:\d{2}\))?\.\s+"
+)
 
 
 def current_date_note() -> str:
@@ -63,8 +69,18 @@ def current_date_note() -> str:
 
     strip_mode_note below must stay in sync with this -- a checkpointed
     HumanMessage carries this prefix too, and history replay needs to
-    strip it back off the same way it does mode_note's."""
-    return f"Today's real date is {datetime.now().strftime('%Y-%m-%d')}. "
+    strip it back off the same way it does mode_note's.
+
+    Also carries the weekday, local time and UTC offset: the model has no
+    other clock. The weekday is spelled out here, not with %A, which follows
+    the OS locale and would stop _DATE_NOTE_RE from matching."""
+    now = datetime.now().astimezone()
+    offset = now.strftime("%z")
+    offset = f"{offset[:3]}:{offset[3:]}" if offset else "+00:00"
+    return (
+        f"Today's real date is {now.strftime('%Y-%m-%d')} ({_WEEKDAYS[now.weekday()]}); "
+        f"local time {now.strftime('%H:%M')} (UTC{offset}). "
+    )
 
 
 def strip_mode_note(text: str) -> str:

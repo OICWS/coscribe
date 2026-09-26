@@ -760,12 +760,16 @@ shouldn't repeat the manual-paste pattern either.
       here, so this shipped as a `needs_config` catalog entry (the same
       Custom-tab-prefill mechanism the old GitHub PAT entry used)
       instead. 5a itself is still undone -- see that bullet.
+      **Removed from the catalog in Phase 8bd**: Slack is set up by hand
+      (Connectors > Custom) for now.
 - [ ] **5b2 -- Asana (or similar task-tracking tool) as a connector** --
       not yet designed, added here as a placeholder after the user flagged
       it as a concrete example of the "real office tools" this phase
       should prioritize (discussion in progress on scope/sequencing, not
       yet started).
-- [ ] **5c -- Slack as an approval channel** -- depends on Phase 4's
+- [ ] ~~**5c -- Slack as an approval channel**~~ -- **dropped from the
+      plan (2026-09-26)**; revisit only if Slack comes back as a
+      connector. Original note kept below. -- depends on Phase 4's
       suspend/resume (a session needs to survive without an open browser
       tab to receive a Slack response). Design the trigger/response
       interface channel-agnostically (an "inbox" concept, not
@@ -5854,7 +5858,8 @@ fetch, time and office365 connected, a first "你好" cost **393.8k tokens
       46,478 without**. Live (DeepSeek): asked to open a local page and
       read its table, it called `search_tools`, got the Playwright tools,
       and finished in about 26k tokens total.
-- [x] **Connector catalog trimmed** to playwright, slack and office365.
+- [x] **Connector catalog trimmed** to playwright, slack and office365
+      (slack removed too in Phase 8bd).
       fetch is replaced by a built-in `read_web_page(url)` (HTML to
       markdown, paged by `start`/`max_chars`) in the core set; memory,
       sequential-thinking and time are gone. Existing connections stay
@@ -5926,6 +5931,30 @@ UI batch, same round:
       table copy gave `项目\t结果\n…`, a selection with inline math gave
       `$\sum_{i=1}^{n} i^2 = \dfrac{…}{6}$`, display-math copy gave
       `a^2 + b^2 = c^2`; light and dark checked.
+
+---
+
+## Phase 8bd -- Fewer connectors, asking which workflow, clock in the turn note (shipped)
+
+- [x] **Slack out of the catalog**, and its approval-channel idea (5c) out
+      of the plan -- it's set up by hand for now. memory and time needed
+      no connector: `remember` + MEMORY.md already cover memory, and the
+      per-turn note now carries the weekday, local time and UTC offset
+      ("2026-09-26 (Saturday); local time 14:05 (UTC+08:00)"). The
+      weekday is spelled out rather than `%A`, which follows the OS locale
+      and would break the regex that strips the note from history.
+- [x] **Ask which kind of workflow.** Asked to make something
+      repeatable, the model now asks (`ask_user_question`, "Fixed steps"
+      vs "Written instructions") unless the user already said, instead of
+      defaulting to a fixed workflow.
+- [x] "Add folder" has no icon.
+- [x] Commits are authored as the user (CLAUDE.md), and simple,
+      well-specified edits go to a Sonnet subagent -- this phase's
+      Slack/icon/time-note changes were done that way and reviewed.
+
+**Open, found by the user:** a saved workflow can't be changed from chat
+-- the model only has list/pause/resume/delete and "create another", so
+it offered to redraft a copy. Not intended; see the next phase.
 
 ---
 

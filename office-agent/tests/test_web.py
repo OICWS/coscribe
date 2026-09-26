@@ -3405,22 +3405,15 @@ def test_get_mcp_catalog_returns_curated_entries(
     assert response.status_code == 200
     entries = response.json()
     names = {entry["name"] for entry in entries}
-    assert {"playwright", "slack", "office365"} <= names
+    assert {"playwright", "office365"} <= names
     # What coscribe already covers itself (reading pages, memory, the
     # date) isn't offered as a connector.
-    assert not names & {"fetch", "memory", "sequential-thinking", "time"}
-
-    slack = next(entry for entry in entries if entry["name"] == "slack")
-    # needs_config -- prefills the Custom tab (a Bot User OAuth Token the
-    # user gets from their own Slack app, not a coscribe-brokered OAuth
-    # exchange) rather than a one-click add like playwright/memory/time.
-    assert slack["needs_config"] is True
-    assert set(slack["env"]) == {"SLACK_BOT_TOKEN", "SLACK_TEAM_ID"}
+    assert not names & {"fetch", "memory", "sequential-thinking", "time", "slack"}
 
     office365 = next(entry for entry in entries if entry["name"] == "office365")
-    # One-click, unlike slack -- its own MCP server handles the device-code
-    # sign-in through its own login/verify-login tools, no coscribe-side
-    # config to prefill.
+    # One-click -- its own MCP server handles the device-code sign-in
+    # through its own login/verify-login tools, no coscribe-side config
+    # to prefill.
     assert "needs_config" not in office365
     assert "env" not in office365
 
@@ -5490,7 +5483,7 @@ def test_date_note_is_per_turn_message_content_not_baked_into_the_system_prompt(
     human_messages = [m for m in sent_messages if isinstance(m, HumanMessage)]
     assert human_messages, "expected a human message in the request"
     today = datetime.now().strftime("%Y-%m-%d")
-    assert human_messages[-1].content.startswith(f"Today's real date is {today}. ")
+    assert human_messages[-1].content.startswith(f"Today's real date is {today} (")
 
 
 def test_delete_thread_endpoint_removes_checkpoints_and_tasks_sidecar_lg(

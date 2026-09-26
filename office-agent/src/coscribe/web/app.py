@@ -225,30 +225,6 @@ MCP_CATALOG: list[dict[str, Any]] = [
         "needs_browser_check": True,
     },
     {
-        "name": "slack",
-        "description": "Post messages, read channels and threads, react to messages -- "
-        "needs a Slack app you create yourself (a few minutes on api.slack.com) and "
-        "its Bot User OAuth Token, not a coscribe-hosted sign-in.",
-        "command": "npx",
-        # Official @modelcontextprotocol server, same publisher as the
-        # memory/sequential-thinking entries above. Deliberately *not* the
-        # "click, get redirected to Slack's login page" OAuth UX ROADMAP.md's
-        # Phase 5a originally sketched -- checked this package's own setup
-        # docs first: it authenticates with a plain Bot User OAuth Token
-        # (`xoxb-...`) the user copies from their own Slack app's "OAuth &
-        # Permissions" page after clicking "Install to Workspace" there,
-        # the exact same shape the old (removed) GitHub PAT catalog entry
-        # used -- there's no token exchange for coscribe to broker, so
-        # there's nothing for a loopback-redirect flow to actually buy
-        # here. needs_config reuses that same still-live Custom-tab
-        # prefill mechanism (see ConnectorsTab.tsx's prefillCustomForm) --
-        # not new code, and not the removed GitHub entry's device-flow
-        # implementation either (see the comment below).
-        "args": ["@modelcontextprotocol/server-slack@2025.4.25"],
-        "env": {"SLACK_BOT_TOKEN": "", "SLACK_TEAM_ID": ""},
-        "needs_config": True,
-    },
-    {
         "name": "office365",
         "description": "Outlook mail and calendar, OneDrive files, Excel, OneNote, "
         "To Do, Planner -- signs in through its own device-code flow (the agent "
@@ -286,9 +262,7 @@ MCP_CATALOG: list[dict[str, Any]] = [
 # one-click catalog entries were removed, along with the GitHub-specific
 # OAuth Device Flow implementation that entry was the only caller of (see
 # git history for `web/github_oauth.py` if that flow is ever needed again
-# for a different provider -- the slack entry above does *not* revive or
-# reuse it, see that entry's own comment for why a token-exchange flow
-# isn't actually needed there).
+# for a different provider).
 
 # Well-maintained official MCP servers that exist but are deliberately left
 # out of MCP_CATALOG above -- these don't just need a path/token filled in
