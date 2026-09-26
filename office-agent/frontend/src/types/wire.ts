@@ -19,6 +19,8 @@ export interface StateEvent {
   type: "state";
   plan_mode: boolean;
   accept_edits: boolean;
+  /** A reviewer model decides risky calls instead of the user. */
+  auto_mode: boolean;
   model: string;
   context_window: number;
   /** Which built-in/local skills are currently spliced into this thread's
@@ -130,6 +132,8 @@ export interface ApprovalRequiredEvent {
    * it, not the chat. */
   subagent_id?: string;
   subagent?: string;
+  /** Why auto mode handed this one to the user. */
+  reviewer_note?: string | null;
 }
 
 /** A sub-agent of this conversation started, progressed, asked for
@@ -147,6 +151,14 @@ export interface SubAgentsChangedEvent {
  * string and drops blank lines) -- never empty when this event fires,
  * but the client should still let the user type a free-text answer
  * instead of only offering the listed options. */
+/** In plan mode, the model's finished plan, for the user to approve (in
+ * auto or manual mode) or send back. */
+export interface PlanReadyEvent {
+  type: "plan_ready";
+  id: string;
+  plan: string;
+}
+
 export interface QuestionRequiredEvent {
   type: "question_required";
   id: string;
@@ -272,6 +284,7 @@ export type WsServerEvent =
   | ToolResultEvent
   | ApprovalRequiredEvent
   | QuestionRequiredEvent
+  | PlanReadyEvent
   | ScheduledRunStartedEvent
   | WorkflowStepEvent
   | TaskDraftRequiredEvent

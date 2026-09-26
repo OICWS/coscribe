@@ -22,12 +22,32 @@ from typing import Any
 # visible inconsistency between a message rendered live vs. rendered from
 # history for the exact same turn.
 PLAN_MODE_NOTE = (
-    "[plan mode is ON: only read-only/task-tracking tools will run, "
-    "everything else is blocked] "
+    "[plan mode is ON: research with read-only tools and write a plan; nothing "
+    "else will run. When the plan is ready, call exit_plan_mode(plan) -- the "
+    "user approves it before any change is made] "
 )
-ACCEPT_EDITS_MODE_NOTE = "[accept-edits mode is ON: tool calls run without asking] "
+ACCEPT_EDITS_MODE_NOTE = (
+    "[accept-edits mode is ON: file edits in your folders run without asking; "
+    "running code and acting outside this computer still ask] "
+)
+AUTO_MODE_NOTE = (
+    "[auto mode is ON: a reviewer model checks each risky action instead of the "
+    "user; one it blocks comes back refused with the reason -- find another way, "
+    "or ask the user to allow that specific action] "
+)
 NORMAL_MODE_NOTE = "[normal mode: risky tool calls ask for approval as usual] "
-_MODE_NOTES = (PLAN_MODE_NOTE, ACCEPT_EDITS_MODE_NOTE, NORMAL_MODE_NOTE)
+# Earlier wordings, still at the front of checkpointed messages.
+_OLD_MODE_NOTES = (
+    "[plan mode is ON: only read-only/task-tracking tools will run, everything else is blocked] ",
+    "[accept-edits mode is ON: tool calls run without asking] ",
+)
+_MODE_NOTES = (
+    PLAN_MODE_NOTE,
+    ACCEPT_EDITS_MODE_NOTE,
+    AUTO_MODE_NOTE,
+    NORMAL_MODE_NOTE,
+    *_OLD_MODE_NOTES,
+)
 
 # Also matches the older date-only note, which checkpointed history still
 # carries.

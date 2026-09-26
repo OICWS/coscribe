@@ -6023,6 +6023,47 @@ pause, resume, delete or make another one, so it offered to redraft a copy.
 
 ---
 
+## Phase 8bg -- Permission modes as in Claude Code (shipped)
+
+Checked against Claude Code's permission-modes doc before changing
+anything: coscribe's "Auto" was really Claude Code's Manual (every gated
+call asks), its Accept Edits approved everything (closer to
+bypassPermissions), and Plan had no approval step -- the user had to
+toggle it off by hand. The user chose to match Claude Code: Accept Edits
+limited to file edits, Auto decided by a reviewer model.
+
+- [x] **Four modes, one at a time**: Manual (default), Accept Edits, Plan,
+      Auto (`/auto` added; turning one on turns the others off). The mode
+      pill lists them with a line each.
+- [x] **Accept Edits** auto-approves only `WRITE_LOCAL`; `EXEC`/`EXTERNAL`
+      ask. `_run_turn` in the tests relied on it approving scripts.
+- [x] **Auto**: `runtime_lg/auto_review.py` -- one extra call to the
+      conversation's model per gated action, given the action, its risk
+      kind, the folders and what the user has said; a block list adapted
+      from Claude Code's defaults (downloaded code, sending data out,
+      destroying pre-existing files, mass changes, acting in accounts,
+      stated boundaries). Blocked calls are refused with the reason; 3 in
+      a row or 20 in all, or no readable verdict, fall back to asking, with
+      a `reviewer_note` on the approval card; a human approval resumes.
+      Audit log reasons `auto_review` / `auto_review_block`. Unattended
+      (self-wake) turns in Auto are reviewed too; what would have been
+      asked is refused.
+- [x] **Plan**: `exit_plan_mode(plan)` (a question-type tool, core set)
+      sends `plan_ready`; the chat's plan card offers "Yes, and use auto
+      mode", "Yes, manually approve edits", "No, keep planning" (+ what to
+      change). Approving leaves Plan mode for the chosen one. The CLI asks
+      the same three.
+- Live (DeepSeek): Auto wrote a requested file unasked; a "download and
+  run" request had the reviewer allow writing the script, then the model
+  itself stopped and asked before running it, so the block path is covered
+  by tests only. Plan: the plan card appeared, "Yes, and use auto mode"
+  switched the pill to Auto and the merge ran through the reviewer.
+- Not copied: Claude Code's server-side review and its configurable
+  trusted-infrastructure list -- coscribe's reviewer is the conversation's
+  own model and its rules are fixed in the prompt.
+
+---
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

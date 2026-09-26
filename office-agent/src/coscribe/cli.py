@@ -84,6 +84,7 @@ from .runtime import (
 from .runtime.provider_config import load_custom_providers
 from .runtime_lg import poll_due_scheduled_tasks, poll_due_wakes
 from .tools import load_builtin_skills, load_skills
+from .tools.interaction import PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL, PLAN_CHOICE_REVISE
 from .tools.scheduled_tasks import ScheduledTriggerStore, create_trigger, update_trigger
 
 app = typer.Typer(add_completion=False, no_args_is_help=False)
@@ -286,6 +287,17 @@ class _CliSocket:
             typer.echo(f"\n[approval required] {data['tool_name']}({data['arguments']})")
             approved = typer.confirm("Allow this action?", default=False)
             self._session.resolve_approval(data["id"], approved)
+        elif kind == "plan_ready":
+            typer.echo(f"\n[plan]\n{data['plan']}\n")
+            choice = typer.prompt(
+                "1) approve, auto mode  2) approve, approve each change  3) keep planning",
+                default="3",
+            )
+            if choice.strip() in ("1", "2"):
+                answer = PLAN_CHOICE_AUTO if choice.strip() == "1" else PLAN_CHOICE_MANUAL
+            else:
+                answer = PLAN_CHOICE_REVISE + typer.prompt("What should change?", default="")
+            self._session.resolve_question(data["id"], answer)
         elif kind == "task_draft_required":
             self._session.resolve_question(data["id"], self._review_task_draft(data["draft"]))
         elif kind == "history":

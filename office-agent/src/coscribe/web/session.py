@@ -92,9 +92,11 @@ from ..runtime_lg import extract_text as _extract_text
 from ..runtime_lg import render_transcript_lg as _render_transcript_lg
 from ..runtime_lg import tool_result_value as _tool_result_value
 from ..runtime_lg.audit import AuditLog, AutoApproveReason, record_decision
+from ..runtime_lg.auto_review import Verdict, recent_user_requests, review_action
 from ..runtime_lg.exec_policy import EXEC_POLICY_TOOL_NAMES, load_exec_policy
 from ..runtime_lg.messages import (
     ACCEPT_EDITS_MODE_NOTE,
+    AUTO_MODE_NOTE,
     NORMAL_MODE_NOTE,
     PLAN_MODE_NOTE,
     current_date_note,
@@ -111,6 +113,7 @@ from ..tools import (
 from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
 from ..tools.documents import DocumentToolkit
+from ..tools.interaction import PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL, PLAN_CHOICE_REVISE
 from ..tools.presentations import PresentationToolkit
 from ..tools.scheduled_tasks import (
     TASK_DRAFT_TOOL_NAMES,
@@ -452,6 +455,13 @@ class ChatSessionLG:
         self.hooks_config: dict[str, list[str]] = hooks_config or empty_hooks_config()
         self.plan_mode = False
         self.accept_edits = False
+        # Auto mode: a reviewer model decides risky calls in the user's
+        # place. After 3 blocks in a row or 20 in all it pauses and the
+        # user is asked, as in Claude Code; the user approving one resumes it.
+        self.auto_mode = False
+        self._auto_blocks_in_row = 0
+        self._auto_blocks_total = 0
+        self._auto_paused = False
         # Reset at the top of every handle_user_message call -- see
         # _stream_turn's docstring for why this exists (recovering a tool
         # call's arguments for the PostToolUse hook payload, which the
@@ -1208,6 +1218,7 @@ class ChatSessionLG:
             "type": "state",
             "plan_mode": self.plan_mode,
             "accept_edits": self.accept_edits,
+            "auto_mode": self.auto_mode,
             "model": self._model_string,
             "context_window": self._context_window,
             "enabled_skills": sorted(self.enabled_skill_names),
@@ -2018,6 +2029,8 @@ class ChatSessionLG:
                 return _denied(message)
             if is_draft:
                 return await self._decide_task_draft_request(name, args, websocket)
+            if name == "exit_plan_mode":
+                return await self._decide_plan_request(args, websocket)
             return await self._decide_question_request(args, websocket)
         if name not in self._gated_tool_risks:
             return {"type": "approve"}
@@ -2077,6 +2090,47 @@ class ChatSessionLG:
             )
             await self._send_tool_started(name, args, websocket)
             return {"type": "approve"}
+        reviewer_note: str | None = None
+        if self.auto_mode and not self._auto_paused:
+            verdict = await self._auto_review(name, args)
+            if verdict is not None and verdict.allow:
+                self._auto_blocks_in_row = 0
+                record_decision(
+                    audit_log,
+                    thread_id=self.thread_id,
+                    tool_name=name,
+                    arguments=args,
+                    decision="approve",
+                    reason="auto_review",
+                    detail=verdict.reason,
+                )
+                await self._send_tool_started(name, args, websocket)
+                return {"type": "approve"}
+            if verdict is not None:
+                self._auto_blocks_in_row += 1
+                self._auto_blocks_total += 1
+                record_decision(
+                    audit_log,
+                    thread_id=self.thread_id,
+                    tool_name=name,
+                    arguments=args,
+                    decision="reject",
+                    reason="auto_review_block",
+                    detail=verdict.reason,
+                )
+                if self._auto_blocks_in_row < 3 and self._auto_blocks_total < 20:
+                    return _denied(
+                        f"Auto mode blocked this: {verdict.reason} Find another way, or ask "
+                        "the user to allow this specific action."
+                    )
+                self._auto_paused = True
+                if self._auto_blocks_total >= 20:
+                    self._auto_blocks_total = 0
+                reviewer_note = (
+                    f"Auto mode kept blocking actions, so it's asking you: {verdict.reason}"
+                )
+            else:
+                reviewer_note = "Auto mode's reviewer gave no answer for this, so it's asking you."
         if not _can_resolve_approvals(websocket):
             # Reached only when this call is genuinely gated and neither
             # exec_policy nor accept_edits already decided it above --
@@ -2084,8 +2138,9 @@ class ChatSessionLG:
             # is present to give. A normal unattended turn never gets here
             # (its caller skips _resolve_pending_approvals entirely, leaving
             # the interrupt durably paused in the checkpointer); this is the
-            # backstop for an unattended run with accept_edits on, which
-            # does resolve approvals and must not hang the poller forever.
+            # backstop for an unattended run with accept_edits or auto mode
+            # on, which does resolve approvals and must not hang the poller
+            # forever.
             message = "No one is available to approve this -- this is an unattended run."
             record_decision(
                 audit_log,
@@ -2121,6 +2176,7 @@ class ChatSessionLG:
                 "arguments": args,
                 "before_preview": before_preview,
                 "after_preview": after_preview,
+                "reviewer_note": reviewer_note,
             }
         )
         try:
@@ -2128,6 +2184,9 @@ class ChatSessionLG:
         finally:
             self._pending_approvals.pop(request_id, None)
             self._subagent_request_ids.discard(request_id)
+        if approved and self._auto_paused:
+            self._auto_paused = False
+            self._auto_blocks_in_row = 0
         record_decision(
             audit_log,
             thread_id=self.thread_id,
@@ -2166,7 +2225,7 @@ class ChatSessionLG:
         exec-policy "forbidden" rule is checked before this and still wins
         under either tier -- those are the user's own standing rules, not
         approvals."""
-        if self.accept_edits:
+        if self.accept_edits and self._gated_tool_risks.get(name) == "WRITE_LOCAL":
             return "accept_edits"
         mode = self._effective_run_approval_mode()
         if mode == "skip":
@@ -2175,8 +2234,45 @@ class ChatSessionLG:
             return "approval_mode_auto"
         return None
 
+    def _toggle_mode(self, mode: str) -> None:
+        """Plan, Accept Edits and Auto are one mode at a time; none of them is
+        Manual. Toggling the current one returns to Manual."""
+        turning_on = not {
+            "plan": self.plan_mode,
+            "accept-edits": self.accept_edits,
+            "auto": self.auto_mode,
+        }[mode]
+        self.plan_mode = turning_on and mode == "plan"
+        self.accept_edits = turning_on and mode == "accept-edits"
+        self.auto_mode = turning_on and mode == "auto"
+        if self.auto_mode:
+            self._auto_blocks_in_row = 0
+            self._auto_paused = False
+
+    async def _auto_review(self, name: str, args: dict[str, Any]) -> Verdict | None:
+        state = await self.lg_agent.aget_state(self.config)
+        messages = list(state.values.get("messages", [])) if state.values else []
+        return await review_action(
+            self.model,
+            tool_name=name,
+            arguments=args,
+            risk=self._gated_tool_risks.get(name, "WRITE_LOCAL"),
+            folders=[str(folder) for folder in (self.folders or [self.workspace_root])],
+            user_requests=recent_user_requests(
+                [
+                    HumanMessage(strip_mode_note(_extract_text(m.content)))
+                    for m in messages
+                    if m.type == "human"
+                ]
+            ),
+        )
+
     def _auto_approval_active(self) -> bool:
-        return self.accept_edits or self._effective_run_approval_mode() in ("auto", "skip")
+        return (
+            self.accept_edits
+            or self.auto_mode
+            or self._effective_run_approval_mode() in ("auto", "skip")
+        )
 
     def _decidable_unattended(self, request: dict[str, Any]) -> bool:
         """Whether _decide_action_request can settle this request with
@@ -2189,6 +2285,8 @@ class ChatSessionLG:
         if name not in self._gated_tool_risks or self.plan_mode:
             return True
         if self._auto_approves(name) is not None:
+            return True
+        if self.auto_mode and not self._auto_paused:
             return True
         if name in EXEC_POLICY_TOOL_NAMES:
             exec_policy = load_exec_policy(self.settings.exec_policy_path)
@@ -2227,6 +2325,48 @@ class ChatSessionLG:
             answer = await future
         finally:
             self._pending_questions.pop(request_id, None)
+        return {"type": "respond", "message": answer}
+
+    async def _decide_plan_request(
+        self, args: dict[str, Any], websocket: WebSocket
+    ) -> dict[str, Any]:
+        """exit_plan_mode: the user approves the plan -- leaving plan mode for
+        auto or manual approvals -- or keeps planning with feedback."""
+        if not self.plan_mode:
+            return {
+                "type": "respond",
+                "message": "Plan mode isn't on, so there's no plan to approve -- go ahead "
+                "with the work; the usual approvals apply.",
+            }
+        request_id = uuid.uuid4().hex
+        future: Future[str] = get_running_loop().create_future()
+        self._pending_questions[request_id] = future
+        await websocket.send_json(
+            {"type": "plan_ready", "id": request_id, "plan": str(args.get("plan", ""))}
+        )
+        try:
+            answer = await future
+        finally:
+            self._pending_questions.pop(request_id, None)
+        if answer in (PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL):
+            self._toggle_mode("auto" if answer == PLAN_CHOICE_AUTO else "plan")
+            await self.send_state(websocket)
+            how = (
+                "switched to auto mode"
+                if answer == PLAN_CHOICE_AUTO
+                else "will approve each change as you go"
+            )
+            return {
+                "type": "respond",
+                "message": f"The user approved the plan and {how}. Carry it out now.",
+            }
+        if answer.startswith(PLAN_CHOICE_REVISE):
+            feedback = answer[len(PLAN_CHOICE_REVISE) :].strip() or "(no details)"
+            return {
+                "type": "respond",
+                "message": f"The user wants to keep planning: {feedback}. Revise the plan "
+                "and call exit_plan_mode again.",
+            }
         return {"type": "respond", "message": answer}
 
     async def _decide_task_draft_request(
@@ -2813,13 +2953,8 @@ class ChatSessionLG:
             await self._handle_pending_skill_save_proposal(text, websocket)
             return
 
-        if stripped_lower == "/plan":
-            self.plan_mode = not self.plan_mode
-            await self.send_state(websocket)
-            return
-
-        if stripped_lower == "/accept-edits":
-            self.accept_edits = not self.accept_edits
+        if stripped_lower in ("/plan", "/accept-edits", "/auto"):
+            self._toggle_mode(stripped_lower[1:])
             await self.send_state(websocket)
             return
 
@@ -2874,6 +3009,8 @@ class ChatSessionLG:
             mode_note = PLAN_MODE_NOTE
         elif self.accept_edits:
             mode_note = ACCEPT_EDITS_MODE_NOTE
+        elif self.auto_mode:
+            mode_note = AUTO_MODE_NOTE
         else:
             mode_note = NORMAL_MODE_NOTE
         # current_date_note() lives here, not in the system prompt --

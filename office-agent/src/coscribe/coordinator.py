@@ -71,6 +71,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset(
         "task_update",
         "task_list",
         "ask_user_question",
+        "exit_plan_mode",
         "web_search",
         "read_web_page",
         "read_docx",

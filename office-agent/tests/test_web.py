@@ -1985,6 +1985,7 @@ def test_plan_mode_toggle_updates_state(tmp_path: Path, monkeypatch: pytest.Monk
                 "workspace_root": str(tmp_path / "workspace"),
                 "workspace_explicit": False,
                 "folders": [],
+                "auto_mode": False,
             }
             ws.send_json({"type": "user_message", "text": "/plan"})
             state = ws.receive_json()
@@ -6014,7 +6015,13 @@ def _run_turn(client: Any, thread_id: str, text: str, accept_edits: bool = True)
             ws.send_json({"type": "user_message", "text": "/accept-edits"})
             _receive_until(ws, "state")
         ws.send_json({"type": "user_message", "text": text})
-        _receive_until(ws, "tasks_changed")
+        while True:
+            message = ws.receive_json()
+            if message["type"] == "tasks_changed":
+                return
+            # Accept Edits still asks before running code; approve those too.
+            if accept_edits and message["type"] == "approval_required":
+                ws.send_json({"type": "approval_response", "id": message["id"], "approved": True})
 
 
 def test_thread_activity_lists_outputs_references_tools_and_progress_lg(
@@ -6869,3 +6876,151 @@ def test_editing_a_saved_task_asks_the_user_with_the_whole_task_lg(
     assert draft["prompt"] == "Summarize the news."
     unchanged = store.load(task.trigger_id)
     assert unchanged is not None and unchanged.schedule.at == "09:00"
+
+
+def _write_call(call_id: str, path: str) -> Any:
+    return _tool_call(call_id, "write_file", {"path": path, "content": "hi"})
+
+
+def _verdict(decision: str, reason: str) -> AIMessage:
+    return AIMessage(content=json.dumps({"decision": decision, "reason": reason}))
+
+
+def _start_mode(ws: Any, mode: str) -> dict[str, Any]:
+    ws.receive_json()  # state
+    ws.receive_json()  # history
+    ws.send_json({"type": "user_message", "text": mode})
+    return ws.receive_json()
+
+
+def test_accept_edits_still_asks_before_running_code_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _tool_call("c1", "run_python_script", {"script": "print(1)", "description": "print"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[run]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_accept_exec") as ws:
+            _start_mode(ws, "/accept-edits")
+            ws.send_json({"type": "user_message", "text": "run it"})
+            approval = _receive_until(ws, "approval_required")[-1]
+            ws.send_json({"type": "approval_response", "id": approval["id"], "approved": False})
+            _receive_until(ws, "tasks_changed")
+
+    assert approval["tool_name"] == "run_python_script"
+
+
+def test_auto_mode_runs_what_the_reviewer_allows_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_write_call("c1", "note.txt")]),
+            _verdict("allow", "writing the note the user asked for"),
+            AIMessage(content="done"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_auto_allow") as ws:
+            state = _start_mode(ws, "/auto")
+            ws.send_json({"type": "user_message", "text": "write the note"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert state["auto_mode"] is True
+    assert not any(m["type"] == "approval_required" for m in messages)
+    assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
+    review_request = str(fake_model.received[1][-1].content)
+    assert "write_file(" in review_request
+    assert "write the note" in review_request
+
+
+def test_auto_mode_refuses_what_the_reviewer_blocks_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_write_call("c1", "old.txt")]),
+            _verdict("block", "old.txt existed before this conversation."),
+            AIMessage(content="I'll ask first."),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_auto_block") as ws:
+            _start_mode(ws, "/auto")
+            ws.send_json({"type": "user_message", "text": "overwrite old.txt"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert not any(m["type"] == "approval_required" for m in messages)
+    assert not (tmp_path / "workspace" / "old.txt").exists()
+    refusal = str(fake_model.received[2][-1].content)
+    assert "Auto mode blocked this: old.txt existed before this conversation." in refusal
+
+
+def test_auto_mode_asks_after_three_blocks_in_a_row_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_write_call("c1", "a.txt")]),
+            _verdict("block", "no"),
+            AIMessage(content="", tool_calls=[_write_call("c2", "b.txt")]),
+            _verdict("block", "no"),
+            AIMessage(content="", tool_calls=[_write_call("c3", "c.txt")]),
+            _verdict("block", "still no"),
+            AIMessage(content="done"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_auto_fallback") as ws:
+            _start_mode(ws, "/auto")
+            ws.send_json({"type": "user_message", "text": "write the files"})
+            approval = _receive_until(ws, "approval_required")[-1]
+            ws.send_json({"type": "approval_response", "id": approval["id"], "approved": True})
+            _receive_until(ws, "tasks_changed")
+
+    assert approval["arguments"]["path"] == "c.txt"
+    assert "still no" in approval["reviewer_note"]
+    assert (tmp_path / "workspace" / "c.txt").exists()
+    assert not (tmp_path / "workspace" / "a.txt").exists()
+
+
+def test_approving_a_plan_leaves_plan_mode_for_auto_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exit_plan = _tool_call("c1", "exit_plan_mode", {"plan": "1. Write note.txt"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[exit_plan]), AIMessage(content="On it.")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_plan_exit") as ws:
+            _start_mode(ws, "/plan")
+            ws.send_json({"type": "user_message", "text": "plan the note"})
+            plan = _receive_until(ws, "plan_ready")[-1]
+            ws.send_json({"type": "question_response", "id": plan["id"], "answer": "auto"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert plan["plan"] == "1. Write note.txt"
+    state = next(m for m in messages if m["type"] == "state")
+    assert (state["plan_mode"], state["auto_mode"]) == (False, True)
+    result = str(fake_model.received[1][-1].content)
+    assert "approved the plan and switched to auto mode" in result
+
+
+def test_modes_are_one_at_a_time_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_modes") as ws:
+            plan = _start_mode(ws, "/plan")
+            ws.send_json({"type": "user_message", "text": "/auto"})
+            auto = ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "/auto"})
+            manual = ws.receive_json()
+
+    assert (plan["plan_mode"], plan["auto_mode"]) == (True, False)
+    assert (auto["plan_mode"], auto["accept_edits"], auto["auto_mode"]) == (False, False, True)
+    assert (manual["plan_mode"], manual["accept_edits"], manual["auto_mode"]) == (
+        False,
+        False,
+        False,
+    )

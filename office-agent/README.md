@@ -14,8 +14,8 @@ for the full design and `runtime_lg/README.md` for why/how that changed.
 A single Coordinator agent with built-in file, document/spreadsheet/
 presentation, task-tracking, Skill, and subagent-delegation tools, plus
 optional MCP server tools and Hooks -- runnable from the CLI (`coscribe`)
-or a full web UI (`coscribe-web`), with Plan Mode and Accept Edits Mode as
-in-session toggles.
+or a full web UI (`coscribe-web`), with Claude Code's four permission
+modes -- Manual, Accept Edits, Plan and Auto -- switchable mid-session.
 
 ## Setup
 
@@ -123,15 +123,33 @@ session state at `.coscribe/state/<thread-id>.tasks.json`.
 
 Several commands are typed as a message mid-session (not startup flags):
 
-- `/plan` -- Plan Mode: only read-only and task-tracking tools run; anything
-  that would change real state (`write_file`, any MCP tool) is blocked
-  outright, no prompt. The model is expected to use `task_create` to note
-  what it would do instead, then wait for you to run `/plan` again to let it
-  proceed.
-- `/accept-edits` -- Accept Edits Mode: tool calls that would normally need
-  approval run without asking, for a faster loop when you trust the agent for
-  a stretch of work. No effect while Plan Mode is also on, since nothing
-  needs approval to begin with in that state.
+The permission modes follow Claude Code's
+(code.claude.com/docs/en/permission-modes). One is on at a time; typing a
+mode's command again returns to **Manual**, the default, which asks before
+every change, script or outside action.
+
+- `/accept-edits` -- Accept Edits: file edits in the conversation's folders
+  (and other local changes: `WRITE_LOCAL` tools) run without asking; running
+  code (`EXEC`) and acting outside this computer (`EXTERNAL`) still ask.
+- `/plan` -- Plan: only read-only and task-tracking tools run; everything
+  else is refused, no prompt. When the plan is ready the model calls
+  `exit_plan_mode(plan)`, and the chat shows it with Claude Code's three
+  choices: **Yes, and use auto mode**, **Yes, manually approve edits**
+  (Manual), or **No, keep planning** with what to change. Approving leaves
+  Plan mode.
+- `/auto` -- Auto: a reviewer model (`runtime_lg/auto_review.py`, the
+  conversation's own model) decides each gated call in the user's place. It
+  allows ordinary work in the conversation's folders and blocks what's hard
+  to undo or leaves the computer -- running downloaded code, sending files
+  or data out, deleting or overwriting files that were there before,
+  acting in the user's accounts -- unless the user asked for that specific
+  action; a stated boundary ("don't email anyone") blocks too. A blocked
+  call is refused back to the model with the reason. After 3 blocks in a
+  row or 20 in all, or when the reviewer gives no usable answer, the user
+  is asked instead, with a note saying why; approving resumes Auto. With
+  nobody watching (a self-wake turn), the reviewer still decides, and what
+  would have been asked is refused instead. Hooks and exec-policy rules
+  still come first, as in every mode.
 - `/compact` -- summarize the current thread's message history down to a
   single note, freeing up context for the rest of a long-running session.
   Does nothing if there's not much yet to compact. This also happens
@@ -1648,8 +1666,9 @@ that serves the frontend and a `/ws/<thread-id>` WebSocket per
 conversation; opening `/` generates a thread id and puts it in the URL
 (`?thread=...`), so reloading or revisiting that URL resumes the same
 thread, same as `coscribe --thread <id>`. The mode pill (bottom-left of
-the message box) covers Normal/Plan/Accept-Edits -- it just sends the same
-`/plan`/`/accept-edits` text the CLI understands, no separate protocol.
+the message box) covers Manual/Accept Edits/Plan/Auto -- it just sends the
+same `/accept-edits`/`/plan`/`/auto` text the CLI understands, no separate
+protocol.
 The web layer (`src/coscribe/web/app.py` + `web/session.py`) runs
 directly on runtime_lg -- `ChatSessionLG` compiles and drives a LangGraph
 agent per thread, it isn't a bridge in front of a separate execution
