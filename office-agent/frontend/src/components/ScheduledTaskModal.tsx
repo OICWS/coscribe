@@ -110,6 +110,7 @@ interface ProviderInfo {
 }
 
 function modalTitle(isEdit: boolean, fromDraft: boolean, newWorkflow: Workflow | undefined): string {
+  if (isEdit && fromDraft) return "Review changes";
   if (isEdit) return "Edit scheduled task";
   if (fromDraft) return "Review scheduled task";
   if (!newWorkflow) return "Create scheduled task";
@@ -226,7 +227,9 @@ export function ScheduledTaskModal({
             <h2 className="text-lg font-semibold">{modalTitle(isEdit, Boolean(draft), newWorkflow)}</h2>
             {draft && (
               <p className="mt-0.5 text-sm text-[var(--muted)]">
-                Drafted from your conversation -- adjust anything before saving.
+                {isEdit
+                  ? "Proposed in your conversation -- the task is unchanged until you save."
+                  : "Drafted from your conversation -- adjust anything before saving."}
               </p>
             )}
           </div>

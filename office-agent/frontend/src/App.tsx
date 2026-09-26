@@ -27,11 +27,13 @@ import {
   getThreads,
   retryWorkflowRun,
   runScheduledTaskNow,
+  updateScheduledTask,
+  type WorkflowDraftResult,
 } from "./lib/rest";
 import { goToThread, SCHEDULED_THREAD_PREFIX, startNewThread, THREAD_CHANGE_EVENT } from "./lib/nav";
 import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
-import type { WorkflowDraftResult } from "./lib/rest";
+import { taskPayload } from "./lib/taskPayload";
 import type { WorkflowDraftEntry } from "./lib/transcriptGrouping";
 import { EMPTY_WORKFLOW } from "./lib/workflowEdit";
 import { recordKey, workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
@@ -99,6 +101,8 @@ function App() {
     nameHint: string;
     initial?: WorkflowDraftResult;
     workspace: string | null;
+    /** Proposed changes to this saved task's workflow. */
+    revision?: { triggerId: string; changes: string[] };
   } | null>(null);
   // One shared copy for the sidebar, portal, task page and run header --
   // REST mutations don't flow through the websocket, so every mutation
@@ -332,6 +336,7 @@ function App() {
       nameHint: entry.name,
       initial: { name: entry.name, workflow: entry.workflow, notes: entry.notes },
       workspace: entry.workspace ?? threadWorkspace,
+      revision: entry.triggerId ? { triggerId: entry.triggerId, changes: entry.changes } : undefined,
     });
     setScheduledTaskModal(null);
     setNavMode("run");
@@ -386,8 +391,22 @@ function App() {
     setPendingComposerText("I'd like to set up a scheduled task: ");
   };
 
-  const onReviewTaskDraft = (item: TaskDraftItem) =>
-    setScheduledTaskModal({ task: null, draft: item, initialWorkspace: threadWorkspace });
+  const onReviewTaskDraft = (item: TaskDraftItem) => {
+    const existing = item.draft.trigger_id
+      ? (scheduledTasks.find((task) => task.trigger_id === item.draft.trigger_id) ?? null)
+      : null;
+    setScheduledTaskModal({ task: existing, draft: item, initialWorkspace: threadWorkspace });
+  };
+
+  const saveWorkflowRevision = async (triggerId: string, workflow: Workflow) => {
+    const task = scheduledTasks.find((t) => t.trigger_id === triggerId);
+    if (!task) return "That task no longer exists.";
+    const result = await updateScheduledTask(triggerId, taskPayload(task, { workflow }));
+    if ("error" in result) return result.error;
+    refreshScheduledTasks();
+    showScheduledTaskPage(result);
+    return null;
+  };
 
   const onDismissTaskDraft = (item: TaskDraftItem) => {
     dispatch({ type: "local_task_draft_resolved", id: item.id, status: "dismissed" });
@@ -697,6 +716,8 @@ function App() {
             threadTitle={workflowDraft.threadTitle}
             nameHint={workflowDraft.nameHint}
             initial={workflowDraft.initial}
+            revision={workflowDraft.revision}
+            onSaveRevision={saveWorkflowRevision}
             onBack={leaveWorkflowDraft}
             onDiscard={leaveWorkflowDraft}
             onSave={(name, workflow) =>

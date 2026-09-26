@@ -183,6 +183,10 @@ export interface TaskDraft {
   start_date?: string | null;
   model?: string | null;
   approval_mode?: string;
+  /** Set when this is a change to a saved task: the whole task as it
+   * would be saved, and which fields change. */
+  trigger_id?: string;
+  changed?: string[];
 }
 
 export interface TaskDraftRequiredEvent {

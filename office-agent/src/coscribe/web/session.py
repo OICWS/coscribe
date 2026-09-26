@@ -115,12 +115,13 @@ from ..tools.presentations import PresentationToolkit
 from ..tools.scheduled_tasks import (
     TASK_DRAFT_TOOL_NAMES,
     ScheduledTriggerStore,
+    edit_draft,
     parse_run_thread_id,
 )
 from ..tools.spreadsheets import SpreadsheetToolkit
 from ..tools.subagent_tasks import SubAgentTask, SubAgentTaskStore, running_subagent
 from ..workflows.engine import StepContext
-from ..workflows.solidify import DraftFailed, WorkflowDraft, draft_workflow
+from ..workflows.solidify import DraftFailed, WorkflowDraft, draft_workflow, revise_workflow
 from .activity import summarize_activity, summarize_workflow_run
 from .context_usage import build_context_breakdown
 
@@ -617,6 +618,7 @@ class ChatSessionLG:
             *delegation_tools,
             review_work_tool,
             self._build_draft_workflow_tool(),
+            self._build_revise_workflow_tool(),
         ]
 
     def _subagent_host(self, model: Any) -> SubAgentHost:
@@ -754,6 +756,58 @@ class ChatSessionLG:
                 "made before more changes is already out of date. Call it again only "
                 "when the user asks for a new draft. `name`: a short name for it, or "
                 "empty to let the draft name itself."
+            ),
+        )
+
+    def _build_revise_workflow_tool(self) -> BaseTool:
+        async def revise_workflow_tool(
+            state: Annotated[dict[str, Any], InjectedState], task_id: str, request: str
+        ) -> str:
+            trigger = ScheduledTriggerStore(self.settings.state_dir).load(task_id)
+            if trigger is None:
+                error = f"There's no scheduled task with id {task_id!r}."
+            elif not trigger.workflow:
+                error = (
+                    "That task runs written instructions, not fixed steps; "
+                    "change it with edit_scheduled_task."
+                )
+            else:
+                try:
+                    draft = await revise_workflow(
+                        self.model,
+                        trigger.name,
+                        trigger.workflow,
+                        request,
+                        list(state.get("messages", [])),
+                        self.workflow_context(None).tools,
+                    )
+                except DraftFailed as exc:
+                    error = str(exc)
+                else:
+                    return json.dumps(
+                        {
+                            "status": "drafted",
+                            **draft.to_dict(),
+                            "trigger_id": trigger.trigger_id,
+                            "workspace": trigger.workspace,
+                            "next": "The user reviews the changes on a card and saves them; "
+                            "the task is unchanged until then.",
+                        },
+                        ensure_ascii=False,
+                    )
+            return json.dumps({"status": "failed", "error": error}, ensure_ascii=False)
+
+        return StructuredTool.from_function(
+            coroutine=revise_workflow_tool,
+            name="revise_workflow",
+            description=(
+                "Change a saved fixed workflow (a scheduled task that runs steps) the way "
+                "the user asks -- add, remove or edit steps, inputs or checks. Nothing "
+                "changes until the user reviews the revision on a card and saves it; the "
+                "task keeps its schedule, runs and notes. `task_id`: from "
+                "list_scheduled_tasks. `request`: the change, complete and specific, in "
+                "the user's words. For a task that runs written instructions, or to change "
+                "a task's name, schedule or approval setting, use edit_scheduled_task."
             ),
         )
 
@@ -1963,7 +2017,7 @@ class ChatSessionLG:
                 )
                 return _denied(message)
             if is_draft:
-                return await self._decide_task_draft_request(args, websocket)
+                return await self._decide_task_draft_request(name, args, websocket)
             return await self._decide_question_request(args, websocket)
         if name not in self._gated_tool_risks:
             return {"type": "approve"}
@@ -2176,7 +2230,7 @@ class ChatSessionLG:
         return {"type": "respond", "message": answer}
 
     async def _decide_task_draft_request(
-        self, args: dict[str, Any], websocket: WebSocket
+        self, name: str, args: dict[str, Any], websocket: WebSocket
     ) -> dict[str, Any]:
         """create_scheduled_task's review flow: the frontend shows the
         draft, the user edits and saves it (through the ordinary REST
@@ -2184,10 +2238,19 @@ class ChatSessionLG:
         answers with a sentence saying which -- substituted as the tool's
         result. Shares the pending-question plumbing, since the answer is
         likewise a string and stop/reconnect treat it the same way."""
+        draft = args
+        if name == "edit_scheduled_task":
+            # The whole task as it would be saved, so the review shows it
+            # in the edit form rather than as a partial list of fields.
+            try:
+                draft = edit_draft(ScheduledTriggerStore(self.settings.state_dir), args)
+            except KeyError as exc:
+                message = f"{exc.args[0]} -- check list_scheduled_tasks."
+                return {"type": "respond", "message": message}
         request_id = uuid.uuid4().hex
         future: Future[str] = get_running_loop().create_future()
         self._pending_questions[request_id] = future
-        await websocket.send_json({"type": "task_draft_required", "id": request_id, "draft": args})
+        await websocket.send_json({"type": "task_draft_required", "id": request_id, "draft": draft})
         try:
             answer = await future
         finally:

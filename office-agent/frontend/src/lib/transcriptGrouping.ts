@@ -96,6 +96,10 @@ export interface WorkflowDraftEntry {
   workflow: Workflow;
   notes: string[];
   workspace: string | null;
+  /** A revision of this saved task's workflow, not a new one. */
+  triggerId: string | null;
+  /** What the revision changes, one line each. */
+  changes: string[];
 }
 
 export type TranscriptEntry = Exclude<LogItem, ToolOrApprovalItem> | ToolRunGroup | WorkflowDraftEntry;
@@ -111,7 +115,8 @@ export function latestWorkflowDraftId(items: LogItem[]): string | null {
 }
 
 function workflowDraftOf(item: ToolOrApprovalItem): WorkflowDraftEntry | null {
-  if (item.kind !== "tool" || item.toolName !== "draft_workflow" || item.result === undefined) return null;
+  if (item.kind !== "tool" || item.result === undefined) return null;
+  if (item.toolName !== "draft_workflow" && item.toolName !== "revise_workflow") return null;
   let result: unknown = item.result;
   if (typeof result === "string") {
     try {
@@ -130,6 +135,8 @@ function workflowDraftOf(item: ToolOrApprovalItem): WorkflowDraftEntry | null {
     workflow: draft.workflow as Workflow,
     notes: Array.isArray(draft.notes) ? draft.notes.map(String) : [],
     workspace: typeof draft.workspace === "string" ? draft.workspace : null,
+    triggerId: typeof draft.trigger_id === "string" ? draft.trigger_id : null,
+    changes: Array.isArray(draft.changes) ? draft.changes.map(String) : [],
   };
 }
 
@@ -335,6 +342,8 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   review_work: () => ({ verb: "Asked a reviewer to check the work", object: null }),
   load_skill: (a) => ({ verb: "Loaded skill", object: str(a, "name") ?? null }),
   draft_workflow: () => ({ verb: "Drafted a workflow", object: null }),
+  revise_workflow: () => ({ verb: "Revised a workflow", object: null }),
+  edit_scheduled_task: () => ({ verb: "Proposed changes to a task", object: null }),
   search_tools: (a) => ({ verb: "Searched tools", object: str(a, "query") ?? null, glue: ": " }),
   read_web_page: (a) => ({ verb: "Read", object: str(a, "url") ?? "a web page" }),
 };
@@ -402,6 +411,8 @@ const PRESENT_TENSE: Record<string, string> = {
   Opened: "Opening",
   Fetched: "Fetching",
   Drafted: "Drafting",
+  Revised: "Revising",
+  Proposed: "Proposing",
 };
 
 /** "Wrote" -> "Writing"; a verb with no known present form stays as is. */

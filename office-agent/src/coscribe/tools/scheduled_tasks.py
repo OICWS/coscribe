@@ -57,7 +57,20 @@ SCHEDULED_THREAD_PREFIX = "scheduled-"
 # becomes a draft the user reviews and edits in the UI, and whatever they
 # decide is substituted as the tool's result -- the Python body below only
 # ever runs outside such a graph (e.g. a direct call in tests).
-TASK_DRAFT_TOOL_NAMES: frozenset[str] = frozenset({"create_scheduled_task"})
+TASK_DRAFT_TOOL_NAMES: frozenset[str] = frozenset({"create_scheduled_task", "edit_scheduled_task"})
+
+# edit_scheduled_task's fields, as the draft the user reviews names them.
+_EDITABLE_FIELDS = (
+    "name",
+    "kind",
+    "at",
+    "prompt",
+    "weekday",
+    "day_of_month",
+    "start_date",
+    "model",
+    "approval_mode",
+)
 
 # Oldest run records beyond this are dropped from the trigger (their
 # conversations are deleted along with them, see web/app.py).
@@ -677,6 +690,29 @@ def update_trigger(
     return trigger
 
 
+def edit_draft(store: ScheduledTriggerStore, changes: dict[str, Any]) -> dict[str, Any]:
+    """The whole task as edit_scheduled_task would leave it -- what the user
+    reviews -- with `trigger_id` and the names of the fields it changes."""
+    trigger = store.load(str(changes.get("trigger_id", "")))
+    if trigger is None:
+        raise KeyError(f"No scheduled task with id {changes.get('trigger_id')!r}")
+    rule = trigger.schedule
+    current: dict[str, Any] = {
+        "name": trigger.name,
+        "kind": "manual" if rule.kind == "once" else rule.kind,
+        "at": rule.at,
+        "prompt": trigger.prompt,
+        "weekday": rule.weekday,
+        "day_of_month": rule.day_of_month,
+        "start_date": rule.start_date,
+        "model": trigger.model,
+        "approval_mode": trigger.approval_mode,
+    }
+    given = {k: v for k, v in changes.items() if k in _EDITABLE_FIELDS and v is not None}
+    changed = [k for k, v in given.items() if v != current[k]]
+    return {**current, **given, "trigger_id": trigger.trigger_id, "changed": changed}
+
+
 def build_scheduled_task_tools(
     state_dir: str | Path, thread_id: str | None = None
 ) -> list[Callable[..., Any]]:
@@ -757,6 +793,72 @@ def build_scheduled_task_tools(
         )
         return trigger.to_dict()
 
+    def edit_scheduled_task(
+        trigger_id: str,
+        name: Optional[str] = None,  # noqa: UP045
+        kind: Optional[str] = None,  # noqa: UP045
+        at: Optional[str] = None,  # noqa: UP045
+        prompt: Optional[str] = None,  # noqa: UP045
+        weekday: Optional[int] = None,  # noqa: UP045
+        day_of_month: Optional[int] = None,  # noqa: UP045
+        start_date: Optional[str] = None,  # noqa: UP045
+        model: Optional[str] = None,  # noqa: UP045
+        approval_mode: Optional[str] = None,  # noqa: UP045
+    ) -> dict[str, Any]:
+        """Propose changes to a saved scheduled task -- its instructions,
+        name, schedule, model or approval setting. The user reviews the
+        changed task and saves or dismisses it; the result tells you which.
+        Its runs, notes and (for a workflow task) steps are kept; to change a
+        workflow's steps, use revise_workflow. Pass only what changes, as
+        create_scheduled_task describes each field.
+
+        Args:
+            trigger_id: the task's id, from list_scheduled_tasks.
+            name: new name.
+            kind: new frequency: "manual", "hourly", "daily", "weekdays",
+                "weekly" or "monthly".
+            at: new "HH:MM" time.
+            prompt: the complete new instructions (not a diff).
+            weekday: for weekly, 0=Monday .. 6=Sunday.
+            day_of_month: for monthly, 1-31.
+            start_date: "YYYY-MM-DD".
+            model: "provider:model".
+            approval_mode: "manual", "auto" or "skip".
+        """
+        draft = edit_draft(
+            store,
+            {
+                "trigger_id": trigger_id,
+                "name": name,
+                "kind": kind,
+                "at": at,
+                "prompt": prompt,
+                "weekday": weekday,
+                "day_of_month": day_of_month,
+                "start_date": start_date,
+                "model": model,
+                "approval_mode": approval_mode,
+            },
+        )
+        trigger = _load_or_raise(trigger_id)
+        updated = update_trigger(
+            store,
+            trigger_id,
+            name=draft["name"],
+            kind=draft["kind"],
+            at=draft["at"],
+            prompt=draft["prompt"],
+            weekday=draft["weekday"],
+            day_of_month=draft["day_of_month"],
+            start_date=draft["start_date"],
+            model=draft["model"],
+            approval_mode=draft["approval_mode"],
+            notes_enabled=trigger.notes_enabled,
+            workflow=trigger.workflow,
+            workspace=trigger.workspace,
+        )
+        return updated.to_dict()
+
     def list_scheduled_tasks() -> list[dict[str, Any]]:
         """List every scheduled task, across all conversations."""
         return [t.to_dict() for t in store.list_all()]
@@ -830,6 +932,7 @@ def build_scheduled_task_tools(
         extra.append(tool_metadata(update_task_notes, risk_category="READ", category=category))
     return extra + [
         tool_metadata(create_scheduled_task, risk_category="WRITE_LOCAL", category=category),
+        tool_metadata(edit_scheduled_task, risk_category="WRITE_LOCAL", category=category),
         tool_metadata(list_scheduled_tasks, risk_category="READ", category=category),
         tool_metadata(pause_scheduled_task, risk_category="WRITE_LOCAL", category=category),
         tool_metadata(resume_scheduled_task, risk_category="WRITE_LOCAL", category=category),

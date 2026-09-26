@@ -461,9 +461,26 @@ fixed workflow I can rerun"): its `draft_workflow` tool runs the same
 curator on the conversation so far, and the result shows in the chat as
 a **Fixed workflow draft** card -- step tiles, inputs, the number of
 things worth checking -- whose **Review and save** opens the draft page.
-The model is told the difference between the two kinds of repeatable
-task: a fixed workflow for "the same steps every time", a prompt task
-(`create_scheduled_task`) for work that needs judgment each run.
+Unless the user already said which kind, the model asks ("Fixed steps"
+or "Written instructions") before drafting either.
+
+**Changing a saved task from chat.** Asked to change a task that already
+exists, the model changes it in place rather than drafting a copy:
+
+- `revise_workflow(task_id, request)` for a fixed workflow's steps. A
+  reviser model gets the saved workflow, the request and the conversation,
+  changes only what the request needs (other steps and ids kept), and is
+  checked like a new draft; tools it adds that it wasn't shown come back
+  with their parameters on the retry. The chat shows a **Workflow
+  changes** card listing each change; **Review changes** opens the step
+  editor with a "What changes" list, and **Save changes** replaces the
+  workflow on the same task.
+- `edit_scheduled_task(trigger_id, ...)` for the instructions, name,
+  schedule, model or approval setting. The review opens the task's edit
+  form filled in with the whole task as it would be saved.
+
+Either way the task keeps its runs and notes, and nothing changes until
+the user saves.
 
 **Connector tools in steps.** A tool step can call a connected
 connector's (MCP) tools, not only built-in ones -- the Playwright
