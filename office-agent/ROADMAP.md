@@ -6162,8 +6162,17 @@ all fine, but ☰ and the sidebar toggle couldn't be clicked or hovered.
       pill and context ring appear once the conversation starts.
 - [x] **Windows only**: the macOS branches (traffic-light spacing, hiding
       ☰) are gone.
-- [ ] Known: a dialog's dimmed backdrop doesn't cover the OS buttons'
-      area at the top-right, which stays at the page color.
+- [x] A dialog's dimmed backdrop now dims the OS buttons too: the page
+      blends every open full-window backdrop onto its background and
+      sends that color (`lib/titleBar.ts`). Computed backdrop colors come
+      back as `oklab(...)` (Tailwind v4), so they're read back through a
+      1px canvas rather than parsed.
+- [x] The Chat/Scheduled switch is a segmented control (selected side
+      white on a grey track).
+- [x] A hover-opened sidebar closes once the pointer is 48px clear of it,
+      not on the first mouseleave: over the title bar's drag area Windows
+      stops sending mouse events, so leaving a button there closed it at
+      once. Checked with real xdotool input.
 
 ## Later -- real intentions, not actively scheduled
 
