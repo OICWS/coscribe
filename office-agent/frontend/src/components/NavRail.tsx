@@ -251,6 +251,10 @@ function ScheduledTaskRow({ task, active, onSelect, onEdit, onRunNow, onChanged 
 
 export const NAV_RAIL_EXPANDED_WIDTH = 272;
 
+/** How far right of the open panel the pointer may wander before a
+ * hover-opened panel closes. */
+const HOVER_CLOSE_MARGIN = 48;
+
 // In the desktop shell the top row is the title bar's left end.
 const TOP_ROW_HEIGHT = DRAWS_TITLE_BAR ? "h-10" : "h-12";
 
@@ -296,6 +300,24 @@ export function NavRail({
 }: NavRailProps) {
   const [hovering, setHovering] = useState(false);
   const expanded = pinned || hovering;
+
+  // A hover-opened panel closes once the pointer is well clear of it, not
+  // the moment it leaves: the desktop title bar's drag area swallows mouse
+  // events, so a plain mouseleave fired as soon as the pointer left a
+  // button there.
+  useEffect(() => {
+    if (!hovering || pinned) return;
+    const onMove = (event: MouseEvent) => {
+      if (event.clientX > NAV_RAIL_EXPANDED_WIDTH + HOVER_CLOSE_MARGIN) setHovering(false);
+    };
+    const onBlur = () => setHovering(false);
+    document.addEventListener("mousemove", onMove);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [hovering, pinned]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
 
   useEffect(() => {
@@ -318,7 +340,6 @@ export function NavRail({
         }`}
         style={{ width: expanded ? NAV_RAIL_EXPANDED_WIDTH : COLLAPSED_CLUSTER_WIDTH }}
         onMouseEnter={DRAWS_TITLE_BAR ? undefined : () => setHovering(true)}
-        onMouseLeave={() => setHovering(false)}
       >
         {/* Collapsed, this row is the pin toggle (plus, in the desktop
          * shell, the app menu and Back/Forward). Expanded, the mode-icon
@@ -347,27 +368,28 @@ export function NavRail({
             {DRAWS_TITLE_BAR && <HistoryButtons />}
           </div>
           {expanded && (
-            <div className="flex gap-0.5">
-              <button
-                type="button"
-                title="Chat"
-                className={`flex h-8 w-8 items-center justify-center rounded-md ${
-                  mode === "create" ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
-                }`}
-                onClick={() => onModeChange("create")}
-              >
-                <MessageCircleIcon className="h-[16px] w-[16px]" />
-              </button>
-              <button
-                type="button"
-                title="Scheduled"
-                className={`flex h-8 w-8 items-center justify-center rounded-md ${
-                  mode === "run" ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
-                }`}
-                onClick={() => onModeChange("run")}
-              >
-                <ClockIcon className="h-[16px] w-[16px]" />
-              </button>
+            <div className="flex rounded-lg bg-[var(--card-bg)] p-0.5">
+              {(
+                [
+                  { value: "create", title: "Chat", Icon: MessageCircleIcon },
+                  { value: "run", title: "Scheduled", Icon: ClockIcon },
+                ] as const
+              ).map(({ value, title, Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  title={title}
+                  aria-pressed={mode === value}
+                  className={`flex h-7 w-8 items-center justify-center rounded-md ${
+                    mode === value
+                      ? "bg-[var(--bg)] text-[var(--fg)] shadow-sm ring-1 ring-[var(--border)]"
+                      : "text-[var(--muted)] hover:text-[var(--fg)]"
+                  }`}
+                  onClick={() => onModeChange(value)}
+                >
+                  <Icon className="h-[15px] w-[15px]" />
+                </button>
+              ))}
             </div>
           )}
         </div>
