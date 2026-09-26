@@ -9,7 +9,7 @@ import { ModelPicker } from "./components/ModelPicker";
 import { BrowserPanel, type BrowserCapture } from "./components/BrowserPanel";
 import { NAV_RAIL_EXPANDED_WIDTH, NavRail, type NavMode } from "./components/NavRail";
 import type { PptxShapeCapture } from "./components/PptxShapeOverlay";
-import { RunBreadcrumb } from "./components/RunBreadcrumb";
+import { RunBreadcrumb, TaskPageBreadcrumb } from "./components/RunBreadcrumb";
 import { RunPanel } from "./components/RunPanel";
 import { ScheduledTaskModal } from "./components/ScheduledTaskModal";
 import { SettingsModal } from "./components/settings/SettingsModal";
@@ -602,6 +602,8 @@ function App() {
             />
           ) : navMode === "create" ? (
             <ThreadHeader sessionLabel={sessionLabel} />
+          ) : selectedTask && !workflowDraft ? (
+            <TaskPageBreadcrumb task={selectedTask} onOpenPortal={() => showScheduledTaskPage(null)} />
           ) : (
             <div className="min-w-0 flex-1" />
           )}
