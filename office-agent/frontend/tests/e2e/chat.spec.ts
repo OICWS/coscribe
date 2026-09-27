@@ -49,3 +49,15 @@ test("/clear wipes the chat log", async ({ page }) => {
   // /clear is supposed to wipe.
   await expect(page.getByTestId("chat-log").getByText("hello", { exact: true })).not.toBeVisible();
 });
+
+test("a new conversation's home screen leaves out the Browser and Sub Agents buttons", async ({ page }) => {
+  await page.goto(freshThreadPath("home-buttons"));
+  await waitForConnected(page);
+  await expect(page.getByTitle("Browser", { exact: true })).toHaveCount(0);
+  await expect(page.getByTitle("Sub Agents", { exact: true })).toHaveCount(0);
+
+  await page.locator("textarea").fill("Reply with just the word ok.");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTitle("Browser", { exact: true })).toBeVisible();
+  await expect(page.getByTitle("Sub Agents", { exact: true })).toBeVisible();
+});

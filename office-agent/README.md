@@ -1317,15 +1317,20 @@ through the `browser_*` tools -- `browser_navigate`, `browser_snapshot`,
 opens by itself when the AI starts, every step happens in front of you (an
 orange frame marks the page it's working in, a dot where it clicks, and a
 "coscribe is using the browser · Stop" bar), and you can take over at any
-moment -- sign in, solve a CAPTCHA, or point at something with **Select
-element** and "Add to chat".
+moment -- sign in, solve a CAPTCHA, or point at something: **Select
+element** sends one element (a crop plus its text); the **pen** freezes
+the page into a screenshot you can mark up -- pen, line, arrow,
+rectangle, ellipse or text, in red, blue, green, black or white, with
+undo/redo -- and "Add to chat" sends it with the page's title and URL and
+any words you wrote on it.
 
 - The AI reads a page as a list of its headings, text, links, buttons and
   fields, each actionable one with a ref (`[ref=e12]`), and acts on refs.
   Clicks and typing are sent as real input events, so sites treat them
   like yours.
 - Sign-ins persist in the browser's own profile, separate from your
-  everyday browser (⋮ → "Sign out of all sites…" clears it). Sites get no
+  everyday browser (⋮ → "Clear browsing data…" clears it; ⋮ → "Save
+  screenshot…" saves the page as a PNG). Sites get no
   camera, microphone, location or notification permission.
 - Reading a page needs no approval; clicking, typing, pressing keys and
   choosing options are gated like other actions with outside effects

@@ -49,6 +49,8 @@ const BROWSER_PANEL_CLOSE_TAB_CHANNEL = "browser-panel:close-tab";
 const BROWSER_PANEL_OPEN_EXTERNAL_CHANNEL = "browser-panel:open-external";
 const BROWSER_PANEL_TABS_EVENT = "browser-panel:tabs";
 const BROWSER_PANEL_SHOW_MENU_CHANNEL = "browser-panel:show-menu";
+const BROWSER_PANEL_CAPTURE_CHANNEL = "browser-panel:capture";
+const BROWSER_PANEL_SET_VIEW_HIDDEN_CHANNEL = "browser-panel:set-view-hidden";
 const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
 // browserAgent.ts's BROWSER_AGENT_EVENT.
 const BROWSER_PANEL_AGENT_EVENT = "browser-panel:agent";
@@ -149,6 +151,12 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
   },
   onBrowserPanelTabs(callback: (payload: unknown) => void): () => void {
     return subscribe(BROWSER_PANEL_TABS_EVENT, callback);
+  },
+  browserPanelCapture(): Promise<unknown> {
+    return ipcRenderer.invoke(BROWSER_PANEL_CAPTURE_CHANNEL);
+  },
+  browserPanelSetViewHidden(hidden: boolean): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_SET_VIEW_HIDDEN_CHANNEL, hidden);
   },
   browserPanelShowMenu(x: number, y: number): void {
     ipcRenderer.send(BROWSER_PANEL_SHOW_MENU_CHANNEL, { x, y });

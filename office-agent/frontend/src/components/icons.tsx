@@ -604,3 +604,64 @@ export function GlobeIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+export function LineToolIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M5 19L19 5" />
+    </Icon>
+  );
+}
+
+export function ArrowToolIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M5 19L19 5" />
+      <path d="M9 5h10v10" />
+    </Icon>
+  );
+}
+
+export function RectangleToolIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <rect x="5" y="5" width="14" height="14" rx="1" />
+    </Icon>
+  );
+}
+
+export function EllipseToolIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="7" />
+    </Icon>
+  );
+}
+
+export function TextToolIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M5 6V5h14v1" />
+      <path d="M12 5v14" />
+      <path d="M9 19h6" />
+    </Icon>
+  );
+}
+
+export function UndoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M4 9v6h6" />
+      <path d="M4.5 15A8 8 0 1 0 7 7.3L4 10" />
+    </Icon>
+  );
+}
+
+export function RedoIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M20 9v6h-6" />
+      <path d="M19.5 15A8 8 0 1 1 17 7.3l3 2.7" />
+    </Icon>
+  );
+}

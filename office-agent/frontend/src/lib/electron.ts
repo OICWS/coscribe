@@ -95,6 +95,22 @@ export async function browserPanelCloseTab(id: number): Promise<void> {
   await window.coscribeDesktop.browserPanelCloseTab(id);
 }
 
+export interface BrowserPageCapture {
+  dataUrl: string;
+  title: string;
+  url: string;
+}
+
+/** A screenshot of the active tab, or null for an empty tab. */
+export async function browserPanelCapture(): Promise<BrowserPageCapture | null> {
+  return (await window.coscribeDesktop.browserPanelCapture?.()) as BrowserPageCapture | null;
+}
+
+/** Hides the live page so the panel can show its own drawing layer there. */
+export async function browserPanelSetViewHidden(hidden: boolean): Promise<void> {
+  await window.coscribeDesktop.browserPanelSetViewHidden?.(hidden);
+}
+
 export function browserPanelShowMenu(x: number, y: number): void {
   window.coscribeDesktop.browserPanelShowMenu?.(x, y);
 }
@@ -173,6 +189,8 @@ declare global {
       browserPanelCloseTab(id: number): Promise<void>;
       browserPanelOpenExternal(): Promise<void>;
       browserPanelShowMenu?(x: number, y: number): void;
+      browserPanelCapture?(): Promise<unknown>;
+      browserPanelSetViewHidden?(hidden: boolean): Promise<void>;
       onBrowserPanelTabs(callback: (payload: unknown) => void): () => void;
       onBrowserAgent?(callback: (payload: unknown) => void): () => void;
       browserPanelSetPickMode(enabled: boolean): Promise<void>;

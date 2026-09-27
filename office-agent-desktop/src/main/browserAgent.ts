@@ -22,6 +22,7 @@ import {
   ensureActiveTab,
   normalizeUrl,
   selectTab,
+  setViewHidden,
   tabInfo,
   waitForPanelOpen,
   isPanelOpen,
@@ -293,6 +294,9 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
       notify({ open: true, threadId: command.thread_id });
       await waitForPanelOpen(5000);
     }
+    // The AI's steps land on the live page, so an annotation in progress
+    // gives way (the panel drops its drawing when it sees "busy").
+    setViewHidden(false);
     notify({ busy: true, threadId: command.thread_id, action: command.action });
     clearTimeout(frameOffTimer);
     const frameTab = command.action === "tabs" ? undefined : ensureActiveTab();

@@ -6,6 +6,8 @@ export interface BrowserCapture {
   dataUrl: string;
   text?: string;
   tag?: string;
+  /** An annotated screenshot, whose `text` is already the whole note. */
+  source?: "annotation";
 }
 
 export interface PickedElement {
