@@ -5,7 +5,8 @@
  * different in the Electron port, not restating identical reasoning.
  */
 
-import { app } from "electron";
+import { randomBytes } from "node:crypto";
+import { app, BrowserWindow } from "electron";
 import { freePort } from "./paths";
 import { startSidecar, killSidecar } from "./sidecar";
 import { watchBackgroundEvents } from "./backgroundEvents";
@@ -14,6 +15,7 @@ import { createTray } from "./tray";
 import { registerDialogHandlers } from "./dialog";
 import { registerWindowChromeHandlers } from "./windowChrome";
 import { registerBrowserPanelHandlers, destroyBrowserPanel } from "./browserPanel";
+import { startBrowserAgent } from "./browserAgent";
 
 // MUST run before anything else touches the window: a second launch
 // fires the 'second-instance' handler below in the ALREADY-running
@@ -31,13 +33,15 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     const port = await freePort();
 
-    startSidecar(port);
+    const browserHostToken = randomBytes(32).toString("hex");
+    startSidecar(port, browserHostToken);
     void watchBackgroundEvents(port);
 
     registerWindowChromeHandlers();
     const win = createMainWindow(port, preloadPath());
     registerDialogHandlers(win);
     registerBrowserPanelHandlers(win);
+    startBrowserAgent(port, browserHostToken, () => (win.isDestroyed() ? BrowserWindow.getAllWindows()[0] : win));
     createTray(iconsDirFromApp(), showMainWindow, () => {
       markQuitting();
       app.quit();

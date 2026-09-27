@@ -17,6 +17,7 @@ from .config import Settings
 from .runtime.types import Agent
 from .tools import (
     build_background_task_tools,
+    build_browser_tools,
     build_document_tools,
     build_file_tools,
     build_image_tools,
@@ -642,6 +643,21 @@ evidence of what a fresh, wordless attachment is about.
 """
 
 
+BROWSER_INSTRUCTIONS = """\
+You have your own browser: the browser_* tools (browser_navigate, \
+browser_snapshot, browser_click, browser_type, ...) drive the tabs in \
+coscribe's Browser panel, which the user watches live, signed in to \
+whatever they've signed in to there. Use it when a page needs a login, \
+JavaScript, clicking or filling in forms, or when the user asks you to do \
+something on a website; plain reading of a public page is cheaper with \
+read_web_page. Work in small steps: navigate, browser_snapshot to get refs, \
+act on a ref, snapshot again. Never type passwords, payment details or \
+other secrets yourself -- if a page asks for a login or a CAPTCHA, stop and \
+ask the user to do that step in the Browser panel, then continue. Before \
+anything that sends, buys, posts, deletes or submits on the user's behalf, \
+say what you're about to do and get their go-ahead."""
+
+
 def _describe_extra_dirs(extra_readable: Sequence[Path], extra_writable: Sequence[Path]) -> str:
     """Extra INSTRUCTIONS paragraph naming the user's configured
     extra_readable_dirs/extra_writable_dirs by their real paths. Without
@@ -675,8 +691,8 @@ def _describe_extra_dirs(extra_readable: Sequence[Path], extra_writable: Sequenc
         "question naming the workspace specifically -- check the workspace "
         "root *and* every directory listed above, not just the workspace "
         "root by default: from the user's side these are all part of what "
-        "you can reach, whether or not they used the words \"readable\" or "
-        "\"writable directory\" to ask."
+        'you can reach, whether or not they used the words "readable" or '
+        '"writable directory" to ask.'
     )
     return "\n".join(lines)
 
@@ -739,9 +755,7 @@ def build_coordinator_agent(
     file_tool_readable = [*extra_readable, settings.skills_dir]
     file_tool_writable = [*extra_writable, settings.skills_dir]
     tools = (
-        build_file_tools(
-            root, extra_readable=file_tool_readable, extra_writable=file_tool_writable
-        )
+        build_file_tools(root, extra_readable=file_tool_readable, extra_writable=file_tool_writable)
         + build_document_tools(
             root,
             state_dir=settings.state_dir,
@@ -778,6 +792,9 @@ def build_coordinator_agent(
         + build_subagent_task_tools(thread_id, settings.state_dir)
     )
     instructions = f"{INSTRUCTIONS}\n\n{_describe_folders(root, extra_folders)}"
+    if settings.browser_host_token:
+        tools += build_browser_tools(thread_id)
+        instructions = f"{instructions}\n\n{BROWSER_INSTRUCTIONS}"
     extra_dirs_note = _describe_extra_dirs(
         settings.extra_readable_dirs, settings.extra_writable_dirs
     )

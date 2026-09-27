@@ -7147,3 +7147,27 @@ def test_modes_are_one_at_a_time_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         False,
         False,
     )
+
+
+def test_browser_host_endpoints_refuse_anyone_without_the_desktop_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    reply = {"id": "1", "ok": True, "result": {}}
+    with _client_lg(tmp_path, monkeypatch, fake_model, browser_host_token="s3cret") as client:
+        assert client.get("/internal/browser-host").status_code == 403
+        wrong = {"x-coscribe-browser-token": "guess"}
+        assert client.get("/internal/browser-host", headers=wrong).status_code == 403
+        assert client.post("/internal/browser-host/result", json=reply).status_code == 403
+        right = {"x-coscribe-browser-token": "s3cret"}
+        response = client.post("/internal/browser-host/result", json=reply, headers=right)
+        assert response.status_code == 200
+
+
+def test_browser_host_is_closed_when_not_started_by_the_desktop_app(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        headers = {"x-coscribe-browser-token": ""}
+        assert client.get("/internal/browser-host", headers=headers).status_code == 403

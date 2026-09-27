@@ -1306,6 +1306,41 @@ DuckDuckGo's own anti-bot response (an HTTP 202 with no real results)
 returning an empty search for a live query -- switching to `"auto"`
 means one engine's soft block no longer empties the whole search.
 
+## The browser (desktop app)
+
+In the desktop app, coscribe has its own browser: the **Browser panel**
+(the globe button) holds real tabs, and the AI uses those same tabs
+through the `browser_*` tools -- `browser_navigate`, `browser_snapshot`,
+`browser_click`, `browser_type`, `browser_press_key`,
+`browser_select_option`, `browser_hover`, `browser_scroll`,
+`browser_wait_for`, `browser_navigate_back`, `browser_tabs`. The panel
+opens by itself when the AI starts, every step happens in front of you (an
+orange frame marks the page it's working in, a dot where it clicks, and a
+"coscribe is using the browser · Stop" bar), and you can take over at any
+moment -- sign in, solve a CAPTCHA, or point at something with **Select
+element** and "Add to chat".
+
+- The AI reads a page as a list of its headings, text, links, buttons and
+  fields, each actionable one with a ref (`[ref=e12]`), and acts on refs.
+  Clicks and typing are sent as real input events, so sites treat them
+  like yours.
+- Sign-ins persist in the browser's own profile, separate from your
+  everyday browser (⋮ → "Sign out of all sites…" clears it). Sites get no
+  camera, microphone, location or notification permission.
+- Reading a page needs no approval; clicking, typing, pressing keys and
+  choosing options are gated like other actions with outside effects
+  (automatic in Auto mode unless the reviewer objects). The AI is told
+  never to type passwords or payment details and to ask before anything
+  that sends, buys, posts or deletes.
+- Only http/https pages: the AI can't open `file://` pages to get around
+  the folders a conversation has.
+- How it's wired: the desktop app starts the server with a random token,
+  connects to `/internal/browser-host` with it and carries out each
+  command on its tabs (`office-agent-desktop/src/main/browserAgent.ts`);
+  no remote-debugging port is opened. Outside the desktop app the tools
+  aren't offered, and the Browser panel falls back to a screencast of a
+  headless browser.
+
 ## Skills
 
 Every skill is a folder with a `SKILL.md` (YAML frontmatter

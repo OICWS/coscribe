@@ -544,3 +544,63 @@ export function CodeIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+export function ReloadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
+    </Icon>
+  );
+}
+
+export function ExternalLinkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M14 4h6v6" />
+      <path d="M20 4l-9 9" />
+      <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+    </Icon>
+  );
+}
+
+export function CursorClickIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M5 3l6.5 16 2.3-6.7L20.5 10z" />
+      <path d="M14 14l5 5" />
+    </Icon>
+  );
+}
+
+export function ExpandIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M14 4h6v6" />
+      <path d="M20 4l-6 6" />
+      <path d="M10 20H4v-6" />
+      <path d="M4 20l6-6" />
+    </Icon>
+  );
+}
+
+export function ShrinkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M4 14h6v6" />
+      <path d="M10 14l-6 6" />
+      <path d="M20 10h-6V4" />
+      <path d="M14 10l6-6" />
+    </Icon>
+  );
+}
+
+export function GlobeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z" />
+    </Icon>
+  );
+}

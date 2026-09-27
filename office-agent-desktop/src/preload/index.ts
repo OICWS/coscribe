@@ -43,21 +43,31 @@ const BROWSER_PANEL_BACK_CHANNEL = "browser-panel:back";
 const BROWSER_PANEL_FORWARD_CHANNEL = "browser-panel:forward";
 const BROWSER_PANEL_RELOAD_CHANNEL = "browser-panel:reload";
 const BROWSER_PANEL_SET_PICK_MODE_CHANNEL = "browser-panel:set-pick-mode";
-const BROWSER_PANEL_NAVIGATED_EVENT = "browser-panel:navigated";
-const BROWSER_PANEL_LOAD_ERROR_EVENT = "browser-panel:load-error";
+const BROWSER_PANEL_NEW_TAB_CHANNEL = "browser-panel:new-tab";
+const BROWSER_PANEL_SELECT_TAB_CHANNEL = "browser-panel:select-tab";
+const BROWSER_PANEL_CLOSE_TAB_CHANNEL = "browser-panel:close-tab";
+const BROWSER_PANEL_OPEN_EXTERNAL_CHANNEL = "browser-panel:open-external";
+const BROWSER_PANEL_TABS_EVENT = "browser-panel:tabs";
+const BROWSER_PANEL_SHOW_MENU_CHANNEL = "browser-panel:show-menu";
 const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
+// browserAgent.ts's BROWSER_AGENT_EVENT.
+const BROWSER_PANEL_AGENT_EVENT = "browser-panel:agent";
+
+/** Subscribes, and returns the unsubscribe a React effect's cleanup
+ * needs; without it every remount would add another listener. */
+function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
+  const listener = (_event: unknown, payload: T) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => {
+    ipcRenderer.removeListener(channel, listener);
+  };
+}
 
 interface BrowserPanelRect {
   x: number;
   y: number;
   width: number;
   height: number;
-}
-
-interface BrowserPanelNavigatedPayload {
-  url: string;
-  canGoBack: boolean;
-  canGoForward: boolean;
 }
 
 interface BrowserPanelPickedPayload {
@@ -103,12 +113,7 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
     return ipcRenderer.invoke(PICK_FOLDER_CHANNEL);
   },
 
-  /** Browser panel, Electron migration Phase 2 -- see browserPanel.ts's
-   * own module docs. Opens/repositions/closes the native WebContentsView
-   * and drives its navigation; onNavigated/onLoadError mirror the plain-
-   * browser-tab path's own WS "frame"/"error" messages closely enough
-   * that BrowserPanel.tsx's electron branch can reuse the same UI states
-   * (address bar, back/forward-enabled, error banner). */
+  /** The Browser panel's tabs -- see browserPanel.ts. */
   browserPanelOpen(rect: BrowserPanelRect): Promise<void> {
     return ipcRenderer.invoke(BROWSER_PANEL_OPEN_CHANNEL, rect);
   },
@@ -130,15 +135,26 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
   browserPanelReload(): Promise<void> {
     return ipcRenderer.invoke(BROWSER_PANEL_RELOAD_CHANNEL);
   },
-  onBrowserPanelNavigated(callback: (payload: BrowserPanelNavigatedPayload) => void): void {
-    ipcRenderer.on(BROWSER_PANEL_NAVIGATED_EVENT, (_event, payload: BrowserPanelNavigatedPayload) =>
-      callback(payload),
-    );
+  browserPanelNewTab(): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_NEW_TAB_CHANNEL);
   },
-  onBrowserPanelLoadError(callback: (errorDescription: string) => void): void {
-    ipcRenderer.on(BROWSER_PANEL_LOAD_ERROR_EVENT, (_event, errorDescription: string) =>
-      callback(errorDescription),
-    );
+  browserPanelSelectTab(id: number): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_SELECT_TAB_CHANNEL, id);
+  },
+  browserPanelCloseTab(id: number): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_CLOSE_TAB_CHANNEL, id);
+  },
+  browserPanelOpenExternal(): Promise<void> {
+    return ipcRenderer.invoke(BROWSER_PANEL_OPEN_EXTERNAL_CHANNEL);
+  },
+  onBrowserPanelTabs(callback: (payload: unknown) => void): () => void {
+    return subscribe(BROWSER_PANEL_TABS_EVENT, callback);
+  },
+  browserPanelShowMenu(x: number, y: number): void {
+    ipcRenderer.send(BROWSER_PANEL_SHOW_MENU_CHANNEL, { x, y });
+  },
+  onBrowserAgent(callback: (payload: unknown) => void): () => void {
+    return subscribe(BROWSER_PANEL_AGENT_EVENT, callback);
   },
 
   /** Element-picking, Electron migration Phase 3. Toggling this forwards
@@ -153,9 +169,7 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
   browserPanelSetPickMode(enabled: boolean): Promise<void> {
     return ipcRenderer.invoke(BROWSER_PANEL_SET_PICK_MODE_CHANNEL, enabled);
   },
-  onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): void {
-    ipcRenderer.on(BROWSER_PANEL_PICKED_EVENT, (_event, payload: BrowserPanelPickedPayload) =>
-      callback(payload),
-    );
+  onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): () => void {
+    return subscribe(BROWSER_PANEL_PICKED_EVENT, callback);
   },
 });

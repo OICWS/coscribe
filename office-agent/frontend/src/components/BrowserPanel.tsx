@@ -1,42 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { CloseIcon } from "./icons";
-import {
-  browserPanelBack as electronBrowserPanelBack,
-  browserPanelClose as electronBrowserPanelClose,
-  browserPanelForward as electronBrowserPanelForward,
-  browserPanelNavigate as electronBrowserPanelNavigate,
-  browserPanelOpen as electronBrowserPanelOpen,
-  browserPanelReload as electronBrowserPanelReload,
-  browserPanelReposition as electronBrowserPanelReposition,
-  browserPanelSetPickMode as electronBrowserPanelSetPickMode,
-  isElectron,
-  onBrowserPanelLoadError,
-  onBrowserPanelNavigated,
-  onBrowserPanelPicked,
-  type BrowserPanelRect,
-} from "../lib/electron";
+import { isElectron } from "../lib/electron";
+import { DesktopBrowserPanel } from "./DesktopBrowserPanel";
+import { usePanelWidth } from "../lib/usePanelWidth";
 
-/** Same shape as Composer.tsx's own PendingImage on purpose -- lets
- * App.tsx hand a captured element straight to Composer's existing
- * pendingImages list with no translation step. `text`/`tag` are the
- * picked element's own innerText/tag name (already extracted server-side
- * by pick_element, previously captured here and shown in the preview
- * but then dropped entirely at "Add to chat" -- the model only ever saw
- * a picture, never the actual text, even though the backend had already
- * read it) -- optional since a plain file/paste-uploaded image has
- * neither. */
-export interface BrowserCapture {
-  name: string;
-  dataUrl: string;
-  text?: string;
-  tag?: string;
-}
+import { PickedPreview, type BrowserCapture, type PickedElement } from "./PickedPreview";
 
-interface PickedElement {
-  screenshot: string; // base64 jpeg, no data: prefix yet
-  text: string;
-  tag: string;
-}
+export type { BrowserCapture };
 
 interface ElementRect {
   x: number;
@@ -52,15 +22,6 @@ interface HoveredElement {
 
 type PanelStatus = "connecting" | "ready" | "error";
 
-const MIN_PANEL_WIDTH = 320;
-// Sanity ceiling only -- the real cap is the window's own width (see the
-// drag handler below), so this just guards against something absurd.
-const MAX_PANEL_WIDTH_ABSOLUTE = 1600;
-// How far short of the window's full width dragging is allowed to go --
-// enough to keep the nav rail and some chat content visible rather than
-// literally filling the window edge to edge.
-const PANEL_WIDTH_WINDOW_MARGIN = 300;
-const DEFAULT_PANEL_WIDTH = 440;
 
 /** The remote page's own emulated viewport size -- deliberately the
  * user's real screen resolution, not this panel's own (often much
@@ -117,7 +78,7 @@ function remoteViewportSize(): { width: number; height: number } {
  * edge -- the remote page's own emulated viewport re-syncs to match
  * automatically (see the ResizeObserver effect below), the same path
  * that already keeps it in sync with the window being resized. */
-export function BrowserPanel({
+function ScreencastBrowserPanel({
   onClose,
   onSendToChat,
 }: {
@@ -158,7 +119,6 @@ export function BrowserPanel({
   // or force those effects to re-subscribe on every resize tick).
   const canvasSizeRef = useRef({ width: 960, height: 600 });
   const lastHoverSentRef = useRef(0);
-  const draggingRef = useRef(false);
   // Mirrors `status` for the same reason canvasSizeRef mirrors
   // canvasSize -- read inside the WS "message" listener below, which is
   // registered once at mount and would otherwise only ever see status's
@@ -179,19 +139,7 @@ export function BrowserPanel({
   const [picked, setPicked] = useState<PickedElement | null>(null);
   const [canvasSize, setCanvasSize] = useState(canvasSizeRef.current);
   const [hoverElement, setHoverElement] = useState<HoveredElement | null>(null);
-  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
-
-  // Electron migration Phase 2 -- see the effect below and electron.ts's
-  // own module docs. electronMode is stable for the life of this
-  // component (isElectron() can't change mid-session) -- computed once
-  // here rather than calling isElectron() at every use site below,
-  // purely for readability at the render/effect call sites.
-  const electronMode = isElectron();
-  const [electronUrl, setElectronUrl] = useState("");
-  const [electronAddressValue, setElectronAddressValue] = useState("");
-  const [electronCanGoBack, setElectronCanGoBack] = useState(false);
-  const [electronCanGoForward, setElectronCanGoForward] = useState(false);
-  const [electronLoadError, setElectronLoadError] = useState<string | null>(null);
+  const { width: panelWidth, onResizeHandleMouseDown } = usePanelWidth();
 
   useEffect(() => {
     statusRef.current = status;
@@ -208,14 +156,6 @@ export function BrowserPanel({
   };
 
   useEffect(() => {
-    // Electron mode has its own real navigation IPC (the effect further
-    // below) and never needs this WS/CDP path at all. Guarding here
-    // rather than not registering the effect at all keeps this file's
-    // Hooks call order identical across both paths (isElectron() never
-    // changes within one mount, so this is safe either way, but matching
-    // React's own "same hooks every render" rule by convention rather
-    // than relying on that is cheap insurance).
-    if (electronMode) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/browser`);
     wsRef.current = ws;
@@ -269,105 +209,7 @@ export function BrowserPanel({
       ws.close();
       wsRef.current = null;
     };
-    // electronMode is derived from isElectron(), a static environment
-    // check that cannot change for the life of this component --
-    // included so this satisfies exhaustive-deps without actually
-    // causing any re-subscription in practice.
-  }, [electronMode]);
-
-  // Browser panel, Electron migration Phase 2 -- real embedding. A
-  // `WebContentsView` is a true child of the main window, not a synced
-  // sibling top-level window the way the now-retired Tauri shell's own
-  // approach was -- `setBounds()` takes coordinates relative to the parent
-  // window's own content area, so computeRect here is just
-  // getBoundingClientRect() with no devicePixelRatio/innerPosition() math
-  // at all (the Tauri shell's own equivalent, before it was retired,
-  // needed exactly that math for its synced-sibling-window approach),
-  // and the main window *moving* needs no reposition call (the child's
-  // position relative to its own parent doesn't change when the parent
-  // moves). Two independent things can still change where this panel's
-  // own container sits *within* the window, so both are watched: a plain
-  // `window.resize` listener (the window's overall width changing moves
-  // this panel's left edge even when the panel's own on-screen size
-  // doesn't change at all, since it's docked to the right edge of a flex
-  // row -- a ResizeObserver on containerRef alone would miss exactly this
-  // case, since ResizeObserver only fires on the observed element's own
-  // size changing) and the same ResizeObserver on containerRef the non-
-  // electron canvas path below already uses for its own purposes (the
-  // resize-handle drag, or the nav rail collapsing, both change the
-  // container's own size directly).
-  useEffect(() => {
-    if (!electronMode) return;
-    let cancelled = false;
-    let resizeObserver: ResizeObserver | undefined;
-
-    const computeRect = (): BrowserPanelRect | null => {
-      const container = containerRef.current;
-      if (!container) return null;
-      const rect = container.getBoundingClientRect();
-      return {
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      };
-    };
-
-    const reposition = () => {
-      const rect = computeRect();
-      if (!rect || cancelled) return;
-      void electronBrowserPanelReposition(rect);
-    };
-
-    (async () => {
-      const rect = computeRect();
-      if (!rect || cancelled) return;
-      await electronBrowserPanelOpen(rect);
-      if (cancelled) return;
-      window.addEventListener("resize", reposition);
-      if (containerRef.current) {
-        resizeObserver = new ResizeObserver(reposition);
-        resizeObserver.observe(containerRef.current);
-      }
-    })();
-
-    onBrowserPanelNavigated((payload) => {
-      setElectronUrl(payload.url);
-      setElectronAddressValue(payload.url);
-      setElectronCanGoBack(payload.canGoBack);
-      setElectronCanGoForward(payload.canGoForward);
-      setElectronLoadError(null);
-    });
-    onBrowserPanelLoadError((errorDescription) => {
-      setElectronLoadError(errorDescription);
-    });
-    onBrowserPanelPicked((payload) => {
-      setPicked(payload);
-      // One pick exits pick mode, same as the non-desktop canvas path's
-      // own WS "picked" handler -- the effect below reacting to pickMode
-      // then tells the content script to stop highlighting.
-      setPickMode(false);
-    });
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener("resize", reposition);
-      resizeObserver?.disconnect();
-      void electronBrowserPanelClose();
-    };
-    // See the WS effect above's own comment on including electronMode here.
-  }, [electronMode]);
-
-  // Element-picking, Electron migration Phase 3: forwards pickMode's own
-  // toggle down to the panel's content script, which draws the highlight
-  // itself (see browserPanelContent.ts). Deliberately its own effect,
-  // separate from the open/reposition one above -- that one only ever
-  // runs once per mount ([electronMode] doesn't change), while pickMode
-  // toggles repeatedly over the component's lifetime.
-  useEffect(() => {
-    if (!electronMode) return;
-    void electronBrowserPanelSetPickMode(pickMode);
-  }, [electronMode, pickMode]);
+  }, []);
 
   // Tracks this panel's own on-screen display size -- purely a local
   // rendering concern now (the canvas's own CSS box + backing pixel
@@ -403,53 +245,6 @@ export function BrowserPanel({
   useEffect(() => {
     if (!pickMode) setHoverElement(null);
   }, [pickMode]);
-
-  // Drag-to-resize: the handle sits on the panel's own left edge (it's
-  // docked to the right of the window), so dragging it left/right just
-  // means "how far is the pointer from the window's right edge" -- no
-  // need to track a drag-start offset. Listens on window, not the
-  // handle itself, since the pointer routinely moves off a 4px-wide
-  // strip mid-drag. This is the *only* thing that changes panelWidth;
-  // the ResizeObserver effect above already reacts to the resulting
-  // layout change and re-syncs the remote page's own viewport to match
-  // -- no separate wiring needed here for that half.
-  //
-  // The ceiling is computed from the window's own current width, not a
-  // fixed constant -- a hardcoded cap felt arbitrarily narrow on a large
-  // monitor and already-binding on a small one (reported: "Cowork可以拉得
-  // 很宽" -- its own panel isn't capped well short of the window either).
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (!draggingRef.current) return;
-      const next = Math.round(window.innerWidth - e.clientX);
-      const maxWidth = Math.min(
-        MAX_PANEL_WIDTH_ABSOLUTE,
-        Math.max(MIN_PANEL_WIDTH, window.innerWidth - PANEL_WIDTH_WINDOW_MARGIN),
-      );
-      setPanelWidth(Math.min(maxWidth, Math.max(MIN_PANEL_WIDTH, next)));
-    };
-    const onMouseUp = () => {
-      draggingRef.current = false;
-      document.body.style.removeProperty("cursor");
-      document.body.style.removeProperty("user-select");
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-  }, []);
-
-  const onResizeHandleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    draggingRef.current = true;
-    // Dragging over the live canvas mid-resize would otherwise select
-    // its surrounding text/select the page behind it -- suppressed for
-    // the duration of the drag only, same as most split-pane widgets.
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  };
 
   const navigate = () => {
     if (addressValue.trim()) send({ type: "navigate", url: addressValue.trim() });
@@ -694,129 +489,6 @@ export function BrowserPanel({
         </div>
       </div>
 
-      {electronMode ? (
-        // A real, natively-embedded WebContentsView paints directly on
-        // top of this empty div (see the effect above) -- no canvas, no
-        // IME bridge, no synthetic input relay, all of that machinery
-        // the non-desktop path below needs simply doesn't apply to a
-        // true native child view. Element-picking (Phase 3): the
-        // highlight itself is drawn inside the live page's own DOM by
-        // browserPanelContent.ts, not here -- this side only toggles
-        // pick mode on/off and receives the final committed pick (see
-        // the pickMode-sync effect below and onBrowserPanelPicked).
-        <>
-          <div className="flex items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-2">
-            <button
-              type="button"
-              title="Back"
-              disabled={!electronCanGoBack}
-              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--card-bg)] disabled:opacity-40"
-              onClick={() => void electronBrowserPanelBack()}
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              title="Forward"
-              disabled={!electronCanGoForward}
-              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--card-bg)] disabled:opacity-40"
-              onClick={() => void electronBrowserPanelForward()}
-            >
-              ›
-            </button>
-            <input
-              className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-xs outline-none focus:border-[var(--accent)]"
-              placeholder="Enter a URL..."
-              value={electronAddressValue}
-              onChange={(e) => setElectronAddressValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && electronAddressValue.trim()) {
-                  void electronBrowserPanelNavigate(electronAddressValue.trim());
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--card-bg)]"
-              onClick={() => electronAddressValue.trim() && void electronBrowserPanelNavigate(electronAddressValue.trim())}
-            >
-              Go
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--card-bg)]"
-              onClick={() => void electronBrowserPanelReload()}
-            >
-              ⟳
-            </button>
-            <button
-              type="button"
-              title="Select an element to send to the chat"
-              className={`rounded-md border px-2 py-1 text-xs ${pickMode ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]" : "border-[var(--border)] hover:bg-[var(--card-bg)]"}`}
-              onClick={() => setPickMode((v) => !v)}
-            >
-              Select
-            </button>
-          </div>
-
-          {electronLoadError && (
-            <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] bg-red-500/10 px-2.5 py-1.5 text-xs text-red-500">
-              <span>{electronLoadError}</span>
-              <button type="button" className="shrink-0 hover:opacity-70" onClick={() => setElectronLoadError(null)}>
-                <CloseIcon className="h-3 w-3" />
-              </button>
-            </div>
-          )}
-
-          <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden bg-black/5">
-            {/* Worth noting for a future reader: the real WebContentsView
-             * is a separately-composited native surface painting
-             * directly on top of this div once
-             * positioned, so this text is only actually visible for the
-             * brief moment before that happens (an empty view still
-             * shows its own blank white background, covering this). Kept
-             * anyway, same reasoning -- worth seeing during that instant
-             * (or if opening somehow never lands) rather than a silent
-             * empty rectangle either way. */}
-            {!electronUrl && !electronLoadError && (
-              <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-[var(--muted)]">
-                Enter a URL above to get started
-              </div>
-            )}
-          </div>
-
-          {picked && (
-            <div className="flex flex-col gap-2 border-t border-[var(--border)] p-2.5">
-              <img
-                src={`data:image/jpeg;base64,${picked.screenshot}`}
-                alt="Selected element"
-                className="max-h-32 w-full rounded-md border border-[var(--border)] object-contain"
-              />
-              {picked.text && <p className="truncate text-xs text-[var(--muted)]">{picked.text}</p>}
-              <div className="flex justify-end gap-2">
-                <button type="button" className="rounded-md border border-[var(--border)] px-3 py-1 text-xs" onClick={() => setPicked(null)}>
-                  Discard
-                </button>
-                <button
-                  type="button"
-                  className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs text-[var(--accent-fg)]"
-                  onClick={() => {
-                    onSendToChat({
-                      name: `${picked.tag || "element"}.jpg`,
-                      dataUrl: `data:image/jpeg;base64,${picked.screenshot}`,
-                      text: picked.text || undefined,
-                      tag: picked.tag || undefined,
-                    });
-                    setPicked(null);
-                  }}
-                >
-                  Add to chat
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
         <>
           <div className="flex items-center gap-1.5 border-b border-[var(--border)] px-2.5 py-2">
             <button
@@ -952,40 +624,29 @@ export function BrowserPanel({
             )}
           </div>
 
-          {picked && (
-            <div className="flex flex-col gap-2 border-t border-[var(--border)] p-2.5">
-              <img
-                src={`data:image/jpeg;base64,${picked.screenshot}`}
-                alt="Selected element"
-                className="max-h-32 w-full rounded-md border border-[var(--border)] object-contain"
-              />
-              {picked.text && <p className="truncate text-xs text-[var(--muted)]">{picked.text}</p>}
-              <div className="flex justify-end gap-2">
-                <button type="button" className="rounded-md border border-[var(--border)] px-3 py-1 text-xs" onClick={() => setPicked(null)}>
-                  Discard
-                </button>
-                <button
-                  type="button"
-                  className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs text-[var(--accent-fg)]"
-                  onClick={() => {
-                    onSendToChat({
-                      name: `${picked.tag || "element"}.jpg`,
-                      dataUrl: `data:image/jpeg;base64,${picked.screenshot}`,
-                      text: picked.text || undefined,
-                      tag: picked.tag || undefined,
-                    });
-                    setPicked(null);
-                  }}
-                >
-                  Add to chat
-                </button>
-              </div>
-            </div>
-          )}
+          {picked && <PickedPreview picked={picked} onDiscard={() => setPicked(null)} onSendToChat={onSendToChat} />}
         </>
-      )}
     </div>
   );
+}
+
+/** The desktop app's real, tabbed browser (shared with coscribe's AI);
+ * in a plain browser tab, a screencast of a headless browser instead. */
+export function BrowserPanel({
+  threadId,
+  onClose,
+  onSendToChat,
+  onStopAgent,
+}: {
+  threadId: string;
+  onClose: () => void;
+  onSendToChat: (capture: BrowserCapture) => void;
+  onStopAgent: () => void;
+}) {
+  if (isElectron()) {
+    return <DesktopBrowserPanel threadId={threadId} onClose={onClose} onSendToChat={onSendToChat} onStopAgent={onStopAgent} />;
+  }
+  return <ScreencastBrowserPanel onClose={onClose} onSendToChat={onSendToChat} />;
 }
 
 function drawFrame(canvas: HTMLCanvasElement | null, base64Jpeg: string): void {

@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
 import inspect
 import json
 import logging
@@ -66,7 +67,7 @@ from typing import TYPE_CHECKING, Any, get_args
 
 import uvicorn
 from dotenv import dotenv_values, load_dotenv, set_key
-from fastapi import FastAPI, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -109,6 +110,7 @@ from ..tools import (
     save_uploaded_skill,
 )
 from ..tools._workspace import WorkspaceScope
+from ..tools.browser import BROWSER_HOST
 from ..tools.mcp import load_mcp_server_configs, validate_mcp_config
 from ..tools.memory import load_memory
 from ..tools.node_env import install_package as install_node_package
@@ -833,6 +835,13 @@ class ConfigUpdate(BaseModel):
     updates: dict[str, str]
 
 
+class BrowserHostReply(BaseModel):
+    id: str
+    ok: bool
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
 class SkillEnabledUpdate(BaseModel):
     enabled: bool
 
@@ -1474,6 +1483,43 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 background_events.unsubscribe(queue)
 
         return StreamingResponse(event_source(), media_type="text/event-stream")
+
+    def _is_browser_host(request: Request) -> bool:
+        expected = settings.browser_host_token
+        given = request.headers.get("x-coscribe-browser-token", "")
+        return bool(expected) and hmac.compare_digest(given.encode(), str(expected).encode())
+
+    @app.get("/internal/browser-host", response_model=None)
+    async def browser_host_stream(request: Request) -> Response:
+        """The desktop app's browser takes its commands from here; see
+        tools/browser.py."""
+        if not _is_browser_host(request):
+            return JSONResponse({"error": "Not the desktop app's browser."}, status_code=403)
+        outbox = BROWSER_HOST.attach()
+
+        async def command_source() -> AsyncIterator[str]:
+            try:
+                yield ": connected\n\n"
+                while True:
+                    try:
+                        command = await asyncio.wait_for(outbox.get(), 15)
+                    except TimeoutError:
+                        # A write is the only way a dropped connection gets
+                        # noticed, and commands can be minutes apart.
+                        yield ": ping\n\n"
+                        continue
+                    yield f"data: {json.dumps(command)}\n\n"
+            finally:
+                BROWSER_HOST.detach(outbox)
+
+        return StreamingResponse(command_source(), media_type="text/event-stream")
+
+    @app.post("/internal/browser-host/result")
+    async def browser_host_result(request: Request, reply: BrowserHostReply) -> JSONResponse:
+        if not _is_browser_host(request):
+            return JSONResponse({"error": "Not the desktop app's browser."}, status_code=403)
+        BROWSER_HOST.resolve(reply.id, reply.model_dump())
+        return JSONResponse({"ok": True})
 
     @app.get("/api/threads")
     async def list_threads() -> list[dict[str, Any]]:
