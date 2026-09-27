@@ -11,10 +11,13 @@ import {
   ShrinkIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
+  PencilIcon,
   StopIcon,
 } from "./icons";
+import { BrowserAnnotator, type PageCapture } from "./BrowserAnnotator";
 import {
   browserPanelBack,
+  browserPanelCapture,
   browserPanelClose,
   browserPanelCloseTab,
   browserPanelForward,
@@ -26,6 +29,7 @@ import {
   browserPanelReposition,
   browserPanelSelectTab,
   browserPanelSetPickMode,
+  browserPanelSetViewHidden,
   browserPanelShowMenu,
   onBrowserAgent,
   onBrowserPanelPicked,
@@ -130,6 +134,7 @@ export function DesktopBrowserPanel({
   const [pickMode, setPickMode] = useState(false);
   const [picked, setPicked] = useState<PickedElement | null>(null);
   const [agent, setAgent] = useState<{ threadId: string; busy: boolean } | null>(null);
+  const [annotation, setAnnotation] = useState<PageCapture | null>(null);
   const { width, expanded, toggleExpanded, onResizeHandleMouseDown } = usePanelWidth();
 
   const active = tabs.find((t) => t.id === activeId) ?? null;
@@ -205,6 +210,29 @@ export function DesktopBrowserPanel({
       stop();
     };
   }, []);
+
+  const startAnnotating = async () => {
+    const capture = await browserPanelCapture();
+    if (!capture) return;
+    setPickMode(false);
+    await browserPanelSetViewHidden(true);
+    setAnnotation(capture);
+  };
+  const stopAnnotating = () => {
+    setAnnotation(null);
+    void browserPanelSetViewHidden(false);
+  };
+
+  // The drawing is of one page at one moment: switching tabs or the AI
+  // acting on the page ends it (the desktop app has already put the live
+  // page back for the AI).
+  useEffect(() => {
+    setAnnotation(null);
+    void browserPanelSetViewHidden(false);
+  }, [activeId]);
+  useEffect(() => {
+    if (agent?.busy) setAnnotation(null);
+  }, [agent]);
 
   const go = () => {
     const url = address.trim();
@@ -323,12 +351,26 @@ export function DesktopBrowserPanel({
         </div>
         <button
           type="button"
+          title="Annotate this page and send it to the chat"
+          aria-label="Annotate"
+          aria-pressed={annotation !== null}
+          disabled={!active?.url}
+          className={`${iconButton} ${annotation ? "!bg-blue-500/15 !text-blue-600" : ""}`}
+          onClick={() => (annotation ? stopAnnotating() : void startAnnotating())}
+        >
+          <PencilIcon className="h-[15px] w-[15px]" />
+        </button>
+        <button
+          type="button"
           title="Select an element to send to the chat"
           aria-label="Select element"
           aria-pressed={pickMode}
           disabled={!active?.url}
           className={`${iconButton} ${pickMode ? "!bg-[var(--accent)]/15 !text-[var(--accent)]" : ""}`}
-          onClick={() => setPickMode((v) => !v)}
+          onClick={() => {
+            if (annotation) stopAnnotating();
+            setPickMode((v) => !v);
+          }}
         >
           <CursorClickIcon className="h-4 w-4" />
         </button>
@@ -358,6 +400,7 @@ export function DesktopBrowserPanel({
 
       <div className="flex min-h-0 flex-1 flex-col px-1.5 pb-1.5">
         <div ref={containerRef} data-testid="browser-page-area" className="relative min-h-0 flex-1 overflow-hidden rounded-lg bg-[var(--bg)]">
+          {annotation && <BrowserAnnotator capture={annotation} onClose={stopAnnotating} onSendToChat={onSendToChat} />}
           {showEmptyState && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
               <GlobeIcon className="mb-1 h-5 w-5 text-[var(--muted)]" />

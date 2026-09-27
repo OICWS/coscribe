@@ -726,22 +726,26 @@ function App() {
               <PanelRightIcon className="h-[18px] w-[18px]" />
             </button>
           )}
-          <button
-            type="button"
-            title="Browser"
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${browserPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
-            onClick={() => setBrowserPanelOpen((v) => !v)}
-          >
-            <BrowserIcon className="h-[18px] w-[18px]" />
-          </button>
-          <button
-            type="button"
-            title="Sub Agents"
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${subAgentsPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
-            onClick={() => setSubAgentsPanelOpen((v) => !v)}
-          >
-            <SubAgentsIcon className="h-[18px] w-[18px]" />
-          </button>
+          {!(navMode === "create" && onHome) && (
+            <>
+              <button
+                type="button"
+                title="Browser"
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${browserPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
+                onClick={() => setBrowserPanelOpen((v) => !v)}
+              >
+                <BrowserIcon className="h-[18px] w-[18px]" />
+              </button>
+              <button
+                type="button"
+                title="Sub Agents"
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${subAgentsPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
+                onClick={() => setSubAgentsPanelOpen((v) => !v)}
+              >
+                <SubAgentsIcon className="h-[18px] w-[18px]" />
+              </button>
+            </>
+          )}
           {/* In the desktop shell these live in the title bar (Settings)
            * and the app menu (Help > Keyboard Shortcuts). */}
           {!DRAWS_TITLE_BAR && (

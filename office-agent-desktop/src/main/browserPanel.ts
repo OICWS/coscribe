@@ -19,6 +19,7 @@
 
 import {
   Menu,
+  app,
   WebContentsView,
   dialog,
   ipcMain,
@@ -29,6 +30,7 @@ import {
   type Session,
   type WebContents,
 } from "electron";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // preload/index.ts repeats these strings: a sandboxed preload can only
@@ -46,6 +48,8 @@ export const BROWSER_PANEL_SELECT_TAB_CHANNEL = "browser-panel:select-tab";
 export const BROWSER_PANEL_CLOSE_TAB_CHANNEL = "browser-panel:close-tab";
 export const BROWSER_PANEL_OPEN_EXTERNAL_CHANNEL = "browser-panel:open-external";
 export const BROWSER_PANEL_SHOW_MENU_CHANNEL = "browser-panel:show-menu";
+export const BROWSER_PANEL_CAPTURE_CHANNEL = "browser-panel:capture";
+export const BROWSER_PANEL_SET_VIEW_HIDDEN_CHANNEL = "browser-panel:set-view-hidden";
 export const BROWSER_PANEL_TABS_EVENT = "browser-panel:tabs";
 export const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
 
@@ -99,6 +103,9 @@ let nextId = 1;
 let win: BrowserWindow | undefined;
 let panelRect: PanelRect | null = null;
 let pickModeActive = false;
+// While the user annotates, the panel shows a still screenshot and its
+// own drawing layer, which the live view would otherwise cover.
+let viewHidden = false;
 const openWaiters: Array<() => void> = [];
 let browserSession: Session | undefined;
 
@@ -192,13 +199,19 @@ function setBoundsReliably(view: WebContentsView, rect: PanelRect): void {
   view.setBounds(rect);
 }
 
+export function setViewHidden(hidden: boolean): void {
+  if (viewHidden === hidden) return;
+  viewHidden = hidden;
+  layout();
+}
+
 /** Attaches the active tab's view over the panel (if it has a page to
  * show) and detaches every other tab's. */
 function layout(): void {
   if (!win || win.isDestroyed()) return;
   const children = win.contentView.children;
   for (const tab of tabs) {
-    const show = panelRect !== null && tab.id === activeId && !tab.blank;
+    const show = panelRect !== null && tab.id === activeId && !tab.blank && !viewHidden;
     const attached = children.includes(tab.view);
     if (show) {
       if (!attached) win.contentView.addChildView(tab.view);
@@ -334,6 +347,7 @@ function openPanel(window: BrowserWindow, rect: PanelRect): void {
 
 function closePanel(): void {
   panelRect = null;
+  viewHidden = false;
   layout();
   // Reopening starts with Select off, matching the panel's fresh state.
   pickModeActive = false;
@@ -391,10 +405,18 @@ export function registerBrowserPanelHandlers(window: BrowserWindow): void {
   });
   ipcMain.handle(BROWSER_PANEL_CLOSE_TAB_CHANNEL, (_event, id: number) => closeTab(Number(id)));
   ipcMain.handle(BROWSER_PANEL_OPEN_EXTERNAL_CHANNEL, () => openActiveExternally());
+  ipcMain.handle(BROWSER_PANEL_CAPTURE_CHANNEL, async () => {
+    const tab = activeTab();
+    if (!tab || tab.blank) return null;
+    const image = await tab.view.webContents.capturePage();
+    const info = tabInfo(tab);
+    return { dataUrl: image.toDataURL(), title: info.title, url: info.url };
+  });
+  ipcMain.handle(BROWSER_PANEL_SET_VIEW_HIDDEN_CHANNEL, (_event, hidden: boolean) => setViewHidden(Boolean(hidden)));
   ipcMain.on(BROWSER_PANEL_SHOW_MENU_CHANNEL, (_event, position: { x: number; y: number }) => {
     const tab = activeTab();
     Menu.buildFromTemplate([
-      { label: "Open in your browser", enabled: Boolean(tab && !tab.blank), click: () => openActiveExternally() },
+      { label: "Save screenshot…", enabled: Boolean(tab && !tab.blank), click: () => void saveScreenshot(window) },
       {
         label: "Close other tabs",
         enabled: tabs.length > 1,
@@ -403,9 +425,21 @@ export function registerBrowserPanelHandlers(window: BrowserWindow): void {
         },
       },
       { type: "separator" },
-      { label: "Sign out of all sites…", click: () => void clearBrowsingData(window) },
+      { label: "Clear browsing data…", click: () => void clearBrowsingData(window) },
     ]).popup({ window, x: Math.round(Number(position?.x) || 0), y: Math.round(Number(position?.y) || 0) });
   });
+}
+
+async function saveScreenshot(window: BrowserWindow): Promise<void> {
+  const tab = activeTab();
+  if (!tab || tab.blank) return;
+  const image = await tab.view.webContents.capturePage();
+  const name = (tab.view.webContents.getTitle() || "screenshot").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80);
+  const { canceled, filePath } = await dialog.showSaveDialog(window, {
+    defaultPath: join(app.getPath("downloads"), `${name || "screenshot"}.png`),
+    filters: [{ name: "PNG image", extensions: ["png"] }],
+  });
+  if (!canceled && filePath) await writeFile(filePath, image.toPNG());
 }
 
 function openActiveExternally(): void {
@@ -417,11 +451,11 @@ function openActiveExternally(): void {
 async function clearBrowsingData(window: BrowserWindow): Promise<void> {
   const { response } = await dialog.showMessageBox(window, {
     type: "question",
-    buttons: ["Sign out", "Cancel"],
+    buttons: ["Clear", "Cancel"],
     defaultId: 1,
     cancelId: 1,
-    message: "Sign out of every site in coscribe's browser?",
-    detail: "This clears its cookies and site data. Your own browser isn't affected.",
+    message: "Clear coscribe's browsing data?",
+    detail: "This signs you out of every site in coscribe's browser by clearing its cookies and site data. Your own browser isn't affected.",
   });
   if (response !== 0) return;
   await tabSession().clearStorageData();

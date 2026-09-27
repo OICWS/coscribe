@@ -38,7 +38,13 @@ interface PendingImage {
    * undefined covers both a plain upload (no note at all) and a
    * BrowserCapture (the original "from the browser panel" wording, kept
    * as the default so that call site didn't need touching). */
-  source?: "pptx";
+  source?: "pptx" | "annotation";
+}
+
+function pickNote(img: PendingImage): string {
+  if (img.source === "pptx") return `(Selected from the pptx preview: ${img.text})`;
+  if (img.source === "annotation") return `(${img.text})`;
+  return `(Selected <${img.tag ?? "element"}> from the browser panel -- text: "${img.text}")`;
 }
 
 interface PendingFile {
@@ -264,13 +270,7 @@ export function Composer({
     // browser-panel-specific phrasing.
     const picksWithText = pendingImages.filter((img) => img.text);
     if (picksWithText.length > 0) {
-      const note = picksWithText
-        .map((img) =>
-          img.source === "pptx"
-            ? `(Selected from the pptx preview: ${img.text})`
-            : `(Selected <${img.tag ?? "element"}> from the browser panel -- text: "${img.text}")`,
-        )
-        .join("\n");
+      const note = picksWithText.map(pickNote).join("\n");
       outgoingText = outgoingText ? `${outgoingText}\n\n${note}` : note;
     }
     const commandWord = text.trim().split(/\s+/, 1)[0]?.toLowerCase();

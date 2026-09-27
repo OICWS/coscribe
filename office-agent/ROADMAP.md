@@ -6209,7 +6209,7 @@ all fine, but ☰ and the sidebar toggle couldn't be clicked or hovered.
       Context lists files only read. Checked live with DeepSeek: read
       facts.txt, created summary.md, appended to todo.md.
 
-## Phase 8bm -- The AI uses coscribe's own browser, in tabs you watch (shipped, step 1 of 3)
+## Phase 8bm -- The AI uses coscribe's own browser, in tabs you watch (shipped, steps 1-2 of 3)
 
 Replaces "browser use" through the Playwright connector, which opened a
 separate browser window, with the Browser panel itself, as in Claude's
@@ -6251,8 +6251,30 @@ built-in browser.
       address bar was taken for a URL scheme (ERR_INVALID_URL); a never-
       loaded tab stalled DevTools clients (new tabs now load about:blank);
       an unlabeled `<select>` was named after its options.
-- [ ] Step 2: the Annotate pen (screenshot + canvas drawing + "Add to
-      chat"), and screenshots for vision-capable models.
+- [x] Step 2 -- the Annotate pen, after Claude's: the pen button freezes
+      the active tab into a `capturePage` screenshot, hides the live view
+      (it would cover any DOM drawn there) and puts a canvas over it. A
+      floating toolbar: tool drop-up (Pen, Line, Arrow, Rectangle,
+      Ellipse, Text), color drop-up (Red, Blue, Green, Black, White),
+      undo/redo/clear (Ctrl+Z / Ctrl+Y too), close, "Add to chat". The
+      marks are burned into the screenshot at its full resolution and sent
+      as a JPEG with a note naming the page and quoting any text written
+      on it. Switching tabs or the AI acting on the page ends the drawing.
+      ⋮ gained "Save screenshot…", and "Sign out of all sites…" became
+      "Clear browsing data…". Checked live with real mouse input under
+      Xvfb, and sent to DeepSeek, which read the marks (and pointed out
+      that the text and the arrow disagreed). Found on the way: the Text
+      tool's box closed at once, the click that opened it having moved
+      focus away.
+- [x] A new conversation's home screen no longer shows the Browser and
+      Sub Agents buttons.
+- [x] Checked on a real site too (Bing search, then the first result in
+      a new tab). In this container Chromium doesn't trust the
+      intercepting proxy's certificate, so that run used
+      --ignore-certificate-errors; told of the certificate error, the
+      model said so and fell back to read_web_page.
+- [ ] Screenshots the model can request itself, for vision-capable
+      models.
 - [ ] Step 3: a first-visit permission prompt per site, like Claude's.
 - Not in this step: importing Chrome sign-ins (later: import cookies);
   cross-origin iframes are listed but not read; OAuth pop-ups that need
