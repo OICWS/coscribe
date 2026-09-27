@@ -788,6 +788,15 @@ LIVE_SETTINGS = {
 # shell just re-reads the file at the next window-close, live).
 DESKTOP_ENV_VARS = ["COSCRIBE_BACKGROUND_ON_CLOSE"]
 
+# Kept in .env rather than the browser's own storage: the desktop app
+# serves the page from a new port each launch, and browser storage
+# doesn't survive an origin change.
+APPEARANCE_ENV_VARS: dict[str, tuple[str, ...]] = {
+    "COSCRIBE_THEME": ("system", "light", "dark"),
+    "COSCRIBE_CHAT_FONT": ("sans", "serif", "system"),
+    "COSCRIBE_MOTION": ("system", "reduced"),
+}
+
 # Blank is a silent footgun for these -- Path("") resolves to Path("."),
 # and blank COSCRIBE_DEFAULT_MODEL/COSCRIBE_LOG_LEVEL make Settings()
 # construction (default_model) or logging.basicConfig (log_level) raise
@@ -1935,7 +1944,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         for tool in agent.tools:
             metadata = get_tool_metadata(tool)
             doc = inspect.getdoc(tool) or ""
-            description = doc.splitlines()[0] if doc else ""
+            # The docstring's first sentence, which often wraps past its
+            # first line.
+            first_paragraph = " ".join(doc.split("\n\n", 1)[0].split())
+            description = first_paragraph.split(". ", 1)[0].rstrip(".") + "." if doc else ""
             tools.append(
                 {
                     "name": tool.__name__,
@@ -2150,6 +2162,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             result[key] = values.get(key) or None
         for key in DESKTOP_ENV_VARS:
             result[key] = values.get(key) or None
+        for key in APPEARANCE_ENV_VARS:
+            result[key] = values.get(key) or None
         return result
 
     @app.post("/api/config")
@@ -2159,6 +2173,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             | set(PROVIDER_DEFAULT_MODEL_ENV_VARS)
             | set(COSCRIBE_ENV_VARS)
             | set(DESKTOP_ENV_VARS)
+            | set(APPEARANCE_ENV_VARS)
         )
         rejected: dict[str, str] = {}
         applied: set[str] = set()
@@ -2176,6 +2191,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 continue
             if key == "COSCRIBE_DEFAULT_PERMISSION_MODE" and value not in get_args(PermissionMode):
                 rejected[key] = f"must be one of {', '.join(get_args(PermissionMode))}"
+                continue
+            if key in APPEARANCE_ENV_VARS and value not in APPEARANCE_ENV_VARS[key]:
+                rejected[key] = f"must be one of {', '.join(APPEARANCE_ENV_VARS[key])}"
                 continue
             if key in PROVIDER_DEFAULT_MODEL_ENV_VARS and ":" in value:
                 rejected[key] = (

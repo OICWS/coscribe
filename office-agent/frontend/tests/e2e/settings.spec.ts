@@ -55,7 +55,7 @@ test("General tab: Default Mode saves", async ({ page }) => {
   await expect(page.getByText(/^Saved/)).toBeVisible();
 });
 
-test("Tools tab: lists built-in tools grouped by category", async ({ page }) => {
+test("Tools tab: categories start collapsed and open to list their tools", async ({ page }) => {
   await page.goto(freshThreadPath("settings-tools"));
   await waitForConnected(page);
   await page.getByRole("button", { name: "Settings" }).click();
@@ -63,6 +63,10 @@ test("Tools tab: lists built-in tools grouped by category", async ({ page }) => 
   await page.getByRole("button", { name: "Tools" }).click();
   await toolsLoaded;
 
+  await expect(page.getByText("list_files")).toHaveCount(0);
+  const filesystem = page.getByRole("button", { name: /^Filesystem/ });
+  await expect(filesystem).toHaveAttribute("aria-expanded", "false");
+  await filesystem.click();
   await expect(page.getByText("list_files")).toBeVisible();
   await expect(page.getByText("Needs approval").first()).toBeVisible();
 });

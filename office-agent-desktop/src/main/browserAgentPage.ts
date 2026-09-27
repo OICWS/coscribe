@@ -284,7 +284,7 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
 
   if (action === "agent_frame") {
     const el = overlay();
-    el.style.boxShadow = args.on ? "inset 0 0 0 3px rgba(217,119,87,0.85), inset 0 0 24px rgba(217,119,87,0.35)" : "none";
+    el.style.boxShadow = args.on ? "inset 0 0 0 3px rgba(42,120,214,0.85), inset 0 0 24px rgba(42,120,214,0.35)" : "none";
     return {};
   }
 
@@ -294,7 +294,7 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
     const y = Number(args.y);
     dot.style.cssText =
       `position:fixed;left:${x - 14}px;top:${y - 14}px;width:28px;height:28px;border-radius:50%;` +
-      "background:rgba(217,119,87,0.35);border:2px solid rgb(217,119,87);pointer-events:none;" +
+      "background:rgba(42,120,214,0.35);border:2px solid rgb(42,120,214);pointer-events:none;" +
       "transition:transform 450ms ease-out,opacity 450ms ease-out;transform:scale(0.6);opacity:1;";
     overlay().appendChild(dot);
     requestAnimationFrame(() => {

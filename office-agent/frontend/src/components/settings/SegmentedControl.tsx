@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 /** A small fixed set of mutually-exclusive choices as one bordered pill
  * group, the selected option in a raised white/bg chip -- explicit
  * request to replace free-text entry for a setting whose real values are
@@ -11,7 +13,7 @@ export function SegmentedControl<T extends string>({
   onChange,
 }: {
   value: T;
-  options: readonly { value: T; label: string }[];
+  options: readonly { value: T; label: ReactNode; title?: string }[];
   onChange: (value: T) => void;
 }) {
   return (
@@ -21,6 +23,8 @@ export function SegmentedControl<T extends string>({
           key={option.value}
           type="button"
           aria-pressed={option.value === value}
+          aria-label={option.title}
+          title={option.title}
           className={`rounded-md px-2.5 py-1 text-sm transition-colors ${
             option.value === value
               ? "bg-[var(--bg)] text-[var(--fg)] shadow-sm"

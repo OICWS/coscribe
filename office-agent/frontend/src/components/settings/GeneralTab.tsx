@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { getProviders } from "../../lib/rest";
+import { setAppearance, useAppearance, type ChatFontChoice } from "../../lib/appearance";
+import { MonitorIcon, MoonIcon, SunIcon } from "../icons";
 import { ToggleSwitch } from "../ToggleSwitch";
 import {
   BACKGROUND_ON_CLOSE_KEY,
@@ -75,11 +77,67 @@ function currentPermissionMode(raw: string | undefined): PermissionMode {
   return PERMISSION_MODES.find((mode) => mode.value === raw)?.value ?? "auto";
 }
 
+const THEMES = [
+  { value: "system", label: <MonitorIcon className="h-4 w-4" />, title: "Match the system" },
+  { value: "light", label: <SunIcon className="h-4 w-4" />, title: "Light" },
+  { value: "dark", label: <MoonIcon className="h-4 w-4" />, title: "Dark" },
+] as const;
+
+const CHAT_FONTS: { value: ChatFontChoice; label: string }[] = [
+  { value: "sans", label: "IBM Plex Sans" },
+  { value: "serif", label: "Source Serif" },
+  { value: "system", label: "System font" },
+];
+
+const MOTION = [
+  { value: "system", label: "System" },
+  { value: "reduced", label: "Reduced" },
+] as const;
+
+/** Applied the moment it's picked, not with Save. */
+function AppearanceSection() {
+  const appearance = useAppearance();
+  return (
+    <SettingsSection title="Appearance">
+      <SettingRows>
+        <SettingRow
+          label="Theme"
+          control={<SegmentedControl value={appearance.theme} options={THEMES} onChange={(v) => void setAppearance("theme", v)} />}
+        />
+        <SettingRow
+          label="Chat font"
+          control={
+            <select
+              aria-label="Chat font"
+              className={`${fieldClass} w-48`}
+              value={appearance.chatFont}
+              onChange={(e) => void setAppearance("chatFont", e.target.value as ChatFontChoice)}
+            >
+              {CHAT_FONTS.map((font) => (
+                <option key={font.value} value={font.value}>
+                  {font.label}
+                </option>
+              ))}
+            </select>
+          }
+        />
+        <SettingRow
+          label="Motion"
+          description="Reduce animation in streaming responses and other parts of the interface."
+          control={<SegmentedControl value={appearance.motion} options={MOTION} onChange={(v) => void setAppearance("motion", v)} />}
+        />
+      </SettingRows>
+    </SettingsSection>
+  );
+}
+
 export function GeneralTab({ values, onChange }: GeneralTabProps) {
   const field = (key: string) => GENERAL_FIELDS.find((f) => f.key === key)!;
   const maxTurns = field(MAX_TURNS_KEY);
   return (
     <div className="flex flex-col gap-10">
+      <AppearanceSection />
+
       <SettingsSection title="Model">
         <SettingRows>
           <SettingRow

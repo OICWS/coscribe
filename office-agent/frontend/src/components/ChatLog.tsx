@@ -184,7 +184,7 @@ export function ChatLog({
 
   if (items.length === 0) {
     return (
-      <div data-testid="chat-log" className="flex-1 overflow-y-auto">
+      <div data-testid="chat-log" className="chat-font flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <div
@@ -201,7 +201,7 @@ export function ChatLog({
   }
 
   return (
-    <div data-testid="chat-log" className="flex-1 overflow-y-auto" ref={scrollRef}>
+    <div data-testid="chat-log" className="chat-font flex-1 overflow-y-auto" ref={scrollRef}>
       <div className="mx-auto flex w-full max-w-[880px] flex-col gap-3 px-4 py-4">
         {olderStatus === "loading" && (
           <p className="self-center text-xs text-[var(--muted)]">Loading earlier messages...</p>

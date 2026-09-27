@@ -7172,3 +7172,35 @@ def test_browser_host_is_closed_when_not_started_by_the_desktop_app(
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         headers = {"x-coscribe-browser-token": ""}
         assert client.get("/internal/browser-host", headers=headers).status_code == 403
+
+
+def test_appearance_settings_save_to_env_and_come_back_without_a_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    updates = {
+        "COSCRIBE_THEME": "dark",
+        "COSCRIBE_CHAT_FONT": "serif",
+        "COSCRIBE_MOTION": "reduced",
+    }
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        body = client.post("/api/config", json={"updates": updates}).json()
+        config = client.get("/api/config").json()
+
+    assert body == {"restart_required": False, "rejected": {}}
+    assert {key: config[key] for key in updates} == updates
+
+
+def test_appearance_settings_refuse_values_the_app_does_not_know(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        body = client.post("/api/config", json={"updates": {"COSCRIBE_THEME": "purple"}}).json()
+
+    assert "COSCRIBE_THEME" in body["rejected"]
+    assert "COSCRIBE_THEME" not in dotenv_values(tmp_path / ".env")

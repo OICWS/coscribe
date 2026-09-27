@@ -17,6 +17,7 @@ import { pageAgent } from "./browserAgentPage";
 import { isAllowed, requestPermission } from "./browserPermissions";
 import {
   BROWSER_AGENT_EVENT,
+  MAX_TABS,
   activeTab,
   allTabs,
   closeTab,
@@ -26,6 +27,7 @@ import {
   selectTab,
   setViewHidden,
   tabInfo,
+  tabLimitReached,
   waitForPanelOpen,
   isPanelOpen,
   type Tab,
@@ -173,6 +175,9 @@ async function run(command: Command): Promise<Record<string, unknown>> {
   if (command.action === "tabs") {
     const op = String(args.op);
     if (op === "new") {
+      if (tabLimitReached()) {
+        throw new Error(`All ${MAX_TABS} tabs are in use -- close one with browser_tabs("close") or reuse the current tab.`);
+      }
       const tab = createTab();
       selectTab(tab.id);
       if (args.url) await load(tab.view.webContents, String(args.url));

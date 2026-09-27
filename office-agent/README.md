@@ -1314,8 +1314,8 @@ through the `browser_*` tools -- `browser_navigate`, `browser_snapshot`,
 `browser_click`, `browser_type`, `browser_press_key`,
 `browser_select_option`, `browser_hover`, `browser_scroll`,
 `browser_wait_for`, `browser_navigate_back`, `browser_tabs`. The panel
-opens by itself when the AI starts, every step happens in front of you (an
-orange frame marks the page it's working in, a dot where it clicks, and a
+opens by itself when the AI starts, every step happens in front of you (a
+blue frame marks the page it's working in, a dot where it clicks, and a
 "coscribe is using the browser · Stop" bar), and you can take over at any
 moment -- sign in, solve a CAPTCHA, or point at something: **Select
 element** sends one element (a crop plus its text); the **pen** freezes
@@ -1339,6 +1339,9 @@ any words you wrote on it.
   how an unattended scheduled task gets through without a prompt (an
   unanswered prompt counts as no after three minutes). Kept by the
   desktop app in `browser-settings.json` in its user-data folder.
+- Up to 9 tabs, as in Claude's browser: past that "+" is disabled, a link
+  that would open a new tab loads in the current one, and the AI is told
+  to close or reuse a tab.
 - **Links** in chat messages open in a Browser panel tab (⋮ → "Open links
   in built-in browser" switches to your own browser); the app window
   never navigates away.
@@ -1817,10 +1820,20 @@ The **+** button next to the message box opens three things:
   `providers.json` file the `COSCRIBE_PROVIDERS_CONFIG_PATH` setting
   points at (see [Custom LLM providers](#custom-llm-providers) above). API
   keys are masked in the configured list, same as the API Keys tab.
-- **Tools settings tab** -- a read-only, grouped list of the built-in tools
-  the Coordinator always has access to (file/document/spreadsheet/task/
+- **Appearance** (top of Settings → General) -- Theme (match the system,
+  light or dark), Chat font (IBM Plex Sans, the default; Source Serif 4,
+  bundled under the OFL; or the system's own UI font) and Motion (follow
+  the system, or reduced). Applied the moment you pick it, and saved as
+  `COSCRIBE_THEME`, `COSCRIBE_CHAT_FONT`, `COSCRIBE_MOTION` in `.env` --
+  the desktop app serves the page from a new port each launch, so browser
+  storage wouldn't keep it. Claude's own Anthropic Serif isn't offered: it
+  is Anthropic's proprietary typeface and can't be redistributed.
+- **Tools settings tab** -- a read-only list of the built-in tools the
+  Coordinator always has access to (file/document/spreadsheet/task/
   memory/subagent, plus Skill-loading tools if any Skills are configured),
-  each with its description and a "requires approval" badge for medium-risk
+  in collapsible categories (collapsed at first, each with its tool
+  count), each tool with the first sentence of its description and a
+  "requires approval" badge for medium-risk
   tools. Backed by `GET /api/tools`, which builds a real Coordinator agent
   (the same entrypoint `cli.py`/the WebSocket session use) and reads off its
   tool list, so it can never drift out of sync with what the agent actually

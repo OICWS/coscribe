@@ -47,6 +47,9 @@ import { useBackdropOpen } from "../lib/titleBar";
 import { PickedPreview, type BrowserCapture, type PickedElement } from "./PickedPreview";
 import { usePanelWidth } from "../lib/usePanelWidth";
 
+// Matches the desktop app's own limit (browserPanel.ts's MAX_TABS).
+const MAX_TABS = 9;
+
 const iconButton =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-35 disabled:hover:bg-transparent";
 
@@ -76,15 +79,20 @@ function TabButton({
 }) {
   const [faviconFailed, setFaviconFailed] = useState(false);
   useEffect(() => setFaviconFailed(false), [tab.favicon]);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [active]);
   return (
     <div
       role="tab"
       aria-selected={active}
       title={tab.url || tab.title}
-      className={`group flex h-7 min-w-0 max-w-[180px] shrink cursor-default items-center gap-1.5 rounded-lg border pl-2 pr-1 text-[13px] ${
+      ref={ref}
+      className={`@container group flex h-7 max-w-[180px] flex-1 basis-[180px] cursor-default items-center gap-1.5 rounded-lg border px-1.5 text-[13px] ${
         active
-          ? "border-[var(--border-hover)] bg-[var(--bg)] text-[var(--fg)]"
-          : "border-transparent text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+          ? "min-w-[56px] border-[var(--border-hover)] bg-[var(--bg)] text-[var(--fg)]"
+          : "min-w-[26px] border-transparent text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
       }`}
       onMouseDown={(e) => {
         // Middle-click closes, as in a browser.
@@ -106,7 +114,7 @@ function TabButton({
       <button
         type="button"
         aria-label={`Close ${tab.title || "tab"}`}
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+        className={`${active ? "flex" : "hidden group-hover:flex @max-[80px]:!hidden"} h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]`}
         onClick={(e) => {
           e.stopPropagation();
           onClose();
@@ -279,7 +287,15 @@ export function DesktopBrowserPanel({
       />
 
       <div className="flex h-11 items-center gap-1 px-2">
-        <div role="tablist" aria-label="Tabs" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+        <div
+          role="tablist"
+          aria-label="Tabs"
+          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]"
+          onWheel={(e) => {
+            // Only a narrow panel overflows, and a mouse wheel has no sideways axis.
+            if (e.deltaY) e.currentTarget.scrollLeft += e.deltaY;
+          }}
+        >
           {tabs.map((tab) => (
             <TabButton
               key={tab.id}
@@ -289,10 +305,17 @@ export function DesktopBrowserPanel({
               onClose={() => void browserPanelCloseTab(tab.id)}
             />
           ))}
-          <button type="button" title="New tab" aria-label="New tab" className={iconButton} onClick={() => void browserPanelNewTab()}>
-            <PlusIcon className="h-4 w-4" />
-          </button>
         </div>
+        <button
+          type="button"
+          title={tabs.length >= MAX_TABS ? `Up to ${MAX_TABS} tabs can be open` : "New tab"}
+          aria-label="New tab"
+          disabled={tabs.length >= MAX_TABS}
+          className={iconButton}
+          onClick={() => void browserPanelNewTab()}
+        >
+          <PlusIcon className="h-4 w-4" />
+        </button>
         <button
           type="button"
           title="More"

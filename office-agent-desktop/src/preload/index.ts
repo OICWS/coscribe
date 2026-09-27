@@ -87,6 +87,7 @@ interface BrowserPanelPickedPayload {
 const SHOW_APP_MENU_CHANNEL = "window:show-app-menu";
 const SET_TITLE_BAR_COLORS_CHANNEL = "window:set-title-bar-colors";
 const SHOW_SHORTCUTS_CHANNEL = "app:show-shortcuts";
+const SET_THEME_SOURCE_CHANNEL = "window:set-theme-source";
 
 contextBridge.exposeInMainWorld("coscribeDesktop", {
   /** The page draws the window's top bar (see main/windowChrome.ts). */
@@ -95,6 +96,10 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
   /** Opens the application menu at a point in the window, in CSS pixels. */
   showAppMenu(x: number, y: number): void {
     ipcRenderer.send(SHOW_APP_MENU_CHANNEL, { x, y });
+  },
+
+  setThemeSource(theme: string): void {
+    ipcRenderer.send(SET_THEME_SOURCE_CHANNEL, theme);
   },
 
   /** Recolors the OS window buttons to match the page's theme, as #rrggbb. */

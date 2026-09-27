@@ -14,6 +14,7 @@ export const TITLE_BAR_HEIGHT = 40;
 const SHOW_APP_MENU_CHANNEL = "window:show-app-menu";
 const SET_TITLE_BAR_COLORS_CHANNEL = "window:set-title-bar-colors";
 const SHOW_SHORTCUTS_CHANNEL = "app:show-shortcuts";
+const SET_THEME_SOURCE_CHANNEL = "window:set-theme-source";
 
 interface TitleBarColors {
   color: string;
@@ -99,6 +100,11 @@ export function registerWindowChromeHandlers(): void {
       x: Math.round(Number(position?.x) || 0),
       y: Math.round(Number(position?.y) || 0),
     });
+  });
+
+  // The page's theme choice, so native menus and dialogs match it.
+  ipcMain.on(SET_THEME_SOURCE_CHANNEL, (_event, theme: unknown) => {
+    if (theme === "system" || theme === "light" || theme === "dark") nativeTheme.themeSource = theme;
   });
 
   ipcMain.on(SET_TITLE_BAR_COLORS_CHANNEL, (event, colors: TitleBarColors) => {
