@@ -16,16 +16,16 @@ export interface SettingsField {
 export const GENERAL_FIELDS: SettingsField[] = [
   {
     key: "COSCRIBE_DEFAULT_MODEL",
-    label: "Default Model",
+    label: "Default model",
     placeholder: "provider:model",
     description:
-      "The model a new session starts with, from the providers you've set up. Switch models on any thread from its own picker.",
+      "What a new conversation starts with. Each conversation can switch from its own model picker.",
   },
   {
     key: "COSCRIBE_MAX_TURNS",
-    label: "Max Turns",
+    label: "Max turns",
     placeholder: "20",
-    description: "Caps how many tool-calling turns a single agent loop can take before stopping itself.",
+    description: "The most tool steps one reply can take before it stops.",
   },
 ];
 
@@ -57,33 +57,33 @@ export const SKILLS_DIR_KEY = "COSCRIBE_SKILLS_DIR";
 export const WORKSPACE_FIELDS: SettingsField[] = [
   {
     key: SKILLS_DIR_KEY,
-    label: "Skills Directory",
+    label: "Skills folder",
     placeholder: "./skills",
-    description: "Where your own saved Skills live, alongside the built-in ones.",
+    description: "Where your own skills are kept, alongside the built-in ones.",
   },
   {
     key: "COSCRIBE_MEMORY_PATH",
-    label: "Memory File",
+    label: "Memory file",
     placeholder: "./MEMORY.md",
-    description: "Where the Global Instructions below (and the remember tool) are stored.",
+    description: "Where your instructions and anything coscribe is asked to remember are kept.",
   },
   {
     key: "COSCRIBE_MCP_CONFIG_PATH",
-    label: "MCP Config Path",
+    label: "Connectors config file",
     placeholder: "(none)",
-    description: "An external MCP server config file to load in addition to the Connectors panel.",
+    description: "An MCP server config file loaded alongside the Connectors page.",
   },
   {
     key: "COSCRIBE_PROVIDERS_CONFIG_PATH",
-    label: "Providers Config Path",
+    label: "Providers config file",
     placeholder: "(none)",
-    description: "An external custom-provider config file to load in addition to the Providers panel.",
+    description: "A custom-provider config file loaded alongside the Providers page.",
   },
   {
     key: "COSCRIBE_HOOKS_CONFIG_PATH",
-    label: "Hooks Config Path",
+    label: "Hooks config file",
     placeholder: "(none)",
-    description: "A hooks config file -- shell commands that run on tool calls and other session events.",
+    description: "Commands that run on tool calls and other conversation events.",
   },
 ];
 

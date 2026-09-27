@@ -651,7 +651,9 @@ whatever they've signed in to there. Use it when a page needs a login, \
 JavaScript, clicking or filling in forms, or when the user asks you to do \
 something on a website; plain reading of a public page is cheaper with \
 read_web_page. Work in small steps: navigate, browser_snapshot to get refs, \
-act on a ref, snapshot again. Never type passwords, payment details or \
+act on a ref, snapshot again. The first time you use a site in a \
+conversation the user may be asked to allow it; if they don't, leave that \
+site alone unless they ask again. Never type passwords, payment details or \
 other secrets yourself -- if a page asks for a login or a CAPTCHA, stop and \
 ask the user to do that step in the Browser panel, then continue. Before \
 anything that sends, buys, posts, deletes or submits on the user's behalf, \

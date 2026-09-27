@@ -111,6 +111,38 @@ export async function browserPanelSetViewHidden(hidden: boolean): Promise<void> 
   await window.coscribeDesktop.browserPanelSetViewHidden?.(hidden);
 }
 
+export interface BrowserPermissionRequest {
+  requestId: number;
+  host: string;
+  threadId: string;
+}
+
+export type BrowserPermissionAnswer = "once" | "always" | "deny";
+
+export function onBrowserPermission(callback: (request: BrowserPermissionRequest) => void): () => void {
+  if (!window.coscribeDesktop?.onBrowserPermission) return () => {};
+  const stop = window.coscribeDesktop.onBrowserPermission(callback as (payload: unknown) => void);
+  // One may already be waiting from before this subscribed.
+  void window.coscribeDesktop.requestPendingBrowserPermission?.();
+  return stop;
+}
+
+export async function answerBrowserPermission(requestId: number, answer: BrowserPermissionAnswer): Promise<void> {
+  await window.coscribeDesktop.answerBrowserPermission?.(requestId, answer);
+}
+
+export async function getAllowedSites(): Promise<string[]> {
+  return (await window.coscribeDesktop.getAllowedSites?.()) ?? [];
+}
+
+export async function setAllowedSites(sites: string[]): Promise<string[]> {
+  return (await window.coscribeDesktop.setAllowedSites?.(sites)) ?? [];
+}
+
+export function onShowAllowedSites(callback: () => void): () => void {
+  return window.coscribeDesktop?.onShowAllowedSites?.(callback) ?? (() => {});
+}
+
 export function browserPanelShowMenu(x: number, y: number): void {
   window.coscribeDesktop.browserPanelShowMenu?.(x, y);
 }
@@ -190,6 +222,12 @@ declare global {
       browserPanelOpenExternal(): Promise<void>;
       browserPanelShowMenu?(x: number, y: number): void;
       browserPanelCapture?(): Promise<unknown>;
+      onBrowserPermission?(callback: (payload: unknown) => void): () => void;
+      answerBrowserPermission?(requestId: number, answer: string): Promise<void>;
+      requestPendingBrowserPermission?(): Promise<void>;
+      getAllowedSites?(): Promise<string[]>;
+      setAllowedSites?(sites: string[]): Promise<string[]>;
+      onShowAllowedSites?(callback: () => void): () => void;
       browserPanelSetViewHidden?(hidden: boolean): Promise<void>;
       onBrowserPanelTabs(callback: (payload: unknown) => void): () => void;
       onBrowserAgent?(callback: (payload: unknown) => void): () => void;

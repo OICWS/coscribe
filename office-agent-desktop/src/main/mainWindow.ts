@@ -25,6 +25,7 @@ import { BrowserWindow, app } from "electron";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { splashPagePath } from "./paths";
+import { openLinkFromApp } from "./browserPanel";
 import { titleBarWindowOptions } from "./windowChrome";
 import { sidecarProcess, shouldKeepRunningInBackground } from "./sidecar";
 
@@ -135,6 +136,19 @@ export function createMainWindow(port: number, preloadPath: string): BrowserWind
 
   void mainWindow.loadFile(splashPagePath());
   void waitForSidecarThenNavigate(mainWindow, port);
+
+  // Links in the app's pages open in a browser tab, never in (or over) the
+  // app window itself.
+  const appOrigin = `http://127.0.0.1:${port}/`;
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    openLinkFromApp(url);
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (url.startsWith(appOrigin) || url.startsWith("file:")) return;
+    event.preventDefault();
+    openLinkFromApp(url);
+  });
 
   // Close hides instead of quitting by default -- see this file's own
   // header for why: the sidecar's own scheduled-task poller has to keep

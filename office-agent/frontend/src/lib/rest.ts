@@ -1,10 +1,8 @@
 import type {
   BrowseDirsResponse,
-  BrowserCheckResponse,
   ConfigResponse,
   ConfigUpdateResult,
   CreateScheduledTaskPayload,
-  InstallBrowserResponse,
   McpCatalogEntry,
   McpServerUpdateResult,
   McpServersResponse,
@@ -185,8 +183,6 @@ export const addMcpServer = (
 export const removeMcpServer = (name: string) => del<Record<string, never>>(`/api/mcp/servers/${encodeURIComponent(name)}`);
 export const reconnectMcpServer = (name: string) =>
   postJson<McpReconnectResult>(`/api/mcp/servers/${encodeURIComponent(name)}/reconnect`, {});
-export const checkBrowser = () => getJson<BrowserCheckResponse>("/api/mcp/browser-check");
-export const installBrowser = () => postJson<InstallBrowserResponse>("/api/mcp/install-browser", {});
 export const getNpmLatestVersion = (pkg: string) =>
   getJson<NpmLatestVersionResponse>(`/api/mcp/npm-latest-version?package=${encodeURIComponent(pkg)}`);
 export const bumpMcpVersion = (name: string, pkg: string, version: string) =>

@@ -4,6 +4,7 @@ import { useFetchOnActive } from "../../lib/useFetchOnActive";
 import type { ProviderCatalogEntry, ProvidersResponse } from "../../types/settings";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { FetchRetry } from "./FetchRetry";
+import { SettingRows, SettingsSection, fieldClass, primaryButtonClass, secondaryButtonClass } from "./SettingRow";
 
 /** Mirrors the backend's builtin-provider name list (app.py's BUILTIN_PROVIDERS) --
  * a name matching one of these (case-insensitively) routes through the
@@ -96,99 +97,98 @@ export function ProvidersTab({ active }: ProvidersTabProps) {
     refresh();
   };
 
+  const detail = (info: (typeof configured)[string]) =>
+    info.builtin
+      ? `${info.default_model || "No default model"} · key ${info.masked_key ?? "not set"}`
+      : `${info.base_url} · key ${info.masked_key ?? "not set"}`;
+
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-xs text-[var(--muted)]">
-        Anthropic, OpenAI, and Gemini are built in. Any other OpenAI-compatible API can be added as a custom
-        provider. Set Default Model on the General tab as <code>name:model</code> once configured here.
-      </p>
+    <div className="flex flex-col gap-10">
       <FetchRetry status={loadStatus} error={loadError} onRetry={refresh} />
 
-      <div>
-        <h4 className="mb-2 text-sm font-medium">Catalog</h4>
-        <div className="grid grid-cols-2 gap-2">
+      <SettingsSection title="Your providers" description="The services coscribe's models come from. Pick the default one on the General page.">
+        {loadStatus === "success" && Object.keys(configured).length === 0 ? (
+          <p className="py-3 text-sm text-[var(--muted)]">No providers yet -- add one below.</p>
+        ) : (
+          <SettingRows>
+            {Object.entries(configured).map(([providerName, info]) => (
+              <div key={providerName} className="flex items-center justify-between gap-4 py-3.5">
+                <div className="min-w-0">
+                  <div className="text-[15px]">{providerName}</div>
+                  <div className="truncate text-[13px] text-[var(--muted)]">{detail(info)}</div>
+                </div>
+                <button type="button" className={secondaryButtonClass} onClick={() => setRemoveTarget(providerName)}>
+                  Remove
+                </button>
+              </div>
+            ))}
+          </SettingRows>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        title="Add a provider"
+        description="Anthropic, OpenAI and Gemini are built in; any other OpenAI-compatible service can be added. Pick one to fill in the form, or enter it yourself."
+      >
+        <div className="mt-3 grid grid-cols-2 gap-2">
           {catalog.map((entry) => {
             const isConfigured = entry.name in configured;
             return (
-              <div key={entry.name} className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2">
+              <button
+                key={entry.name}
+                type="button"
+                title={isConfigured ? `Update ${entry.name}` : `Add ${entry.name}`}
+                className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--field-bg)] px-3.5 py-2.5 text-left hover:border-[var(--border-hover)]"
+                onClick={() => prefillFrom(entry)}
+              >
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">
-                    {entry.name}
-                    {isConfigured ? " (configured)" : ""}
-                  </div>
-                  <div className="truncate text-xs text-[var(--muted)]">{entry.description}</div>
+                  <div className="truncate text-sm font-medium">{entry.name}</div>
+                  <div className="truncate text-[13px] text-[var(--muted)]">{entry.description}</div>
                 </div>
-                <button
-                  type="button"
-                  title={isConfigured ? `Update ${entry.name}` : `Add ${entry.name}`}
-                  className="ml-2 shrink-0 rounded-md border border-[var(--border)] px-2 py-1 text-sm"
-                  onClick={() => prefillFrom(entry)}
-                >
-                  {isConfigured ? "✓" : "+"}
-                </button>
-              </div>
+                <span className={`shrink-0 text-[13px] ${isConfigured ? "text-[var(--muted)]" : "text-[var(--fg)]"}`}>
+                  {isConfigured ? "Added" : "Add"}
+                </span>
+              </button>
             );
           })}
         </div>
-      </div>
 
-      <div>
-        <h4 className="mb-2 text-sm font-medium">Configured</h4>
-        <div className="flex flex-col gap-1">
-          {Object.entries(configured).map(([providerName, info]) => (
-            <div key={providerName} className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
-              <div className="min-w-0">
-                <div className="font-medium">{providerName}</div>
-                <div className="truncate text-xs text-[var(--muted)]">
-                  {info.builtin
-                    ? `${info.default_model || "no default model set"} -- key ${info.masked_key ?? "no key"}`
-                    : `${info.base_url} -- key ${info.masked_key ?? "no key"}`}
-                </div>
-              </div>
-              <button type="button" className="text-[var(--muted)] hover:text-red-500" onClick={() => setRemoveTarget(providerName)}>
-                ×
-              </button>
-            </div>
-          ))}
-          {loadStatus === "success" && Object.keys(configured).length === 0 && <div className="text-sm text-[var(--muted)]">No providers configured.</div>}
+        <div className="mt-5 grid grid-cols-2 gap-x-3 gap-y-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-[var(--muted)]">Name</span>
+            <input className={fieldClass} placeholder="e.g. deepseek" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-[var(--muted)]">Base URL</span>
+            <input
+              className={`${fieldClass} disabled:opacity-40`}
+              placeholder={baseUrlDisabled ? "Not needed for built-in providers" : "https://api.example.com/v1"}
+              value={baseUrl}
+              disabled={baseUrlDisabled}
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-[var(--muted)]">API key</span>
+            <input type="password" className={fieldClass} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-[var(--muted)]">Default model (optional)</span>
+            <input
+              className={fieldClass}
+              placeholder="e.g. deepseek-chat"
+              value={defaultModel}
+              onChange={(e) => setDefaultModel(e.target.value)}
+            />
+          </label>
         </div>
-      </div>
-
-      <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] p-3">
-        <h4 className="text-sm font-medium">Add / update a provider</h4>
-        <input
-          className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-          placeholder="Name (e.g. deepseek)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <input
-          className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none disabled:opacity-40"
-          placeholder={baseUrlDisabled ? "(not needed for built-in providers)" : "Base URL"}
-          value={baseUrl}
-          disabled={baseUrlDisabled}
-          onChange={(e) => setBaseUrl(e.target.value)}
-        />
-        <input
-          type="password"
-          className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-          placeholder="API key"
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-        />
-        <input
-          className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-          placeholder="Default model (optional)"
-          value={defaultModel}
-          onChange={(e) => setDefaultModel(e.target.value)}
-        />
-        <div className="flex items-center gap-2">
-          <button type="button" className="rounded-md bg-[var(--accent)] px-3 py-1 text-sm text-[var(--accent-fg)]" onClick={submit}>
-            Save
+        <div className="mt-4 flex items-center justify-end gap-3">
+          {status && <span className={`mr-auto text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>}
+          <button type="button" className={primaryButtonClass} onClick={submit}>
+            Save provider
           </button>
-          {status && <span className={`text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>}
         </div>
-      </div>
+      </SettingsSection>
 
       {removeTarget && (
         <ConfirmDialog

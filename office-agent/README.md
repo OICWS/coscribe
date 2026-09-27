@@ -505,9 +505,9 @@ Either way the task keeps its runs and notes, and nothing changes until
 the user saves.
 
 **Connector tools in steps.** A tool step can call a connected
-connector's (MCP) tools, not only built-in ones -- the Playwright
-connector's browser tools, for example, so a web task done once in chat
-can become fixed browser steps. Their parameters come from the tool's
+connector's (MCP) tools, not only built-in ones -- the Office 365
+connector's, for example, so a task done once in chat can become fixed
+steps. Their parameters come from the tool's
 JSON schema (the editor's argument form and the curator's tool list use
 them); their text replies become values (JSON decoded, and for replies
 laid out as `### Result` / `### Ran Playwright code` sections, the
@@ -1332,13 +1332,32 @@ any words you wrote on it.
   everyday browser (⋮ → "Clear browsing data…" clears it; ⋮ → "Save
   screenshot…" saves the page as a PNG). Sites get no
   camera, microphone, location or notification permission.
-- Reading a page needs no approval; clicking, typing, pressing keys and
-  choosing options are gated like other actions with outside effects
-  (automatic in Auto mode unless the reviewer objects). The AI is told
+- **Site permission**: the first time the AI's browser tools touch a
+  site in a conversation, the Browser panel asks -- Don't allow, Allow
+  for this chat, or Always allow. ⋮ → "Manage allowed sites…" lists the
+  always-allowed ones (add, remove, clear all); pre-allowing a site is
+  how an unattended scheduled task gets through without a prompt (an
+  unanswered prompt counts as no after three minutes). Kept by the
+  desktop app in `browser-settings.json` in its user-data folder.
+- **Links** in chat messages open in a Browser panel tab (⋮ → "Open links
+  in built-in browser" switches to your own browser); the app window
+  never navigates away.
+- Beyond the site prompt, reading a page needs no approval; clicking,
+  typing, pressing keys and choosing options are gated like other actions
+  with outside effects (automatic in Auto mode unless the reviewer
+  objects). The AI is told
   never to type passwords or payment details and to ask before anything
   that sends, buys, posts or deletes.
 - Only http/https pages: the AI can't open `file://` pages to get around
   the folders a conversation has.
+- No cookie import from your everyday browser: Chrome and Edge encrypt
+  their cookies with an app-bound key other programs can't use, so only
+  Firefox could be read, and bringing live sign-ins into a browser an AI
+  drives isn't worth that narrow gain. Sign in once in the Browser panel
+  instead; it stays signed in.
+- This replaces the Playwright connector, which is no longer in the
+  connector catalog: it drove a separate browser window with none of the
+  panel's sign-ins, and returned a full page snapshot after every action.
 - How it's wired: the desktop app starts the server with a random token,
   connects to `/internal/browser-host` with it and carries out each
   command on its tabs (`office-agent-desktop/src/main/browserAgent.ts`);
@@ -1501,7 +1520,6 @@ see `../ARCHITECTURE.md`):
 ```json
 {
   "mcpServers": {
-    "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] },
     "custom-db": {
       "command": "npx",
       "args": ["my-mcp-server"],
@@ -1538,11 +1556,9 @@ reload the page or open a new thread to pick up the change). The
 any other setting, since it isn't a long-running server multiple sessions
 share.
 
-The built-in catalog's `playwright` entry pins an exact
-`@playwright/mcp` version rather than `@latest` — an unpinned tag makes
-`npx` hit the npm registry on every single startup just to check for a
-newer version, which is most of the extra delay adding it used to add.
-Any configured connector whose args contain a `package@version` token
+Catalog entries pin an exact package version rather than `@latest` —
+an unpinned tag makes `npx` hit the npm registry on every startup just
+to check for a newer version. Any configured connector whose args contain a `package@version` token
 (scoped or not) gets a "Check for updates" link in its Configured card,
 which looks up the real latest version on npm and, if newer, updates that
 one arg in place and reconnects live — no need to remove and re-add.
@@ -1783,9 +1799,10 @@ The **+** button next to the message box opens three things:
   message, so the Coordinator reaches for `read_docx`/`read_pdf`/
   `read_file` on it like any other workspace file -- both kinds show up
   as removable chips above the message box while queued.
-- **Add connectors** -- a small curated catalog (`playwright` for browser
-  automation, plus `office365`; Slack is set up by hand in the Custom tab; reading a web page is the
-  built-in `read_web_page` tool, no connector needed) plus a form for any custom MCP server, backed by
+- **Add connectors** -- a small curated catalog (`office365`; Slack is
+  set up by hand in the Custom tab; reading a web page is the built-in
+  `read_web_page` tool and using websites is the desktop app's own
+  browser, so neither needs a connector) plus a form for any custom MCP server, backed by
   `GET`/`POST /api/mcp/servers` and `DELETE /api/mcp/servers/{name}` in
   `web/app.py`. These are the same stdio MCP servers the CLI's
   `COSCRIBE_MCP_CONFIG_PATH` config file already supports (see below) --

@@ -2,12 +2,10 @@ import { useEffect, useState } from "react";
 import {
   addMcpServer,
   bumpMcpVersion,
-  checkBrowser,
   getConfig,
   getMcpCatalog,
   getMcpServers,
   getNpmLatestVersion,
-  installBrowser,
   reconnectMcpServer,
   removeMcpServer,
 } from "../../lib/rest";
@@ -388,7 +386,6 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "connected" | "not-connected">("all");
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
-  const [browserPrompt, setBrowserPrompt] = useState<McpCatalogEntry | null>(null);
   const [updateChecks, setUpdateChecks] = useState<Record<string, string>>({});
   const [configPath, setConfigPath] = useState<string | null | undefined>(undefined);
 
@@ -490,30 +487,6 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
     }
   };
 
-  const addWithBrowserCheck = async (entry: McpCatalogEntry) => {
-    const check = await checkBrowser();
-    if (!check.checked) {
-      await performAdd(entry.name, { command: entry.command, args: entry.args });
-      return;
-    }
-    if (check.path) {
-      await performAdd(entry.name, { command: entry.command, args: [...entry.args, "--executable-path", check.path] });
-      return;
-    }
-    setBrowserPrompt(entry);
-  };
-
-  const installBrowserThenAdd = async (entry: McpCatalogEntry) => {
-    setBrowserPrompt(null);
-    setStatus({ text: "Installing Chromium -- this can take a while.", error: false });
-    const result = await installBrowser();
-    if (!result.success) {
-      setStatus({ text: `Install failed -- ${result.error ?? "unknown error"}`, error: true });
-      return;
-    }
-    await performAdd(entry.name, { command: entry.command, args: entry.args });
-  };
-
   const onCatalogAdd = (entry: McpCatalogEntry) => {
     if (entry.needs_config) {
       // No prefill sub-step needed anymore -- the manual form already
@@ -521,10 +494,6 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
       // catalog entry's own required env keys as a hint via the
       // description above it.
       setStatus({ text: `${entry.name} needs its own token -- fill in "Add manually" below with the required env vars.`, error: false });
-      return;
-    }
-    if (entry.needs_browser_check) {
-      addWithBrowserCheck(entry);
       return;
     }
     performAdd(entry.name, { command: entry.command, args: entry.args });
@@ -616,12 +585,13 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Connectors</h2>
+        <h2 className="text-[22px] font-semibold">Connectors</h2>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 rounded-md border border-[var(--border)] px-2.5 py-1.5">
-            <SearchIcon className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
+          <div className="flex h-9 w-60 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--field-bg)] px-3 focus-within:border-[var(--focus)] focus-within:ring-2 focus-within:ring-[var(--focus)]/15">
+            <SearchIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
             <input
-              className="w-40 min-w-0 bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
+              aria-label="Search connectors"
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
               placeholder="Search connectors"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -637,12 +607,12 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
         </div>
       </div>
 
-      <p className="text-xs text-[var(--muted)]">
-        MCP servers run local commands or talk to a remote MCP endpoint -- only add ones you trust. Add/remove/update
-        applies immediately, no restart needed -- open conversations pick up the change too.
+      <p className="text-sm leading-relaxed text-[var(--muted)]">
+        Connectors (MCP servers) give coscribe tools from other apps. They run commands on this computer or reach a remote
+        server, so add only ones you trust. Changes apply right away, open conversations included.
       </p>
       {configPath !== undefined && (
-        <p className="truncate text-xs text-[var(--muted)]">
+        <p className="truncate text-[13px] text-[var(--muted)]">
           Config file: {configPath ?? "not created yet -- will be written to ./mcp.json on first add"}
         </p>
       )}
@@ -690,20 +660,6 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
             ))}
           </tbody>
         </table>
-      )}
-
-      {browserPrompt && (
-        <div className="rounded-lg border border-[var(--accent)] p-3 text-sm">
-          <div className="mb-2">Chromium isn't installed yet -- {browserPrompt.name} needs it to run.</div>
-          <div className="flex gap-2">
-            <button type="button" className="rounded-md bg-[var(--accent)] px-3 py-1 text-sm text-[var(--accent-fg)]" onClick={() => installBrowserThenAdd(browserPrompt)}>
-              Install Chromium
-            </button>
-            <button type="button" className="rounded-md border border-[var(--border)] px-3 py-1 text-sm" onClick={() => setBrowserPrompt(null)}>
-              Cancel
-            </button>
-          </div>
-        </div>
       )}
 
       {status && <span className={`text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>}

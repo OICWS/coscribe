@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DirBrowserModal } from "./DirBrowserModal";
-import { SettingRow, SettingRowInput } from "./SettingRow";
+import { CloseIcon, FolderIcon } from "../icons";
+import { SettingRow, SettingRowInput, SettingRows, SettingsSection, fieldClass, secondaryButtonClass } from "./SettingRow";
 import { SKILLS_DIR_KEY, WORKSPACE_FIELDS, WORKSPACE_ROOT_KEY, type DirEntry, type DirPermission } from "./fields";
 
 interface WorkspaceTabProps {
@@ -35,136 +36,111 @@ export function WorkspaceTab({ values, onChange, dirEntries, onDirEntriesChange 
     setAddValue("");
   };
 
-  return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col divide-y divide-[var(--border)]">
-        <SettingRow
-          label="Default Workspace"
-          description="Used for any session that doesn't pick its own folder at start -- each session can have its own workspace (see the folder picker on New Session)."
-          control={
-            <div className="flex items-center gap-2">
-              <SettingRowInput
-                value={values[WORKSPACE_ROOT_KEY] ?? ""}
-                placeholder="./workspace"
-                onChange={(v) => onChange(WORKSPACE_ROOT_KEY, v)}
-              />
-              <button
-                type="button"
-                className="rounded-md border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--card-bg)]"
-                onClick={() => {
-                  setBrowserTarget("root");
-                  setBrowserOpen(true);
-                }}
-              >
-                Browse...
-              </button>
-            </div>
-          }
-        />
-        {WORKSPACE_FIELDS.map((field) => (
-          <SettingRow
-            key={field.key}
-            label={field.label}
-            description={field.description}
-            control={
-              field.key === SKILLS_DIR_KEY ? (
-                <div className="flex items-center gap-2">
-                  <SettingRowInput
-                    value={values[field.key] ?? ""}
-                    placeholder={field.placeholder}
-                    onChange={(v) => onChange(field.key, v)}
-                  />
-                  <button
-                    type="button"
-                    className="rounded-md border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--card-bg)]"
-                    onClick={() => {
-                      setBrowserTarget("skills");
-                      setBrowserOpen(true);
-                    }}
-                  >
-                    Browse...
-                  </button>
-                </div>
-              ) : (
-                <SettingRowInput
-                  value={values[field.key] ?? ""}
-                  placeholder={field.placeholder}
-                  onChange={(v) => onChange(field.key, v)}
-                />
-              )
-            }
-          />
-        ))}
-      </div>
-
-      <div>
-        <h4 className="text-sm text-[var(--fg)]">Other Directories</h4>
-        <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
-          The workspace above is always readable and writable. Give coscribe access to more folders here, each
-          with its own Read only / Read &amp; Write permission.
-        </p>
-        <div className="mt-3 flex flex-col overflow-hidden rounded-lg border border-[var(--border)]">
-          <div className="flex items-center gap-2 bg-[var(--card-bg)] px-3 py-2 text-sm">
-            <span className="flex-1 truncate">{values[WORKSPACE_ROOT_KEY] || "(unset)"}</span>
-            <span className="text-xs text-[var(--muted)]">Read &amp; Write · root</span>
-          </div>
-          {dirEntries.length === 0 ? (
-            <p className="px-3 py-3 text-xs text-[var(--muted)]">No other directories added.</p>
-          ) : (
-            dirEntries.map((entry) => (
-              <div
-                key={entry.path}
-                className="flex items-center gap-2 border-t border-[var(--border)] px-3 py-2 text-sm"
-              >
-                <span className="flex-1 truncate">{entry.path}</span>
-                <select
-                  className="rounded-md border border-[var(--border)] bg-transparent px-1.5 py-0.5 text-xs outline-none"
-                  value={entry.permission}
-                  onChange={(e) => setPermission(entry.path, e.target.value as DirPermission)}
-                >
-                  <option value="read">Read only</option>
-                  <option value="read-write">Read &amp; Write</option>
-                </select>
-                <button
-                  type="button"
-                  className="text-xs text-[var(--muted)] hover:text-red-500"
-                  onClick={() => removeEntry(entry.path)}
-                >
-                  Remove
-                </button>
-              </div>
-            ))
+  const browse = (target: "root" | "skills" | "extra") => {
+    setBrowserTarget(target);
+    setBrowserOpen(true);
+  };
+  const pathRow = (key: string, label: string, description: string, placeholder: string, target?: "root" | "skills") => (
+    <SettingRow
+      key={key}
+      label={label}
+      description={description}
+      control={
+        <div className="flex items-center gap-2">
+          <SettingRowInput value={values[key] ?? ""} placeholder={placeholder} onChange={(v) => onChange(key, v)} />
+          {target && (
+            <button type="button" className={secondaryButtonClass} onClick={() => browse(target)}>
+              Browse…
+            </button>
           )}
         </div>
-        <div className="mt-2 flex gap-2">
+      }
+    />
+  );
+  const field = (key: string) => WORKSPACE_FIELDS.find((f) => f.key === key)!;
+  const fieldRow = (key: string, target?: "skills") =>
+    pathRow(key, field(key).label, field(key).description, field(key).placeholder, target);
+
+  return (
+    <div className="flex flex-col gap-10">
+      <SettingsSection title="Folders">
+        <SettingRows>
+          {pathRow(
+            WORKSPACE_ROOT_KEY,
+            "Default workspace",
+            "Where a conversation works when you don't pick a folder for it.",
+            "./workspace",
+            "root",
+          )}
+          {fieldRow(SKILLS_DIR_KEY, "skills")}
+        </SettingRows>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Other folders"
+        description="coscribe can always read and change the workspace. Give it more folders here, each read-only or read and write."
+      >
+        <div className="mt-3 flex flex-col overflow-hidden rounded-xl border border-[var(--border)]">
+          <div className="flex items-center gap-3 px-4 py-3 text-sm">
+            <FolderIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+            <span className="min-w-0 flex-1 truncate">{values[WORKSPACE_ROOT_KEY] || "(not set)"}</span>
+            <span className="text-[13px] text-[var(--muted)]">Workspace · read and write</span>
+          </div>
+          {dirEntries.map((entry) => (
+            <div key={entry.path} className="flex items-center gap-3 border-t border-[var(--border)] px-4 py-2.5 text-sm">
+              <FolderIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+              <span className="min-w-0 flex-1 truncate">{entry.path}</span>
+              <select
+                aria-label={`Access to ${entry.path}`}
+                className={`${fieldClass} h-8 px-2 text-[13px]`}
+                value={entry.permission}
+                onChange={(e) => setPermission(entry.path, e.target.value as DirPermission)}
+              >
+                <option value="read">Read only</option>
+                <option value="read-write">Read and write</option>
+              </select>
+              <button
+                type="button"
+                aria-label={`Remove ${entry.path}`}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-red-500"
+                onClick={() => removeEntry(entry.path)}
+              >
+                <CloseIcon className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex gap-2">
           <input
-            className="flex-1 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none focus:border-[var(--accent)]"
-            placeholder="/path/to/dir, /another/path"
+            aria-label="Folder to add"
+            className={`${fieldClass} min-w-0 flex-1`}
+            placeholder="Paste a folder path, or several separated by commas"
             value={addValue}
             onChange={(e) => setAddValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") addPaths(addValue);
             }}
           />
-          <button
-            type="button"
-            className="rounded-md border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--card-bg)]"
-            onClick={() => addPaths(addValue)}
-          >
+          <button type="button" className={secondaryButtonClass} disabled={!addValue.trim()} onClick={() => addPaths(addValue)}>
             Add
           </button>
-          <button
-            type="button"
-            className="rounded-md border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--card-bg)]"
-            onClick={() => {
-              setBrowserTarget("extra");
-              setBrowserOpen(true);
-            }}
-          >
-            Browse...
+          <button type="button" className={secondaryButtonClass} onClick={() => browse("extra")}>
+            Browse…
           </button>
         </div>
-      </div>
+      </SettingsSection>
+
+      <SettingsSection title="Files">
+        <SettingRows>{fieldRow("COSCRIBE_MEMORY_PATH")}</SettingRows>
+      </SettingsSection>
+
+      <SettingsSection title="Advanced">
+        <SettingRows>
+          {fieldRow("COSCRIBE_MCP_CONFIG_PATH")}
+          {fieldRow("COSCRIBE_PROVIDERS_CONFIG_PATH")}
+          {fieldRow("COSCRIBE_HOOKS_CONFIG_PATH")}
+        </SettingRows>
+      </SettingsSection>
 
       {browserOpen && (
         <DirBrowserModal

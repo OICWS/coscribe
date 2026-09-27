@@ -11,7 +11,7 @@ import {
 } from "./fields";
 import { GlobalInstructionsSection } from "./GlobalInstructionsSection";
 import { SegmentedControl } from "./SegmentedControl";
-import { SettingRow, SettingRowInput } from "./SettingRow";
+import { SettingRow, SettingRows, SettingsSection, fieldClass } from "./SettingRow";
 
 interface GeneralTabProps {
   values: Record<string, string>;
@@ -22,6 +22,7 @@ type LogLevel = (typeof LOG_LEVELS)[number]["value"];
 type PermissionMode = (typeof PERMISSION_MODES)[number]["value"];
 
 const DEFAULT_MODEL_KEY = "COSCRIBE_DEFAULT_MODEL";
+const MAX_TURNS_KEY = "COSCRIBE_MAX_TURNS";
 
 /** "provider:model" for every provider set up with a default model. */
 function useConfiguredModels(): string[] {
@@ -46,7 +47,7 @@ function DefaultModelSelect({ value, onChange }: { value: string; onChange: (val
   return (
     <select
       aria-label="Default model"
-      className="w-56 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none focus:border-[var(--accent)]"
+      className={`${fieldClass} w-64`}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
@@ -75,67 +76,81 @@ function currentPermissionMode(raw: string | undefined): PermissionMode {
 }
 
 export function GeneralTab({ values, onChange }: GeneralTabProps) {
+  const field = (key: string) => GENERAL_FIELDS.find((f) => f.key === key)!;
+  const maxTurns = field(MAX_TURNS_KEY);
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-xs text-[var(--muted)]">
-        These write to <code>.env</code>. Default Model, Default Mode and Max Turns apply to new sessions right away; Log Level needs
-        a restart of coscribe-web. <code>HTTPS_PROXY</code>/<code>HTTP_PROXY</code> aren't configurable here.
-      </p>
-      <div className="flex flex-col divide-y divide-[var(--border)]">
-        {GENERAL_FIELDS.map((field) => (
+    <div className="flex flex-col gap-10">
+      <SettingsSection title="Model">
+        <SettingRows>
           <SettingRow
-            key={field.key}
-            label={field.label}
-            description={field.description}
+            label={field(DEFAULT_MODEL_KEY).label}
+            description={field(DEFAULT_MODEL_KEY).description}
+            control={<DefaultModelSelect value={values[DEFAULT_MODEL_KEY] ?? ""} onChange={(v) => onChange(DEFAULT_MODEL_KEY, v)} />}
+          />
+          <SettingRow
+            label="Default mode"
+            description="The permission mode a new conversation starts in. Auto lets a reviewer model approve routine work and stop risky actions; Manual asks before every change."
             control={
-              field.key === DEFAULT_MODEL_KEY ? (
-                <DefaultModelSelect value={values[field.key] ?? ""} onChange={(v) => onChange(field.key, v)} />
-              ) : (
-                <SettingRowInput
-                  value={values[field.key] ?? ""}
-                  placeholder={field.placeholder}
-                  onChange={(v) => onChange(field.key, v)}
-                />
-              )
+              <SegmentedControl
+                value={currentPermissionMode(values[PERMISSION_MODE_KEY])}
+                options={PERMISSION_MODES}
+                onChange={(v) => onChange(PERMISSION_MODE_KEY, v)}
+              />
             }
           />
-        ))}
-        <SettingRow
-          label="Default Mode"
-          description="The permission mode a new conversation starts in. Auto lets a reviewer model run routine work and stop risky actions; Manual asks before every change. Switch any conversation from the mode button under the message box. Scheduled tasks keep their own approval setting."
-          control={
-            <SegmentedControl
-              value={currentPermissionMode(values[PERMISSION_MODE_KEY])}
-              options={PERMISSION_MODES}
-              onChange={(v) => onChange(PERMISSION_MODE_KEY, v)}
-            />
-          }
-        />
-        <SettingRow
-          label="Log Level"
-          description="How much detail coscribe-web writes to its terminal/log file -- doesn't affect what you see in the chat UI itself. Info is the right choice for normal use; switch to Debug only while troubleshooting something (e.g. a connector that won't connect), since it prints every tool call's raw arguments and every provider request. Warning/Error trim it down to problems only."
-          control={
-            <SegmentedControl
-              value={currentLogLevel(values[LOG_LEVEL_KEY])}
-              options={LOG_LEVELS}
-              onChange={(v) => onChange(LOG_LEVEL_KEY, v)}
-            />
-          }
-        />
-        <SettingRow
-          label="Keep Running in Background"
-          description="Desktop app only. When on, closing the window keeps coscribe running so scheduled tasks continue -- reopen it from the tray icon. Turn off to fully quit when you close the window."
-          control={
-            <ToggleSwitch
-              on={values[BACKGROUND_ON_CLOSE_KEY] !== "false"}
-              onClick={() =>
-                onChange(BACKGROUND_ON_CLOSE_KEY, values[BACKGROUND_ON_CLOSE_KEY] === "false" ? "true" : "false")
-              }
-            />
-          }
-        />
+          <SettingRow
+            label={maxTurns.label}
+            description={maxTurns.description}
+            control={
+              <input
+                aria-label={maxTurns.label}
+                inputMode="numeric"
+                className={`${fieldClass} w-24 text-right`}
+                value={values[MAX_TURNS_KEY] ?? ""}
+                placeholder={maxTurns.placeholder}
+                onChange={(e) => onChange(MAX_TURNS_KEY, e.target.value)}
+              />
+            }
+          />
+        </SettingRows>
+      </SettingsSection>
+
+      <SettingsSection title="Instructions">
         <GlobalInstructionsSection active />
-      </div>
+      </SettingsSection>
+
+      <SettingsSection title="Desktop app">
+        <SettingRows>
+          <SettingRow
+            label="Keep running in the background"
+            description="Closing the window keeps coscribe in the tray, so scheduled tasks still run. Turn off to quit when you close it."
+            control={
+              <ToggleSwitch
+                on={values[BACKGROUND_ON_CLOSE_KEY] !== "false"}
+                onClick={() =>
+                  onChange(BACKGROUND_ON_CLOSE_KEY, values[BACKGROUND_ON_CLOSE_KEY] === "false" ? "true" : "false")
+                }
+              />
+            }
+          />
+        </SettingRows>
+      </SettingsSection>
+
+      <SettingsSection title="Advanced">
+        <SettingRows>
+          <SettingRow
+            label="Log level"
+            description="How much detail goes into coscribe's log file. Use Debug only while troubleshooting. Takes effect after a restart."
+            control={
+              <SegmentedControl
+                value={currentLogLevel(values[LOG_LEVEL_KEY])}
+                options={LOG_LEVELS}
+                onChange={(v) => onChange(LOG_LEVEL_KEY, v)}
+              />
+            }
+          />
+        </SettingRows>
+      </SettingsSection>
     </div>
   );
 }

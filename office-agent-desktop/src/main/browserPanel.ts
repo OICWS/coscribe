@@ -32,6 +32,7 @@ import {
 } from "electron";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { browserSettings, updateBrowserSettings } from "./browserPermissions";
 
 // preload/index.ts repeats these strings: a sandboxed preload can only
 // require electron's own modules, never a project file.
@@ -52,6 +53,10 @@ export const BROWSER_PANEL_CAPTURE_CHANNEL = "browser-panel:capture";
 export const BROWSER_PANEL_SET_VIEW_HIDDEN_CHANNEL = "browser-panel:set-view-hidden";
 export const BROWSER_PANEL_TABS_EVENT = "browser-panel:tabs";
 export const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
+// Asks the panel to open (the AI started, or a link is opening in it) and
+// brackets each of the AI's steps -- see browserAgent.ts.
+export const BROWSER_AGENT_EVENT = "browser-panel:agent";
+export const BROWSER_PANEL_SHOW_ALLOWED_SITES_EVENT = "browser-panel:show-allowed-sites";
 
 // Between this file and browserPanelContent.ts, which repeats them.
 const CONTENT_SET_PICK_MODE_CHANNEL = "browser-panel-content:set-pick-mode";
@@ -425,6 +430,17 @@ export function registerBrowserPanelHandlers(window: BrowserWindow): void {
         },
       },
       { type: "separator" },
+      {
+        label: "Open links in built-in browser",
+        type: "checkbox",
+        checked: browserSettings().openLinksInBuiltIn,
+        click: (item) => void updateBrowserSettings({ openLinksInBuiltIn: item.checked }),
+      },
+      {
+        label: "Manage allowed sites…",
+        click: () => window.webContents.send(BROWSER_PANEL_SHOW_ALLOWED_SITES_EVENT),
+      },
+      { type: "separator" },
       { label: "Clear browsing data…", click: () => void clearBrowsingData(window) },
     ]).popup({ window, x: Math.round(Number(position?.x) || 0), y: Math.round(Number(position?.y) || 0) });
   });
@@ -440,6 +456,22 @@ async function saveScreenshot(window: BrowserWindow): Promise<void> {
     filters: [{ name: "PNG image", extensions: ["png"] }],
   });
   if (!canceled && filePath) await writeFile(filePath, image.toPNG());
+}
+
+/** A link clicked in the app's own pages (a chat message, say): into a
+ * tab of the Browser panel, or the user's own browser if they've turned
+ * that off. The app window itself never navigates away. */
+export function openLinkFromApp(url: string): void {
+  if (!/^https?:\/\//i.test(url)) {
+    if (/^mailto:/i.test(url)) void shell.openExternal(url);
+    return;
+  }
+  if (!browserSettings().openLinksInBuiltIn || !win || win.isDestroyed()) {
+    void shell.openExternal(url);
+    return;
+  }
+  selectTab(createTab(url).id);
+  win.webContents.send(BROWSER_AGENT_EVENT, { open: true });
 }
 
 function openActiveExternally(): void {

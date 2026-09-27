@@ -6209,7 +6209,7 @@ all fine, but ☰ and the sidebar toggle couldn't be clicked or hovered.
       Context lists files only read. Checked live with DeepSeek: read
       facts.txt, created summary.md, appended to todo.md.
 
-## Phase 8bm -- The AI uses coscribe's own browser, in tabs you watch (shipped, steps 1-2 of 3)
+## Phase 8bm -- The AI uses coscribe's own browser, in tabs you watch (shipped)
 
 Replaces "browser use" through the Playwright connector, which opened a
 separate browser window, with the Browser panel itself, as in Claude's
@@ -6275,10 +6275,50 @@ built-in browser.
       model said so and fell back to read_web_page.
 - [ ] Screenshots the model can request itself, for vision-capable
       models.
-- [ ] Step 3: a first-visit permission prompt per site, like Claude's.
+- [x] Step 3 -- site permission, like Claude's: before a command touches
+      a site not yet allowed (the navigate target, or the page acted on),
+      the desktop app shows a card in the Browser panel (Don't allow /
+      Allow for this chat / Always allow) and waits up to three minutes;
+      no is an error the model is told to respect. The always-allowed list
+      is desktop-side (`browser-settings.json`), managed from ⋮ → "Manage
+      allowed sites…" (a dialog after Claude's: add URL, remove, Clear
+      all, Done); sites are stored as hosts without "www." and cover
+      their subdomains. The Python side's tool timeouts grew by the
+      prompt's wait.
+- [x] ⋮ → "Open links in built-in browser" (on by default). Links in
+      chat messages had no target, so in the desktop app clicking one
+      navigated the whole app window to the site; the main window now
+      routes every outside navigation and window.open to a panel tab or
+      the system browser.
+- [x] The live page is hidden whenever a dialog's backdrop is open
+      (Settings, Allowed sites...): a native view paints over any DOM,
+      so dialogs used to sit under it.
+- [x] The Playwright connector left the catalog (with its browser-check
+      and install-Chromium endpoints).
+- Not doing: cookie import. On Windows only Firefox's cookies are
+      readable (Chrome and Edge 127+ use app-bound encryption), and
+      importing sign-ins into an AI-driven browser isn't worth it for
+      that; signing in once in the panel persists.
 - Not in this step: importing Chrome sign-ins (later: import cookies);
   cross-origin iframes are listed but not read; OAuth pop-ups that need
   `window.opener` open as tabs and may not complete.
+
+## Phase 8bn -- Settings after Claude's (shipped)
+
+- [x] Bigger dialog (1100x840); nav search is a bright field that takes a
+      blue ring and caret when focused (`--field-bg`, `--focus` tokens,
+      both themes); nav items 15px with 18px icons.
+- [x] Both scroll areas are inset: the page's starts below the close
+      button and stops short of the bottom edge; the nav's starts below
+      the search box.
+- [x] Pages are bold-titled sections of hairline-separated rows
+      (`SettingsSection`, `SettingRows`, `SettingRow`, shared field and
+      button classes): General = Model / Instructions / Desktop app /
+      Advanced; Workspace = Folders / Other folders / Files / Advanced;
+      Providers = Your providers / Add a provider (catalog cards, labeled
+      form); Tools grouped by category, built-ins first; Environment =
+      Python (interpreter, packages) / Node.js. Labels in sentence case,
+      descriptions rewritten short. "Save changes" sits bottom-right.
 
 ## Later -- real intentions, not actively scheduled
 

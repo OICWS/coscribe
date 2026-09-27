@@ -52,8 +52,14 @@ const BROWSER_PANEL_SHOW_MENU_CHANNEL = "browser-panel:show-menu";
 const BROWSER_PANEL_CAPTURE_CHANNEL = "browser-panel:capture";
 const BROWSER_PANEL_SET_VIEW_HIDDEN_CHANNEL = "browser-panel:set-view-hidden";
 const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
-// browserAgent.ts's BROWSER_AGENT_EVENT.
 const BROWSER_PANEL_AGENT_EVENT = "browser-panel:agent";
+const BROWSER_PANEL_SHOW_ALLOWED_SITES_EVENT = "browser-panel:show-allowed-sites";
+// browserPermissions.ts's channels.
+const BROWSER_PERMISSION_EVENT = "browser-panel:permission";
+const PERMISSION_ANSWER_CHANNEL = "browser-panel:permission-answer";
+const PENDING_PERMISSION_CHANNEL = "browser-panel:pending-permission";
+const GET_ALLOWED_SITES_CHANNEL = "browser-panel:get-allowed-sites";
+const SET_ALLOWED_SITES_CHANNEL = "browser-panel:set-allowed-sites";
 
 /** Subscribes, and returns the unsubscribe a React effect's cleanup
  * needs; without it every remount would add another listener. */
@@ -157,6 +163,24 @@ contextBridge.exposeInMainWorld("coscribeDesktop", {
   },
   browserPanelSetViewHidden(hidden: boolean): Promise<void> {
     return ipcRenderer.invoke(BROWSER_PANEL_SET_VIEW_HIDDEN_CHANNEL, hidden);
+  },
+  onBrowserPermission(callback: (payload: unknown) => void): () => void {
+    return subscribe(BROWSER_PERMISSION_EVENT, callback);
+  },
+  answerBrowserPermission(requestId: number, answer: string): Promise<void> {
+    return ipcRenderer.invoke(PERMISSION_ANSWER_CHANNEL, requestId, answer);
+  },
+  requestPendingBrowserPermission(): Promise<void> {
+    return ipcRenderer.invoke(PENDING_PERMISSION_CHANNEL);
+  },
+  getAllowedSites(): Promise<string[]> {
+    return ipcRenderer.invoke(GET_ALLOWED_SITES_CHANNEL);
+  },
+  setAllowedSites(sites: string[]): Promise<string[]> {
+    return ipcRenderer.invoke(SET_ALLOWED_SITES_CHANNEL, sites);
+  },
+  onShowAllowedSites(callback: () => void): () => void {
+    return subscribe(BROWSER_PANEL_SHOW_ALLOWED_SITES_EVENT, () => callback());
   },
   browserPanelShowMenu(x: number, y: number): void {
     ipcRenderer.send(BROWSER_PANEL_SHOW_MENU_CHANNEL, { x, y });

@@ -4,6 +4,7 @@ import { getConfig, updateConfig } from "../../lib/rest";
 import type { ConfigResponse } from "../../types/settings";
 import {
   BookOpenIcon,
+  CloseIcon,
   FolderIcon,
   KeyIcon,
   LinkIcon,
@@ -28,6 +29,7 @@ import {
 } from "./fields";
 import { EnvironmentTab } from "./EnvironmentTab";
 import { GeneralTab } from "./GeneralTab";
+import { primaryButtonClass } from "./SettingRow";
 import { ProvidersTab } from "./ProvidersTab";
 import { SkillsTab } from "./SkillsTab";
 import { ToolsTab } from "./ToolsTab";
@@ -193,49 +195,60 @@ export function SettingsModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="relative flex h-[min(680px,100vh-2rem)] w-[min(920px,100vw-2rem)] overflow-hidden rounded-[14px] border border-[var(--border)] bg-[var(--panel-bg)] shadow-[var(--shadow)]">
+      <div className="relative flex h-[min(840px,100vh-2rem)] w-[min(1100px,100vw-2rem)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel-bg)] shadow-[var(--shadow)]">
         <button
           type="button"
           aria-label="Close settings"
-          className="absolute right-3 top-3 z-10 text-[var(--muted)] hover:text-[var(--fg)]"
+          className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
           onClick={onClose}
         >
-          ✕
+          <CloseIcon className="h-[18px] w-[18px]" />
         </button>
-        <nav className="flex w-[220px] shrink-0 flex-col gap-3 overflow-y-auto border-r border-[var(--border)] p-3">
-          <div className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card-bg)] px-2.5 py-1.5">
-            <SearchIcon className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
-            <input
-              className="w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
-              placeholder="Search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          {filteredGroups.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No matches.</div>}
-          {filteredGroups.map((group) => (
-            <div key={group.label} className="flex flex-col gap-0.5">
-              <div className="mb-0.5 px-2 text-xs font-medium tracking-wide text-[var(--muted)]">{group.label}</div>
-              {group.categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
-                    category === cat.id
-                      ? "bg-[var(--card-bg)] font-medium text-[var(--fg)]"
-                      : "text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
-                  }`}
-                  onClick={() => setCategory(cat.id)}
-                >
-                  <cat.icon className="h-4 w-4 shrink-0" />
-                  {cat.label}
-                </button>
-              ))}
+        <nav className="flex w-[240px] shrink-0 flex-col border-r border-[var(--border)]">
+          <div className="p-4 pb-3">
+            <div className="flex h-10 items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--field-bg)] px-3 focus-within:border-[var(--focus)] focus-within:ring-2 focus-within:ring-[var(--focus)]/15">
+              <SearchIcon className="h-[18px] w-[18px] shrink-0 text-[var(--muted)]" />
+              <input
+                aria-label="Search settings"
+                className="w-full min-w-0 bg-transparent text-[15px] outline-none placeholder:text-[var(--muted)]"
+                placeholder="Search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
             </div>
-          ))}
+          </div>
+          {/* Scrolls on its own, below the search box, so its scrollbar
+           * never runs up beside it. */}
+          <div className="mb-3 flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-2 pt-2">
+            {filteredGroups.length === 0 && <div className="px-3 py-1 text-sm text-[var(--muted)]">No matches.</div>}
+            {filteredGroups.map((group) => (
+              <div key={group.label} className="flex flex-col gap-0.5">
+                <div className="mb-1 px-3 text-[13px] text-[var(--muted)]">{group.label}</div>
+                {group.categories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    aria-current={category === cat.id ? "page" : undefined}
+                    className={`flex h-9 items-center gap-3 rounded-lg px-3 text-left text-[15px] ${
+                      category === cat.id
+                        ? "bg-[var(--card-bg)] font-medium text-[var(--fg)]"
+                        : "text-[var(--fg)]/80 hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+                    }`}
+                    onClick={() => setCategory(cat.id)}
+                  >
+                    <cat.icon className="h-[18px] w-[18px] shrink-0" />
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
         </nav>
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Starts below the close button and stops short of the bottom
+           * edge, so the scrollbar keeps clear of both. */}
+          <div className="mb-3 mr-1.5 mt-14 min-h-0 flex-1 overflow-y-auto pl-10 pr-8">
+            <div className="pb-8">
             {category === "general" && <GeneralTab values={values} onChange={(k, v) => setValues({ ...values, [k]: v })} />}
             {category === "workspace" && (
               <WorkspaceTab
@@ -255,20 +268,16 @@ export function SettingsModal({
             )}
             {category === "connectors" && <ConnectorsTab active={category === "connectors"} />}
             {category === "environment" && <EnvironmentTab active={category === "environment"} />}
+            </div>
           </div>
           {showSaveBar && (
-            <div className="flex items-center gap-3 border-t border-[var(--border)] px-4 py-3">
-              <button
-                type="button"
-                className="rounded-md bg-[var(--accent)] px-4 py-1.5 text-sm text-[var(--accent-fg)] disabled:opacity-40"
-                disabled={!isDirty || saving}
-                onClick={save}
-              >
-                Save
-              </button>
+            <div className="flex items-center justify-end gap-3 border-t border-[var(--border)] px-8 py-3">
               {status && (
-                <span className={`text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>
+                <span className={`mr-auto text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>
               )}
+              <button type="button" className={primaryButtonClass} disabled={!isDirty || saving} onClick={save}>
+                Save changes
+              </button>
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getScriptEnvInterpreter, setScriptEnvInterpreter } from "../../lib/rest";
+import { fieldClass, secondaryButtonClass } from "./SettingRow";
 
 interface PythonInterpreterSectionProps {
   active: boolean;
@@ -67,20 +68,21 @@ export function PythonInterpreterSection({ active }: PythonInterpreterSectionPro
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--card-bg)] p-3">
+    <div className="flex flex-col gap-3 pt-4">
       <div>
-        <p className="text-sm font-medium">Python interpreter</p>
-        <p className="mt-1 text-sm">
+        <div className="text-[15px]">Interpreter</div>
+        <p className="mt-1 text-[13px] leading-snug text-[var(--muted)]">
           {configured
-            ? "The script environment is built with the interpreter below."
-            : "Auto-detected automatically -- set a path here only if scripts fail to run or the wrong Python gets used."}
+            ? "Scripts run with the Python below."
+            : "Found automatically. Set a path only if scripts fail to run or the wrong Python is used."}
         </p>
       </div>
 
       <div className="flex items-center gap-2">
         <input
-          className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-transparent px-3 py-1.5 font-mono text-sm outline-none focus:border-[var(--accent)]"
-          placeholder="Leave blank for auto-detection, or paste a python.exe path"
+          aria-label="Python interpreter path"
+          className={`${fieldClass} min-w-0 flex-1 font-mono text-[13px]`}
+          placeholder="Blank to find it automatically, or a python.exe path"
           value={path}
           disabled={saving}
           onChange={(e) => setPath(e.target.value)}
@@ -88,7 +90,7 @@ export function PythonInterpreterSection({ active }: PythonInterpreterSectionPro
         />
         <button
           type="button"
-          className="shrink-0 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-40"
+          className={secondaryButtonClass}
           disabled={saving || path.trim() === (configured ?? "")}
           onClick={save}
         >
@@ -98,13 +100,13 @@ export function PythonInterpreterSection({ active }: PythonInterpreterSectionPro
 
       {autoDetected.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
-          <span>Auto-detected:</span>
+          <span>Found:</span>
           {autoDetected.map((candidate) => (
             <button
               key={candidate}
               type="button"
               title={candidate}
-              className="max-w-40 truncate rounded-md border border-[var(--border)] px-2 py-0.5 font-mono hover:bg-[var(--panel-bg)]"
+              className="max-w-48 truncate rounded-md border border-[var(--border)] bg-[var(--field-bg)] px-2 py-0.5 font-mono hover:border-[var(--border-hover)]"
               onClick={() => pickAutoDetected(candidate)}
             >
               {candidate}
@@ -113,11 +115,7 @@ export function PythonInterpreterSection({ active }: PythonInterpreterSectionPro
         </div>
       )}
 
-      {status && (
-        <div className={`rounded-md px-3 py-2 text-xs ${status.error ? "bg-red-500/10 text-red-500" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
-          {status.text}
-        </div>
-      )}
+      {status && <p className={`text-[13px] ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</p>}
     </div>
   );
 }

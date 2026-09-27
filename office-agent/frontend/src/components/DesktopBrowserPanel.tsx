@@ -14,6 +14,7 @@ import {
   PencilIcon,
   StopIcon,
 } from "./icons";
+import { AllowedSitesDialog } from "./AllowedSitesDialog";
 import { BrowserAnnotator, type PageCapture } from "./BrowserAnnotator";
 import {
   browserPanelBack,
@@ -36,7 +37,13 @@ import {
   onBrowserPanelTabs,
   type BrowserPanelRect,
   type BrowserTab,
+  answerBrowserPermission,
+  onBrowserPermission,
+  onShowAllowedSites,
+  type BrowserPermissionAnswer,
+  type BrowserPermissionRequest,
 } from "../lib/electron";
+import { useBackdropOpen } from "../lib/titleBar";
 import { PickedPreview, type BrowserCapture, type PickedElement } from "./PickedPreview";
 import { usePanelWidth } from "../lib/usePanelWidth";
 
@@ -135,6 +142,8 @@ export function DesktopBrowserPanel({
   const [picked, setPicked] = useState<PickedElement | null>(null);
   const [agent, setAgent] = useState<{ threadId: string; busy: boolean } | null>(null);
   const [annotation, setAnnotation] = useState<PageCapture | null>(null);
+  const [permission, setPermission] = useState<BrowserPermissionRequest | null>(null);
+  const [allowedSitesOpen, setAllowedSitesOpen] = useState(false);
   const { width, expanded, toggleExpanded, onResizeHandleMouseDown } = usePanelWidth();
 
   const active = tabs.find((t) => t.id === activeId) ?? null;
@@ -215,24 +224,37 @@ export function DesktopBrowserPanel({
     const capture = await browserPanelCapture();
     if (!capture) return;
     setPickMode(false);
-    await browserPanelSetViewHidden(true);
     setAnnotation(capture);
   };
-  const stopAnnotating = () => {
-    setAnnotation(null);
-    void browserPanelSetViewHidden(false);
-  };
+  const stopAnnotating = () => setAnnotation(null);
+
+  // The live page is a native view drawn over the window; while the
+  // drawing layer or any dialog needs that spot, the view steps aside.
+  const backdropOpen = useBackdropOpen();
+  const viewHidden = annotation !== null || backdropOpen;
+  useEffect(() => {
+    void browserPanelSetViewHidden(viewHidden);
+  }, [viewHidden, agent]);
 
   // The drawing is of one page at one moment: switching tabs or the AI
-  // acting on the page ends it (the desktop app has already put the live
-  // page back for the AI).
-  useEffect(() => {
-    setAnnotation(null);
-    void browserPanelSetViewHidden(false);
-  }, [activeId]);
+  // acting on the page ends it.
+  useEffect(() => setAnnotation(null), [activeId]);
   useEffect(() => {
     if (agent?.busy) setAnnotation(null);
   }, [agent]);
+
+  useEffect(() => onBrowserPermission(setPermission), []);
+  useEffect(() => onShowAllowedSites(() => setAllowedSitesOpen(true)), []);
+
+  const answerPermission = (answer: BrowserPermissionAnswer) => {
+    if (!permission) return;
+    void answerBrowserPermission(permission.requestId, answer);
+    setPermission(null);
+  };
+  const stopAgent = () => {
+    answerPermission("deny");
+    onStopAgent();
+  };
 
   const go = () => {
     const url = address.trim();
@@ -386,11 +408,56 @@ export function DesktopBrowserPanel({
             <button
               type="button"
               className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 font-medium hover:bg-[var(--accent)]/15"
-              onClick={onStopAgent}
+              onClick={stopAgent}
             >
               <StopIcon className="h-3 w-3" /> Stop
             </button>
           )}
+        </div>
+      )}
+
+      {permission && (
+        <div
+          role="alertdialog"
+          aria-label="Site permission"
+          className="mx-2 mb-1.5 flex flex-col gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-3 shadow-[var(--shadow)]"
+        >
+          <div className="flex items-start gap-2.5">
+            <GlobeIcon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--muted)]" />
+            <div className="min-w-0 text-sm">
+              <p className="font-medium">
+                Allow coscribe to use <span className="break-all">{permission.host}</span>?
+              </p>
+              <p className="mt-0.5 text-[13px] text-[var(--muted)]">
+                {permission.threadId === threadId
+                  ? "It will read and act on this site in the Browser panel."
+                  : "Asked from another conversation. It will read and act on this site in the Browser panel."}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-end gap-1.5">
+            <button
+              type="button"
+              className="h-7 rounded-lg border border-[var(--border)] px-2.5 text-[13px] hover:bg-[var(--card-bg)]"
+              onClick={() => answerPermission("deny")}
+            >
+              Don't allow
+            </button>
+            <button
+              type="button"
+              className="h-7 rounded-lg border border-[var(--border)] px-2.5 text-[13px] hover:bg-[var(--card-bg)]"
+              onClick={() => answerPermission("once")}
+            >
+              Allow for this chat
+            </button>
+            <button
+              type="button"
+              className="h-7 rounded-lg bg-[var(--primary)] px-2.5 text-[13px] font-medium text-[var(--primary-fg)] hover:bg-[var(--primary-hover)]"
+              onClick={() => answerPermission("always")}
+            >
+              Always allow
+            </button>
+          </div>
         </div>
       )}
 
@@ -415,6 +482,7 @@ export function DesktopBrowserPanel({
         </div>
       </div>
 
+      {allowedSitesOpen && <AllowedSitesDialog onClose={() => setAllowedSitesOpen(false)} />}
       {picked && <PickedPreview picked={picked} onDiscard={() => setPicked(null)} onSendToChat={onSendToChat} />}
     </aside>
   );

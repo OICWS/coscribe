@@ -3367,7 +3367,8 @@ def test_get_mcp_catalog_returns_curated_entries(
     assert response.status_code == 200
     entries = response.json()
     names = {entry["name"] for entry in entries}
-    assert {"playwright", "office365"} <= names
+    assert "office365" in names
+    assert "playwright" not in names
     # What coscribe already covers itself (reading pages, memory, the
     # date) isn't offered as a connector.
     assert not names & {"fetch", "memory", "sequential-thinking", "time", "slack"}
