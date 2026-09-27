@@ -161,7 +161,7 @@ export function TaskPanel({
               ))}
             </ul>
           ) : (
-            <EmptyState art={<OutputsArt />} text="View and open files created during this task." />
+            <EmptyState art={<OutputsArt />} text="View and open files created or edited during this task." />
           )}
           {fileError && (
             <p role="alert" className="mt-2 text-xs text-[var(--danger)]">
@@ -366,9 +366,11 @@ function FileRow({
   onOpen: (file: ActivityFile, reveal: boolean) => void;
   compact?: boolean;
 }) {
-  const parts = [folderOf(file.path)];
+  const parts = [file.action === "read" ? "Read" : "", folderOf(file.path)];
   if (!file.exists) parts.push("No longer on disk");
-  else if (file.modified_at && !compact) parts.push(`Edited ${formatRunTime(file.modified_at)}`);
+  else if (file.modified_at && !compact) {
+    parts.push(`${file.action === "created" ? "Created" : "Edited"} ${formatRunTime(file.modified_at)}`);
+  }
   const subtitle = parts.filter(Boolean).join(" · ");
   const iconButton =
     "flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--bg)] hover:text-[var(--fg)]";
@@ -446,7 +448,7 @@ function ContextView({
   return (
     <div className="flex flex-col gap-4">
       {activity.references.length > 0 && (
-        <ContextGroup label="Files">
+        <ContextGroup label="Files read">
           <ul className="-mx-2 flex flex-col">
             {activity.references.map((file) => (
               <FileRow key={file.path} file={file} threadId={threadId} onOpen={onOpen} compact />

@@ -5,9 +5,9 @@ Same convention as Claude Code's own skills (see ARCHITECTURE.md's "Skill
 name+description, then markdown instructions), plus optional
 scripts/references/assets. Metadata (name+description) is always visible to
 the Coordinator via its instructions; the full body is loaded on demand via
-load_skill. Bundled scripts can be read via read_skill_file but not run --
-coscribe has no code-execution tool yet, so script-dependent skills are
-only partially usable until that lands.
+load_skill, which also gives the skill's absolute folder so its bundled
+scripts can be run with run_python_script; other files are read via
+read_skill_file.
 
 Two sources, both parsed the same way: `load_skills(settings.skills_dir)`
 scans a user/deployment-local directory (gitignored, empty by default --
@@ -155,6 +155,9 @@ def _scan_skills_dir(root: Path, *, create_if_missing: bool) -> list[SkillInfo]:
         return []
     skills = []
     for entry in sorted(root.iterdir()):
+        # A dot-folder is a skill still being downloaded (skill_catalog.py).
+        if entry.name.startswith("."):
+            continue
         skill_md = entry / "SKILL.md"
         if not entry.is_dir() or not skill_md.is_file():
             continue
@@ -299,12 +302,18 @@ def build_skill_tools(skills: list[SkillInfo]) -> list[Callable[..., Any]]:
         skill = by_name.get(name)
         if skill is None:
             raise ValueError(f"Unknown skill: {name!r}. Available: {sorted(by_name)}")
-        return skill.body
+        # Skills written for other agents refer to their own scripts and
+        # assets by relative path; the absolute folder lets a script run
+        # through run_python_script find them.
+        return (
+            f"(This skill's folder is {skill.dir.resolve()} -- read its files with "
+            f"read_skill_file; a bundled script can be run with run_python_script, "
+            f"e.g. runpy.run_path on its absolute path.)\n\n{skill.body}"
+        )
 
     def read_skill_file(name: str, path: str) -> str:
         """Read a bundled reference/asset file within a skill's own directory
-        (e.g. a REFERENCE.md the skill's instructions point you to). Cannot
-        run bundled scripts -- coscribe has no code-execution tool yet.
+        (e.g. a REFERENCE.md the skill's instructions point you to).
 
         Args:
             name: skill name

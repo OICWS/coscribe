@@ -513,3 +513,34 @@ export function MenuIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+/** A skill: a scroll, as in Claude's skills list. */
+export function SkillIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props} strokeWidth={1.6}>
+      <path d="M8 21h11a2 2 0 0 0 2-2v-1H10v1a2 2 0 0 1-4 0V5a2 2 0 0 0-2-2" />
+      <path d="M4 3h12a2 2 0 0 1 2 2v13" />
+      <path d="M4 3a2 2 0 0 0-2 2v2h4" />
+      <path d="M10 8h5M10 12h5" />
+    </Icon>
+  );
+}
+
+export function EyeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </Icon>
+  );
+}
+
+export function CodeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="m16 18 6-6-6-6" />
+      <path d="m8 6-6 6 6 6" />
+      <path d="m14 4-4 16" />
+    </Icon>
+  );
+}

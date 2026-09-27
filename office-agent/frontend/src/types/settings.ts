@@ -98,12 +98,25 @@ export interface ToolsResponse {
 export interface SkillInfo {
   name: string;
   description: string;
-  source: "builtin" | "custom";
+  /** builtin: ships with coscribe; anthropic: added from Discover; custom: yours. */
+  source: "builtin" | "anthropic" | "custom";
+  enabled: boolean;
+  /** When its SKILL.md last changed, ISO 8601. */
+  updated: string;
+}
+
+export interface CatalogSkill {
+  name: string;
+  description: string;
+  license: string;
+  /** Total bytes the download would fetch. */
+  size: number;
+  added: boolean;
 }
 
 export type SkillsResponse = SkillInfo[];
 
-export type UploadSkillResult = SkillInfo | { error: string };
+export type UploadSkillResult = Pick<SkillInfo, "name" | "description"> | { error: string };
 
 /** GET /api/skills/{name}/files -- flat, relative posix paths under that
  * skill's own real directory (a skill is a folder: SKILL.md plus

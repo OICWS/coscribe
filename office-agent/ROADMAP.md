@@ -6174,6 +6174,41 @@ all fine, but ☰ and the sidebar toggle couldn't be clicked or hovered.
       stops sending mouse events, so leaving a button there closed it at
       once. Checked with real xdotool input.
 
+## Phase 8bl -- Skills: Discover, global on/off, skill pages; files read and edited (shipped)
+
+- [x] **Settings → Skills** redone after Claude's: Yours/Discover
+      segmented tabs, a search box, "+ Add" (Upload a skill / Create
+      with coscribe), groups *Created by you*, *From Anthropic*, *Built
+      into coscribe* with counts, a ⋮ menu per skill (Turn off/on;
+      Remove unless built in, with a confirm). A skill's page has an
+      on/off switch and Overview/Contents tabs; Contents is its file
+      tree with SKILL.md first, Markdown preview/source toggle, line
+      numbers for other text files.
+- [x] **Discover**: 8 Apache-2.0 skills from anthropics/skills at commit
+      33375500bcea, listed from `skill_catalog.json` (name, description,
+      each file's size and SHA-256). Add downloads just that skill into
+      a hidden staging folder, checks every file's hash and renames it
+      into place, so a failed or altered download never loads. Marked
+      with `.coscribe-source.json` (hidden from Contents) so it's grouped
+      as From Anthropic. docx/pdf/pptx/xlsx are proprietary ("All rights
+      reserved") and doc-coauthoring has no license file, so neither is
+      listed. Checked live: Add (brand-guidelines, theme-factory through
+      the proxy), preview, turn off, remove, and back in Discover.
+- [x] **Global on/off** replaces the per-conversation checkboxes (and
+      the `select_skills` message, the `?skills=` query parameter and the
+      per-thread `.skills` files): one off-set in `<state_dir>/skills.json`,
+      re-read at the start of every turn, so a change reaches open
+      conversations on their next message.
+- [x] `load_skill` now tells the model the skill's folder, so a bundled
+      script can be run with `run_python_script`.
+- [x] Fixed: with the default relative `skills_dir`, a skill's file list
+      came back as `skills/<name>/...` and every preview 404'd.
+- [x] **Task panel**: Outputs lists files the conversation *created* or
+      *edited* (an overwrite of an existing file, `edit_*`, or a write
+      after reading it counts as edited); a new "Files read" group under
+      Context lists files only read. Checked live with DeepSeek: read
+      facts.txt, created summary.md, appended to todo.md.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

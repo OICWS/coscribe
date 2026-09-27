@@ -380,6 +380,7 @@ def _client_lg(
         "coscribe.web.session.resolve_chat_model",
         lambda model, custom_providers=None: fake_model,
     )
+
     # No connect_mcp_tools_lg monkeypatch needed here -- it's only ever
     # awaited inside the lifespan when settings.mcp_config_path is set, and
     # no test *starts* with that set (see _settings' defaults above) --
@@ -1122,9 +1123,7 @@ def test_approval_preview_resolves_a_file_in_an_extra_writable_directory(
     fake_model = FakeToolCallingChatModel(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
     )
-    with _client_lg(
-        tmp_path, monkeypatch, fake_model, extra_writable_dirs=[extra_dir]
-    ) as client:
+    with _client_lg(tmp_path, monkeypatch, fake_model, extra_writable_dirs=[extra_dir]) as client:
         with client.websocket_connect("/ws/t_extra_writable") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
@@ -1268,9 +1267,7 @@ def test_ask_user_question_is_not_blocked_by_plan_mode_lg(
     """Unlike a WRITE_LOCAL/EXEC/EXTERNAL tool, asking a question isn't a
     risky action plan mode's read-only guarantee needs to block -- it's
     pure communication, no side effect."""
-    call = _tool_call(
-        "call_1", "ask_user_question", {"question": "Which one?", "options": "A\nB"}
-    )
+    call = _tool_call("call_1", "ask_user_question", {"question": "Which one?", "options": "A\nB"})
     fake_model = FakeToolCallingChatModel(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
     )
@@ -1302,9 +1299,7 @@ def test_ask_user_question_hook_veto_becomes_a_respond_decision_not_a_reject_lg(
     hooks_path.write_text(
         json.dumps({"PreToolUse": [f"{sys.executable} {hook_script}"]}), encoding="utf-8"
     )
-    call = _tool_call(
-        "call_1", "ask_user_question", {"question": "Which one?", "options": "A\nB"}
-    )
+    call = _tool_call("call_1", "ask_user_question", {"question": "Which one?", "options": "A\nB"})
     fake_model = FakeToolCallingChatModel(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="blocked")]
     )
@@ -1341,9 +1336,7 @@ def test_stop_resolves_a_pending_question_with_a_placeholder_answer_lg(
     as the non-stopped answer path above -- so this only checks the
     contract a client actually sees: the turn ends promptly, not that it
     hangs waiting on a future nobody will ever resolve."""
-    call = _tool_call(
-        "call_1", "ask_user_question", {"question": "Which one?", "options": "A\nB"}
-    )
+    call = _tool_call("call_1", "ask_user_question", {"question": "Which one?", "options": "A\nB"})
     fake_model = FakeToolCallingChatModel(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="stopped")]
     )
@@ -1391,9 +1384,7 @@ def test_ask_user_question_multi_select_flag_and_option_parsing_lg(
             # newline/`---`-separated tool argument in this codebase uses.
             assert question["options"] == ["A", "B", "C"]
 
-            ws.send_json(
-                {"type": "question_response", "id": question["id"], "answer": "A, C"}
-            )
+            ws.send_json({"type": "question_response", "id": question["id"], "answer": "A, C"})
             _receive_until(ws, "tasks_changed")
 
 
@@ -1430,9 +1421,7 @@ def test_pending_approval_is_redelivered_on_reconnect(
             assert redelivered["type"] == "approval_required"
             assert redelivered["tool_name"] == "write_file"
 
-            ws.send_json(
-                {"type": "approval_response", "id": redelivered["id"], "approved": True}
-            )
+            ws.send_json({"type": "approval_response", "id": redelivered["id"], "approved": True})
             messages = _receive_until(ws, "tasks_changed")
 
     agent_message = next(m for m in messages if m["type"] == "agent_message")
@@ -1487,9 +1476,7 @@ def test_concurrent_sub_agents_ask_for_approval_in_the_panel_independently(
     assert all(t.pending_approval is None and t.tool_uses == 1 for t in tasks)
 
 
-def test_write_file_denied_is_not_executed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_write_file_denied_is_not_executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})
     fake_model = FakeToolCallingChatModel(
         responses=[
@@ -2409,9 +2396,7 @@ def test_grpc_metadata_overflow_recovers_by_rebuilding_the_agent_and_retrying(
     _GRPC_METADATA_OVERFLOW_SIGNATURE comment has the full explanation.
     The turn must recover by rebuilding self.model/self.lg_agent and
     retrying once, not surface that error to the user on the first hit."""
-    fake_model = GrpcMetadataOverflowThenSuccessModel(
-        responses=[AIMessage(content="recovered")]
-    )
+    fake_model = GrpcMetadataOverflowThenSuccessModel(responses=[AIMessage(content="recovered")])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         with client.websocket_connect("/ws/t_grpc_overflow") as ws:
             ws.receive_json()  # state
@@ -2446,9 +2431,7 @@ def test_pretool_use_hook_denial_blocks_a_call_even_in_accept_edits_mode(
             AIMessage(content="denied by hook"),
         ]
     )
-    with _client_lg(
-        tmp_path, monkeypatch, fake_model, hooks_config_path=hooks_path
-    ) as client:
+    with _client_lg(tmp_path, monkeypatch, fake_model, hooks_config_path=hooks_path) as client:
         with client.websocket_connect("/ws/t4g") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
@@ -2500,9 +2483,7 @@ def test_pretool_use_hook_gates_a_low_risk_tool_too(
             AIMessage(content="tracked it"),
         ]
     )
-    with _client_lg(
-        tmp_path, monkeypatch, fake_model, hooks_config_path=hooks_path
-    ) as client:
+    with _client_lg(tmp_path, monkeypatch, fake_model, hooks_config_path=hooks_path) as client:
         with client.websocket_connect("/ws/t4h") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
@@ -2539,17 +2520,13 @@ def test_post_tool_use_hook_receives_the_tool_result(
             AIMessage(content="done"),
         ]
     )
-    with _client_lg(
-        tmp_path, monkeypatch, fake_model, hooks_config_path=hooks_path
-    ) as client:
+    with _client_lg(tmp_path, monkeypatch, fake_model, hooks_config_path=hooks_path) as client:
         with client.websocket_connect("/ws/t4i") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
             ws.send_json({"type": "user_message", "text": "write hi to note.txt"})
             approval = ws.receive_json()
-            ws.send_json(
-                {"type": "approval_response", "id": approval["id"], "approved": True}
-            )
+            ws.send_json({"type": "approval_response", "id": approval["id"], "approved": True})
             _receive_until(ws, "tasks_changed")
 
     logged = json.loads(log_path.read_text(encoding="utf-8").strip())
@@ -2881,13 +2858,17 @@ def test_background_event_bus_fans_out_to_every_subscriber() -> None:
         )
         e1 = q1.get_nowait()
         e2 = q2.get_nowait()
-        assert e1 == e2 == {
-            "type": "background_run_completed",
-            "kind": "wake",
-            "status": "completed",
-            "title": "research done",
-            "thread_id": "t1",
-        }
+        assert (
+            e1
+            == e2
+            == {
+                "type": "background_run_completed",
+                "kind": "wake",
+                "status": "completed",
+                "title": "research done",
+                "thread_id": "t1",
+            }
+        )
         bus.unsubscribe(q1)
         bus.publish(
             BackgroundEvent(kind="wake", status="completed", title="ignored", thread_id="t1")
@@ -2927,9 +2908,7 @@ def test_wake_poll_loop_publishes_background_events_for_fired_wakes_and_triggers
         return [types.SimpleNamespace(name="daily digest", runs=[run])]
 
     monkeypatch.setattr("coscribe.web.app.poll_due_wakes", _fake_poll_due_wakes)
-    monkeypatch.setattr(
-        "coscribe.web.app.poll_due_scheduled_tasks", _fake_poll_due_scheduled_tasks
-    )
+    monkeypatch.setattr("coscribe.web.app.poll_due_scheduled_tasks", _fake_poll_due_scheduled_tasks)
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model, wake_poll_seconds=0) as client:
         bus = client.app.state.background_events
@@ -3042,9 +3021,7 @@ def test_upload_auto_renames_on_name_collision(
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         first = client.post("/api/upload", files={"file": ("notes.txt", b"first", "text/plain")})
-        second = client.post(
-            "/api/upload", files={"file": ("notes.txt", b"second", "text/plain")}
-        )
+        second = client.post("/api/upload", files={"file": ("notes.txt", b"second", "text/plain")})
 
     assert first.json()["path"] == "notes.txt"
     assert second.json()["path"] == "notes (1).txt"
@@ -3099,9 +3076,7 @@ def test_get_preview_serves_an_existing_preview_png(
     assert response.content == b"\x89PNG\r\n\x1a\n fake png bytes"
 
 
-def test_get_preview_404s_for_unknown_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_preview_404s_for_unknown_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         response = client.get("/api/previews/0123456789abcdef0123456789abcdef.png")
@@ -3313,9 +3288,7 @@ def test_post_config_updates_env_and_rejects_bad_values(
     assert response.status_code == 200
     body = response.json()
     assert body["rejected"] == {
-        "COSCRIBE_DEFAULT_MODEL": (
-            'must be a "provider:model" string, e.g. "anthropic:sonnet"'
-        )
+        "COSCRIBE_DEFAULT_MODEL": ('must be a "provider:model" string, e.g. "anthropic:sonnet"')
     }
     assert dotenv_values(tmp_path / ".env")["GEMINI_API_KEY"] == "sk-newkey"
     assert os.environ["GEMINI_API_KEY"] == "sk-newkey"
@@ -3816,9 +3789,7 @@ def test_delete_mcp_server_removes_only_that_entry(
         encoding="utf-8",
     )
     fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(
-        tmp_path, monkeypatch, fake_model, mcp_config_path=config_path
-    ) as client:
+    with _client_lg(tmp_path, monkeypatch, fake_model, mcp_config_path=config_path) as client:
         response = client.delete("/api/mcp/servers/fetch")
 
     assert response.status_code == 200
@@ -3920,8 +3891,7 @@ def test_get_providers_falls_back_to_the_global_default_model(
     default names this same provider."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text(
-        "GEMINI_API_KEY='test-gemini-key'\n"
-        "COSCRIBE_DEFAULT_MODEL='gemini:gemini-flash-latest'\n",
+        "GEMINI_API_KEY='test-gemini-key'\nCOSCRIBE_DEFAULT_MODEL='gemini:gemini-flash-latest'\n",
         encoding="utf-8",
     )
     fake_model = FakeToolCallingChatModel(responses=[])
@@ -3968,8 +3938,11 @@ def test_post_provider_persists_an_absolute_path_not_a_cwd_relative_one(
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         response = client.post(
             "/api/providers",
-            json={"name": "glm", "base_url": "https://open.bigmodel.cn/api/paas/v4",
-                  "api_key": "sk-glm"},
+            json={
+                "name": "glm",
+                "base_url": "https://open.bigmodel.cn/api/paas/v4",
+                "api_key": "sk-glm",
+            },
         )
         assert response.status_code == 200
 
@@ -4373,6 +4346,26 @@ def test_get_skill_files_lists_nested_paths_for_a_custom_skill(
     assert sorted(response.json()["files"]) == ["SKILL.md", "reference/notes.md"]
 
 
+def test_get_skill_files_paths_are_relative_to_the_skill_with_a_relative_skills_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The shipped default is skills_dir="./skills", so listed paths must be
+    # ones the file endpoint can open, not "skills/mine/SKILL.md".
+    monkeypatch.chdir(tmp_path)
+    skill_dir = tmp_path / "skills" / "mine"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: mine\ndescription: my own skill\n---\nbody", encoding="utf-8"
+    )
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model, skills_dir=Path("skills")) as client:
+        files = client.get("/api/skills/mine/files").json()["files"]
+        content = client.get(f"/api/skills/mine/files/{files[0]}")
+
+    assert files == ["SKILL.md"]
+    assert content.status_code == 200
+
+
 def test_get_skill_files_unknown_skill_name_404s(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4453,8 +4446,8 @@ def test_upload_skill_md_appears_in_get_skills_without_a_restart(
     # The real regression this guards: skills_by_name used to be a
     # closure snapshot taken once at startup (same staleness shape as
     # switch_model's custom-providers bug) -- an uploaded skill wouldn't
-    # show up in GET /api/skills, or be acceptable to select_skills,
-    # until the process restarted.
+    # show up in GET /api/skills, or be offered to a new session, until
+    # the process restarted.
     fake_model = FakeToolCallingChatModel(responses=[])
     md_content = "---\nname: mine\ndescription: my own skill\n---\nbody"
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
@@ -4470,11 +4463,9 @@ def test_upload_skill_md_appears_in_get_skills_without_a_restart(
         assert "mine" in names
 
         with client.websocket_connect("/ws/t_upload_skill") as ws:
-            ws.receive_json()  # state
+            state = ws.receive_json()
             ws.receive_json()  # history
-            ws.send_json({"type": "select_skills", "skills": ["mine"]})
-            updated_state = ws.receive_json()
-    assert updated_state["enabled_skills"] == ["mine"]
+    assert "mine" in state["enabled_skills"]
 
 
 def test_upload_skill_rejects_malformed_skill_md(
@@ -4522,105 +4513,109 @@ def test_new_thread_defaults_to_the_builtin_skills_enabled(
     ]
 
 
-def test_select_skills_ws_message_enables_them_live(
+def test_switching_a_skill_off_applies_everywhere_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="ok")])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_select_skills") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-
-            ws.send_json({"type": "select_skills", "skills": ["PPTX Slides", "Excel Spreadsheets"]})
-            updated_state = ws.receive_json()
-
-    assert sorted(updated_state["enabled_skills"]) == ["Excel Spreadsheets", "PPTX Slides"]
-    sidecar = tmp_path / "state" / "t_select_skills.skills"
-    assert sorted(json.loads(sidecar.read_text(encoding="utf-8"))) == [
-        "Excel Spreadsheets",
-        "PPTX Slides",
-    ]
-
-
-def test_select_skills_can_be_toggled_more_than_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_skills_retoggle") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-
-            ws.send_json({"type": "select_skills", "skills": ["PPTX Slides"]})
-            first = ws.receive_json()
-            ws.send_json({"type": "select_skills", "skills": []})
-            second = ws.receive_json()
-
-    assert first["enabled_skills"] == ["PPTX Slides"]
-    assert second["enabled_skills"] == []
-
-
-def test_select_skills_unknown_name_is_dropped_not_rejected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_skills_unknown") as ws:
-            ws.receive_json()  # state
-            ws.receive_json()  # history
-
-            ws.send_json({"type": "select_skills", "skills": ["PPTX Slides", "nope"]})
-            updated_state = ws.receive_json()
-
-    assert updated_state["enabled_skills"] == ["PPTX Slides"]
-
-
-def test_skills_query_param_resolves_enabled_skills_on_connect(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_skills_qs?skills=PPTX%20Slides") as ws:
-            state = ws.receive_json()
-            ws.receive_json()  # history
-
-    assert state["enabled_skills"] == ["PPTX Slides"]
-
-
-def test_skills_choice_persists_across_reconnect_without_the_query_param(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as first_process:
-        with first_process.websocket_connect("/ws/t_skills_persist?skills=Word%20Documents") as ws:
+        with client.websocket_connect("/ws/t_skill_off_open") as ws:
             ws.receive_json()
-            ws.receive_json()  # history
-
-    # Fresh create_app_lg() -- its own empty in-memory `sessions` dict, same
-    # tmp_path on disk -- so a reconnect with no ?skills= this time can only
-    # pick the enabled set back up from the sidecar, not in-process state.
-    with _client_lg(tmp_path, monkeypatch, fake_model) as second_process:
-        with second_process.websocket_connect("/ws/t_skills_persist") as ws:
+            ws.receive_json()
+            off = client.post("/api/skills/PPTX%20Slides/enabled", json={"enabled": False})
+            ws.send_json({"type": "user_message", "text": "hi"})
+            _receive_until(ws, "tasks_changed")
+        listing = {s["name"]: s for s in client.get("/api/skills").json()}
+        with client.websocket_connect("/ws/t_skill_off_new") as ws:
             state = ws.receive_json()
-            ws.receive_json()  # history
+            ws.receive_json()
 
-    assert state["enabled_skills"] == ["Word Documents"]
+    assert off.json() == {"name": "PPTX Slides", "enabled": False}
+    assert listing["PPTX Slides"]["enabled"] is False
+    assert listing["PPTX Slides"]["source"] == "builtin"
+    assert "PPTX Slides" not in state["enabled_skills"]
+    # The already-open conversation dropped it at its next turn.
+    assert "- PPTX Slides:" not in str(fake_model.received[0][0].content)
+    assert "- Word Documents:" in str(fake_model.received[0][0].content)
 
 
-def test_delete_thread_removes_skills_sidecar_too(
+def test_removing_a_skill_deletes_it_but_builtins_only_switch_off_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_model = FakeToolCallingChatModel(responses=[])
+    md_content = "---\nname: mine\ndescription: my own skill\n---\nbody"
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/t_skills_delete?skills=PPTX%20Slides") as ws:
-            ws.receive_json()
-            ws.receive_json()  # history
-        sidecar = tmp_path / "state" / "t_skills_delete.skills"
-        assert sidecar.is_file()
+        client.post("/api/skills/upload", files={"file": ("mine.md", md_content, "text/markdown")})
+        removed = client.delete("/api/skills/mine")
+        builtin = client.delete("/api/skills/PPTX%20Slides")
+        names = {s["name"] for s in client.get("/api/skills").json()}
 
-        client.delete("/api/threads/t_skills_delete")
+    assert removed.json() == {"removed": "mine"}
+    assert "mine" not in names
+    assert builtin.status_code == 400
+    assert "PPTX Slides" in names
 
-        assert not sidecar.is_file()
+
+def test_adding_a_discover_skill_downloads_and_checks_it_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    from coscribe.tools import skill_catalog
+
+    skill_md = b"---\nname: tiny\ndescription: a tiny skill\n---\nDo tiny things."
+    catalog = {
+        "repo": "anthropics/skills",
+        "commit": "abc",
+        "skills": [
+            {
+                "name": "tiny",
+                "description": "a tiny skill",
+                "license": "Apache-2.0",
+                "files": [
+                    {"path": "SKILL.md", "size": 1, "sha256": hashlib.sha256(skill_md).hexdigest()},
+                    {
+                        "path": "scripts/run.py",
+                        "size": 1,
+                        "sha256": hashlib.sha256(b"x").hexdigest(),
+                    },  # noqa: E501
+                ],
+            }
+        ],
+    }
+    monkeypatch.setattr(skill_catalog, "load_catalog", lambda: catalog)
+    monkeypatch.setattr("coscribe.web.app.load_catalog", lambda: catalog)
+    served = {"SKILL.md": skill_md, "scripts/run.py": b"tampered"}
+    fetched: list[str] = []
+
+    def fake_download(url: str) -> bytes:
+        fetched.append(url)
+        return served[url.split("/skills/tiny/", 1)[1]]
+
+    monkeypatch.setattr(skill_catalog, "_download", fake_download)
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        before = client.get("/api/skills/catalog").json()
+        bad = client.post("/api/skills/catalog/tiny")
+        left_behind = [p.name for p in (tmp_path / "skills").iterdir()]
+        served["scripts/run.py"] = b"x"
+        good = client.post("/api/skills/catalog/tiny")
+        listing = {s["name"]: s for s in client.get("/api/skills").json()}
+        files = client.get("/api/skills/tiny/files").json()["files"]
+        after = client.get("/api/skills/catalog").json()
+        again = client.post("/api/skills/catalog/tiny")
+
+    assert [(e["name"], e["added"]) for e in before] == [("tiny", False)]
+    assert bad.status_code == 400 and "expected contents" in bad.json()["error"]
+    assert left_behind == []
+    assert good.json() == {"added": "tiny"}
+    assert (
+        fetched[0] == "https://raw.githubusercontent.com/anthropics/skills/abc/skills/tiny/SKILL.md"
+    )
+    assert listing["tiny"]["source"] == "anthropic"
+    assert listing["tiny"]["enabled"] is True
+    assert files == ["SKILL.md", "scripts/run.py"]
+    assert after[0]["added"] is True
+    assert again.status_code == 400
 
 
 def test_workspace_query_param_resolves_workspace_on_connect(
@@ -5134,9 +5129,7 @@ def test_pause_scheduled_task_endpoint_unknown_id_404s_lg(
     assert response.status_code == 404
 
 
-def test_delete_scheduled_task_endpoint_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_delete_scheduled_task_endpoint_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
 
     fake_model = FakeToolCallingChatModel(responses=[])
@@ -5786,9 +5779,7 @@ def test_browse_dirs_nonexistent_path_returns_error_lg(
 ) -> None:
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        response = client.get(
-            "/api/browse-dirs", params={"path": str(tmp_path / "does-not-exist")}
-        )
+        response = client.get("/api/browse-dirs", params={"path": str(tmp_path / "does-not-exist")})
 
     assert response.status_code == 200
     assert "error" in response.json()
@@ -6076,6 +6067,56 @@ def test_thread_activity_lists_outputs_references_tools_and_progress_lg(
         "run_python_script": 1,
     }
     assert activity["connectors"] == [] and activity["skills"] == []
+
+
+def test_thread_activity_marks_files_created_edited_and_read_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "notes.txt").write_text("keep", encoding="utf-8")
+    (workspace / "plan.md").write_text("old line", encoding="utf-8")
+    (workspace / "draft.md").write_text("old", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call("c1", "read_file", {"path": "notes.txt"}),
+                    _tool_call("c2", "read_file", {"path": "plan.md"}),
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call(
+                        "c3", "edit_file", {"path": "plan.md", "old_text": "old", "new_text": "new"}
+                    ),
+                    _tool_call("c4", "write_file", {"path": "draft.md", "content": "replaced"}),
+                    _tool_call("c5", "write_file", {"path": "summary.md", "content": "# S"}),
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call("c6", "write_file", {"path": "summary.md", "content": "# S2"})
+                ],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        _run_turn(client, "t_activity_actions", "tidy up")
+        activity = client.get("/api/threads/t_activity_actions/activity").json()
+
+    # summary.md was made here, so it stays "created" after being rewritten;
+    # draft.md existed (its old line was removed) and plan.md was read first.
+    assert {o["path"]: o["action"] for o in activity["outputs"]} == {
+        "summary.md": "created",
+        "draft.md": "edited",
+        "plan.md": "edited",
+    }
+    assert [(r["path"], r["action"]) for r in activity["references"]] == [("notes.txt", "read")]
 
 
 def test_opening_a_thread_file_only_hands_documents_to_the_os_lg(
@@ -6848,9 +6889,7 @@ def test_editing_a_saved_task_asks_the_user_with_the_whole_task_lg(
     task = create_trigger(
         store, name="Morning digest", kind="daily", at="09:00", prompt="Summarize the news."
     )
-    edit = _tool_call(
-        "c1", "edit_scheduled_task", {"trigger_id": task.trigger_id, "at": "08:00"}
-    )
+    edit = _tool_call("c1", "edit_scheduled_task", {"trigger_id": task.trigger_id, "at": "08:00"})
     fake_model = FakeToolCallingChatModel(
         responses=[AIMessage(content="", tool_calls=[edit]), AIMessage(content="Left it as is.")]
     )

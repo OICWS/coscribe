@@ -78,7 +78,9 @@ def test_load_skill_returns_body_and_raises_for_unknown(tmp_path: Path) -> None:
     skills = load_skills(tmp_path)
     tools = {tool.__name__: tool for tool in build_skill_tools(skills)}  # type: ignore[attr-defined]
 
-    assert tools["load_skill"](name="demo") == "# Demo Skill\n\nDo the demo thing."
+    loaded = tools["load_skill"](name="demo")
+    assert loaded.endswith("# Demo Skill\n\nDo the demo thing.")
+    assert str((tmp_path / "demo").resolve()) in loaded
     with pytest.raises(ValueError, match="Unknown skill"):
         tools["load_skill"](name="nope")
 

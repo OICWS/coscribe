@@ -66,3 +66,23 @@ test("Tools tab: lists built-in tools grouped by category", async ({ page }) => 
   await expect(page.getByText("list_files")).toBeVisible();
   await expect(page.getByText("requires approval").first()).toBeVisible();
 });
+
+test("Skills tab: a skill switched off from its menu shows Off, and back on", async ({ page }) => {
+  await page.goto(freshThreadPath("settings-skills"));
+  await waitForConnected(page);
+  await page.getByRole("button", { name: "Settings" }).click();
+  const skillsLoaded = page.waitForResponse((r) => r.url().endsWith("/api/skills") && r.status() === 200);
+  await page.getByRole("button", { name: "Skills", exact: true }).click();
+  await skillsLoaded;
+
+  const row = page.getByRole("button", { name: "Open Word Documents" });
+  const options = page.getByRole("button", { name: "Options for Word Documents", exact: true });
+  await options.click();
+  await page.getByRole("menuitem", { name: "Turn off" }).click();
+  await expect(row.getByText("Off", { exact: true })).toBeVisible();
+  // Built-in skills can only be switched off, never removed.
+  await options.click();
+  await expect(page.getByRole("menuitem", { name: "Remove" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "Turn on" }).click();
+  await expect(row.getByText("Off", { exact: true })).toHaveCount(0);
+});
