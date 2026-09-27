@@ -633,6 +633,9 @@ function StatusCell({ row, pending, onConnect }: { row: ConnectorRow; pending: b
   );
 }
 
+// Header and rows share it, so each column lines up with its heading.
+const ROW_GRID = "grid grid-cols-[minmax(0,1fr)_10rem_8rem] items-center gap-4 px-3";
+
 const EMPTY: { catalog: McpCatalogEntry[]; servers: McpServersResponse } = { catalog: [], servers: {} };
 
 /** Settings > Connectors: the list, a connector's own page (its tools and
@@ -856,51 +859,52 @@ export function ConnectorsTab({ active }: { active: boolean }) {
         <p className="text-sm text-[var(--muted)]">{q ? "No connectors match." : "No connectors yet."}</p>
       )}
       {status === "success" && visible.length > 0 && (
-        <table className="w-full table-fixed text-left text-sm">
-          <thead>
-            <tr className="border-b border-[var(--border)] text-[13px] text-[var(--muted)]">
-              <th className="w-[58%] pb-2 pr-4 font-normal">Connector</th>
-              <th className="w-[22%] pb-2 pr-4 font-normal">Type</th>
-              <th className="w-[20%] pb-2 font-normal">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((row) => (
-              <tr
-                key={row.name}
+        <div className="flex flex-col">
+          <div className={`${ROW_GRID} border-b border-[var(--border)] pb-2 text-[13px] text-[var(--muted)]`}>
+            <span>Connector</span>
+            <span>Type</span>
+            <span>Status</span>
+          </div>
+          {visible.map((row) => (
+            <div key={row.name} className="border-b border-[var(--border)] py-1 last:border-b-0">
+              <div
+                role="button"
                 tabIndex={0}
-                className="cursor-pointer border-b border-[var(--border)] hover:bg-[var(--card-bg)] focus-visible:bg-[var(--card-bg)] focus-visible:outline-none"
+                aria-label={`Open ${row.title}`}
+                className={`${ROW_GRID} cursor-pointer rounded-lg py-2 outline-none hover:bg-[var(--card-bg)] focus-visible:bg-[var(--card-bg)]`}
                 onClick={() => {
                   setNotice(null);
                   setOpenName(row.name);
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") setOpenName(row.name);
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setNotice(null);
+                    setOpenName(row.name);
+                  }
                 }}
               >
-                <td className="py-3 pr-4">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <ConnectorBadge title={row.title} />
-                    <span className="truncate text-[15px]">{row.title}</span>
-                  </div>
-                </td>
-                <td className="py-3 pr-4 text-[15px]">
+                <div className="flex min-w-0 items-center gap-3">
+                  <ConnectorBadge title={row.title} />
+                  <span className="truncate text-[15px]">{row.title}</span>
+                </div>
+                <div className="flex items-center text-[15px]">
                   {row.serverInfo?.server_url !== undefined ? "Web" : "Local"}
                   {!row.catalogEntry && (
                     <span className="ml-2 rounded-md bg-[var(--card-bg)] px-1.5 py-0.5 text-xs text-[var(--muted)]">Custom</span>
                   )}
-                </td>
-                <td className="py-3">
+                </div>
+                <div className="flex items-center">
                   <StatusCell
                     row={row}
                     pending={pendingConnectorAdds.has(row.name)}
                     onConnect={() => row.catalogEntry && connectCatalog(row.catalogEntry)}
                   />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       {adding && (

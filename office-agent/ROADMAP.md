@@ -6410,6 +6410,25 @@ reproduced here before fixing:
 - Not reproduced here: a Gemini sub-agent sending nothing on Windows (it
   ran normally in this environment); the 180s stall watchdog covers it.
 
+## Phase 8br -- Desktop File/Edit menus, Find in page; connector list rows (shipped)
+
+- [x] File menu after Claude's: New Session, Open File…, Open Folder…,
+      Settings…, Close Session, Exit (New Session in New Window, Close
+      Window and Reopen Closed Session left for later). Edit: the standard
+      editing items plus Find… / Find Next / Find Previous (Find in Files
+      left for later). No Window menu, as in Claude's. Menu items reach the
+      page as `coscribe:menu-command` events dispatched with a user
+      gesture -- without one Chromium refuses the file chooser Open File
+      needs. Verified in Electron under Xvfb: Open File and Open Folder
+      bring up the native pickers, Ctrl+N / Ctrl+W land on the new-session
+      screen, Ctrl+, opens Settings.
+- [x] Find in page: a bar under the header icons, CSS Custom Highlight API
+      matches in the chat log, count and stepping (F3 / Shift+F3 too),
+      follows streaming output; closes on another conversation. e2e test
+      added.
+- [x] Connectors list: padded grid rows whose icons line up with the
+      "Connector" heading, and a rounded hover background.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
