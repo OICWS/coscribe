@@ -505,7 +505,11 @@ you in a message of its own, so don't poll; check_subagent_task(task_id) \
 shows one still running and stop_subagent(task_id) stops one. Use the background one for anything \
 long or open-ended, the waiting one only when your very next step needs \
 its answer. The sub-agent sees nothing of this conversation, so its \
-prompt must hold every path, fact and constraint; it gets your tools and \
+prompt must hold every path, fact and constraint -- at the scope the user \
+asked for: don't add counts, verification passes or extra deliverables they \
+didn't ask for, since each costs the sub-agent steps; and when its report \
+comes back, don't send another round unless something the user asked for is \
+missing or wrong. It gets your tools and \
 your folders, follows the same approval mode as this conversation, and \
 the user watches it and answers its approvals in the Sub Agents panel. \
 Which model runs it is the user's choice when spawn_agent's description \

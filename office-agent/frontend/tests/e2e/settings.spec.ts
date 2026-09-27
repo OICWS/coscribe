@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { freshThreadPath, waitForConnected } from "./helpers";
 
-test("General tab: editing a field enables Save, saving persists it", async ({ page }) => {
+test("General tab: a change saves itself", async ({ page }) => {
   // Restores whatever level was selected before, so the dev .env isn't
   // left changed across runs.
   await page.goto(freshThreadPath("settings"));
@@ -13,8 +13,7 @@ test("General tab: editing a field enables Save, saving persists it", async ({ p
   // and typing before it lands gets silently clobbered when it arrives.
   await configLoaded;
 
-  const saveButton = page.getByRole("button", { name: "Save" });
-  await expect(saveButton).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save changes" })).toHaveCount(0);
 
   const levels = ["Debug", "Info", "Warning", "Error"];
   const pressed = await page.locator("button[aria-pressed=true]").allInnerTexts();
@@ -22,16 +21,12 @@ test("General tab: editing a field enables Save, saving persists it", async ({ p
   const target = original === "Debug" ? "Warning" : "Debug";
 
   await page.getByRole("button", { name: target, exact: true }).click();
-  await expect(saveButton).toBeEnabled();
-  await saveButton.click();
-
-  await expect(page.getByText(/^Saved/)).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(/^Saved/);
   const config = await page.evaluate(() => fetch("/api/config").then((r) => r.json()));
   expect(JSON.stringify(config)).toContain(target.toUpperCase());
 
   await page.getByRole("button", { name: original, exact: true }).click();
-  await saveButton.click();
-  await expect(page.getByText(/^Saved/)).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(/^Saved/);
 });
 
 test("General tab: Default Mode saves", async ({ page }) => {
@@ -41,18 +36,14 @@ test("General tab: Default Mode saves", async ({ page }) => {
   await page.getByRole("button", { name: "Settings" }).click();
   await configLoaded;
 
-  const saveButton = page.getByRole("button", { name: "Save" });
   await page.getByRole("button", { name: "Plan", exact: true }).click();
-  await expect(saveButton).toBeEnabled();
-  await saveButton.click();
-  await expect(page.getByText(/^Saved/)).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(/^Saved/);
 
   const config = await page.evaluate(() => fetch("/api/config").then((r) => r.json()));
   expect(config.COSCRIBE_DEFAULT_PERMISSION_MODE).toBe("plan");
 
   await page.getByRole("button", { name: "Auto", exact: true }).click();
-  await saveButton.click();
-  await expect(page.getByText(/^Saved/)).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText(/^Saved/);
 });
 
 test("Tools tab: categories start collapsed and open to list their tools", async ({ page }) => {

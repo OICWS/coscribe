@@ -1,25 +1,15 @@
 import { useEffect, useState } from "react";
 import { getMemory, updateMemory } from "../../lib/rest";
-import { SettingRow, fieldClass, primaryButtonClass, secondaryButtonClass } from "./SettingRow";
+import { SettingRow, fieldClass, secondaryButtonClass } from "./SettingRow";
 
-/** Direct editor for MEMORY.md's own content -- modeled on Cowork's
- * "Global instructions" row (an "Edit" button that opens a text box for
- * preferences/conventions the model should always know). coscribe
- * already had the underlying concept (MEMORY.md, injected into every
- * session's instructions -- see coordinator.py's format_memory_section)
- * and a path to it in the Workspace tab's own fields, but no way to see
- * or change its *content* without leaving the app to edit the file by
- * hand, or asking the agent in chat to use its `remember` tool. This is
- * a separate mini-form, not wired into SettingsModal's own dirty/Save-
- * bar tracking (which is keyed to plain .env fields) -- memory content
- * is a bigger, multi-line edit that reads better with its own explicit
- * Save, not bundled with unrelated General-tab changes. */
+/** Direct editor for MEMORY.md's content, the preferences injected into
+ * every conversation's instructions. Saved as you type, once typing
+ * pauses, like the rest of Settings. */
 export function GlobalInstructionsSection({ active }: { active: boolean }) {
   const [content, setContent] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
 
   useEffect(() => {
@@ -31,25 +21,29 @@ export function GlobalInstructionsSection({ active }: { active: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, loaded]);
 
+  useEffect(() => {
+    if (!editing || draft === content) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        await updateMemory(draft);
+        setContent(draft);
+        setStatus({ text: "Saved", error: false });
+      } catch {
+        setStatus({ text: "Couldn't save -- keep typing to try again.", error: true });
+      }
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [editing, draft, content]);
+
   const startEditing = () => {
     setDraft(content);
     setStatus(null);
     setEditing(true);
   };
 
-  const save = async () => {
-    setSaving(true);
-    setStatus(null);
-    try {
-      await updateMemory(draft);
-      setContent(draft);
-      setEditing(false);
-      setStatus({ text: "Saved.", error: false });
-    } catch {
-      setStatus({ text: "Couldn't save -- try again.", error: true });
-    } finally {
-      setSaving(false);
-    }
+  const stopEditing = () => {
+    if (draft !== content) void updateMemory(draft).then(() => setContent(draft));
+    setEditing(false);
   };
 
   return (
@@ -58,33 +52,29 @@ export function GlobalInstructionsSection({ active }: { active: boolean }) {
         label="Global instructions"
         description="Preferences, conventions or context coscribe should always know. Applies to every new conversation."
         control={
-          <button type="button" className={secondaryButtonClass} onClick={editing ? () => setEditing(false) : startEditing}>
-            {editing ? "Close" : "Edit"}
+          <button type="button" className={secondaryButtonClass} onClick={editing ? stopEditing : startEditing}>
+            {editing ? "Done" : "Edit"}
           </button>
         }
       />
       {editing && (
-        <div className="flex flex-col gap-3 pb-2">
+        <div className="flex flex-col gap-2 pb-2">
           <textarea
+            aria-label="Global instructions"
             className={`${fieldClass} h-auto min-h-36 w-full resize-y py-2.5 leading-relaxed`}
             value={draft}
             placeholder="e.g. Always write dates as YYYY-MM-DD. I prefer decks with no more than 6 bullets per slide."
             onChange={(e) => setDraft(e.target.value)}
             autoFocus
           />
-          <div className="flex items-center justify-end gap-3">
-            {status && (
-              <span className={`mr-auto text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>
-            )}
-            <button type="button" className={primaryButtonClass} disabled={saving || draft === content} onClick={save}>
-              Save
-            </button>
-          </div>
+          {status && (
+            <span className={`text-[13px] ${status.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>
+              {status.text}
+            </span>
+          )}
         </div>
       )}
-      {!editing && status && (
-        <p className={`pb-2 text-[13px] ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</p>
-      )}
+      {!editing && status?.error && <p className="pb-2 text-[13px] text-[var(--danger)]">{status.text}</p>}
     </div>
   );
 }

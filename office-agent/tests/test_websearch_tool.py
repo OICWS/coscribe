@@ -165,3 +165,36 @@ def test_read_web_page_refuses_what_isnt_a_page(monkeypatch: pytest.MonkeyPatch)
         read_web_page("https://example.com/report.pdf")
     with pytest.raises(ValueError, match="isn't an http"):
         read_web_page("file:///etc/passwd")
+
+
+def test_web_search_retries_a_query_the_engines_briefly_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ddgs.exceptions import DDGSException
+
+    calls: list[str] = []
+
+    def flaky_text(self: object, query: str, max_results: int = 5) -> list[dict[str, str]]:
+        calls.append(query)
+        if len(calls) < 3:
+            raise DDGSException("No results found.")
+        return [{"title": "T", "href": "https://example.com", "body": "B"}]
+
+    monkeypatch.setattr("ddgs.ddgs.DDGS.text", flaky_text)
+    monkeypatch.setattr("coscribe.tools.websearch._SEARCH_RETRY_SECONDS", 0)
+
+    assert web_search("ai news") == [{"title": "T", "url": "https://example.com", "snippet": "B"}]
+    assert len(calls) == 3
+
+
+def test_web_search_gives_up_after_its_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ddgs.exceptions import DDGSException
+
+    def always_fails(self: object, query: str, max_results: int = 5) -> list[dict[str, str]]:
+        raise DDGSException("No results found.")
+
+    monkeypatch.setattr("ddgs.ddgs.DDGS.text", always_fails)
+    monkeypatch.setattr("coscribe.tools.websearch._SEARCH_RETRY_SECONDS", 0)
+
+    with pytest.raises(DDGSException, match="No results found"):
+        web_search("nothing")

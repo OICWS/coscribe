@@ -5,13 +5,20 @@ const Markdown = lazy(() => import("./Markdown").then((m) => ({ default: m.Markd
 
 // Mirrors runtime_lg/subagents.py's subagent_report.
 export const SUBAGENT_REPORT_PREFIX = "[Sub-agent finished]";
-const HEADER_RE = /^\[Sub-agent finished\] "(.*?)" \(task (\w+), (.*?)\) (finished\. Its report:|failed:)\s*/s;
+const HEADER_RE =
+  /^\[Sub-agent finished\] "(.*?)" \(task (\w+), (.*?)\) (finished\. Its report:|failed:|was stopped by the user before it finished\.)\s*/s;
 
 interface ParsedReport {
   description: string;
   model: string;
-  failed: boolean;
+  outcome: "finished" | "failed" | "stopped";
   body: string;
+}
+
+function outcomeOf(verb: string): ParsedReport["outcome"] {
+  if (verb === "failed:") return "failed";
+  if (verb.startsWith("was stopped")) return "stopped";
+  return "finished";
 }
 
 function parseReport(text: string): ParsedReport | null {
@@ -20,7 +27,7 @@ function parseReport(text: string): ParsedReport | null {
   return {
     description: match[1],
     model: match[3],
-    failed: match[4] === "failed:",
+    outcome: outcomeOf(match[4]),
     body: text.slice(match[0].length).trim(),
   };
 }
@@ -43,14 +50,15 @@ export function SubAgentReportCard({ text }: { text: string }) {
         <span className="min-w-0 flex-1 truncate">
           {parsed ? (
             <>
-              Sub-agent {parsed.failed ? "failed" : "finished"}:{" "}
+              Sub-agent {parsed.outcome}:{" "}
               <span className="text-[var(--muted)]">{parsed.description}</span>
             </>
           ) : (
             "Sub-agent finished"
           )}
         </span>
-        {parsed?.failed && <span className="shrink-0 text-xs text-[var(--danger)]">Failed</span>}
+        {parsed?.outcome === "failed" && <span className="shrink-0 text-xs text-[var(--danger)]">Failed</span>}
+        {parsed?.outcome === "stopped" && <span className="shrink-0 text-xs text-[var(--muted)]">Stopped by you</span>}
         {model && <span className="shrink-0 text-xs text-[var(--muted)]">{model}</span>}
         <ChevronRightIcon
           className={`h-4 w-4 shrink-0 text-[var(--muted)] transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
@@ -58,7 +66,9 @@ export function SubAgentReportCard({ text }: { text: string }) {
       </button>
       {open && (
         <div className="max-h-96 overflow-y-auto border-t border-[var(--border)] px-4 py-3 text-sm [overflow-wrap:anywhere]">
-          {parsed?.failed ? (
+          {parsed?.outcome === "stopped" ? (
+            <div className="text-[var(--muted)]">You stopped this sub-agent before it finished.</div>
+          ) : parsed?.outcome === "failed" ? (
             <div className="whitespace-pre-wrap text-[var(--danger)]">{parsed.body}</div>
           ) : (
             <Suspense fallback={<div className="whitespace-pre-wrap">{parsed?.body || text}</div>}>

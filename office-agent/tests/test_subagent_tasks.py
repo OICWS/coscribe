@@ -248,7 +248,7 @@ async def test_stopping_a_waited_on_sub_agent_hands_the_parent_a_report(tmp_path
     stop_subagent_task(tmp_path, task.task_id)
     report = await asyncio.wait_for(parent, timeout=5)
 
-    assert report == "(this sub-agent was stopped before it finished)"
+    assert report == "(the user stopped this sub-agent before it finished)"
     assert store.load(task.task_id).status == "stopped"
 
 
@@ -555,3 +555,52 @@ async def test_a_slow_tool_run_after_its_approval_is_not_taken_for_a_hung_model(
     task = await _wait_for_status(SubAgentTaskStore(tmp_path), started["task_id"], "succeeded")
 
     assert task.result == "written"
+
+
+async def test_a_run_that_uses_all_its_steps_still_reports_what_it_found(tmp_path: Path) -> None:
+    model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_call("_read_note", {}, "c1")]),
+            AIMessage(content="", tool_calls=[_call("_read_note", {}, "c2")]),
+            AIMessage(content="The note says hi; I didn't get to the rest."),
+        ]
+    )
+    host = _host(tmp_path, model)
+    host.max_turns = 2
+    _, spawn_background = build_delegation_tools(host, _tools())
+
+    started = await spawn_background(description="read", prompt="read the note twice")
+    task = await _wait_for_status(SubAgentTaskStore(tmp_path), started["task_id"], "succeeded")
+
+    assert task.result == "The note says hi; I didn't get to the rest."
+
+
+class _RecordingChatModel(FakeToolCallingChatModel):
+    seen: list[list[BaseMessage]] = []
+
+    def _stream(self, messages: list[BaseMessage], *args: Any, **kwargs: Any) -> Any:
+        self.seen.append(list(messages))
+        yield from super()._stream(messages, *args, **kwargs)
+
+
+async def test_every_sub_agent_is_told_its_step_budget(tmp_path: Path) -> None:
+    model = _RecordingChatModel(responses=[AIMessage(content="ok")])
+    host = _host(tmp_path, model)
+    host.max_turns = 7
+    _, spawn_background = build_delegation_tools(host, _tools())
+
+    started = await spawn_background(description="x", prompt="y", instructions="Be terse.")
+    await _wait_for_status(SubAgentTaskStore(tmp_path), started["task_id"], "succeeded")
+
+    system = str(model.seen[0][0].content)
+    assert system.startswith("Be terse.")
+    assert "at most 7 steps" in system
+
+
+def test_a_run_the_user_stopped_is_reported_as_such() -> None:
+    task = _finished("stopped", stopped_by="user")
+
+    assert subagent_report(task) == (
+        '[Sub-agent finished] "Research Bosch" (task t1, glm:glm-4.6v) was stopped by the '
+        "user before it finished."
+    )

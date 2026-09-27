@@ -684,14 +684,19 @@ class ChatSessionLG:
             defer_tools=self.settings.defer_tools,
             core_tool_names=CORE_TOOL_NAMES,
             interrupt_all=bool(self.hooks_config["PreToolUse"]),
+            max_turns=self.settings.max_turns,
         )
 
     async def _subagent_changed(self, task: SubAgentTask) -> None:
         # Before any await: the wake poller runs on this loop too, and must
         # not also resume the thread for a wake this report takes over.
+        # A stop the model asked for itself needs no report.
+        ended = task.status in ("succeeded", "failed") or (
+            task.status == "stopped" and task.stopped_by == "user"
+        )
         if (
             task.background
-            and task.status in ("succeeded", "failed")
+            and ended
             and not task.reported
             and task.task_id not in self._reporting_subagents
         ):

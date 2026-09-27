@@ -1,4 +1,4 @@
-import { type ComponentType, useEffect, useMemo, useState } from "react";
+import { type ComponentType, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getConfig, updateConfig } from "../../lib/rest";
 import type { ConfigResponse } from "../../types/settings";
@@ -29,7 +29,6 @@ import {
 } from "./fields";
 import { EnvironmentTab } from "./EnvironmentTab";
 import { GeneralTab } from "./GeneralTab";
-import { primaryButtonClass } from "./SettingRow";
 import { DRAWS_TITLE_BAR, openBackdrops } from "../../lib/titleBar";
 import { ProvidersTab } from "./ProvidersTab";
 import { SkillsTab } from "./SkillsTab";
@@ -113,7 +112,6 @@ export function SettingsModal({
   const [values, setValues] = useState<Record<string, string>>({});
   const [dirEntries, setDirEntries] = useState<DirEntry[]>([]);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
-  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
 
   // v1: filters by category label only (e.g. "skill" narrows the list to
@@ -143,54 +141,62 @@ export function SettingsModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const dirty = useMemo(() => {
+    const changed: Record<string, string> = {};
+    if (!config) return changed;
+    for (const key of CONFIG_KEYS) {
+      const original = (config as unknown as Record<string, string | null>)[key] ?? "";
+      if (values[key] !== original) changed[key] = values[key];
+    }
+    const dirs = syncDirsToStrings(dirEntries);
+    if (dirs.readable !== (config.COSCRIBE_EXTRA_READABLE_DIRS ?? "")) changed[READABLE_DIRS_KEY] = dirs.readable;
+    if (dirs.writable !== (config.COSCRIBE_EXTRA_WRITABLE_DIRS ?? "")) changed[WRITABLE_DIRS_KEY] = dirs.writable;
+    return changed;
+  }, [config, values, dirEntries]);
+
+  // Saved as you go, once typing pauses, rather than on a button.
+  const dirtyKey = JSON.stringify(dirty);
+  const unsaved = useRef(dirty);
+  unsaved.current = dirty;
+  // Closing mustn't drop an edit still waiting out the pause.
+  const close = useCallback(() => {
+    if (Object.keys(unsaved.current).length > 0) void updateConfig(unsaved.current);
+    onClose();
+  }, [onClose]);
+  useEffect(() => {
+    if (!open || Object.keys(dirty).length === 0) return;
+    const timer = window.setTimeout(async () => {
+      const result = await updateConfig(dirty);
+      const rejected = Object.entries(result.rejected);
+      if (rejected.length > 0) {
+        setStatus({ text: `Not saved -- ${rejected[0][1]}`, error: true });
+        return;
+      }
+      setStatus({ text: result.restart_required ? "Saved. Restart coscribe to apply." : "Saved", error: false });
+      setConfig(await getConfig());
+    }, 700);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, dirtyKey]);
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       // A dialog opened from here (folder picker, a confirmation) takes
       // Escape for itself.
-      if (e.key === "Escape" && openBackdrops().length <= 1) onClose();
+      if (e.key === "Escape" && openBackdrops().length <= 1) close();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open, close]);
+
+  useEffect(() => {
+    if (status?.text !== "Saved") return;
+    const timer = window.setTimeout(() => setStatus(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
 
   if (!open) return null;
-
-  const dirs = syncDirsToStrings(dirEntries);
-  const originalDirs = config
-    ? { readable: config.COSCRIBE_EXTRA_READABLE_DIRS ?? "", writable: config.COSCRIBE_EXTRA_WRITABLE_DIRS ?? "" }
-    : { readable: "", writable: "" };
-
-  const dirty: Record<string, string> = {};
-  if (config) {
-    for (const key of CONFIG_KEYS) {
-      const original = (config as unknown as Record<string, string | null>)[key] ?? "";
-      if (values[key] !== original) dirty[key] = values[key];
-    }
-    if (dirs.readable !== originalDirs.readable) dirty[READABLE_DIRS_KEY] = dirs.readable;
-    if (dirs.writable !== originalDirs.writable) dirty[WRITABLE_DIRS_KEY] = dirs.writable;
-  }
-  const isDirty = Object.keys(dirty).length > 0;
-
-  const save = async () => {
-    setSaving(true);
-    setStatus(null);
-    try {
-      const result = await updateConfig(dirty);
-      const rejectedEntries = Object.entries(result.rejected);
-      if (rejectedEntries.length > 0) {
-        setStatus({ text: `Not saved -- ${rejectedEntries[0][1]}`, error: true });
-        return;
-      }
-      setStatus({ text: result.restart_required ? "Saved. Restart coscribe-web to apply." : "Saved.", error: false });
-      const refreshed = await getConfig();
-      setConfig(refreshed);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const showSaveBar = category === "general" || category === "workspace";
 
   // Portaled straight to document.body -- real, reproduced bug: rendered
   // in place (a descendant of App's own root, a sibling of BrowserPanel),
@@ -205,7 +211,7 @@ export function SettingsModal({
   return createPortal(
     <div
       className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 ${DRAWS_TITLE_BAR ? "pt-10" : ""}`}
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && close()}
     >
       {/* In the desktop app the OS draws its window buttons over the top
        * 40px of the page, so the dialog stays below them. */}
@@ -214,7 +220,7 @@ export function SettingsModal({
           type="button"
           aria-label="Close settings"
           className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
-          onClick={onClose}
+          onClick={close}
         >
           <CloseIcon className="h-[18px] w-[18px]" />
         </button>
@@ -284,14 +290,12 @@ export function SettingsModal({
             {category === "environment" && <EnvironmentTab active={category === "environment"} />}
             </div>
           </div>
-          {showSaveBar && (
-            <div className="flex items-center justify-end gap-3 border-t border-[var(--border)] px-8 py-3">
-              {status && (
-                <span className={`mr-auto text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>
-              )}
-              <button type="button" className={primaryButtonClass} disabled={!isDirty || saving} onClick={save}>
-                Save changes
-              </button>
+          {status && (category === "general" || category === "workspace") && (
+            <div
+              role="status"
+              className={`pointer-events-none absolute bottom-4 right-6 rounded-lg border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-1.5 text-sm shadow-[var(--shadow)] ${status.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}
+            >
+              {status.text}
             </div>
           )}
         </div>

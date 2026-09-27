@@ -57,18 +57,27 @@ import type { StepRecord, Workflow } from "./types/workflow";
 
 type TaskDraftItem = Extract<LogItem, { kind: "task_draft" }>;
 
+type SidePanel = "browser" | "subagents" | null;
+
 function App() {
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const socketRef = useRef<AgentSocket | null>(null);
   const [threadId, setThreadId] = useState(resolveThreadId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  // One side panel at a time: they share the chat's right edge.
-  const [sidePanel, setSidePanel] = useState<"browser" | "subagents" | null>(null);
+  // One side panel at a time, since they share the chat's right edge, and
+  // remembered per conversation: each one's sub-agents and browsing are its own.
+  const [panelByThread, setPanelByThread] = useState<Record<string, SidePanel>>({});
+  const sidePanel = panelByThread[threadId] ?? null;
   const browserPanelOpen = sidePanel === "browser";
   const subAgentsPanelOpen = sidePanel === "subagents";
-  const toggleSidePanel = (panel: "browser" | "subagents") =>
-    setSidePanel((open) => (open === panel ? null : panel));
+  const setSidePanel = (panel: SidePanel) =>
+    setPanelByThread((panels) => ({ ...panels, [threadIdRef.current]: panel }));
+  const toggleSidePanel = (panel: Exclude<SidePanel, null>) =>
+    setPanelByThread((panels) => {
+      const current = threadIdRef.current;
+      return { ...panels, [current]: panels[current] === panel ? null : panel };
+    });
   const [subAgentsTick, setSubAgentsTick] = useState(0);
   const [subAgentFocus, setSubAgentFocus] = useState<{ threadId: string; taskId: string } | null>(null);
   // Per conversation, this page load: whether the panel was opened or
@@ -332,6 +341,8 @@ function App() {
     }
   };
   const selectedTask = scheduledTasks.find((t) => t.trigger_id === selectedTaskId) ?? null;
+  // Browser and Sub Agents belong to a conversation, not the Scheduled pages.
+  const inConversation = navMode === "create" && !onHome;
   const showingScheduled = navMode === "run" || isScheduledTaskThread;
 
   useEffect(() => {
@@ -727,7 +738,7 @@ function App() {
               <PanelRightIcon className="h-[18px] w-[18px]" />
             </button>
           )}
-          {!(navMode === "create" && onHome) && (
+          {inConversation && (
             <>
               <button
                 type="button"
@@ -876,7 +887,7 @@ function App() {
         />
         {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       </div>
-      {sidePanels}
+      {inConversation && sidePanels}
       </div>
       {/* Last in the page: the desktop shell works out which parts of the
        * window drag it in page order, so the sidebar's own buttons must
