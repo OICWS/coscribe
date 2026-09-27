@@ -143,7 +143,6 @@ export interface McpCatalogEntry {
   command: string;
   args: string[];
   env?: Record<string, string>;
-  needs_browser_check?: boolean;
   needs_config?: boolean;
 }
 
@@ -170,16 +169,6 @@ export interface McpServerUpdateResult {
    * or when `rejected` already explains the outcome (a local validation
    * failure, caught before any connect was attempted). */
   error: string | null;
-}
-
-export interface BrowserCheckResponse {
-  checked: boolean;
-  path: string | null;
-}
-
-export interface InstallBrowserResponse {
-  success: boolean;
-  error?: string;
 }
 
 export type NpmLatestVersionResponse = { package: string; latest: string } | { error: string };

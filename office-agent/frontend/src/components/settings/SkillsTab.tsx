@@ -754,8 +754,7 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* pr-7 keeps + Add clear of the modal's own close button. */}
-      <div className="flex flex-wrap items-center gap-3 pr-7">
+      <div className="flex flex-wrap items-center gap-3">
         <h2 className="mr-1 text-[22px] font-semibold">Skills</h2>
         <div className="flex rounded-lg bg-[var(--card-bg)] p-0.5">
           <button type="button" aria-pressed={tab === "yours"} className={segment(tab === "yours")} onClick={() => setTab("yours")}>
@@ -766,7 +765,7 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
           </button>
         </div>
         <div className="flex-1" />
-        <div className="flex h-9 w-60 items-center gap-2 rounded-lg border border-[var(--border)] px-3 focus-within:border-[var(--border-hover)]">
+        <div className="flex h-9 w-60 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--field-bg)] px-3 focus-within:border-[var(--focus)] focus-within:ring-2 focus-within:ring-[var(--focus)]/15">
           <SearchIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
           <input
             aria-label="Search skills"

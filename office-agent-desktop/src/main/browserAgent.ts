@@ -14,7 +14,9 @@
 import { Readable } from "node:stream";
 import { type BrowserWindow, type WebContents } from "electron";
 import { pageAgent } from "./browserAgentPage";
+import { isAllowed, requestPermission } from "./browserPermissions";
 import {
+  BROWSER_AGENT_EVENT,
   activeTab,
   allTabs,
   closeTab,
@@ -29,7 +31,6 @@ import {
   type Tab,
 } from "./browserPanel";
 
-export const BROWSER_AGENT_EVENT = "browser-panel:agent";
 
 const RECONNECT_DELAY_MS = 2000;
 // Its own world: separate from the page's scripts and from the content
@@ -264,6 +265,28 @@ async function run(command: Command): Promise<Record<string, unknown>> {
   }
 }
 
+/** The site a command would touch: where it navigates to, or the page
+ * it acts on. None for tab bookkeeping and empty tabs. */
+function siteFor(command: Command): string | null {
+  const args = command.args ?? {};
+  let url: string;
+  if (command.action === "navigate" || (command.action === "tabs" && args.op === "new" && args.url)) {
+    url = normalizeUrl(String(args.url));
+  } else if (command.action === "tabs") {
+    return null;
+  } else {
+    const tab = activeTab();
+    if (!tab || tab.blank) return null;
+    url = tab.view.webContents.getURL();
+  }
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "http:" || protocol === "https:" ? hostname : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Starts the connection loop for the life of the app. */
 export function startBrowserAgent(port: number, token: string, getWindow: () => BrowserWindow | undefined): void {
   const base = `http://127.0.0.1:${port}/internal/browser-host`;
@@ -293,6 +316,13 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
     if (!isPanelOpen()) {
       notify({ open: true, threadId: command.thread_id });
       await waitForPanelOpen(5000);
+    }
+    try {
+      const site = siteFor(command);
+      if (site && !isAllowed(site, command.thread_id)) await requestPermission(site, command.thread_id, getWindow());
+    } catch (err) {
+      await reply(command.id, { ok: false, error: err instanceof Error ? err.message : String(err) });
+      return;
     }
     // The AI's steps land on the live page, so an annotation in progress
     // gives way (the panel drops its drawing when it sees "busy").

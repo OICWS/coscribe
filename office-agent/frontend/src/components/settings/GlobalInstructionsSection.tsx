@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getMemory, updateMemory } from "../../lib/rest";
-import { SettingRow } from "./SettingRow";
+import { SettingRow, fieldClass, primaryButtonClass, secondaryButtonClass } from "./SettingRow";
 
 /** Direct editor for MEMORY.md's own content -- modeled on Cowork's
  * "Global instructions" row (an "Edit" button that opens a text box for
@@ -53,49 +53,37 @@ export function GlobalInstructionsSection({ active }: { active: boolean }) {
   };
 
   return (
-    // pt-4 here, not on SettingRow itself: SettingRow's own `first:pt-0`
-    // zeroes its top padding because this wrapper makes it the sole (so
-    // both first *and* last) child of its own container, collapsing the
-    // gap above it to nothing and pulling it flush against the divider
-    // the parent's divide-y draws above this section.
-    <div className="pt-4">
+    <div className="flex flex-col">
       <SettingRow
-        label="Global Instructions"
-        description="Preferences, conventions, or context coscribe should always know. Applies to every new session."
+        label="Global instructions"
+        description="Preferences, conventions or context coscribe should always know. Applies to every new conversation."
         control={
-          <button
-            type="button"
-            className="rounded-md border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--card-bg)]"
-            onClick={editing ? () => setEditing(false) : startEditing}
-          >
+          <button type="button" className={secondaryButtonClass} onClick={editing ? () => setEditing(false) : startEditing}>
             {editing ? "Close" : "Edit"}
           </button>
         }
       />
       {editing && (
-        <div className="flex flex-col gap-2 pb-4">
+        <div className="flex flex-col gap-3 pb-2">
           <textarea
-            className="min-h-32 w-full resize-y rounded-md border border-[var(--border)] bg-transparent px-2 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+            className={`${fieldClass} h-auto min-h-36 w-full resize-y py-2.5 leading-relaxed`}
             value={draft}
             placeholder="e.g. Always write dates as YYYY-MM-DD. I prefer decks with no more than 6 bullets per slide."
             onChange={(e) => setDraft(e.target.value)}
             autoFocus
           />
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              className="rounded-md bg-[var(--accent)] px-3 py-1 text-sm text-[var(--accent-fg)] disabled:opacity-40"
-              disabled={saving || draft === content}
-              onClick={save}
-            >
+          <div className="flex items-center justify-end gap-3">
+            {status && (
+              <span className={`mr-auto text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>
+            )}
+            <button type="button" className={primaryButtonClass} disabled={saving || draft === content} onClick={save}>
               Save
             </button>
-            {status && <span className={`text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>}
           </div>
         </div>
       )}
       {!editing && status && (
-        <p className={`-mt-2 pb-4 text-xs ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</p>
+        <p className={`pb-2 text-[13px] ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</p>
       )}
     </div>
   );

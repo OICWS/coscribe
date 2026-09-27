@@ -35,7 +35,7 @@ def find_windows_browser() -> str | None:
     """First existing Chromium-family executable at a standard Windows
     install location, or None if none of them exist. Doesn't check
     sys.platform itself -- that's the caller's job (see
-    web/app.py's /api/mcp/browser-check) -- so this stays a pure,
+    web/browser_panel.py) -- so this stays a pure,
     OS-agnostic-to-test function: real path-construction/existence-check
     logic, exercisable via monkeypatched env vars + tmp_path on any host
     OS, not just Windows."""

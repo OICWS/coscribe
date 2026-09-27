@@ -43,6 +43,12 @@ function tableAsTsv(table: HTMLTableElement): string {
     .join("\n");
 }
 
+/** Opens outside the conversation: a new browser tab, or in the desktop
+ * app a tab of its Browser panel -- never replacing the app page. */
+function Link({ node: _node, ...props }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  return <a {...props} target="_blank" rel="noopener noreferrer" />;
+}
+
 function Table({ node: _node, ...props }: ComponentPropsWithoutRef<"table"> & { node?: unknown }) {
   const tableRef = useRef<HTMLTableElement>(null);
   return (
@@ -115,7 +121,7 @@ export function Markdown({ text }: { text: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
-        components={{ pre: CodeBlock, table: Table, span: MathSpan }}
+        components={{ pre: CodeBlock, table: Table, span: MathSpan, a: Link }}
       >
         {text}
       </ReactMarkdown>

@@ -25,6 +25,9 @@ from ..runtime.types import tool_metadata
 
 _DEFAULT_TIMEOUT = 30.0
 _NAVIGATE_TIMEOUT = 60.0
+# The desktop app may first ask the user whether the AI can use the site
+# (it gives up after three minutes), so every call waits that much longer.
+_PERMISSION_WAIT = 190.0
 _MAX_WAIT_SECONDS = 30.0
 _SNAPSHOT_CHARS = 12_000
 
@@ -135,7 +138,7 @@ def build_browser_tools(
     thread_id: str, host: BrowserHost = BROWSER_HOST
 ) -> list[Callable[..., Any]]:
     def call(action: str, timeout: float = _DEFAULT_TIMEOUT, **args: Any) -> dict[str, Any]:
-        return host.call(action, args, thread_id, timeout)
+        return host.call(action, args, thread_id, timeout + _PERMISSION_WAIT)
 
     def browser_navigate(url: str) -> str:
         """Open a URL in coscribe's browser (the Browser panel the user

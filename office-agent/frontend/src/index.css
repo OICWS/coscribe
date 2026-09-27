@@ -111,6 +111,10 @@
   --primary: #171614;
   --primary-hover: #322f2c;
   --primary-fg: #fcfcfb;
+  /* Text fields sit a step brighter than the page, and a focused one
+     takes a blue ring, as in Claude's settings. */
+  --field-bg: #ffffff;
+  --focus: #2f6fe4;
   /* Explicit correction: the rose accent-soft tint read as pink, not the
      neutral gray asked for -- the user's own message bubble uses --card-bg
      (the same gray as every other "resting" surface in this app) now. */
@@ -157,6 +161,8 @@
     --primary: #f7f5f3;
     --primary-hover: #ffffff;
     --primary-fg: #232120;
+    --field-bg: #2b2928;
+    --focus: #5b8def;
     --user-bubble: var(--card-bg);
     --user-bubble-fg: var(--fg);
     --agent-bubble: transparent;

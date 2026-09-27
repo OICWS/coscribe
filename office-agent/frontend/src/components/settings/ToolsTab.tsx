@@ -2,6 +2,7 @@ import { getTools } from "../../lib/rest";
 import type { ToolInfo } from "../../types/settings";
 import { FetchRetry } from "./FetchRetry";
 import { useFetchOnActive } from "../../lib/useFetchOnActive";
+import { SettingRows, SettingsSection } from "./SettingRow";
 
 interface ToolsTabProps {
   active: boolean;
@@ -19,35 +20,40 @@ export function ToolsTab({ active }: ToolsTabProps) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-xs text-[var(--muted)]">
-        Built-in tools the Coordinator can call directly. See Connectors for MCP server tools and Providers for
-        LLM providers.
-      </p>
+    <div className="flex flex-col gap-10">
       <FetchRetry status={status} onRetry={retry} />
-      {[...byCategory.entries()].map(([category, list]) => (
-        <div key={category}>
-          <h4 className="mb-1 text-sm font-medium">{category}</h4>
-          <div className="flex flex-col gap-1">
+      {[...byCategory.entries()]
+        .sort(([a], [b]) => Number(a.startsWith("mcp:")) - Number(b.startsWith("mcp:")))
+        .map(([category, list]) => (
+        <SettingsSection key={category} title={categoryTitle(category)}>
+          <SettingRows>
             {list.map((tool) => (
-              <div key={tool.name} className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono">{tool.name}</span>
-                  {tool.requires_approval && (
-                    <span
-                      className="rounded-full border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]"
-                      title={`risk category: ${tool.risk_category}`}
-                    >
-                      requires approval &middot; {tool.risk_category}
-                    </span>
+              <div key={tool.name} className="flex items-start justify-between gap-6 py-3">
+                <div className="min-w-0">
+                  <div className="font-mono text-[13px] text-[var(--fg)]">{tool.name}</div>
+                  {tool.description && (
+                    <div className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-[var(--muted)]">{tool.description}</div>
                   )}
                 </div>
-                {tool.description && <div className="text-xs text-[var(--muted)]">{tool.description}</div>}
+                {tool.requires_approval && (
+                  <span
+                    className="mt-0.5 shrink-0 rounded-full border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--muted)]"
+                    title={`Risk: ${tool.risk_category}`}
+                  >
+                    Needs approval
+                  </span>
+                )}
               </div>
             ))}
-          </div>
-        </div>
+          </SettingRows>
+        </SettingsSection>
       ))}
     </div>
   );
+}
+
+/** "files" -> "Files", "mcp:office365" -> "Connector: office365". */
+function categoryTitle(category: string): string {
+  if (category.startsWith("mcp:")) return `Connector: ${category.slice(4)}`;
+  return category.charAt(0).toUpperCase() + category.slice(1).replace(/[_-]/g, " ");
 }

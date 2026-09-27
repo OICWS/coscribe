@@ -158,7 +158,6 @@ from ..workflows.solidify import DraftFailed
 from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflow_error
 from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus
-from .browser_detect import find_windows_browser
 from .browser_panel import BrowserPanelError, BrowserPanelSession
 from .session import ChatSessionLG
 
@@ -220,24 +219,6 @@ class _NoCacheStaticFiles(StaticFiles):
 # is a stdio/local-command MCP server, matching tools/mcp.py's existing
 # schema.
 MCP_CATALOG: list[dict[str, Any]] = [
-    {
-        "name": "playwright",
-        "description": "Browser automation -- navigate, click, fill forms, take screenshots.",
-        "command": "npx",
-        # Pinned, not "@latest" -- an unpinned tag makes npx hit the npm
-        # registry to check for a newer version on every single startup,
-        # which is most of the extra delay users notice adding this one.
-        # Bump by hand occasionally (`npm view @playwright/mcp version`),
-        # or use the Connectors panel's "Check for updates" on the
-        # configured entry once it's added -- that's wired to bump this
-        # same "package@version" arg live, no restart needed.
-        "args": ["@playwright/mcp@0.0.78"],
-        # Needs a real Chromium-family browser binary to drive -- the
-        # frontend checks for one before adding this specific entry (see
-        # /api/mcp/browser-check), not a generic flag every catalog entry
-        # needs.
-        "needs_browser_check": True,
-    },
     {
         "name": "office365",
         "description": "Outlook mail and calendar, OneDrive files, Excel, OneNote, "
@@ -2293,30 +2274,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/mcp/catalog")
     async def get_mcp_catalog() -> list[dict[str, Any]]:
         return MCP_CATALOG
-
-    @app.get("/api/mcp/browser-check")
-    async def check_browser() -> dict[str, Any]:
-        if sys.platform != "win32":
-            return {"checked": False, "path": None}
-        return {"checked": True, "path": find_windows_browser()}
-
-    @app.post("/api/mcp/install-browser")
-    async def install_browser() -> dict[str, Any]:
-        try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                # Resolved via shutil.which -- same Windows PATHEXT bug
-                # runtime_lg/mcp.py's _to_lg_connection already documents.
-                [shutil.which("npx") or "npx", "playwright", "install", "chromium"],
-                capture_output=True,
-                text=True,
-                timeout=600,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return {"success": False, "error": str(exc)}
-        if result.returncode != 0:
-            return {"success": False, "error": result.stderr[-2000:] or "install failed"}
-        return {"success": True}
 
     @app.get("/api/mcp/servers")
     async def get_mcp_servers() -> dict[str, Any]:

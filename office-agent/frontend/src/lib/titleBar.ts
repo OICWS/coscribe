@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { setTitleBarColors, titleBarPlatform } from "./electron";
 
 /** The desktop shell hides the OS title bar and leaves the top row to the
@@ -42,7 +42,7 @@ function toRgba(color: string): { rgb: Rgb; alpha: number } | null {
 
 /** The translucent full-window backdrops currently open (a dialog's dimmed
  * layer), bottom-most first. */
-function openBackdrops(): { rgb: Rgb; alpha: number }[] {
+export function openBackdrops(): { rgb: Rgb; alpha: number }[] {
   const layers: { rgb: Rgb; alpha: number }[] = [];
   for (const el of document.querySelectorAll<HTMLElement>(".fixed.inset-0")) {
     const layer = toRgba(getComputedStyle(el).backgroundColor);
@@ -103,4 +103,27 @@ export function useTitleBarColors() {
       if (frame) cancelAnimationFrame(frame);
     };
   }, []);
+}
+
+/** Whether a dialog's dimmed backdrop is open anywhere in the page. */
+export function useBackdropOpen(): boolean {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let frame = 0;
+    const check = () => setOpen(openBackdrops().length > 0);
+    check();
+    const observer = new MutationObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        check();
+      });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+  return open;
 }

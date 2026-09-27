@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useFetchOnActive } from "../../lib/useFetchOnActive";
 import type { ScriptEnvInstallResult, ScriptEnvPackage } from "../../types/settings";
 import { FetchRetry } from "./FetchRetry";
+import { CloseIcon } from "../icons";
+import { fieldClass, secondaryButtonClass } from "./SettingRow";
 
 // Extracted from what used to be EnvironmentTab.tsx's entire body, so the
 // same add/list/remove list can be rendered twice (Python packages for
@@ -15,7 +17,6 @@ import { FetchRetry } from "./FetchRetry";
 interface PackageListSectionProps {
   title: string;
   description: string;
-  note: string;
   placeholder: string;
   emptyStateText: string;
   active: boolean;
@@ -27,7 +28,6 @@ interface PackageListSectionProps {
 export function PackageListSection({
   title,
   description,
-  note,
   placeholder,
   emptyStateText,
   active,
@@ -93,31 +93,26 @@ export function PackageListSection({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--card-bg)] p-3">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="mt-1 text-sm">{description}</p>
-        <p className="mt-1.5 text-xs text-[var(--muted)]">{note}</p>
+    <div className="flex flex-col gap-3 pt-5">
+      <div>
+        <div className="text-[15px]">{title}</div>
+        <p className="mt-1 text-[13px] leading-snug text-[var(--muted)]">{description}</p>
       </div>
 
       <div className="flex items-center gap-2">
         <input
-          className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-transparent px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+          aria-label={placeholder}
+          className={`${fieldClass} min-w-0 flex-1`}
           placeholder={placeholder}
           value={query}
           disabled={installing}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && install()}
         />
-        <button
-          type="button"
-          className="shrink-0 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-40"
-          disabled={installing || !query.trim()}
-          onClick={install}
-        >
+        <button type="button" className={secondaryButtonClass} disabled={installing || !query.trim()} onClick={install}>
           {installing ? (
             <span className="flex items-center gap-1.5">
-              <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--accent-fg)] border-t-transparent" />
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--muted)] border-t-transparent" />
               Adding
             </span>
           ) : (
@@ -126,41 +121,32 @@ export function PackageListSection({
         </button>
       </div>
 
-      {status && (
-        <div className={`rounded-md px-3 py-2 text-xs ${status.error ? "bg-red-500/10 text-red-500" : "bg-[var(--accent)]/10 text-[var(--accent)]"}`}>
-          {status.text}
-        </div>
-      )}
+      {status && <p className={`text-[13px] ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</p>}
 
       <FetchRetry status={loadStatus} error={loadError} onRetry={refresh} />
 
-      <div className="flex flex-col gap-1">
-        {packages.map((pkg) => (
-          <div
-            key={pkg.name}
-            className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
-          >
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate font-mono font-medium">{pkg.name}</span>
-              <span className="shrink-0 text-xs text-[var(--muted)]">{pkg.version}</span>
+      {packages.length > 0 && (
+        <div className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
+          {packages.map((pkg) => (
+            <div key={pkg.name} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate font-mono">{pkg.name}</span>
+                <span className="shrink-0 text-xs text-[var(--muted)]">{pkg.version}</span>
+              </div>
+              <button
+                type="button"
+                aria-label={`Remove ${pkg.name}`}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-red-500 disabled:opacity-40"
+                disabled={removing === pkg.name}
+                onClick={() => remove(pkg.name)}
+              >
+                {removing === pkg.name ? "…" : <CloseIcon className="h-3.5 w-3.5" />}
+              </button>
             </div>
-            <button
-              type="button"
-              className="shrink-0 rounded-md px-2 py-0.5 text-[var(--muted)] hover:bg-red-500/10 hover:text-red-500 disabled:opacity-40"
-              disabled={removing === pkg.name}
-              onClick={() => remove(pkg.name)}
-              title={`Remove ${pkg.name}`}
-            >
-              {removing === pkg.name ? "…" : "×"}
-            </button>
-          </div>
-        ))}
-        {loadStatus === "success" && packages.length === 0 && (
-          <div className="rounded-lg border border-dashed border-[var(--border)] px-3 py-4 text-center text-sm text-[var(--muted)]">
-            {emptyStateText}
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      )}
+      {loadStatus === "success" && packages.length === 0 && <p className="text-[13px] text-[var(--muted)]">{emptyStateText}</p>}
     </div>
   );
 }

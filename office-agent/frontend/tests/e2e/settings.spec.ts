@@ -64,7 +64,7 @@ test("Tools tab: lists built-in tools grouped by category", async ({ page }) => 
   await toolsLoaded;
 
   await expect(page.getByText("list_files")).toBeVisible();
-  await expect(page.getByText("requires approval").first()).toBeVisible();
+  await expect(page.getByText("Needs approval").first()).toBeVisible();
 });
 
 test("Skills tab: a skill switched off from its menu shows Off, and back on", async ({ page }) => {
