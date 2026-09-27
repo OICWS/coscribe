@@ -26,12 +26,14 @@ escape hatch for exactly this, not a fallback that needs building later.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
 from ddgs import DDGS
+from ddgs.exceptions import DDGSException
 from markdownify import markdownify
 
 from ..runtime.proxy import configured_proxy
@@ -47,6 +49,12 @@ from ..runtime.types import tool_metadata
 # call instead of using the fake.
 
 DEFAULT_MAX_RESULTS = 5
+# The free engines fail a query now and then ("No results found." when
+# every engine they tried came back empty or blocked) and answer it on a
+# second try moments later. Retried here, a failure costs a second or two;
+# handed back, the model spends a whole step rewording a query that was fine.
+_SEARCH_ATTEMPTS = 3
+_SEARCH_RETRY_SECONDS = 1.5
 
 
 def web_search(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[str, str]]:
@@ -64,7 +72,14 @@ def web_search(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict[
     # DDGS_PROXY env var its docs mention, which a typical corporate
     # .env/HTTP_PROXY setup won't have. configured_proxy() forwards the
     # standard HTTP_PROXY/HTTPS_PROXY instead (see runtime/proxy.py).
-    results = DDGS(proxy=configured_proxy()).text(query, max_results=max_results)
+    for attempt in range(_SEARCH_ATTEMPTS):
+        try:
+            results = DDGS(proxy=configured_proxy()).text(query, max_results=max_results)
+            break
+        except DDGSException:
+            if attempt == _SEARCH_ATTEMPTS - 1:
+                raise
+            time.sleep(_SEARCH_RETRY_SECONDS)
     return [
         {
             "title": str(result.get("title", "")),

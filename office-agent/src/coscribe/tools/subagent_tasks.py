@@ -57,6 +57,8 @@ class SubAgentTask:
     # The parent has seen how a background run ended, so it needn't be
     # told again.
     reported: bool = False
+    # "user" (the panel) or "assistant" (stop_subagent) for a stopped run.
+    stopped_by: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +80,7 @@ class SubAgentTask:
             "pending_approval": self.pending_approval,
             "background": self.background,
             "reported": self.reported,
+            "stopped_by": self.stopped_by,
         }
 
     @classmethod
@@ -105,6 +108,7 @@ class SubAgentTask:
             pending_approval=data.get("pending_approval"),
             background=data.get("background", False),
             reported=data.get("reported", False),
+            stopped_by=data.get("stopped_by", ""),
         )
 
 
@@ -179,6 +183,9 @@ _WRITE_LOCK = threading.Lock()
 # Holding it here also keeps it from being garbage-collected mid-run.
 _RUNNING: dict[str, asyncio.Task[Any]] = {}
 
+# task_id -> who asked for the stop, picked up by the runner as it unwinds.
+_STOP_REQUESTED_BY: dict[str, str] = {}
+
 # task_id -> (its compiled graph, its child thread config), kept after it
 # finishes: the only copy of what it did lives in that graph's checkpointer.
 _TRANSCRIPTS: dict[str, tuple[Any, dict[str, Any]]] = {}
@@ -196,7 +203,11 @@ def running_subagent(task_id: str) -> asyncio.Task[Any] | None:
     return _RUNNING.get(task_id)
 
 
-def stop_subagent_task(state_dir: str | Path, task_id: str) -> dict[str, Any]:
+def take_stop_requester(task_id: str) -> str:
+    return _STOP_REQUESTED_BY.pop(task_id, "")
+
+
+def stop_subagent_task(state_dir: str | Path, task_id: str, by: str = "user") -> dict[str, Any]:
     """Cancel a running sub-agent. Its runner records the "stopped" status
     as it unwinds, so the returned record may still read as running."""
     task = SubAgentTaskStore(state_dir).load(task_id)
@@ -205,6 +216,7 @@ def stop_subagent_task(state_dir: str | Path, task_id: str) -> dict[str, Any]:
     runner = _RUNNING.get(task_id)
     if task.status in FINISHED_STATUSES or runner is None:
         raise ValueError(f"Task {task_id!r} isn't running")
+    _STOP_REQUESTED_BY[task_id] = by
     runner.cancel()
     return task.to_dict()
 
@@ -273,7 +285,7 @@ def build_subagent_task_tools(thread_id: str, state_dir: str | Path) -> list[Cal
         task = store.load(task_id)
         if task is None or task.thread_id != thread_id:
             raise KeyError(f"No sub-agent task with id {task_id!r} in this conversation")
-        stop_subagent_task(state_dir, task_id)
+        stop_subagent_task(state_dir, task_id, by="assistant")
         return {"task_id": task_id, "status": "stopped"}
 
     return [

@@ -80,36 +80,35 @@ export function WorkspaceTab({ values, onChange, dirEntries, onDirEntriesChange 
         title="Other folders"
         description="coscribe can always read and change the workspace. Give it more folders here, each read-only or read and write."
       >
-        <div className="mt-3 flex flex-col overflow-hidden rounded-xl border border-[var(--border)]">
-          <div className="flex items-center gap-3 px-4 py-3 text-sm">
-            <FolderIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
-            <span className="min-w-0 flex-1 truncate">{values[WORKSPACE_ROOT_KEY] || "(not set)"}</span>
-            <span className="text-[13px] text-[var(--muted)]">Workspace · read and write</span>
+        {dirEntries.length === 0 ? (
+          <p className="mt-3 text-sm text-[var(--muted)]">No other folders yet.</p>
+        ) : (
+          <div className="mt-3 flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+            {dirEntries.map((entry) => (
+              <div key={entry.path} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <FolderIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+                <span className="min-w-0 flex-1 truncate">{entry.path}</span>
+                <select
+                  aria-label={`Access to ${entry.path}`}
+                  className={`${fieldClass} h-8 px-2 text-[13px]`}
+                  value={entry.permission}
+                  onChange={(e) => setPermission(entry.path, e.target.value as DirPermission)}
+                >
+                  <option value="read">Read only</option>
+                  <option value="read-write">Read and write</option>
+                </select>
+                <button
+                  type="button"
+                  aria-label={`Remove ${entry.path}`}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-red-500"
+                  onClick={() => removeEntry(entry.path)}
+                >
+                  <CloseIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
           </div>
-          {dirEntries.map((entry) => (
-            <div key={entry.path} className="flex items-center gap-3 border-t border-[var(--border)] px-4 py-2.5 text-sm">
-              <FolderIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
-              <span className="min-w-0 flex-1 truncate">{entry.path}</span>
-              <select
-                aria-label={`Access to ${entry.path}`}
-                className={`${fieldClass} h-8 px-2 text-[13px]`}
-                value={entry.permission}
-                onChange={(e) => setPermission(entry.path, e.target.value as DirPermission)}
-              >
-                <option value="read">Read only</option>
-                <option value="read-write">Read and write</option>
-              </select>
-              <button
-                type="button"
-                aria-label={`Remove ${entry.path}`}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-red-500"
-                onClick={() => removeEntry(entry.path)}
-              >
-                <CloseIcon className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
+        )}
         <div className="mt-3 flex gap-2">
           <input
             aria-label="Folder to add"

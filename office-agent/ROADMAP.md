@@ -6378,6 +6378,38 @@ reproduced here before fixing:
   this environment (2.4s for a tool call); the watchdog covers a stuck
   connection wherever it happens.
 
+## Phase 8bq -- Connectors page after Claude's; sub-agents on a budget; settings save themselves (shipped)
+
+- [x] Settings → Connectors matches Skills: bold title, search, a dark
+      "+ Add ▾" (Add custom connector), a Connector / Type / Status table
+      (check when connected, Connect for a catalog entry). Discover is left
+      out -- one catalog entry doesn't make a marketplace.
+- [x] Add custom connector dialog: Name + MCP server URL, or a local
+      command, arguments and env.
+- [x] A connector's page: Disconnect, ⋮ (Reconnect, Check for updates),
+      and Tool permissions -- Read-only / Write/delete groups from the
+      server's `readOnlyHint`, each tool Always allow / Needs approval /
+      Blocked, a group menu to set them all. Allow marks the tool READ (no
+      approval, no Auto review); block leaves it out of the conversation's
+      tools. Verified live with a local FastMCP server: allowed list/read
+      ran with no prompt; with delete blocked, DeepSeek said it couldn't
+      delete and asked what to do instead. A catalog entry not added yet
+      gets an intro page (description, made by, package, Connect).
+- [x] Sub-agents: run under Max turns and are told their budget; a run
+      that hits it writes its report from what it did (told not to claim
+      unwritten files -- a first version let Gemini claim a rewrite it
+      never made). The coordinator delegates at the user's scope and
+      doesn't send extra rounds; the same news request went from three
+      re-verification rounds to one 80s run. A user stop from the panel is
+      reported to the conversation. `web_search` retries briefly failed
+      queries (17 of one run's 40 calls were "No results found").
+- [x] General / Workspace / Global instructions save as you go; Other
+      folders no longer shows "(not set)"; the Scheduled tasks breadcrumb is
+      gray only on hover; side panels remembered per conversation and shown
+      only in conversations.
+- Not reproduced here: a Gemini sub-agent sending nothing on Windows (it
+  ran normally in this environment); the 180s stall watchdog covers it.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

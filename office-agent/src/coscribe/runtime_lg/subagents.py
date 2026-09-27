@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -35,12 +35,35 @@ from ..tools.subagent_tasks import (
     SubAgentTask,
     SubAgentTaskStore,
     register_subagent_run,
+    take_stop_requester,
 )
 from .agent import build_langgraph_agent
 from .agent import tool_name as _tool_name
-from .messages import extract_text
+from .messages import extract_text, render_transcript_lg
 
 logger = logging.getLogger(__name__)
+
+# Appended to every sub-agent's instructions, custom ones included: a
+# delegated task has no one watching its cost, and a model left to itself
+# keeps searching and re-checking long after it has enough.
+_BUDGET_NOTE = (
+    "\n\nYou have at most {max_turns} steps (model calls). Keep the work in "
+    "proportion to the task: stop searching as soon as you have enough to answer, "
+    "don't re-check what you've already confirmed, and prefer a few well-chosen "
+    "calls to many. If you run out of steps you'll be asked for your report with "
+    "what you have."
+)
+
+# The model-call cap ends a run with langchain's own "Model call limits
+# exceeded" message, which reports nothing of the work.
+_LIMIT_MESSAGE_PREFIX = "Model call limits exceeded"
+_WRAP_UP_REQUEST = (
+    "You've used all your steps, and nothing more will run: a file you didn't "
+    "write below is not written. Report only what the record below shows you "
+    "actually did and found, and say plainly what you didn't get to (for example "
+    "\"I didn't write the file\"). Don't ask for more steps.\n\n{transcript}"
+)
+_WRAP_UP_TRANSCRIPT_CHARS = 60000
 
 DEFAULT_SUBAGENT_INSTRUCTIONS = (
     "You are doing one task delegated to you by another assistant. Do the "
@@ -180,12 +203,26 @@ async def _stream_turn(
         await stream.aclose()
 
 
+async def _wrap_up(chat_model: Any, instructions: str, messages: list[Any]) -> str:
+    """The report a run cut off by its step cap still owes its parent."""
+    transcript = render_transcript_lg(messages[:-1])[-_WRAP_UP_TRANSCRIPT_CHARS:]
+    reply = await chat_model.ainvoke(
+        [
+            SystemMessage(instructions),
+            HumanMessage(_WRAP_UP_REQUEST.format(transcript=transcript)),
+        ]
+    )
+    return extract_text(reply.content)
+
+
 async def _drive(
     host: SubAgentHost,
     store: SubAgentTaskStore,
     task: SubAgentTask,
     sub_agent: Any,
     child_config: dict[str, Any],
+    chat_model: Any,
+    instructions: str,
 ) -> None:
     async def save() -> None:
         store.save(task)
@@ -228,6 +265,7 @@ async def _drive(
             turn_input = Command(resume=resume)
     except asyncio.CancelledError:
         task.status = "stopped"
+        task.stopped_by = take_stop_requester(task.task_id)
         task.pending_approval = None
         task.finished_at = datetime.now(UTC).isoformat()
         await save()
@@ -244,6 +282,12 @@ async def _drive(
     state = await sub_agent.aget_state(child_config)
     messages = state.values.get("messages", []) if state.values else []
     reply = extract_text(getattr(messages[-1], "content", None)) if messages else ""
+    if reply.startswith(_LIMIT_MESSAGE_PREFIX):
+        try:
+            reply = await _wrap_up(chat_model, instructions, messages)
+        except Exception:  # noqa: BLE001 -- the cap's own message is still a report
+            logger.warning("sub-agent %s couldn't write its report", task.task_id, exc_info=True)
+            reply = f"(it used all {host.max_turns} of its steps before finishing)"
     task.result = reply or "(the sub-agent gave no reply)"
     task.status = "succeeded"
     task.finished_at = datetime.now(UTC).isoformat()
@@ -262,6 +306,8 @@ def subagent_report(task: SubAgentTask, reasons: Sequence[str] = ()) -> str:
     head = f'{SUBAGENT_REPORT_PREFIX} "{task.description}" (task {task.task_id}, {task.model})'
     if task.status == "succeeded":
         body = f"{head} finished. Its report:\n\n{task.result or '(no reply)'}"
+    elif task.status == "stopped":
+        body = f"{head} was stopped by the user before it finished."
     else:
         body = f"{head} failed: {task.error or 'unknown error'}"
     if len(body) > _REPORT_CHARS:
@@ -275,6 +321,8 @@ def _outcome(task: SubAgentTask) -> str:
     if task.status == "succeeded":
         return task.result or "(the sub-agent gave no reply)"
     if task.status == "stopped":
+        if task.stopped_by == "user":
+            return "(the user stopped this sub-agent before it finished)"
         return "(this sub-agent was stopped before it finished)"
     return f"(the sub-agent failed: {task.error or 'unknown error'})"
 
@@ -300,10 +348,13 @@ def build_delegation_tools(
             raise ValueError(f"Unknown tool for a sub-agent: {', '.join(unknown)}")
         selected = [tools_by_name[n] for n in requested] or list(tools_by_name.values())
         model_string, chat_model = host.resolve_model(model.strip())
+        system_prompt = instructions.strip() or DEFAULT_SUBAGENT_INSTRUCTIONS
+        if host.max_turns is not None:
+            system_prompt += _BUDGET_NOTE.format(max_turns=host.max_turns)
         sub_agent = build_langgraph_agent(
             chat_model,
             selected,
-            instructions.strip() or DEFAULT_SUBAGENT_INSTRUCTIONS,
+            system_prompt,
             checkpointer=InMemorySaver(),
             extra_interrupt_tool_names=[_tool_name(t) for t in selected]
             if host.interrupt_all
@@ -331,7 +382,8 @@ def build_delegation_tools(
         # contextvars, and a copied one would stream the child's messages
         # into the parent's own chat stream.
         runner = asyncio.create_task(
-            _drive(host, store, task, sub_agent, child_config), context=contextvars.Context()
+            _drive(host, store, task, sub_agent, child_config, chat_model, system_prompt),
+            context=contextvars.Context(),
         )
         register_subagent_run(task.task_id, runner, sub_agent, child_config)
         # Saved only once registered: a record with no live runner reads as

@@ -3416,6 +3416,7 @@ def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(
                 "args": ["mcp-server-fetch"],
                 "masked_env": {},
                 "connected": False,
+                "tools": [],
             }
         }
 
@@ -7287,3 +7288,79 @@ def test_a_background_sub_agent_is_reviewed_against_its_task_and_reports_back_lg
     assert started["text"].startswith('[Sub-agent finished] "write the note"')
     assert "wrote note.txt" in started["text"]
     assert reply["text"] == "The sub-agent wrote the note."
+
+
+def test_connector_tool_permissions_change_what_a_conversation_may_do_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from langchain_core.tools import StructuredTool
+
+    from coscribe.runtime.types import tool_metadata
+
+    def _make(name: str, read_only: bool) -> Any:
+        def run(x: str = "") -> str:
+            return f"{name}:{x}"
+
+        tool = StructuredTool.from_function(
+            run, name=name, description=f"{name}. More.", metadata={"readOnlyHint": read_only}
+        )
+        tool_metadata(tool, risk_category="EXTERNAL", category="mcp:notes")
+        return tool
+
+    tools = [_make("notes_read", True), _make("notes_delete", False)]
+
+    class _FakeConnection:
+        async def close(self) -> None:
+            pass
+
+    async def _connect(name: str, config: Any) -> tuple[list[Any], Any, None]:
+        return tools, _FakeConnection(), None
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    read = _tool_call("r1", "notes_read", {"x": "a"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[read]),
+            AIMessage(content="done"),
+            AIMessage(content="", tool_calls=[read]),
+            AIMessage(content="done"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        monkeypatch.setattr("coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", _connect)
+        client.post("/api/mcp/servers", json={"name": "notes", "command": "npx", "args": ["n"]})
+
+        listed = client.get("/api/mcp/servers").json()["notes"]["tools"]
+        with client.websocket_connect("/ws/t_perm_ask") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "read"})
+            asked = _receive_until(ws, "approval_required")[-1]
+            ws.send_json({"type": "approval_response", "id": asked["id"], "approved": True})
+            _receive_until(ws, "tasks_changed")
+
+        saved = client.put(
+            "/api/mcp/servers/notes/permissions",
+            json={"tools": {"notes_read": "allow", "notes_delete": "block"}},
+        )
+        with client.websocket_connect("/ws/t_perm_ask") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "read again"})
+            allowed = _receive_until(ws, "tasks_changed")
+        tool_names = [t["name"] for t in client.get("/api/tools").json()["tools"]]
+        refused = client.put(
+            "/api/mcp/servers/notes/permissions", json={"tools": {"notes_read": "never"}}
+        )
+
+    assert [(t["name"], t["title"], t["read_only"], t["policy"]) for t in listed] == [
+        ("notes_read", "Read", True, "ask"),
+        ("notes_delete", "Delete", False, "ask"),
+    ]
+    assert asked["tool_name"] == "notes_read"
+    assert saved.json() == {"tools": {"notes_read": "allow", "notes_delete": "block"}}
+    assert not any(m["type"] == "approval_required" for m in allowed)
+    assert next(m for m in allowed if m["type"] == "tool_result")["result"] == "notes_read:a"
+    assert "notes_read" in tool_names and "notes_delete" not in tool_names
+    assert refused.status_code == 422

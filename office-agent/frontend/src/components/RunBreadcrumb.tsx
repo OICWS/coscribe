@@ -117,7 +117,7 @@ export function TaskPageBreadcrumb({ task, onOpenPortal }: { task: ScheduledTask
     <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
       <button
         type="button"
-        className="shrink-0 rounded-md bg-[var(--card-bg)] px-2 py-1 hover:bg-[var(--border)]"
+        className="shrink-0 rounded-md px-2 py-1 text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
         onClick={onOpenPortal}
       >
         Scheduled tasks
