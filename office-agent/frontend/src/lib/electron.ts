@@ -193,6 +193,10 @@ export function showAppMenu(x: number, y: number): void {
   window.coscribeDesktop?.showAppMenu?.(x, y);
 }
 
+export function setThemeSource(theme: "system" | "light" | "dark"): void {
+  window.coscribeDesktop?.setThemeSource?.(theme);
+}
+
 export function setTitleBarColors(color: string, symbolColor: string): void {
   window.coscribeDesktop?.setTitleBarColors?.(color, symbolColor);
 }
@@ -207,6 +211,7 @@ declare global {
       platform?: string;
       showAppMenu?(x: number, y: number): void;
       setTitleBarColors?(color: string, symbolColor: string): void;
+      setThemeSource?(theme: string): void;
       onShowShortcuts?(callback: () => void): void;
       pickFolder(): Promise<string | null>;
       browserPanelOpen(rect: BrowserPanelRect): Promise<void>;

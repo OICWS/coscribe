@@ -97,6 +97,8 @@ export function useTitleBarColors() {
       });
     });
     observer.observe(document.body, { childList: true, subtree: true });
+    // The chosen theme lands on <html> (lib/appearance.ts).
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     return () => {
       scheme.removeEventListener("change", sendIfChanged);
       observer.disconnect();

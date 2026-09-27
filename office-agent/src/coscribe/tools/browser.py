@@ -266,8 +266,9 @@ def build_browser_tools(
         return _with_tab(f'"{text}" is on the page.' if text else f"Waited {wait:.0f}s.", result)
 
     def browser_tabs(action: str = "list", tab_id: int = 0, url: str = "") -> str:
-        """List, open, switch to or close tabs in coscribe's browser. The
-        other browser_* tools act on the current tab.
+        """List, open, switch to or close tabs in coscribe's browser (at
+        most 9 are open at once). The other browser_* tools act on the
+        current tab.
 
         Args:
             action: "list", "new" (opens url, or a blank tab), "select" or "close"

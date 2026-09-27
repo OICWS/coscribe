@@ -64,6 +64,8 @@ const CONTENT_PICKED_CHANNEL = "browser-panel-content:picked";
 const CONTENT_WHEEL_ZOOM_CHANNEL = "browser-panel-content:wheel-zoom";
 
 const PARTITION = "persist:coscribe-browser";
+// As in Claude's browser: past this the tab strip can't show a usable tab.
+export const MAX_TABS = 9;
 const MIN_ZOOM_FACTOR = 0.25;
 const MAX_ZOOM_FACTOR = 5;
 const ZOOM_STEP_FACTOR = 1.1;
@@ -227,6 +229,10 @@ function layout(): void {
   }
 }
 
+export function tabLimitReached(): boolean {
+  return tabs.length >= MAX_TABS;
+}
+
 export function createTab(url?: string): Tab {
   const view = new WebContentsView({
     webPreferences: {
@@ -273,8 +279,9 @@ export function createTab(url?: string): Tab {
   // target="_blank" and window.open open a tab in the panel rather than a
   // separate native window without any browser chrome.
   wc.setWindowOpenHandler(({ url: target }) => {
-    const opened = createTab(target);
-    selectTab(opened.id);
+    // With every tab in use, the link replaces this page instead.
+    if (tabLimitReached()) void wc.loadURL(normalizeUrl(target)).catch(() => undefined);
+    else selectTab(createTab(target).id);
     return { action: "deny" };
   });
   wc.on("before-input-event", (_event, input) => {
@@ -403,7 +410,7 @@ export function registerBrowserPanelHandlers(window: BrowserWindow): void {
     activeTab()?.view.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, enabled);
   });
   ipcMain.handle(BROWSER_PANEL_NEW_TAB_CHANNEL, () => {
-    selectTab(createTab().id);
+    if (!tabLimitReached()) selectTab(createTab().id);
   });
   ipcMain.handle(BROWSER_PANEL_SELECT_TAB_CHANNEL, (_event, id: number) => {
     selectTab(Number(id));
@@ -470,7 +477,8 @@ export function openLinkFromApp(url: string): void {
     void shell.openExternal(url);
     return;
   }
-  selectTab(createTab(url).id);
+  if (tabLimitReached()) void ensureActiveTab().view.webContents.loadURL(url).catch(() => undefined);
+  else selectTab(createTab(url).id);
   win.webContents.send(BROWSER_AGENT_EVENT, { open: true });
 }
 

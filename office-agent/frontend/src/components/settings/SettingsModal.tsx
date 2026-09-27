@@ -30,6 +30,7 @@ import {
 import { EnvironmentTab } from "./EnvironmentTab";
 import { GeneralTab } from "./GeneralTab";
 import { primaryButtonClass } from "./SettingRow";
+import { DRAWS_TITLE_BAR, openBackdrops } from "../../lib/titleBar";
 import { ProvidersTab } from "./ProvidersTab";
 import { SkillsTab } from "./SkillsTab";
 import { ToolsTab } from "./ToolsTab";
@@ -142,6 +143,17 @@ export function SettingsModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      // A dialog opened from here (folder picker, a confirmation) takes
+      // Escape for itself.
+      if (e.key === "Escape" && openBackdrops().length <= 1) onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const dirs = syncDirsToStrings(dirEntries);
@@ -192,10 +204,12 @@ export function SettingsModal({
   // that isn't a descendant of it in the first place.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 ${DRAWS_TITLE_BAR ? "pt-10" : ""}`}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="relative flex h-[min(840px,100vh-2rem)] w-[min(1100px,100vw-2rem)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel-bg)] shadow-[var(--shadow)]">
+      {/* In the desktop app the OS draws its window buttons over the top
+       * 40px of the page, so the dialog stays below them. */}
+      <div className={`relative flex ${DRAWS_TITLE_BAR ? "h-[min(840px,100vh-4.5rem)]" : "h-[min(840px,100vh-2rem)]"} w-[min(1100px,100vw-2rem)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel-bg)] shadow-[var(--shadow)]`}>
         <button
           type="button"
           aria-label="Close settings"

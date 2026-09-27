@@ -6320,6 +6320,32 @@ built-in browser.
       Python (interpreter, packages) / Node.js. Labels in sentence case,
       descriptions rewritten short. "Save changes" sits bottom-right.
 
+## Phase 8bo -- Claude blue, Appearance, tidier Settings and tabs (shipped)
+
+- [x] The rose accent is Claude blue (`--accent #2a78d6`, sampled from
+      Claude's own UI; `#4b8fe3` in dark), with the soft tint, ink and focus
+      ring following it; the AI's page frame and click dot in the Browser
+      panel too. Danger keeps its own red tokens.
+- [x] Settings → General → Appearance: Theme (system / light / dark, as
+      icons), Chat font (IBM Plex Sans / Source Serif 4 / system font),
+      Motion (system / reduced). Applied instantly as `data-theme`,
+      `data-chat-font`, `data-motion` on `<html>`; saved in `.env`
+      because the desktop page's origin port changes every launch. The
+      desktop app's native theme (menus, dialogs) follows the choice.
+      Anthropic Serif is proprietary, so it isn't bundled.
+- [x] Settings sits below the desktop title bar (the OS drew its window
+      buttons over the dialog's top-right corner) and closes on Escape.
+- [x] Tools: categories collapsed by default, each with a tool count;
+      descriptions are the docstring's first sentence, not its first line.
+- [x] Browser panel: at most 9 tabs, as in Claude. Tabs shrink to their
+      icon and all 9 fit the panel's default width; "+" stays outside the
+      scrolling strip and is disabled at 9; a link or `window.open` at the
+      limit loads in the current tab; the AI's `browser_tabs("new")` gets
+      a clear error telling it to close or reuse one.
+- [x] Verified live in Electron: "Always allow" prompted once, and a new
+      conversation on the same site didn't prompt
+      (`browser-settings.json` holds the site).
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
