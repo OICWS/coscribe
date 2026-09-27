@@ -1,4 +1,5 @@
 from .background_tasks import BackgroundTask, BackgroundTaskStore, build_background_task_tools
+from .browser import build_browser_tools
 from .documents import build_document_tools
 from .files import build_file_tools
 from .images import build_image_tools
@@ -74,6 +75,7 @@ __all__ = [
     "build_spreadsheet_tools",
     "build_subagent_task_tools",
     "build_task_tools",
+    "build_browser_tools",
     "build_websearch_tools",
     "compute_next_run_at",
     "format_memory_section",

@@ -1,43 +1,38 @@
 /**
- * Browser panel, Electron migration Phases 2-3 -- a real, natively-
- * embedded `WebContentsView` child of the main window, replacing the
- * screencast/CDP-relay implementation
- * (`office-agent/src/coscribe/web/browser_panel.py` + `/ws/browser`)
- * that the plain-browser-tab and Tauri paths still use. See
- * office-agent/ROADMAP.md's "Browser panel native-window migration
- * plan" for the full design. Phase 2: real embedding + navigation, no
- * CDP, no screencast, no synthetic input relay -- a `WebContentsView` is
- * a real, natively-interactive surface, so mouse/keyboard/IME all just
- * work with zero code here. Phase 3: element-picking, see the section
- * below.
+ * The Browser panel: real browser tabs, each a `WebContentsView` child of
+ * the main window, of which only the active tab's view is attached, laid
+ * over the panel's content area. The React panel draws the tab strip and
+ * address bar and reports where the content area is; this file owns the
+ * tabs. Both the user and coscribe's AI (browserAgent.ts) drive the same
+ * tabs.
  *
- * One singleton view for the life of the app, not recreated per open/
- * close -- `closeBrowserPanel` only detaches it from the window
- * (`removeChildView`), it doesn't destroy the underlying `webContents`,
- * so the page's own navigation state/history survives a close+reopen
- * exactly like a real browser tab would (this was an explicit real-
- * hardware checkpoint: "closed, reopened, and left open across at least
- * one full close cycle").
+ * Tabs share one persistent session ("persist:coscribe-browser"), apart
+ * from the app's own pages, so sign-ins survive restarts and stay out of
+ * coscribe's UI.
  *
- * Element-picking (Phase 3): the actual hover-highlight/click-capture
- * logic lives in browserPanelContent.ts (the panel's own preload,
- * re-injected on every navigation like a content script) since only
- * that context can draw *inside* the live page's own DOM -- see that
- * file's own module docs for why. This file's role is the plumbing
- * either side of that: forwarding pick-mode on/off down to the content
- * script, and turning a picked element's rect into a real screenshot
- * (`capturePage`, no CDP/DPI math needed -- see this project's own
- * migration plan for why that whole problem class doesn't exist here)
- * once the content script reports one.
+ * Element picking draws inside the page (browserPanelContent.ts, each
+ * tab's preload): the page is a separately composited native surface the
+ * React DOM can't paint over. This side forwards pick mode and turns a
+ * picked element's rect into a screenshot with `capturePage`, which works
+ * in the same CSS-pixel space getBoundingClientRect returns.
  */
 
-import { WebContentsView, ipcMain, type BrowserWindow, type Rectangle } from "electron";
+import {
+  Menu,
+  WebContentsView,
+  dialog,
+  ipcMain,
+  session,
+  shell,
+  type BrowserWindow,
+  type Rectangle,
+  type Session,
+  type WebContents,
+} from "electron";
 import { join } from "node:path";
 
-// preload/index.ts duplicates each of these exact strings rather than
-// importing them from here -- see dialog.ts's own comment on why a
-// sandboxed preload can only require electron/events/timers/url, never a
-// local project file. Keep every copy in sync if these ever change.
+// preload/index.ts repeats these strings: a sandboxed preload can only
+// require electron's own modules, never a project file.
 export const BROWSER_PANEL_OPEN_CHANNEL = "browser-panel:open";
 export const BROWSER_PANEL_REPOSITION_CHANNEL = "browser-panel:reposition";
 export const BROWSER_PANEL_CLOSE_CHANNEL = "browser-panel:close";
@@ -46,50 +41,23 @@ export const BROWSER_PANEL_BACK_CHANNEL = "browser-panel:back";
 export const BROWSER_PANEL_FORWARD_CHANNEL = "browser-panel:forward";
 export const BROWSER_PANEL_RELOAD_CHANNEL = "browser-panel:reload";
 export const BROWSER_PANEL_SET_PICK_MODE_CHANNEL = "browser-panel:set-pick-mode";
-// Main -> renderer events (webContents.send / ipcRenderer.on), not
-// ipcMain.handle -- same shape as mainWindow.ts's own "sidecar-status".
-export const BROWSER_PANEL_NAVIGATED_EVENT = "browser-panel:navigated";
-export const BROWSER_PANEL_LOAD_ERROR_EVENT = "browser-panel:load-error";
+export const BROWSER_PANEL_NEW_TAB_CHANNEL = "browser-panel:new-tab";
+export const BROWSER_PANEL_SELECT_TAB_CHANNEL = "browser-panel:select-tab";
+export const BROWSER_PANEL_CLOSE_TAB_CHANNEL = "browser-panel:close-tab";
+export const BROWSER_PANEL_OPEN_EXTERNAL_CHANNEL = "browser-panel:open-external";
+export const BROWSER_PANEL_SHOW_MENU_CHANNEL = "browser-panel:show-menu";
+export const BROWSER_PANEL_TABS_EVENT = "browser-panel:tabs";
 export const BROWSER_PANEL_PICKED_EVENT = "browser-panel:picked";
 
-// Content-script-facing channels (this file <-> browserPanelContent.ts,
-// the panel's *own* preload -- not the main window's). Duplicated as
-// plain literals in that file too, same "sandboxed preload can't import
-// a local file" constraint dialog.ts's own comment explains -- keep both
-// copies in sync if these ever change.
+// Between this file and browserPanelContent.ts, which repeats them.
 const CONTENT_SET_PICK_MODE_CHANNEL = "browser-panel-content:set-pick-mode";
 const CONTENT_PICKED_CHANNEL = "browser-panel-content:picked";
 const CONTENT_WHEEL_ZOOM_CHANNEL = "browser-panel-content:wheel-zoom";
 
-// Chromium's own practical zoom range (roughly what Chrome's UI itself
-// steps through, 25%-500%) -- setZoomFactor has no built-in clamp of its
-// own, so an unbounded ctrl+wheel fling would otherwise zoom the page
-// into either an unreadable sliver or a many-thousand-percent blowout.
+const PARTITION = "persist:coscribe-browser";
 const MIN_ZOOM_FACTOR = 0.25;
 const MAX_ZOOM_FACTOR = 5;
-// Per ctrl+plus/minus keypress, or per ~100-120-delta mouse-wheel notch
-// (see applyWheelZoom below) -- matches the ~10% granularity Chrome's
-// own zoom steps use around 100%, close enough without replicating its
-// full non-uniform step table (25/33/50/67/75/80/90/100/110/125/...).
 const ZOOM_STEP_FACTOR = 1.1;
-
-function clampZoomFactor(factor: number): number {
-  return Math.min(MAX_ZOOM_FACTOR, Math.max(MIN_ZOOM_FACTOR, factor));
-}
-
-/** `deltaY` drives a *continuous* zoom (not a fixed per-notch step) so a
- * trackpad's pinch-to-zoom gesture (which browsers report as a ctrl-held
- * wheel event with small, smooth delta values, not one big notch) feels
- * analog rather than jumping in discrete 10% chunks -- a real mouse
- * wheel's much larger per-notch delta (~100-120) still lands close to
- * one ZOOM_STEP_FACTOR-sized step this way, so both input devices get a
- * reasonable feel from the same formula. Negative deltaY (scroll up) is
- * "zoom in", matching every browser's own ctrl+scroll convention. */
-function applyWheelZoom(view: WebContentsView, deltaY: number): void {
-  const current = view.webContents.getZoomFactor();
-  const next = clampZoomFactor(current * (1 - deltaY * 0.001));
-  view.webContents.setZoomFactor(next);
-}
 
 export interface PanelRect {
   x: number;
@@ -104,232 +72,358 @@ interface PickedElementInfo {
   rect: Rectangle;
 }
 
-let panelView: WebContentsView | undefined;
-let attachedWindow: BrowserWindow | undefined;
-// Mirrors what was last told to the content script -- re-sent on every
-// navigation (did-navigate handler below), since browserPanelContent.ts
-// re-executes fresh on each new page load and would otherwise forget
-// pick mode was on the moment the user navigates while picking.
+export interface Tab {
+  id: number;
+  view: WebContentsView;
+  // A tab that hasn't loaded anything shows the panel's own "new tab"
+  // page, so its (blank white) view stays detached.
+  blank: boolean;
+  loadError: string | null;
+}
+
+export interface TabInfo {
+  id: number;
+  title: string;
+  url: string;
+  favicon: string | null;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  loadError: string | null;
+}
+
+const tabs: Tab[] = [];
+const favicons = new Map<number, string>();
+let activeId: number | null = null;
+let nextId = 1;
+let win: BrowserWindow | undefined;
+let panelRect: PanelRect | null = null;
 let pickModeActive = false;
+const openWaiters: Array<() => void> = [];
+let browserSession: Session | undefined;
 
-function browserPanelContentPreloadPath(): string {
-  return join(__dirname, "..", "preload", "browserPanelContent.js");
+function clampZoomFactor(factor: number): number {
+  return Math.min(MAX_ZOOM_FACTOR, Math.max(MIN_ZOOM_FACTOR, factor));
 }
 
-/** Bare-domain convenience ("baidu.com" -> "https://baidu.com"), same as
- * typing into a real browser's address bar -- ported byte-for-byte from
- * browser_panel.py's own `navigate()` (the plain-browser-tab/Tauri path's
- * equivalent) so both paths behave identically. Only applies when there's
- * no scheme at all, so an already-schemed URL (any "xyz:" prefix --
- * data:, about:, file:, chrome:, not just http(s)) passes through
- * untouched instead of getting "https://" wrongly glued onto its front. */
-function normalizeUrl(url: string): string {
-  if (!url.includes("://") && !url.split("/")[0].includes(":")) {
-    return `https://${url}`;
+/** What the address bar (or the AI) typed, as a URL: a full URL or a
+ * special scheme stays as is; "baidu.com" gets https://; a local address
+ * like "localhost:3000" gets http://; anything that isn't an address is
+ * searched for. */
+export function normalizeUrl(input: string): string {
+  const text = input.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|data|file|mailto|view-source):/i.test(text)) return text;
+  const host = text.split(/[/?#]/)[0];
+  if (/^(localhost|127(\.\d+){3}|\[::1\])(:\d+)?$/i.test(host)) return `http://${text}`;
+  const looksLikeHost = /^[^\s:]+\.[^\s:]+(:\d+)?$/.test(host) || /^[^\s:]+:\d+$/.test(host);
+  if (looksLikeHost && !/\s/.test(text)) return `https://${text}`;
+  return `https://www.bing.com/search?q=${encodeURIComponent(text)}`;
+}
+
+function tabSession(): Session {
+  if (browserSession) return browserSession;
+  browserSession = session.fromPartition(PARTITION);
+  // Electron grants every permission by default; a site shouldn't get the
+  // camera, microphone or location just by asking.
+  const allowed = new Set(["clipboard-sanitized-write", "fullscreen", "pointerLock"]);
+  browserSession.setPermissionRequestHandler((_wc, permission, callback) => callback(allowed.has(permission)));
+  browserSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission));
+  return browserSession;
+}
+
+export function tabInfo(tab: Tab): TabInfo {
+  const wc = tab.view.webContents;
+  const url = tab.blank ? "" : wc.getURL();
+  return {
+    id: tab.id,
+    title: tab.blank ? "New tab" : wc.getTitle() || url,
+    url,
+    favicon: favicons.get(tab.id) ?? null,
+    loading: wc.isLoading(),
+    canGoBack: wc.navigationHistory.canGoBack(),
+    canGoForward: wc.navigationHistory.canGoForward(),
+    loadError: tab.loadError,
+  };
+}
+
+export function sendTabs(): void {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send(BROWSER_PANEL_TABS_EVENT, { tabs: tabs.map(tabInfo), activeId });
+}
+
+function tabFor(sender: WebContents): Tab | undefined {
+  return tabs.find((t) => t.view.webContents === sender);
+}
+
+export function activeTab(): Tab | undefined {
+  return tabs.find((t) => t.id === activeId);
+}
+
+export function allTabs(): readonly Tab[] {
+  return tabs;
+}
+
+export function isPanelOpen(): boolean {
+  return panelRect !== null;
+}
+
+/** Resolves once the React panel has opened and reported its bounds, or
+ * after `timeoutMs`. */
+export function waitForPanelOpen(timeoutMs: number): Promise<boolean> {
+  if (panelRect) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      const index = openWaiters.indexOf(done);
+      if (index >= 0) openWaiters.splice(index, 1);
+      resolve(false);
+    }, timeoutMs);
+    const done = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    openWaiters.push(done);
+  });
+}
+
+function setBoundsReliably(view: WebContentsView, rect: PanelRect): void {
+  // electron/electron#39993: one setBounds can leave the view painting at
+  // its old size, stretched and blurry; the second call forces the layout.
+  view.setBounds(rect);
+  view.setBounds(rect);
+}
+
+/** Attaches the active tab's view over the panel (if it has a page to
+ * show) and detaches every other tab's. */
+function layout(): void {
+  if (!win || win.isDestroyed()) return;
+  const children = win.contentView.children;
+  for (const tab of tabs) {
+    const show = panelRect !== null && tab.id === activeId && !tab.blank;
+    const attached = children.includes(tab.view);
+    if (show) {
+      if (!attached) win.contentView.addChildView(tab.view);
+      setBoundsReliably(tab.view, panelRect!);
+    } else if (attached) {
+      win.contentView.removeChildView(tab.view);
+    }
   }
-  return url;
 }
 
-function ensurePanelView(): WebContentsView {
-  if (panelView) return panelView;
+export function createTab(url?: string): Tab {
   const view = new WebContentsView({
     webPreferences: {
-      preload: browserPanelContentPreloadPath(),
+      preload: join(__dirname, "..", "preload", "browserPanelContent.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      session: tabSession(),
+      // The AI keeps working while the window is in the tray or behind
+      // another app; a throttled page would stall its steps.
+      backgroundThrottling: false,
     },
   });
-  view.webContents.on("did-navigate", (_event, url) => {
-    sendStatus(url);
-    // The content script this just reloaded has forgotten pick mode was
-    // on -- see pickModeActive's own comment above.
-    if (pickModeActive) view.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, true);
-  });
-  view.webContents.on("did-navigate-in-page", (_event, url) => {
-    sendStatus(url);
-  });
-  view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
-    // A sub-frame (an ad iframe, a tracking pixel) failing to load is
-    // routine noise on plenty of real sites -- only a main-frame failure
-    // is the page-level error this panel's own error banner should show.
-    // -3 is Chromium's ERR_ABORTED, fired for e.g. a navigation that gets
-    // superseded by another one before it finishes -- not a real failure
-    // the user needs to see, same reasoning any browser's own UI applies.
-    if (!isMainFrame || errorCode === -3) return;
-    attachedWindow?.webContents.send(BROWSER_PANEL_LOAD_ERROR_EVENT, errorDescription);
-  });
-  // Real-hardware-reported: clicking a target="_blank" link (or anything
-  // calling window.open()) on a real site (e.g. a Google search result)
-  // spawned a whole separate native OS window showing that page --
-  // Electron's own default behavior for any webContents that doesn't
-  // override this, and exactly the wrong UX for a *single embedded*
-  // panel (no browser chrome, no tabs -- one view). Denying the popup
-  // and navigating this same view instead keeps every link the user
-  // clicks inside the panel, matching how the old screencast
-  // implementation behaved (it had no concept of "new window" at all,
-  // being driven by raw CDP navigate/click commands).
-  view.webContents.setWindowOpenHandler(({ url }) => {
-    void view.webContents.loadURL(url);
-    return { action: "deny" };
-  });
-  ipcMain.on(CONTENT_PICKED_CHANNEL, (event, info: PickedElementInfo) => {
-    if (event.sender !== view.webContents) return;
-    void handlePicked(view, info);
-  });
-  // Ctrl+wheel half of the zoom fix -- see browserPanelContent.ts's own
-  // onWheel for why this can't be caught directly here (webContents has
-  // no wheel event at all in the main process).
-  ipcMain.on(CONTENT_WHEEL_ZOOM_CHANNEL, (event, deltaY: number) => {
-    if (event.sender !== view.webContents) return;
-    applyWheelZoom(view, deltaY);
-  });
-  // Ctrl+plus/minus/0 half -- this one *is* directly catchable here,
-  // before-input-event fires for every keydown/keyup regardless of
-  // whether the page's own JS would otherwise swallow it (a page that
-  // calls preventDefault on its own keydown listener doesn't stop this).
-  view.webContents.on("before-input-event", (_event, input) => {
-    if (input.type !== "keyDown" || (!input.control && !input.meta)) return;
-    if (input.key === "+" || input.key === "=") {
-      view.webContents.setZoomFactor(clampZoomFactor(view.webContents.getZoomFactor() * ZOOM_STEP_FACTOR));
-    } else if (input.key === "-") {
-      view.webContents.setZoomFactor(clampZoomFactor(view.webContents.getZoomFactor() / ZOOM_STEP_FACTOR));
-    } else if (input.key === "0") {
-      view.webContents.setZoomFactor(1);
+  // Matches the rounded page area the panel draws (rounded-lg).
+  view.setBorderRadius(8);
+  const tab: Tab = { id: nextId++, view, blank: true, loadError: null };
+  const wc = view.webContents;
+  wc.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument && tab.blank && details.url !== "about:blank") {
+      tab.blank = false;
+      layout();
     }
   });
-  panelView = view;
-  return view;
+  wc.on("did-navigate", () => {
+    tab.loadError = null;
+    if (pickModeActive && tab.id === activeId) wc.send(CONTENT_SET_PICK_MODE_CHANNEL, true);
+    sendTabs();
+  });
+  wc.on("did-navigate-in-page", () => sendTabs());
+  wc.on("page-title-updated", () => sendTabs());
+  wc.on("page-favicon-updated", (_event, urls) => {
+    if (urls[0]) favicons.set(tab.id, urls[0]);
+    sendTabs();
+  });
+  wc.on("did-start-loading", () => sendTabs());
+  wc.on("did-stop-loading", () => sendTabs());
+  wc.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    // Sub-frame failures (ads, trackers) are routine; -3 is ERR_ABORTED,
+    // a navigation superseded by another.
+    if (!isMainFrame || errorCode === -3) return;
+    tab.loadError = errorDescription;
+    sendTabs();
+  });
+  // target="_blank" and window.open open a tab in the panel rather than a
+  // separate native window without any browser chrome.
+  wc.setWindowOpenHandler(({ url: target }) => {
+    const opened = createTab(target);
+    selectTab(opened.id);
+    return { action: "deny" };
+  });
+  wc.on("before-input-event", (_event, input) => {
+    if (input.type !== "keyDown" || (!input.control && !input.meta)) return;
+    if (input.key === "+" || input.key === "=") wc.setZoomFactor(clampZoomFactor(wc.getZoomFactor() * ZOOM_STEP_FACTOR));
+    else if (input.key === "-") wc.setZoomFactor(clampZoomFactor(wc.getZoomFactor() / ZOOM_STEP_FACTOR));
+    else if (input.key === "0") wc.setZoomFactor(1);
+  });
+  tabs.push(tab);
+  if (activeId === null) activeId = tab.id;
+  // about:blank rather than nothing: a webContents that has never loaded
+  // a document doesn't answer DevTools, which stalls tools attaching to
+  // the app (and the page reads as "" either way).
+  void wc.loadURL(url ? normalizeUrl(url) : "about:blank").catch(() => undefined);
+  sendTabs();
+  return tab;
 }
 
-/** capturePage's rect is in the same CSS-pixel/DIP space
- * getBoundingClientRect() already returns, and the returned NativeImage
- * is already DPI-correct -- no Emulation.setDeviceMetricsOverride /
- * captureBeyondViewport dance to get right here at all, unlike
- * browser_panel.py's own pick_element (see that function's own docstring
- * for the CDP-side DPI/viewport gotchas this sidesteps entirely: there's
- * no separate "emulated viewport" concept for a real native view in the
- * first place). */
-async function handlePicked(view: WebContentsView, info: PickedElementInfo): Promise<void> {
-  if (!attachedWindow || attachedWindow.isDestroyed()) return;
+export function selectTab(id: number): Tab | undefined {
+  const tab = tabs.find((t) => t.id === id);
+  if (!tab) return undefined;
+  if (activeId !== null && activeId !== id) activeTab()?.view.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, false);
+  activeId = id;
+  if (pickModeActive) tab.view.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, true);
+  layout();
+  sendTabs();
+  return tab;
+}
+
+export function closeTab(id: number): void {
+  const index = tabs.findIndex((t) => t.id === id);
+  if (index < 0) return;
+  const [tab] = tabs.splice(index, 1);
+  if (win && !win.isDestroyed() && win.contentView.children.includes(tab.view)) {
+    win.contentView.removeChildView(tab.view);
+  }
+  tab.view.webContents.close();
+  favicons.delete(id);
+  if (activeId === id) activeId = tabs[Math.min(index, tabs.length - 1)]?.id ?? null;
+  // The panel always has a tab to show, even after the last one closes.
+  if (!tabs.length) createTab();
+  layout();
+  sendTabs();
+}
+
+/** The active tab, making one if there are none. */
+export function ensureActiveTab(): Tab {
+  return activeTab() ?? selectTab(createTab().id)!;
+}
+
+async function handlePicked(tab: Tab, info: PickedElementInfo): Promise<void> {
+  if (!win || win.isDestroyed()) return;
   const rect: Rectangle = {
     x: Math.round(info.rect.x),
     y: Math.round(info.rect.y),
     width: Math.round(info.rect.width),
     height: Math.round(info.rect.height),
   };
-  const image = await view.webContents.capturePage(rect);
-  attachedWindow.webContents.send(BROWSER_PANEL_PICKED_EVENT, {
+  const image = await tab.view.webContents.capturePage(rect);
+  win.webContents.send(BROWSER_PANEL_PICKED_EVENT, {
     screenshot: image.toJPEG(90).toString("base64"),
     text: info.text,
     tag: info.tag,
   });
 }
 
-function sendStatus(url: string): void {
-  if (!attachedWindow || attachedWindow.isDestroyed() || !panelView) return;
-  attachedWindow.webContents.send(BROWSER_PANEL_NAVIGATED_EVENT, {
-    url,
-    canGoBack: panelView.webContents.canGoBack(),
-    canGoForward: panelView.webContents.canGoForward(),
-  });
+function openPanel(window: BrowserWindow, rect: PanelRect): void {
+  win = window;
+  panelRect = rect;
+  ensureActiveTab();
+  layout();
+  sendTabs();
+  for (const done of openWaiters.splice(0)) done();
 }
 
-/** Real, confirmed Electron/Chromium bug, not a guess:
- * https://github.com/electron/electron/issues/39993 -- a single
- * `setBounds()` call can leave the view painting at its *previous*
- * bounds (marked "needs layout" internally, but not actually flushed)
- * even though `getBounds()` immediately reports the new rect. The
- * view's own compositor backing surface then stays sized/rasterized for
- * the stale bounds and just gets visually stretched to fill the real
- * (larger) on-screen area -- exactly the "content correctly positioned,
- * but blurry/low-res" symptom this was written to fix, first live-
- * reported against a real 3440x1440 monitor no earlier real-hardware
- * round had tested against. The issue's own confirmed workaround:
- * setting the identical bounds a second time forces the layout that the
- * first call only scheduled. Upstream fixed this for some cases (PRs
- * #39994/#40035-37) but calling twice is harmless and cheap regardless
- * of whether the pinned Electron version already has that fix. */
-function setBoundsReliably(view: WebContentsView, rect: PanelRect): void {
-  view.setBounds(rect);
-  view.setBounds(rect);
-}
-
-function openBrowserPanel(win: BrowserWindow, rect: PanelRect): void {
-  const view = ensurePanelView();
-  if (attachedWindow !== win) {
-    // A previous window (shouldn't happen in this single-main-window
-    // app, but defensive rather than assumed) still has this view
-    // attached -- detach before reattaching elsewhere.
-    if (attachedWindow && !attachedWindow.isDestroyed()) {
-      attachedWindow.contentView.removeChildView(view);
-    }
-    win.contentView.addChildView(view);
-    attachedWindow = win;
-  } else if (!win.contentView.children.includes(view)) {
-    win.contentView.addChildView(view);
-  }
-  setBoundsReliably(view, rect);
-}
-
-function repositionBrowserPanel(rect: PanelRect): void {
-  if (panelView) setBoundsReliably(panelView, rect);
-}
-
-function closeBrowserPanel(): void {
-  if (panelView && attachedWindow && !attachedWindow.isDestroyed()) {
-    attachedWindow.contentView.removeChildView(panelView);
-  }
-  // BrowserPanel.tsx unmounts entirely on close (App.tsx only renders it
-  // while its own open flag is true), so its own pickMode React state
-  // always starts fresh (false) on the next open -- reset here too, or a
-  // panel closed mid-pick would silently keep highlighting on reopen
-  // with a "Select" button that no longer looks active.
+function closePanel(): void {
+  panelRect = null;
+  layout();
+  // Reopening starts with Select off, matching the panel's fresh state.
   pickModeActive = false;
-  panelView?.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, false);
+  for (const tab of tabs) tab.view.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, false);
 }
 
-/** Explicit teardown for app quit -- mirrors sidecar.ts's own
- * killSidecar() being called from index.ts's before-quit handler rather
- * than assumed to happen automatically. WebContentsView's underlying
- * webContents is a real Chromium renderer; closing it explicitly here is
- * the same "don't just hope the parent window's own teardown handles it"
- * caution this whole migration exists because of (see this project's own
- * ROADMAP.md on the Tauri sibling-window exit bug it replaced). */
+/** App quit: closes every tab's renderer explicitly rather than trusting
+ * the window's teardown to. */
 export function destroyBrowserPanel(): void {
-  if (!panelView) return;
-  closeBrowserPanel();
-  panelView.webContents.close();
-  panelView = undefined;
-  attachedWindow = undefined;
+  closePanel();
+  for (const tab of tabs.splice(0)) tab.view.webContents.close();
+  activeId = null;
+  win = undefined;
 }
 
-export function registerBrowserPanelHandlers(win: BrowserWindow): void {
-  ipcMain.handle(BROWSER_PANEL_OPEN_CHANNEL, (_event, rect: PanelRect) => {
-    openBrowserPanel(win, rect);
+export function registerBrowserPanelHandlers(window: BrowserWindow): void {
+  win = window;
+  ipcMain.on(CONTENT_PICKED_CHANNEL, (event, info: PickedElementInfo) => {
+    const tab = tabFor(event.sender);
+    if (tab) void handlePicked(tab, info);
   });
+  // A page swallows its own ctrl+wheel, so the content script reports it.
+  ipcMain.on(CONTENT_WHEEL_ZOOM_CHANNEL, (event, deltaY: number) => {
+    const wc = tabFor(event.sender)?.view.webContents;
+    if (wc) wc.setZoomFactor(clampZoomFactor(wc.getZoomFactor() * (1 - deltaY * 0.001)));
+  });
+  ipcMain.handle(BROWSER_PANEL_OPEN_CHANNEL, (_event, rect: PanelRect) => openPanel(window, rect));
   ipcMain.handle(BROWSER_PANEL_REPOSITION_CHANNEL, (_event, rect: PanelRect) => {
-    repositionBrowserPanel(rect);
+    if (!panelRect) return;
+    panelRect = rect;
+    layout();
   });
-  ipcMain.handle(BROWSER_PANEL_CLOSE_CHANNEL, () => {
-    closeBrowserPanel();
-  });
+  ipcMain.handle(BROWSER_PANEL_CLOSE_CHANNEL, () => closePanel());
   ipcMain.handle(BROWSER_PANEL_NAVIGATE_CHANNEL, (_event, url: string) => {
-    void ensurePanelView().webContents.loadURL(normalizeUrl(url));
+    void ensureActiveTab().view.webContents.loadURL(normalizeUrl(url)).catch(() => undefined);
   });
   ipcMain.handle(BROWSER_PANEL_BACK_CHANNEL, () => {
-    const wc = panelView?.webContents;
-    if (wc?.canGoBack()) wc.goBack();
+    const history = activeTab()?.view.webContents.navigationHistory;
+    if (history?.canGoBack()) history.goBack();
   });
   ipcMain.handle(BROWSER_PANEL_FORWARD_CHANNEL, () => {
-    const wc = panelView?.webContents;
-    if (wc?.canGoForward()) wc.goForward();
+    const history = activeTab()?.view.webContents.navigationHistory;
+    if (history?.canGoForward()) history.goForward();
   });
-  ipcMain.handle(BROWSER_PANEL_RELOAD_CHANNEL, () => {
-    panelView?.webContents.reload();
-  });
+  ipcMain.handle(BROWSER_PANEL_RELOAD_CHANNEL, () => activeTab()?.view.webContents.reload());
   ipcMain.handle(BROWSER_PANEL_SET_PICK_MODE_CHANNEL, (_event, enabled: boolean) => {
     pickModeActive = enabled;
-    panelView?.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, enabled);
+    activeTab()?.view.webContents.send(CONTENT_SET_PICK_MODE_CHANNEL, enabled);
   });
+  ipcMain.handle(BROWSER_PANEL_NEW_TAB_CHANNEL, () => {
+    selectTab(createTab().id);
+  });
+  ipcMain.handle(BROWSER_PANEL_SELECT_TAB_CHANNEL, (_event, id: number) => {
+    selectTab(Number(id));
+  });
+  ipcMain.handle(BROWSER_PANEL_CLOSE_TAB_CHANNEL, (_event, id: number) => closeTab(Number(id)));
+  ipcMain.handle(BROWSER_PANEL_OPEN_EXTERNAL_CHANNEL, () => openActiveExternally());
+  ipcMain.on(BROWSER_PANEL_SHOW_MENU_CHANNEL, (_event, position: { x: number; y: number }) => {
+    const tab = activeTab();
+    Menu.buildFromTemplate([
+      { label: "Open in your browser", enabled: Boolean(tab && !tab.blank), click: () => openActiveExternally() },
+      {
+        label: "Close other tabs",
+        enabled: tabs.length > 1,
+        click: () => {
+          for (const other of [...tabs]) if (other.id !== activeId) closeTab(other.id);
+        },
+      },
+      { type: "separator" },
+      { label: "Sign out of all sites…", click: () => void clearBrowsingData(window) },
+    ]).popup({ window, x: Math.round(Number(position?.x) || 0), y: Math.round(Number(position?.y) || 0) });
+  });
+}
+
+function openActiveExternally(): void {
+  const tab = activeTab();
+  const url = tab && !tab.blank ? tab.view.webContents.getURL() : "";
+  if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+}
+
+async function clearBrowsingData(window: BrowserWindow): Promise<void> {
+  const { response } = await dialog.showMessageBox(window, {
+    type: "question",
+    buttons: ["Sign out", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    message: "Sign out of every site in coscribe's browser?",
+    detail: "This clears its cookies and site data. Your own browser isn't affected.",
+  });
+  if (response !== 0) return;
+  await tabSession().clearStorageData();
+  for (const tab of tabs) if (!tab.blank) tab.view.webContents.reload();
 }

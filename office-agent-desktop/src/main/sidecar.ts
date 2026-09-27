@@ -17,7 +17,7 @@ let child: ChildProcess | undefined;
  * defaults -- mirrors the Rust `Command` block exactly: same args, same
  * env vars, same log-file redirection, same self-exit-on-orphan
  * belt-and-suspenders. */
-export function startSidecar(port: number): void {
+export function startSidecar(port: number, browserHostToken: string): void {
   const dataDir = appDataDir();
   const logFd = serverLogFd();
 
@@ -39,6 +39,9 @@ export function startSidecar(port: number): void {
         // _exit_when_orphaned docstring.
         COSCRIBE_EXIT_WITH_PARENT: "1",
         COSCRIBE_PARENT_PID: String(process.pid),
+        // Lets this app's Browser panel take the AI's browser commands
+        // (browserAgent.ts); nothing else on the machine knows it.
+        COSCRIBE_BROWSER_HOST_TOKEN: browserHostToken,
       },
       stdio: ["ignore", logFd ?? "ignore", logFd ?? "ignore"],
       // Built-in option, no raw CREATE_NO_WINDOW flag needed -- the

@@ -90,6 +90,14 @@ check clicks with real input (xdotool under Xvfb, or Windows itself).
   `/ws/browser` (the CDP-relay/screencast implementation) stay
   completely untouched -- they still serve the plain-browser-tab case.
 
+- **Tabs, shared with the AI.** `browserPanel.ts` keeps one
+  `WebContentsView` per tab (only the active one attached) in its own
+  persistent session; `browserAgent.ts` takes the AI's `browser_*`
+  commands from the sidecar's token-authenticated `/internal/browser-host`
+  stream and performs them on those tabs with real input events, reading
+  pages through `browserAgentPage.ts` in an isolated world. No
+  remote-debugging port is opened.
+
 ## Prerequisites
 
 - Node.js (no Rust toolchain needed at all).

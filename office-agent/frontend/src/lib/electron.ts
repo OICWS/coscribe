@@ -30,12 +30,6 @@ export interface BrowserPanelRect {
   height: number;
 }
 
-export interface BrowserPanelNavigatedPayload {
-  url: string;
-  canGoBack: boolean;
-  canGoForward: boolean;
-}
-
 export async function browserPanelOpen(rect: BrowserPanelRect): Promise<void> {
   await window.coscribeDesktop.browserPanelOpen(rect);
 }
@@ -64,12 +58,59 @@ export async function browserPanelReload(): Promise<void> {
   await window.coscribeDesktop.browserPanelReload();
 }
 
-export function onBrowserPanelNavigated(callback: (payload: BrowserPanelNavigatedPayload) => void): void {
-  window.coscribeDesktop.onBrowserPanelNavigated(callback);
+export interface BrowserTab {
+  id: number;
+  title: string;
+  url: string;
+  favicon: string | null;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  loadError: string | null;
 }
 
-export function onBrowserPanelLoadError(callback: (errorDescription: string) => void): void {
-  window.coscribeDesktop.onBrowserPanelLoadError(callback);
+export interface BrowserTabsPayload {
+  tabs: BrowserTab[];
+  activeId: number | null;
+}
+
+/** From the desktop app while coscribe's AI uses the browser: `open`
+ * asks for the panel to be shown, `busy` brackets each step. */
+export interface BrowserAgentPayload {
+  open?: boolean;
+  busy?: boolean;
+  threadId?: string;
+  action?: string;
+}
+
+export async function browserPanelNewTab(): Promise<void> {
+  await window.coscribeDesktop.browserPanelNewTab();
+}
+
+export async function browserPanelSelectTab(id: number): Promise<void> {
+  await window.coscribeDesktop.browserPanelSelectTab(id);
+}
+
+export async function browserPanelCloseTab(id: number): Promise<void> {
+  await window.coscribeDesktop.browserPanelCloseTab(id);
+}
+
+export function browserPanelShowMenu(x: number, y: number): void {
+  window.coscribeDesktop.browserPanelShowMenu?.(x, y);
+}
+
+export async function browserPanelOpenExternal(): Promise<void> {
+  await window.coscribeDesktop.browserPanelOpenExternal();
+}
+
+export function onBrowserPanelTabs(callback: (payload: BrowserTabsPayload) => void): () => void {
+  return window.coscribeDesktop.onBrowserPanelTabs(callback as (payload: unknown) => void);
+}
+
+/** A no-op outside the desktop app, where there's no built-in browser. */
+export function onBrowserAgent(callback: (payload: BrowserAgentPayload) => void): () => void {
+  if (!isElectron() || !window.coscribeDesktop.onBrowserAgent) return () => {};
+  return window.coscribeDesktop.onBrowserAgent(callback as (payload: unknown) => void);
 }
 
 /** Element-picking, Electron migration Phase 3. Unlike the non-desktop
@@ -89,8 +130,8 @@ export async function browserPanelSetPickMode(enabled: boolean): Promise<void> {
   await window.coscribeDesktop.browserPanelSetPickMode(enabled);
 }
 
-export function onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): void {
-  window.coscribeDesktop.onBrowserPanelPicked(callback);
+export function onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): () => void {
+  return window.coscribeDesktop.onBrowserPanelPicked(callback);
 }
 
 /** The OS the desktop shell runs on when it draws its own title bar, or
@@ -127,10 +168,15 @@ declare global {
       browserPanelBack(): Promise<void>;
       browserPanelForward(): Promise<void>;
       browserPanelReload(): Promise<void>;
-      onBrowserPanelNavigated(callback: (payload: BrowserPanelNavigatedPayload) => void): void;
-      onBrowserPanelLoadError(callback: (errorDescription: string) => void): void;
+      browserPanelNewTab(): Promise<void>;
+      browserPanelSelectTab(id: number): Promise<void>;
+      browserPanelCloseTab(id: number): Promise<void>;
+      browserPanelOpenExternal(): Promise<void>;
+      browserPanelShowMenu?(x: number, y: number): void;
+      onBrowserPanelTabs(callback: (payload: unknown) => void): () => void;
+      onBrowserAgent?(callback: (payload: unknown) => void): () => void;
       browserPanelSetPickMode(enabled: boolean): Promise<void>;
-      onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): void;
+      onBrowserPanelPicked(callback: (payload: BrowserPanelPickedPayload) => void): () => void;
     };
   }
 }

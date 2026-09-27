@@ -193,6 +193,12 @@ class Settings(BaseSettings):
     have no version of this problem to solve.
     """
 
+    browser_host_token: str | None = None
+    """Set by the desktop app when it starts this server: the secret its
+    built-in browser presents on /internal/browser-host. When set, the
+    browser_* tools are offered and drive the tabs in the desktop app's
+    Browser panel; unset (the plain web UI), they aren't offered at all."""
+
     wake_poll_seconds: int = 30
     """How often the web server checks for due sleep_until/sleep_for/
     wake_on/wake_on_event requests (tools/selfwake.py) and resumes their

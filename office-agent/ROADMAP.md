@@ -6209,6 +6209,55 @@ all fine, but ☰ and the sidebar toggle couldn't be clicked or hovered.
       Context lists files only read. Checked live with DeepSeek: read
       facts.txt, created summary.md, appended to todo.md.
 
+## Phase 8bm -- The AI uses coscribe's own browser, in tabs you watch (shipped, step 1 of 3)
+
+Replaces "browser use" through the Playwright connector, which opened a
+separate browser window, with the Browser panel itself, as in Claude's
+built-in browser.
+
+- [x] **Tabs**: the desktop panel is now tabbed (`browserPanel.ts`: one
+      `WebContentsView` per tab, only the active one attached, a shared
+      `persist:coscribe-browser` session). Tab strip with favicon/title/×
+      and +, ⋮ (native menu: open in your browser, close other tabs, sign
+      out of all sites), expand, close; back/forward/reload, an address
+      bar that shows host+path until focused and searches plain text,
+      open-externally, Select element; "Browse with coscribe" empty state.
+      Links that open a new window open a tab. Site permission requests
+      (camera, mic, location...) are denied.
+- [x] **The AI drives those tabs**: 11 `browser_*` tools
+      (`tools/browser.py`), offered only when the desktop app started the
+      server (`COSCRIBE_BROWSER_HOST_TOKEN`). Commands go over
+      `/internal/browser-host` (SSE out, POST back, token in a header) to
+      `browserAgent.ts`, which runs them one at a time. No
+      remote-debugging port -- that was the option we decided against,
+      since any local program could then drive signed-in pages.
+- [x] **Reading and acting**: `browserAgentPage.ts` runs in its own
+      isolated world: a page snapshot in page order (headings, text,
+      links, buttons, fields, options, cursor:pointer elements) with
+      stable refs (`[ref=eN]`, kept per element for the life of the
+      document), paginated at 12k characters; locate-by-ref scrolls the
+      element to the middle and returns its center. Clicks/hover/keys are
+      `sendInputEvent` (trusted input), typing is click + select-all +
+      `insertText`, dropdowns are set in the page. Agent navigation is
+      http/https only.
+- [x] **Visible**: the panel opens itself on the first command; an orange
+      frame on the page while the AI works, a pulse where it clicks, and
+      a "coscribe is using the browser · Stop" bar (Stop ends the turn).
+- [x] Checked live in Electron under Xvfb with DeepSeek on a local test
+      shop: navigate, type "A4 paper", pick "5 reams", click Search, wait
+      for the results that load after 800ms, read the price ($21.00),
+      follow a `target=_blank` link into a new tab, read the phone number.
+      Found and fixed on the way: `127.0.0.1:8765/...` typed in the
+      address bar was taken for a URL scheme (ERR_INVALID_URL); a never-
+      loaded tab stalled DevTools clients (new tabs now load about:blank);
+      an unlabeled `<select>` was named after its options.
+- [ ] Step 2: the Annotate pen (screenshot + canvas drawing + "Add to
+      chat"), and screenshots for vision-capable models.
+- [ ] Step 3: a first-visit permission prompt per site, like Claude's.
+- Not in this step: importing Chrome sign-ins (later: import cookies);
+  cross-origin iframes are listed but not read; OAuth pop-ups that need
+  `window.opener` open as tabs and may not complete.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

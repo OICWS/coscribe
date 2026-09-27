@@ -5,7 +5,7 @@ import { Composer, type ComposerSendPayload } from "./components/Composer";
 import { ContextRing } from "./components/ContextRing";
 import { FolderPicker } from "./components/FolderPicker";
 import { ModePill } from "./components/ModePill";
-import { isElectron, onShowShortcuts } from "./lib/electron";
+import { isElectron, onBrowserAgent, onShowShortcuts } from "./lib/electron";
 import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR, useTitleBarColors } from "./lib/titleBar";
 import type { PlanChoice, PlanItem } from "./components/PlanCard";
 import { ModelPicker } from "./components/ModelPicker";
@@ -167,6 +167,18 @@ function App() {
   useEffect(() => {
     if (isElectron()) onShowShortcuts(() => setShortcutsOpen(true));
   }, []);
+
+  // coscribe's AI started using the browser: show it, so the user watches
+  // each step happen.
+  useEffect(
+    () =>
+      onBrowserAgent((payload) => {
+        if (!payload.open) return;
+        setSubAgentsPanelOpen(false);
+        setBrowserPanelOpen(true);
+      }),
+    [],
+  );
 
   useTitleBarColors();
 
@@ -623,7 +635,12 @@ function App() {
         />
       )}
       {browserPanelOpen && (
-        <BrowserPanel onClose={() => setBrowserPanelOpen(false)} onSendToChat={onBrowserPanelCapture} />
+        <BrowserPanel
+          threadId={threadId}
+          onClose={() => setBrowserPanelOpen(false)}
+          onSendToChat={onBrowserPanelCapture}
+          onStopAgent={onStop}
+        />
       )}
       {subAgentsPanelOpen && (
         <SubAgentsPanel
