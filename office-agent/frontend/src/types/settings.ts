@@ -139,11 +139,25 @@ export type SkillFileContentResult = { path: string; content: string } | { error
 
 export interface McpCatalogEntry {
   name: string;
+  /** What people call it, e.g. "Microsoft 365"; `name` is its config key. */
+  title?: string;
   description: string;
   command: string;
   args: string[];
   env?: Record<string, string>;
   needs_config?: boolean;
+  made_by?: string;
+  homepage?: string;
+}
+
+export type ConnectorToolPolicy = "allow" | "ask" | "block";
+
+export interface ConnectorTool {
+  name: string;
+  title: string;
+  description: string;
+  read_only: boolean;
+  policy: ConnectorToolPolicy;
 }
 
 export interface McpServerInfo {
@@ -158,6 +172,8 @@ export interface McpServerInfo {
    * entry comes from -- whether this server is currently connected in
    * the running coscribe-web process (see web/app.py's mcp_connections). */
   connected: boolean;
+  /** A connected server's tools, blocked ones included. */
+  tools?: ConnectorTool[];
 }
 
 export type McpServersResponse = Record<string, McpServerInfo>;

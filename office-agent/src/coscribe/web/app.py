@@ -111,6 +111,14 @@ from ..tools import (
 )
 from ..tools._workspace import WorkspaceScope
 from ..tools.browser import BROWSER_HOST
+from ..tools.connector_permissions import (
+    POLICIES,
+    ConnectorPermissions,
+    apply_connector_permissions,
+    connector_of,
+    is_read_only,
+    name_of,
+)
 from ..tools.mcp import load_mcp_server_configs, validate_mcp_config
 from ..tools.memory import load_memory
 from ..tools.node_env import install_package as install_node_package
@@ -221,6 +229,9 @@ class _NoCacheStaticFiles(StaticFiles):
 MCP_CATALOG: list[dict[str, Any]] = [
     {
         "name": "office365",
+        "title": "Microsoft 365",
+        "made_by": "Softeria (community)",
+        "homepage": "https://github.com/Softeria/ms-365-mcp-server",
         "description": "Outlook mail and calendar, OneDrive files, Excel, OneNote, "
         "To Do, Planner -- signs in through its own device-code flow (the agent "
         "gives you a URL and a code to enter, no setup beforehand).",
@@ -864,6 +875,10 @@ class MCPVersionBump(BaseModel):
     version: str
 
 
+class ConnectorPermissionsUpdate(BaseModel):
+    tools: dict[str, str]
+
+
 class ThreadRename(BaseModel):
     title: str
 
@@ -1150,7 +1165,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 settings=settings,
                 context_window_client=context_window_client,
                 custom_providers=session_custom_providers,
-                extra_tools=extra_tools_holder["tools"],
+                extra_tools=_session_extra_tools(),
                 checkpointer=checkpointer_holder["checkpointer"],
                 hooks_config=hooks_config,
                 enabled_skill_names=_enabled_skills(),
@@ -1160,6 +1175,36 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 configured_models=_configured_models,
             )
         return sessions[thread_id]
+
+    def _session_extra_tools() -> list[Any]:
+        """The connector tools conversations get, under the permissions set
+        in Settings > Connectors."""
+        return apply_connector_permissions(
+            extra_tools_holder["tools"], ConnectorPermissions(settings.state_dir).load()
+        )
+
+    def _connector_tools(name: str) -> list[dict[str, Any]]:
+        permissions = ConnectorPermissions(settings.state_dir).load().get(name, {})
+        prefix = f"{name}_"
+        result = []
+        for tool in extra_tools_holder["tools"]:
+            if connector_of(tool) != name:
+                continue
+            full_name = name_of(tool)
+            bare = full_name[len(prefix) :] if full_name.startswith(prefix) else full_name
+            title = (getattr(tool, "metadata", None) or {}).get("title") or (
+                bare.replace("-", " ").replace("_", " ").strip().capitalize()
+            )
+            result.append(
+                {
+                    "name": full_name,
+                    "title": title,
+                    "description": tool_description(tool).split(". ")[0],
+                    "read_only": is_read_only(tool),
+                    "policy": permissions.get(full_name, "ask"),
+                }
+            )
+        return result
 
     async def _disconnect_mcp_server_lg(name: str) -> None:
         """Strips `name`'s tools from extra_tools_holder so the *next* new
@@ -1213,8 +1258,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         tools already logs-and-keeps-previous-tools on its own failure, so
         one broken session's rebuild can't block the others from picking
         up the change."""
+        tools = _session_extra_tools()
         for session in sessions.values():
-            await session.refresh_extra_tools(extra_tools_holder["tools"])
+            await session.refresh_extra_tools(tools)
 
     async def _get_session_async(thread_id: str) -> ChatSessionLG:
         # poll_due_wakes takes an async get_session callback (see its own
@@ -1927,7 +1973,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         agent = build_coordinator_agent(settings, thread_id="__tools_probe__")
         tools = []
         # Connected connectors' tools can be workflow steps too.
-        for connector_tool in extra_tools_holder["tools"]:
+        for connector_tool in _session_extra_tools():
             metadata = get_tool_metadata(connector_tool)
             if not (metadata.category or "").startswith("mcp:"):
                 continue
@@ -2320,6 +2366,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                         k: _mask(v) for k, v in (config.get("headers") or {}).items()
                     },
                     "connected": connected,
+                    "tools": _connector_tools(name),
                 }
             else:
                 result[name] = {
@@ -2327,6 +2374,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "args": config.get("args", []),
                     "masked_env": {k: _mask(v) for k, v in (config.get("env") or {}).items()},
                     "connected": connected,
+                    "tools": _connector_tools(name),
                 }
         return result
 
@@ -2389,8 +2437,28 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     delete_secret(value)
             settings.mcp_config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
             harden_file_permissions(settings.mcp_config_path)
+        ConnectorPermissions(settings.state_dir).forget(name)
         await _refresh_all_sessions_extra_tools()
         return {}
+
+    @app.put("/api/mcp/servers/{name}/permissions")
+    async def set_connector_permissions(
+        name: str, payload: ConnectorPermissionsUpdate
+    ) -> JSONResponse:
+        known = {t["name"] for t in _connector_tools(name)}
+        unknown = sorted(set(payload.tools) - known)
+        if unknown:
+            return JSONResponse(
+                {"error": f"{name!r} has no tool {', '.join(unknown)}"}, status_code=404
+            )
+        try:
+            tools = ConnectorPermissions(settings.state_dir).update(name, payload.tools)
+        except ValueError:
+            return JSONResponse(
+                {"error": f"a policy must be one of {', '.join(POLICIES)}"}, status_code=422
+            )
+        await _refresh_all_sessions_extra_tools()
+        return JSONResponse({"tools": tools})
 
     @app.get("/api/mcp/npm-latest-version")
     async def npm_latest_version(package: str) -> dict[str, Any]:

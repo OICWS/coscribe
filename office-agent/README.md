@@ -1439,14 +1439,20 @@ The Coordinator can hand a self-contained task to a sub-agent
 - `spawn_agent(description, prompt, instructions="", model="", tool_names="")`
   waits for the sub-agent's report; `spawn_agent_background(...)` returns a
   `task_id` at once. Only the report re-enters the conversation.
-- **A background sub-agent reports back by itself**: when it succeeds or
-  fails, its report (or error) arrives in the conversation as a message of
-  its own -- drawn as a "Sub-agent finished / failed" card -- and starts a
+- **A background sub-agent reports back by itself**: when it succeeds,
+  fails, or you stop it from the panel, its report (or error) arrives in
+  the conversation as a message of its own -- drawn as a "Sub-agent
+  finished / failed / stopped" card -- and starts a
   turn right away, or right after the turn in progress. No polling, and no
   wake to set up. With nobody typing, a chain of these turns (a report,
   another sub-agent, its report...) is asked to wind down on the third and
   stops starting turns after the fifth, until the user speaks.
   `check_subagent_task` shows one still running; `stop_subagent` stops one.
+- **A step budget**: a sub-agent runs under Settings → General → Max
+  turns and is told so, with an instruction to keep the work in
+  proportion to the task. One that uses every step is asked for its
+  report from what it actually did, rather than ending on the cap's bare
+  "Model call limits exceeded".
 - **A hung model call fails the run**: 180 seconds without a single
   streamed token from the model ends a sub-agent with that error (tool
   calls aren't timed -- a slow tool isn't a hung one).
@@ -1552,43 +1558,48 @@ see `../ARCHITECTURE.md`):
 Same schema Claude Desktop, Claude Code, and Cursor all use for local
 (stdio) MCP servers -- `command`/`args`/`env` per server, keyed by name --
 since it's the shape Anthropic's own MCP spec examples popularized, not
-something coscribe invented. The web UI's Connectors > Custom tab
-exposes all three fields (`env` as one `KEY=value` pair per line, not
-space-split like `args`, since env values routinely contain spaces);
-`env` values are never echoed back to the browser after saving, only
-masked, same as provider API keys elsewhere in this panel. Remote
-(HTTP/SSE + OAuth) MCP servers aren't supported yet -- only local
-stdio servers.
+something coscribe invented. A remote server is an entry with a
+`server_url` (and optional `headers`) instead.
+
+**Settings → Connectors** lists the catalog and your own connectors
+(Type Local or Web, "Custom" for ones you added; Status a check when
+connected, Connect for a catalog one not added yet). **Add → Add custom
+connector** takes a name and an MCP server URL, or -- "Run a local command
+instead" -- a command, arguments and environment variables (one
+`KEY=value` per line). `env` and header values are never echoed back to
+the browser after saving, only masked.
+
+Click a connector for its page. A catalog one not added yet shows what it
+is, who makes it and its package, with **Connect**. An added one has
+**Disconnect**, a ⋮ menu (Reconnect; Check for updates when its args pin a
+`package@version` -- it looks the version up on npm and updates that one
+arg in place), and **Tool permissions**: its tools in "Read-only tools" and
+"Write/delete tools" (the server's own `readOnlyHint`; a tool without one
+counts as write/delete), each set to **Always allow** (runs without asking,
+not even Auto mode's reviewer), **Needs approval** (the default: the
+conversation's mode decides, as for `write_file`) or **Blocked** (the
+model never sees it). A group's menu sets all its tools at once. Kept in
+`connector_permissions.json` in the state folder, not in `mcp.json`, and
+applied to open conversations at once.
 
 Tool names are always prefixed with the server name to avoid colliding with
-the built-in file tools, and every MCP tool requires approval before running
-(same as `write_file`) — MCP servers are less trusted than the sandboxed
-built-ins. A server that fails to connect at startup (or the config file
-itself being missing) is skipped with a warning rather than blocking the
-others or crashing the process.
+the built-in file tools. A server that fails to connect at startup (or the
+config file itself being missing) is skipped with a warning rather than
+blocking the others or crashing the process. Adding, removing, updating or
+changing permissions takes effect right away, open conversations included;
+the `coscribe` CLI reads MCP config once per invocation and doesn't apply
+the permissions.
 
-In the web UI, adding, removing, or updating a connector (Connectors panel)
-is saved immediately and `coscribe-web` never needs restarting for
-this — but it only takes effect for the *next* new conversation, not
-already-open ones (each conversation's tools are fixed once it starts;
-reload the page or open a new thread to pick up the change). The
-`coscribe` CLI still picks up MCP config once per invocation, same as
-any other setting, since it isn't a long-running server multiple sessions
-share.
-
-Catalog entries pin an exact package version rather than `@latest` —
+Catalog entries pin an exact package version rather than `@latest` --
 an unpinned tag makes `npx` hit the npm registry on every startup just
-to check for a newer version. Any configured connector whose args contain a `package@version` token
-(scoped or not) gets a "Check for updates" link in its Configured card,
-which looks up the real latest version on npm and, if newer, updates that
-one arg in place and reconnects live — no need to remove and re-add.
+to check for a newer version.
 
 The built-in catalog no longer includes `git`/`github` entries (and the
 GitHub OAuth Device Flow sign-in button that used to come with the
 `github` one) -- coscribe is a general file/task automation assistant,
 not a developer coding tool, so a git/GitHub connector isn't relevant to
-its target audience by default. Either is still addable by hand via the
-Custom tab (name + command + args) for anyone who specifically wants one.
+its target audience by default. Either is still addable by hand as a
+custom connector for anyone who specifically wants one.
 
 `tools/mcp.py` also monkeypatches a real bug in aisuite 0.1.14 (the latest
 published release) on import: `MCPToolWrapper._create_signature` builds a

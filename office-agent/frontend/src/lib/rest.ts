@@ -3,6 +3,7 @@ import type {
   ConfigResponse,
   ConfigUpdateResult,
   CreateScheduledTaskPayload,
+  ConnectorToolPolicy,
   McpCatalogEntry,
   McpServerUpdateResult,
   McpServersResponse,
@@ -181,6 +182,10 @@ export const addMcpServer = (
     | { server_url: string; headers?: Record<string, string> },
 ) => postJson<McpServerUpdateResult>("/api/mcp/servers", { name, ...server });
 export const removeMcpServer = (name: string) => del<Record<string, never>>(`/api/mcp/servers/${encodeURIComponent(name)}`);
+export const setConnectorToolPolicies = (name: string, tools: Record<string, ConnectorToolPolicy>) =>
+  putJson<{ tools: Record<string, ConnectorToolPolicy> }>(`/api/mcp/servers/${encodeURIComponent(name)}/permissions`, {
+    tools,
+  });
 export const reconnectMcpServer = (name: string) =>
   postJson<McpReconnectResult>(`/api/mcp/servers/${encodeURIComponent(name)}/reconnect`, {});
 export const getNpmLatestVersion = (pkg: string) =>

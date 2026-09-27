@@ -1,30 +1,42 @@
-import { useEffect, useState } from "react";
+import { type ComponentType, type SVGProps, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   addMcpServer,
   bumpMcpVersion,
-  getConfig,
   getMcpCatalog,
   getMcpServers,
   getNpmLatestVersion,
   reconnectMcpServer,
   removeMcpServer,
+  setConnectorToolPolicies,
 } from "../../lib/rest";
-import type { McpCatalogEntry, McpServerInfo, McpServersResponse } from "../../types/settings";
-import { ArrowLeftIcon, SearchIcon } from "../icons";
+import type {
+  ConnectorTool,
+  ConnectorToolPolicy,
+  McpCatalogEntry,
+  McpServerInfo,
+  McpServersResponse,
+} from "../../types/settings";
+import {
+  ArrowLeftIcon,
+  BanIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  CloseIcon,
+  HandIcon,
+  MoreIcon,
+  PlusIcon,
+  SearchIcon,
+} from "../icons";
 import { FetchRetry } from "./FetchRetry";
+import { fieldClass, primaryButtonClass, secondaryButtonClass } from "./SettingRow";
+import { useClickOutside } from "../../lib/useClickOutside";
 import { useFetchOnActive } from "../../lib/useFetchOnActive";
 
-const CONNECTOR_ICONS: Record<string, string> = {
-  playwright: "🎭",
-  office365: "📧",
-};
-
-/** Module-level, not component state -- survives ConnectorsTab unmounting
- * when the settings modal closes or the category switches away. A slow
- * first `npx` install can take a minute+; the add's fetch keeps running
- * regardless of whether this component is mounted, so the pending marker
- * has to live outside it too (mirrors app.js's own module-level
- * pendingConnectorAdds, called out there for the same reason). */
+/** Module-level: a first `npx` install can take a minute or more, and the
+ * add keeps running after Settings closes or the tab changes, so its
+ * "connecting" marker has to outlive this component. */
 const pendingConnectorAdds = new Set<string>();
 let listeners: (() => void)[] = [];
 function notifyPendingChanged() {
@@ -32,10 +44,10 @@ function notifyPendingChanged() {
 }
 
 const PINNED_NPM_PACKAGE_RE = /^((?:@[^/@]+\/)?[^@]+)@(\d[\w.-]*)$/;
-function findPinnedNpmPackage(args: string[]): { index: number; name: string; version: string } | null {
-  for (let i = 0; i < args.length; i += 1) {
-    const match = PINNED_NPM_PACKAGE_RE.exec(args[i]);
-    if (match) return { index: i, name: match[1], version: match[2] };
+function findPinnedNpmPackage(args: string[]): { name: string; version: string } | null {
+  for (const arg of args) {
+    const match = PINNED_NPM_PACKAGE_RE.exec(arg);
+    if (match) return { name: match[1], version: match[2] };
   }
   return null;
 }
@@ -50,344 +62,590 @@ function parseEnvLines(text: string): Record<string, string> {
   return env;
 }
 
-type ConnectorType = "local" | "remote";
+type LocalServerArgs = { command: string; args: string[]; env?: Record<string, string> };
+type RemoteServerArgs = { server_url: string; headers?: Record<string, string> };
 
-/** One row of the unified table below -- either a catalog entry (may or
- * may not be added yet), a hand-added custom entry with no catalog match,
- * or both merged when a catalog entry has been added. Coscribe has no
- * second, bigger "Discover" universe beyond MCP_CATALOG's ~7 entries (see
- * ConnectorsTab's own docstring), so catalog + added servers merge into
- * one list instead of Skills' two-tab split. */
+/** A catalog entry, a connector someone added, or both. */
 interface ConnectorRow {
   name: string;
-  description: string | null;
-  type: ConnectorType;
-  isAdded: boolean;
-  connected: boolean;
+  title: string;
   catalogEntry: McpCatalogEntry | null;
   serverInfo: McpServerInfo | null;
 }
 
 function buildRows(catalog: McpCatalogEntry[], servers: McpServersResponse): ConnectorRow[] {
-  const rows: ConnectorRow[] = [];
-  const seen = new Set<string>();
-  for (const entry of catalog) {
-    const info = servers[entry.name] ?? null;
-    rows.push({
-      name: entry.name,
-      description: entry.description,
-      type: "local", // every catalog entry is a local stdio process today
-      isAdded: info !== null,
-      connected: info?.connected ?? false,
-      catalogEntry: entry,
-      serverInfo: info,
-    });
-    seen.add(entry.name);
-  }
+  const rows: ConnectorRow[] = catalog.map((entry) => ({
+    name: entry.name,
+    title: entry.title ?? entry.name,
+    catalogEntry: entry,
+    serverInfo: servers[entry.name] ?? null,
+  }));
   for (const [name, info] of Object.entries(servers)) {
-    if (seen.has(name)) continue;
-    rows.push({
-      name,
-      description: null,
-      type: info.server_url !== undefined ? "remote" : "local",
-      isAdded: true,
-      connected: info.connected,
-      catalogEntry: null,
-      serverInfo: info,
-    });
+    if (!catalog.some((entry) => entry.name === name)) {
+      rows.push({ name, title: name, catalogEntry: null, serverInfo: info });
+    }
   }
   return rows;
 }
 
-type LocalServerArgs = { command: string; args: string[]; env?: Record<string, string> };
-type RemoteServerArgs = { server_url: string; headers?: Record<string, string> };
-
-interface ConnectorRowViewProps {
-  row: ConnectorRow;
-  isPending: boolean;
-  updateCheck: string | undefined;
-  onConnect: () => void;
-  onRemove: () => void;
-  onRetry: () => void;
-  onCheckUpdate: (pkg: string) => void;
-  onApplyUpdate: (pkg: string, version: string) => void;
-}
-
-/** One <tr> in the unified table -- top-level, not nested in
- * ConnectorsTab, per this repo's own "no inner components" convention. */
-function ConnectorRowView({ row, isPending, updateCheck, onConnect, onRemove, onRetry, onCheckUpdate, onApplyUpdate }: ConnectorRowViewProps) {
-  const pinned = row.type === "local" ? findPinnedNpmPackage(row.serverInfo?.args ?? []) : null;
-  const latest = updateCheck?.startsWith("latest:") ? updateCheck.slice(7) : null;
-  const detail =
-    row.serverInfo === null
-      ? row.description
-      : row.serverInfo.server_url !== undefined
-        ? row.serverInfo.server_url
-        : `${row.serverInfo.command ?? ""} ${(row.serverInfo.args ?? []).join(" ")}`.trim();
-
+function ConnectorBadge({ title, large }: { title: string; large?: boolean }) {
   return (
-    <tr className="border-b border-[var(--border)] last:border-b-0">
-      <td className="min-w-0 overflow-hidden py-2.5 pr-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0">{CONNECTOR_ICONS[row.name] ?? "🔌"}</span>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{row.name}</div>
-            {detail && <div className="truncate text-xs text-[var(--muted)]">{detail}</div>}
-            {pinned && (
-              <div className="mt-0.5 flex items-center gap-2 text-xs">
-                {!updateCheck && (
-                  <button type="button" className="text-[var(--accent)]" onClick={() => onCheckUpdate(pinned.name)}>
-                    Check for updates
-                  </button>
-                )}
-                {updateCheck && !latest && <span className="text-[var(--muted)]">{updateCheck}</span>}
-                {latest && latest === pinned.version && <span className="text-[var(--muted)]">Up to date (v{pinned.version}).</span>}
-                {latest && latest !== pinned.version && (
-                  <>
-                    <span className="text-[var(--muted)]">
-                      v{pinned.version} -&gt; v{latest} available.
-                    </span>
-                    <button type="button" className="text-[var(--accent)]" onClick={() => onApplyUpdate(pinned.name, latest)}>
-                      Update
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </td>
-      <td className="py-2.5 pr-4 text-sm capitalize text-[var(--muted)]">{row.type}</td>
-      <td className="py-2.5 pr-4">
-        {row.isAdded ? (
-          row.connected ? (
-            // Explicit correction: a bare checkmark with no click target
-            // left "disconnect" reachable only via the separate trash-can
-            // column (now removed) -- one status-column button per state
-            // instead, same as the not-connected branches below.
-            <button
-              type="button"
-              className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm text-[var(--muted)] hover:border-red-500 hover:text-red-500"
-              onClick={onRemove}
-            >
-              Disconnect
-            </button>
-          ) : (
-            // Real gap this replaces: a failed/never-connected server used
-            // to be a dead-end static "Not connected" label -- the only
-            // way to retry was Remove + re-add, which also throws away
-            // the saved config. Same running-wave-ring treatment as the
-            // composer's own in-flight indicator while isPending, so a
-            // slow first-run install reads as "working," not "stuck."
-            <button
-              type="button"
-              disabled={isPending}
-              className={`rounded-md px-2.5 py-1 text-sm disabled:opacity-90 ${
-                isPending
-                  ? "running-wave-ring bg-[var(--bg)]"
-                  : "border border-[var(--border)] text-[var(--muted)] hover:text-[var(--fg)]"
-              }`}
-              onClick={onRetry}
-            >
-              {isPending ? "Retrying…" : "Retry"}
-            </button>
-          )
-        ) : (
-          <button
-            type="button"
-            disabled={isPending}
-            className={`rounded-md px-2.5 py-1 text-sm disabled:opacity-90 ${
-              isPending ? "running-wave-ring bg-[var(--bg)]" : "border border-[var(--border)]"
-            }`}
-            onClick={onConnect}
-          >
-            {isPending ? "Connecting…" : "Connect"}
-          </button>
-        )}
-      </td>
-    </tr>
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--field-bg)] font-medium text-[var(--muted)] ${
+        large ? "h-11 w-11 text-base" : "h-7 w-7 text-xs"
+      }`}
+    >
+      {title.slice(0, 1).toUpperCase()}
+    </span>
   );
 }
 
-interface AddConnectorViewProps {
-  catalog: McpCatalogEntry[];
-  servers: McpServersResponse;
-  pendingConnectorAdds: Set<string>;
-  onBack: () => void;
-  onCatalogAdd: (entry: McpCatalogEntry) => void;
-  onManualAdd: (name: string, server: LocalServerArgs | RemoteServerArgs) => void;
+const POLICIES: {
+  value: ConnectorToolPolicy;
+  label: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+}[] = [
+  { value: "allow", label: "Always allow", icon: CheckCircleIcon },
+  { value: "ask", label: "Needs approval", icon: HandIcon },
+  { value: "block", label: "Blocked", icon: BanIcon },
+];
+
+/** Three icon buttons, one per policy, for a single tool. */
+function PolicyToggle({
+  tool,
+  onChange,
+}: {
+  tool: ConnectorTool;
+  onChange: (policy: ConnectorToolPolicy) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={`${tool.title} permission`} className="flex shrink-0 rounded-lg bg-[var(--card-bg)] p-0.5">
+      {POLICIES.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          role="radio"
+          aria-checked={tool.policy === value}
+          aria-label={label}
+          title={label}
+          className={`flex h-7 w-8 items-center justify-center rounded-md ${
+            tool.policy === value
+              ? "bg-[var(--bg)] text-[var(--fg)] shadow-sm ring-1 ring-[var(--border)]"
+              : "text-[var(--muted)] hover:text-[var(--fg)]"
+          }`}
+          onClick={() => onChange(value)}
+        >
+          <Icon className="h-4 w-4" />
+        </button>
+      ))}
+    </div>
+  );
 }
 
-/** Settings > Connectors > Add -- catalog picks (one click) plus a manual
- * Local/Remote form, top-level per the "no inner components" convention. */
-function AddConnectorView({ catalog, servers, pendingConnectorAdds, onBack, onCatalogAdd, onManualAdd }: AddConnectorViewProps) {
-  const [manualType, setManualType] = useState<"local" | "remote">("local");
-  const [name, setName] = useState("");
-  const [command, setCommand] = useState("");
-  const [args, setArgs] = useState("");
-  const [env, setEnv] = useState("");
-  const [serverUrl, setServerUrl] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const submit = () => {
-    const trimmedName = name.trim();
-    if (manualType === "remote") {
-      const trimmedUrl = serverUrl.trim();
-      if (!trimmedName || !trimmedUrl) {
-        setFormError("Name and MCP Server URL are required.");
-        return;
-      }
-      onManualAdd(trimmedName, { server_url: trimmedUrl });
-    } else {
-      const trimmedCommand = command.trim();
-      if (!trimmedName || !trimmedCommand) {
-        setFormError("Name and command are required.");
-        return;
-      }
-      const argList = args.split(/\s+/).filter((a) => a.length > 0);
-      onManualAdd(trimmedName, { command: trimmedCommand, args: argList, env: parseEnvLines(env) });
-    }
-    setFormError(null);
-    setName("");
-    setCommand("");
-    setArgs("");
-    setEnv("");
-    setServerUrl("");
-  };
-
+/** Sets every tool in a group at once; shows the group's policy when its
+ * tools agree. */
+function GroupPolicyMenu({
+  tools,
+  onChange,
+}: {
+  tools: ConnectorTool[];
+  onChange: (policy: ConnectorToolPolicy) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, () => setOpen(false), open);
+  const shared = tools.every((t) => t.policy === tools[0]?.policy) ? tools[0]?.policy : undefined;
+  const current = POLICIES.find((p) => p.value === shared);
+  const Icon = current?.icon;
   return (
-    <div className="flex flex-col gap-4">
-      <button type="button" className="flex w-fit items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--fg)]" onClick={onBack}>
-        <ArrowLeftIcon className="h-3.5 w-3.5" /> Connectors
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--field-bg)] px-3 text-sm hover:bg-[var(--card-bg)]"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {Icon && <Icon className="h-4 w-4" />}
+        {current?.label ?? "Custom"}
+        <ChevronDownIcon className="h-3.5 w-3.5 text-[var(--muted)]" />
       </button>
-      <h2 className="text-lg font-semibold">Add connector</h2>
-
-      <div>
-        <div className="mb-2 text-sm font-medium">From the catalog</div>
-        <div className="flex flex-col gap-1.5">
-          {catalog.map((entry) => {
-            const isAdded = entry.name in servers;
-            const isPending = pendingConnectorAdds.has(entry.name);
-            return (
-              <div key={entry.name} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">
-                    {CONNECTOR_ICONS[entry.name] ?? "🔌"} {entry.name}
-                  </div>
-                  <div className="truncate text-xs text-[var(--muted)]">{entry.description}</div>
-                </div>
-                <button
-                  type="button"
-                  disabled={isAdded || isPending}
-                  className="shrink-0 rounded-md border border-[var(--border)] px-2.5 py-1 text-sm disabled:opacity-60"
-                  onClick={() => onCatalogAdd(entry)}
-                >
-                  {isAdded ? "Added" : isPending ? "Connecting…" : "Add"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2 rounded-lg border border-[var(--border)] p-3">
-        <h4 className="text-sm font-medium">Add manually</h4>
-        <div className="flex gap-1 rounded-lg bg-[var(--card-bg)] p-1">
-          {(["local", "remote"] as const).map((t) => (
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-20 mt-1 min-w-44 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] py-1 shadow-[var(--shadow)]"
+        >
+          {POLICIES.map(({ value, label, icon: ItemIcon }) => (
             <button
-              key={t}
+              key={value}
               type="button"
-              className={`flex-1 rounded-md py-1 text-sm font-medium capitalize ${
-                manualType === t ? "bg-[var(--accent)] text-[var(--accent-fg)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
-              }`}
-              onClick={() => setManualType(t)}
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
+              onClick={() => {
+                setOpen(false);
+                onChange(value);
+              }}
             >
-              {t}
+              <ItemIcon className="h-4 w-4" />
+              <span className="flex-1">{label}</span>
+              {shared === value && <CheckIcon className="h-3.5 w-3.5" />}
             </button>
           ))}
         </div>
-        <input
-          className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-          placeholder="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+      )}
+    </div>
+  );
+}
+
+function ToolGroup({
+  title,
+  tools,
+  onChange,
+}: {
+  title: string;
+  tools: ConnectorTool[];
+  onChange: (policies: Record<string, ConnectorToolPolicy>) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  if (tools.length === 0) return null;
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center gap-3 py-2">
+        <button
+          type="button"
+          aria-expanded={open}
+          className="flex flex-1 items-center gap-2 text-left text-[15px]"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <ChevronDownIcon className={`h-4 w-4 text-[var(--muted)] transition-transform ${open ? "" : "-rotate-90"}`} />
+          {title}
+          <span className="rounded-md bg-[var(--card-bg)] px-1.5 text-xs text-[var(--muted)]">{tools.length}</span>
+        </button>
+        <GroupPolicyMenu
+          tools={tools}
+          onChange={(policy) => onChange(Object.fromEntries(tools.map((t) => [t.name, policy])))}
         />
-        {manualType === "remote" ? (
-          <input
-            className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-            placeholder="MCP Server URL (https://...)"
-            value={serverUrl}
-            onChange={(e) => setServerUrl(e.target.value)}
-          />
-        ) : (
-          <>
-            <input
-              className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-              placeholder="Command (e.g. npx)"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-            />
-            <input
-              className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-              placeholder="Args (space-separated)"
-              value={args}
-              onChange={(e) => setArgs(e.target.value)}
-            />
-            <textarea
-              className="rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-sm outline-none"
-              placeholder="Env vars, one per line: KEY=value"
-              rows={3}
-              value={env}
-              onChange={(e) => setEnv(e.target.value)}
-            />
-          </>
-        )}
-        <div className="flex items-center gap-3">
-          <button type="button" className="self-start rounded-md bg-[var(--accent)] px-3 py-1 text-sm text-[var(--accent-fg)]" onClick={submit}>
-            Add
+      </div>
+      {open && (
+        <div className="flex flex-col divide-y divide-[var(--border)] pl-6">
+          {tools.map((tool) => (
+            <div key={tool.name} className="flex items-center gap-6 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm">{tool.title}</div>
+                {tool.description && tool.description !== tool.title && (
+                  <div className="mt-0.5 line-clamp-2 text-[13px] text-[var(--muted)]">{tool.description}</div>
+                )}
+              </div>
+              <PolicyToggle tool={tool} onChange={(policy) => onChange({ [tool.name]: policy })} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConnectorMenu({
+  pinned,
+  onReconnect,
+  onCheckUpdate,
+}: {
+  pinned: boolean;
+  onReconnect: () => void;
+  onCheckUpdate: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, () => setOpen(false), open);
+  const item = "flex w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]";
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        aria-label="More connector actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <MoreIcon className="h-4 w-4" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-20 mt-1 min-w-44 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] py-1 shadow-[var(--shadow)]"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className={item}
+            onClick={() => {
+              setOpen(false);
+              onReconnect();
+            }}
+          >
+            Reconnect
           </button>
-          {formError && <span className="text-sm text-red-500">{formError}</span>}
+          {pinned && (
+            <button
+              type="button"
+              role="menuitem"
+              className={item}
+              onClick={() => {
+                setOpen(false);
+                onCheckUpdate();
+              }}
+            >
+              Check for updates
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface Notice {
+  text: string;
+  error: boolean;
+  update?: { pkg: string; version: string };
+}
+
+/** An added connector: its tools and what each may do, and Disconnect. */
+function ConnectorDetail({
+  row,
+  pending,
+  notice,
+  onBack,
+  onDisconnect,
+  onReconnect,
+  onCheckUpdate,
+  onApplyUpdate,
+  onPolicies,
+}: {
+  row: ConnectorRow;
+  pending: boolean;
+  notice: Notice | null;
+  onBack: () => void;
+  onDisconnect: () => void;
+  onReconnect: () => void;
+  onCheckUpdate: (pkg: string) => void;
+  onApplyUpdate: (pkg: string, version: string) => void;
+  onPolicies: (policies: Record<string, ConnectorToolPolicy>) => void;
+}) {
+  const info = row.serverInfo!;
+  const pinned = findPinnedNpmPackage(info.args ?? []);
+  const source = info.server_url ?? `${info.command ?? ""} ${(info.args ?? []).join(" ")}`.trim();
+  const tools = info.tools ?? [];
+  return (
+    <div className="flex flex-col gap-5">
+      <button type="button" className="flex w-fit items-center gap-2 text-[15px] text-[var(--fg)] hover:opacity-70" onClick={onBack}>
+        <ArrowLeftIcon className="h-4 w-4" /> Your connectors
+      </button>
+      <div className="flex items-center gap-4">
+        <ConnectorBadge title={row.title} large />
+        <div className="min-w-0 flex-1 truncate text-lg font-semibold">{row.title}</div>
+        <button type="button" className={secondaryButtonClass} onClick={onDisconnect}>
+          Disconnect
+        </button>
+        <ConnectorMenu
+          pinned={pinned !== null}
+          onReconnect={onReconnect}
+          onCheckUpdate={() => pinned && onCheckUpdate(pinned.name)}
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        {row.catalogEntry && <p className="text-[15px] leading-relaxed">{row.catalogEntry.description}</p>}
+        <p className="truncate font-mono text-xs text-[var(--muted)]" title={source}>
+          {source}
+        </p>
+      </div>
+
+      {notice && (
+        <p role="status" className={`text-sm ${notice.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>
+          {notice.text}{" "}
+          {notice.update && (
+            <button
+              type="button"
+              className="text-[var(--accent)] hover:underline"
+              onClick={() => onApplyUpdate(notice.update!.pkg, notice.update!.version)}
+            >
+              Update
+            </button>
+          )}
+        </p>
+      )}
+
+      {!info.connected ? (
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] px-4 py-3 text-sm">
+          <span className="flex-1 text-[var(--muted)]">
+            {pending ? "Connecting…" : "Not connected. Its tools show up here once it connects."}
+          </span>
+          <button type="button" className={secondaryButtonClass} disabled={pending} onClick={onReconnect}>
+            Retry
+          </button>
+        </div>
+      ) : (
+        <section className="flex flex-col">
+          <h3 className="text-[15px] font-semibold">Tool permissions</h3>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Choose when coscribe is allowed to use these tools. Needs approval follows the conversation's own mode.
+          </p>
+          <div className="mt-3 flex flex-col divide-y divide-[var(--border)]">
+            <ToolGroup title="Read-only tools" tools={tools.filter((t) => t.read_only)} onChange={onPolicies} />
+            <ToolGroup title="Write/delete tools" tools={tools.filter((t) => !t.read_only)} onChange={onPolicies} />
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+/** A catalog connector not added yet: what it is, and Connect. */
+function CatalogConnectorPage({
+  entry,
+  pending,
+  notice,
+  onBack,
+  onConnect,
+}: {
+  entry: McpCatalogEntry;
+  pending: boolean;
+  notice: Notice | null;
+  onBack: () => void;
+  onConnect: () => void;
+}) {
+  const title = entry.title ?? entry.name;
+  const pkg = findPinnedNpmPackage(entry.args);
+  return (
+    <div className="flex flex-col gap-5">
+      <button type="button" className="flex w-fit items-center gap-2 text-[15px] text-[var(--fg)] hover:opacity-70" onClick={onBack}>
+        <ArrowLeftIcon className="h-4 w-4" /> Your connectors
+      </button>
+      <div className="flex items-center gap-4 rounded-xl bg-[var(--card-bg)] px-5 py-5">
+        <ConnectorBadge title={title} large />
+        <div className="min-w-0 flex-1">
+          <div className="text-xl font-semibold">{title}</div>
+        </div>
+        <button
+          type="button"
+          disabled={pending}
+          className={`${primaryButtonClass} ${pending ? "running-wave-ring" : ""}`}
+          onClick={onConnect}
+        >
+          {pending ? "Connecting…" : "Connect"}
+        </button>
+      </div>
+      <p className="text-[15px] leading-relaxed">{entry.description}</p>
+      {notice && (
+        <p role="status" className={`text-sm ${notice.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>
+          {notice.text}
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-6 border-t border-[var(--border)] pt-5 text-sm">
+        {entry.made_by && (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">Made by</div>
+            {entry.homepage ? (
+              <a href={entry.homepage} target="_blank" rel="noreferrer" className="mt-1 block text-[var(--accent)] hover:underline">
+                {entry.made_by}
+              </a>
+            ) : (
+              <div className="mt-1">{entry.made_by}</div>
+            )}
+          </div>
+        )}
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
+            {pkg ? "Package" : "Command"}
+          </div>
+          <div className="mt-1 font-mono text-[13px]">
+            {pkg ? `${pkg.name} ${pkg.version}` : `${entry.command} ${entry.args.join(" ")}`}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-interface ConnectorsTabProps {
-  active: boolean;
+/** Name plus an MCP server URL, or a local command for a server that runs
+ * on this computer. */
+function AddCustomConnectorDialog({
+  existing,
+  onClose,
+  onAdd,
+}: {
+  existing: string[];
+  onClose: () => void;
+  onAdd: (name: string, server: LocalServerArgs | RemoteServerArgs) => void;
+}) {
+  const [local, setLocal] = useState(false);
+  const [name, setName] = useState("");
+  const [serverUrl, setServerUrl] = useState("");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [env, setEnv] = useState("");
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const trimmedName = name.trim();
+  const nameTaken = existing.includes(trimmedName);
+  const urlOk = /^https?:\/\/\S+$/i.test(serverUrl.trim());
+  const ready = trimmedName !== "" && !nameTaken && (local ? command.trim() !== "" : urlOk);
+
+  const submit = () => {
+    if (!ready) return;
+    onAdd(
+      trimmedName,
+      local
+        ? { command: command.trim(), args: args.split(/\s+/).filter(Boolean), env: parseEnvLines(env) }
+        : { server_url: serverUrl.trim() },
+    );
+  };
+
+  const hint = "mt-1.5 text-[13px] text-[var(--muted)]";
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-connector-title"
+        className="flex w-[min(640px,100vw-2rem)] flex-col gap-5 rounded-2xl border border-[var(--border)] bg-[var(--panel-bg)] p-7 shadow-[var(--shadow)]"
+      >
+        <div className="flex items-start gap-4">
+          <h2 id="add-connector-title" className="flex-1 text-2xl font-semibold">
+            Add custom connector
+          </h2>
+          <button
+            type="button"
+            aria-label="Close"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
+            onClick={onClose}
+          >
+            <CloseIcon className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="-mt-2 text-[15px] text-[var(--muted)]">Connect coscribe to your data and tools.</p>
+
+        <div>
+          <input
+            aria-label="Name"
+            autoFocus
+            className={`${fieldClass} h-10 w-full`}
+            placeholder="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <p className={hint}>{nameTaken ? "A connector already has this name." : "Shown in the connectors list."}</p>
+        </div>
+
+        {local ? (
+          <div className="flex flex-col gap-3">
+            <input
+              aria-label="Command"
+              className={`${fieldClass} h-10 w-full font-mono text-[13px]`}
+              placeholder="Command, e.g. npx"
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+            />
+            <input
+              aria-label="Arguments"
+              className={`${fieldClass} h-10 w-full font-mono text-[13px]`}
+              placeholder="Arguments, separated by spaces"
+              value={args}
+              onChange={(e) => setArgs(e.target.value)}
+            />
+            <textarea
+              aria-label="Environment variables"
+              className={`${fieldClass} h-auto min-h-20 w-full py-2 font-mono text-[13px]`}
+              placeholder="Environment variables, one per line: KEY=value"
+              value={env}
+              onChange={(e) => setEnv(e.target.value)}
+            />
+            <p className="text-[13px] text-[var(--muted)]">It runs as a program on this computer, with your permissions.</p>
+          </div>
+        ) : (
+          <div>
+            <input
+              aria-label="MCP server URL"
+              className={`${fieldClass} h-10 w-full`}
+              placeholder="MCP server URL"
+              value={serverUrl}
+              onChange={(e) => setServerUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
+            />
+            <p className={hint}>
+              The HTTPS address where the server accepts MCP requests, for example https://mcp.example.com/mcp.
+            </p>
+          </div>
+        )}
+        <button
+          type="button"
+          className="-mt-2 w-fit text-sm text-[var(--accent)] hover:underline"
+          onClick={() => setLocal((v) => !v)}
+        >
+          {local ? "Use a server URL instead" : "Run a local command instead"}
+        </button>
+
+        <p className="text-[15px] text-[var(--muted)]">
+          Only use connectors from developers you trust. coscribe can't check what their tools do or whether they
+          change.
+        </p>
+
+        <div className="flex justify-end gap-2">
+          <button type="button" className={secondaryButtonClass} onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className={primaryButtonClass} disabled={!ready} onClick={submit}>
+            Continue
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
-const EMPTY_CATALOG_AND_SERVERS: { catalog: McpCatalogEntry[]; servers: McpServersResponse } = {
-  catalog: [],
-  servers: {},
-};
+function StatusCell({ row, pending, onConnect }: { row: ConnectorRow; pending: boolean; onConnect: () => void }) {
+  if (pending) {
+    return <span className="running-wave-ring rounded-md px-2.5 py-1 text-sm">Connecting…</span>;
+  }
+  if (row.serverInfo?.connected) return <CheckIcon aria-label="Connected" className="h-4 w-4" />;
+  if (row.serverInfo) return <span className="text-sm text-[var(--danger)]">Not connected</span>;
+  return (
+    <button
+      type="button"
+      className={secondaryButtonClass}
+      onClick={(e) => {
+        e.stopPropagation();
+        onConnect();
+      }}
+    >
+      Connect
+    </button>
+  );
+}
 
-/** Settings > Connectors, restructured toward docs/ui-references/
- * connectors-tab.png: catalog ("Built-in", one-click add) and hand-added
- * servers ("Custom") used to be two separate tabs -- they merge into one
- * searchable/filterable table here, since MCP_CATALOG's ~7 entries
- * (web/app.py) already ARE the full known set coscribe ships, unlike
- * Claude's own "Your connectors" vs a much bigger "Discover" marketplace
- * -- there's no second universe to discover beyond it, so no Discover tab
- * or "Popular for X" recommendation strip either (no coscribe data behind
- * either). Status now carries a real, live `connected` field
- * (web/app.py's mcp_connections registry), not just "configured" --
- * added-but-not-currently-connected shows as "Not connected" rather than
- * a fake retryable "Connect" (env/headers secrets are masked on read, so
- * there's no way to actually replay a failed connect from this tab; the
- * honest fix is Remove + re-add). Add's manual form now supports Remote
- * (server_url) too, not just Local (command/args/env) -- the validation
- * layer (tools/mcp.py's validate_mcp_config) already handled server_url,
- * only the POST /api/mcp/servers payload shape and this form were
- * missing it. */
-export function ConnectorsTab({ active }: ConnectorsTabProps) {
+const EMPTY: { catalog: McpCatalogEntry[]; servers: McpServersResponse } = { catalog: [], servers: {} };
+
+/** Settings > Connectors: the list, a connector's own page (its tools and
+ * their permissions), and adding a custom one. */
+export function ConnectorsTab({ active }: { active: boolean }) {
   const [, forceRender] = useState(0);
-  const [view, setView] = useState<"list" | "add">("list");
+  const [openName, setOpenName] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  useClickOutside(addMenuRef, () => setAddMenuOpen(false), addMenuOpen);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "connected" | "not-connected">("all");
-  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
-  const [updateChecks, setUpdateChecks] = useState<Record<string, string>>({});
-  const [configPath, setConfigPath] = useState<string | null | undefined>(undefined);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   useEffect(() => {
     const listener = () => forceRender((n) => n + 1);
@@ -397,59 +655,22 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
     };
   }, []);
 
-  // catalogStatus/refresh replace this tab's own former bare `getX().then
-  // (setX)` (no .catch, no loading state) -- see useFetchOnActive's own
-  // docstring for the real, live-hit bug that left this tab permanently
-  // showing "No connectors match" (indistinguishable from a genuinely
-  // empty result) after one transient failure on a fresh Windows install.
   const {
     data: { catalog, servers },
-    status: catalogStatus,
+    status,
     retry: refresh,
   } = useFetchOnActive(
     active,
     () => Promise.all([getMcpCatalog(), getMcpServers()]).then(([cat, srv]) => ({ catalog: cat, servers: srv })),
-    EMPTY_CATALOG_AND_SERVERS,
+    EMPTY,
   );
 
-  useEffect(() => {
-    if (!active) return;
-    // mcp.json's real on-disk path -- answers "where does an added
-    // connector's config actually live", not shown anywhere else in this
-    // tab. null means no connector has been added yet (the file is only
-    // created on first add, see add_mcp_server); it then defaults to
-    // ./mcp.json next to wherever coscribe was started. Re-fires on every
-    // re-activation (unlike the catalog/servers fetch above, this one
-    // isn't gated to "only once") -- cheap, and self-heals from a
-    // transient failure the next time the tab opens; .catch is just
-    // silencing an unhandled-rejection warning, configPath staying
-    // undefined either way (its own "not shown" case already renders
-    // fine, see below).
-    getConfig()
-      .then((cfg) => setConfigPath(cfg.COSCRIBE_MCP_CONFIG_PATH))
-      .catch(() => {});
-  }, [active]);
-
-  // Real, live-reported bug: `connected` is a live signal (web/app.py's
-  // mcp_connections, populated once a server's own connect actually
-  // finishes), but a slow-to-start one -- Playwright launching a real
-  // browser is the documented worst case -- can easily take longer than
-  // the 5s startup window (MCP_STARTUP_TIMEOUT_SECONDS) allows, finishing
-  // in the background afterward (see lifespan's own comment). Nothing
-  // ever pushed that completion to an already-open Connectors tab (chat
-  // sessions get a WS splice for exactly this reason; Settings tabs are
-  // plain REST, no push channel) -- open Settings right after startup and
-  // the connector you're actually using correctly shows "Not connected"
-  // forever, even once it's genuinely connected. Silent background poll,
-  // deliberately not routed through useFetchOnActive's own retry (which
-  // would flip catalogStatus to "error" and blank the whole list behind
-  // a transient failure) -- errors are swallowed and the last-known
-  // `servers` snapshot just stays put, same graceful-degradation posture
-  // as this file's other non-critical background work.
+  // A slow server can finish connecting well after the tab opened, and
+  // Settings has no push channel, so its live state is polled.
   const [liveServers, setLiveServers] = useState<McpServersResponse | null>(null);
   const pollLiveServers = () => {
     getMcpServers()
-      .then((result) => setLiveServers(result))
+      .then(setLiveServers)
       .catch(() => {});
   };
   useEffect(() => {
@@ -458,27 +679,14 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
     pollLiveServers();
     const id = setInterval(pollLiveServers, 4000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
   const effectiveServers = liveServers ?? servers;
 
-  const performAdd = async (name: string, server: LocalServerArgs | RemoteServerArgs) => {
+  const withPending = async (name: string, work: () => Promise<void>) => {
     pendingConnectorAdds.add(name);
     notifyPendingChanged();
-    setStatus({ text: "Adding -- first-run installs can take a minute or more.", error: false });
     try {
-      const result = await addMcpServer(name, server);
-      const rejectedEntries = Object.entries(result.rejected);
-      if (rejectedEntries.length > 0) {
-        setStatus({ text: `Not added -- ${rejectedEntries[0][1]}`, error: true });
-      } else {
-        setStatus({
-          text: result.connected
-            ? "Added."
-            : `Saved, but couldn't connect${result.error ? ` -- ${result.error}` : " -- check the command/args."}`,
-          error: !result.connected,
-        });
-      }
+      await work();
     } finally {
       pendingConnectorAdds.delete(name);
       notifyPendingChanged();
@@ -487,182 +695,225 @@ export function ConnectorsTab({ active }: ConnectorsTabProps) {
     }
   };
 
-  const onCatalogAdd = (entry: McpCatalogEntry) => {
+  const performAdd = (name: string, server: LocalServerArgs | RemoteServerArgs) =>
+    withPending(name, async () => {
+      setNotice({ text: "Connecting -- a first install can take a minute or more.", error: false });
+      const result = await addMcpServer(name, server);
+      const rejected = Object.values(result.rejected);
+      if (rejected.length > 0) setNotice({ text: `Not added -- ${rejected[0]}`, error: true });
+      else if (result.connected) setNotice(null);
+      else setNotice({ text: `Saved, but couldn't connect${result.error ? ` -- ${result.error}` : "."}`, error: true });
+    });
+
+  const connectCatalog = (entry: McpCatalogEntry) => {
+    setOpenName(entry.name);
     if (entry.needs_config) {
-      // No prefill sub-step needed anymore -- the manual form already
-      // lives on this same Add view; the user just fills it in with the
-      // catalog entry's own required env keys as a hint via the
-      // description above it.
-      setStatus({ text: `${entry.name} needs its own token -- fill in "Add manually" below with the required env vars.`, error: false });
+      setNotice({ text: `${entry.title ?? entry.name} needs its own token -- add it as a custom connector.`, error: false });
       return;
     }
-    performAdd(entry.name, { command: entry.command, args: entry.args });
+    void performAdd(entry.name, { command: entry.command, args: entry.args });
   };
 
-  const remove = async (name: string) => {
+  const disconnect = async (name: string) => {
     await removeMcpServer(name);
+    setOpenName(null);
+    setNotice(null);
     refresh();
     pollLiveServers();
   };
 
-  const checkUpdate = async (name: string, pkg: string) => {
-    const result = await getNpmLatestVersion(pkg);
-    if ("error" in result) {
-      setUpdateChecks({ ...updateChecks, [name]: `Couldn't check: ${result.error}` });
-      return;
-    }
-    setUpdateChecks({ ...updateChecks, [name]: `latest:${result.latest}` });
-  };
-
-  const applyUpdate = async (name: string, pkg: string, version: string) => {
-    pendingConnectorAdds.add(name);
-    notifyPendingChanged();
-    try {
-      // Real, live-reported bug: this used to discard the result and
-      // always show "Updated." even when the version bump saved fine but
-      // the reconnect that follows it failed -- the exact same
-      // "Saved, but couldn't connect" case performAdd already handles
-      // correctly, just silently swallowed here instead.
-      const result = await bumpMcpVersion(name, pkg, version);
-      setStatus({
-        text: result.connected
-          ? "Updated."
-          : `Updated, but couldn't reconnect${result.error ? ` -- ${result.error}` : "."}`,
-        error: !result.connected,
-      });
-    } finally {
-      pendingConnectorAdds.delete(name);
-      notifyPendingChanged();
-      const next = { ...updateChecks };
-      delete next[name];
-      setUpdateChecks(next);
-      refresh();
-      pollLiveServers();
-    }
-  };
-
-  const retry = async (name: string) => {
-    pendingConnectorAdds.add(name);
-    notifyPendingChanged();
-    setStatus({ text: "Reconnecting…", error: false });
-    try {
+  const reconnect = (name: string) =>
+    withPending(name, async () => {
       const result = await reconnectMcpServer(name);
-      setStatus({
-        text: result.connected ? "Connected." : `Still couldn't connect${result.error ? ` -- ${result.error}` : "."}`,
-        error: !result.connected,
-      });
-    } finally {
-      pendingConnectorAdds.delete(name);
-      notifyPendingChanged();
-      pollLiveServers();
-    }
+      setNotice(result.connected ? null : { text: `Still couldn't connect${result.error ? ` -- ${result.error}` : "."}`, error: true });
+    });
+
+  const checkUpdate = async (pkg: string, current: string | undefined) => {
+    const result = await getNpmLatestVersion(pkg);
+    if ("error" in result) setNotice({ text: `Couldn't check for updates: ${result.error}`, error: true });
+    else if (result.latest === current) setNotice({ text: `Up to date (${current}).`, error: false });
+    else setNotice({ text: `Version ${result.latest} is available.`, error: false, update: { pkg, version: result.latest } });
   };
 
-  if (view === "add") {
+  const applyUpdate = (name: string, pkg: string, version: string) =>
+    withPending(name, async () => {
+      const result = await bumpMcpVersion(name, pkg, version);
+      setNotice(
+        result.connected
+          ? { text: `Updated to ${version}.`, error: false }
+          : { text: `Updated, but couldn't reconnect${result.error ? ` -- ${result.error}` : "."}`, error: true },
+      );
+    });
+
+  const setPolicies = async (name: string, policies: Record<string, ConnectorToolPolicy>) => {
+    setLiveServers((current) => {
+      const base = current ?? servers;
+      const info = base[name];
+      if (!info?.tools) return current;
+      const tools = info.tools.map((t) => (t.name in policies ? { ...t, policy: policies[t.name] } : t));
+      return { ...base, [name]: { ...info, tools } };
+    });
+    try {
+      await setConnectorToolPolicies(name, policies);
+    } catch {
+      setNotice({ text: "Couldn't save the permission -- try again.", error: true });
+    }
+    pollLiveServers();
+  };
+
+  const rows = buildRows(catalog, effectiveServers);
+  const opened = openName ? rows.find((r) => r.name === openName) : undefined;
+  const backToList = () => {
+    setOpenName(null);
+    setNotice(null);
+  };
+
+  if (opened?.serverInfo) {
+    const pinned = findPinnedNpmPackage(opened.serverInfo.args ?? []);
     return (
-      <AddConnectorView
-        catalog={catalog}
-        servers={effectiveServers}
-        pendingConnectorAdds={pendingConnectorAdds}
-        onBack={() => setView("list")}
-        onCatalogAdd={(entry) => {
-          onCatalogAdd(entry);
-        }}
-        onManualAdd={(name, server) => {
-          performAdd(name, server);
-          setView("list");
-        }}
+      <ConnectorDetail
+        row={opened}
+        pending={pendingConnectorAdds.has(opened.name)}
+        notice={notice}
+        onBack={backToList}
+        onDisconnect={() => void disconnect(opened.name)}
+        onReconnect={() => void reconnect(opened.name)}
+        onCheckUpdate={(pkg) => void checkUpdate(pkg, pinned?.version)}
+        onApplyUpdate={(pkg, version) => void applyUpdate(opened.name, pkg, version)}
+        onPolicies={(policies) => void setPolicies(opened.name, policies)}
+      />
+    );
+  }
+  if (opened?.catalogEntry) {
+    return (
+      <CatalogConnectorPage
+        entry={opened.catalogEntry}
+        pending={pendingConnectorAdds.has(opened.name)}
+        notice={notice}
+        onBack={backToList}
+        onConnect={() => connectCatalog(opened.catalogEntry!)}
       />
     );
   }
 
-  let rows = buildRows(catalog, effectiveServers);
   const q = search.trim().toLowerCase();
-  if (q) rows = rows.filter((r) => r.name.toLowerCase().includes(q));
-  if (filter === "connected") rows = rows.filter((r) => r.isAdded && r.connected);
-  if (filter === "not-connected") rows = rows.filter((r) => !r.isAdded || !r.connected);
+  const visible = q ? rows.filter((r) => `${r.title} ${r.name}`.toLowerCase().includes(q)) : rows;
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-[22px] font-semibold">Connectors</h2>
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-60 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--field-bg)] px-3 focus-within:border-[var(--focus)] focus-within:ring-2 focus-within:ring-[var(--focus)]/15">
-            <SearchIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
-            <input
-              aria-label="Search connectors"
-              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
-              placeholder="Search connectors"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="mr-1 text-[22px] font-semibold">Connectors</h2>
+        <div className="flex-1" />
+        <div className="flex h-9 w-60 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--field-bg)] px-3 focus-within:border-[var(--focus)] focus-within:ring-2 focus-within:ring-[var(--focus)]/15">
+          <SearchIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+          <input
+            aria-label="Search connectors"
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--muted)]"
+            placeholder="Search connectors"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="relative" ref={addMenuRef}>
           <button
             type="button"
-            className="rounded-md bg-[var(--fg)] px-3 py-1.5 text-sm font-medium text-[var(--bg)]"
-            onClick={() => setView("add")}
+            aria-haspopup="menu"
+            aria-expanded={addMenuOpen}
+            className="flex h-9 items-center gap-1.5 rounded-lg bg-[var(--primary)] px-3.5 text-sm font-medium text-[var(--primary-fg)] hover:bg-[var(--primary-hover)]"
+            onClick={() => setAddMenuOpen((v) => !v)}
           >
-            Add
+            <PlusIcon className="h-4 w-4" /> Add <ChevronDownIcon className="h-3.5 w-3.5" />
           </button>
+          {addMenuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full z-20 mt-1 min-w-52 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] py-1 shadow-[var(--shadow)]"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setAdding(true);
+                }}
+              >
+                Add custom connector
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      <p className="text-sm leading-relaxed text-[var(--muted)]">
-        Connectors (MCP servers) give coscribe tools from other apps. They run commands on this computer or reach a remote
-        server, so add only ones you trust. Changes apply right away, open conversations included.
-      </p>
-      {configPath !== undefined && (
-        <p className="truncate text-[13px] text-[var(--muted)]">
-          Config file: {configPath ?? "not created yet -- will be written to ./mcp.json on first add"}
+      {notice && (
+        <p role="status" className={`text-sm ${notice.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>
+          {notice.text}
         </p>
       )}
 
-      <div className="flex gap-1">
-        {(["all", "connected", "not-connected"] as const).map((f) => (
-          <button
-            key={f}
-            type="button"
-            className={`rounded-md border px-2.5 py-1 text-sm capitalize ${
-              filter === f ? "border-[var(--fg)] font-medium" : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--fg)]"
-            }`}
-            onClick={() => setFilter(f)}
-          >
-            {f === "not-connected" ? "Not connected" : f}
-          </button>
-        ))}
-      </div>
-
-      <FetchRetry status={catalogStatus} onRetry={refresh} />
-
-      {catalogStatus === "success" && rows.length === 0 && <div className="text-sm text-[var(--muted)]">No connectors match.</div>}
-      {catalogStatus === "success" && rows.length > 0 && (
+      <FetchRetry status={status} onRetry={refresh} />
+      {status === "success" && visible.length === 0 && (
+        <p className="text-sm text-[var(--muted)]">{q ? "No connectors match." : "No connectors yet."}</p>
+      )}
+      {status === "success" && visible.length > 0 && (
         <table className="w-full table-fixed text-left text-sm">
           <thead>
-            <tr className="border-b border-[var(--border)] text-xs text-[var(--muted)]">
-              <th className="w-[55%] pb-2 pr-4 font-medium">Connector</th>
-              <th className="w-[15%] pb-2 pr-4 font-medium">Type</th>
-              <th className="w-[30%] pb-2 font-medium">Status</th>
+            <tr className="border-b border-[var(--border)] text-[13px] text-[var(--muted)]">
+              <th className="w-[58%] pb-2 pr-4 font-normal">Connector</th>
+              <th className="w-[22%] pb-2 pr-4 font-normal">Type</th>
+              <th className="w-[20%] pb-2 font-normal">Status</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <ConnectorRowView
+            {visible.map((row) => (
+              <tr
                 key={row.name}
-                row={row}
-                isPending={pendingConnectorAdds.has(row.name)}
-                updateCheck={updateChecks[row.name]}
-                onConnect={() => row.catalogEntry && onCatalogAdd(row.catalogEntry)}
-                onRemove={() => remove(row.name)}
-                onRetry={() => retry(row.name)}
-                onCheckUpdate={(pkg) => checkUpdate(row.name, pkg)}
-                onApplyUpdate={(pkg, version) => applyUpdate(row.name, pkg, version)}
-              />
+                tabIndex={0}
+                className="cursor-pointer border-b border-[var(--border)] hover:bg-[var(--card-bg)] focus-visible:bg-[var(--card-bg)] focus-visible:outline-none"
+                onClick={() => {
+                  setNotice(null);
+                  setOpenName(row.name);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setOpenName(row.name);
+                }}
+              >
+                <td className="py-3 pr-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <ConnectorBadge title={row.title} />
+                    <span className="truncate text-[15px]">{row.title}</span>
+                  </div>
+                </td>
+                <td className="py-3 pr-4 text-[15px]">
+                  {row.serverInfo?.server_url !== undefined ? "Web" : "Local"}
+                  {!row.catalogEntry && (
+                    <span className="ml-2 rounded-md bg-[var(--card-bg)] px-1.5 py-0.5 text-xs text-[var(--muted)]">Custom</span>
+                  )}
+                </td>
+                <td className="py-3">
+                  <StatusCell
+                    row={row}
+                    pending={pendingConnectorAdds.has(row.name)}
+                    onConnect={() => row.catalogEntry && connectCatalog(row.catalogEntry)}
+                  />
+                </td>
+              </tr>
             ))}
           </tbody>
         </table>
       )}
 
-      {status && <span className={`text-sm ${status.error ? "text-red-500" : "text-[var(--muted)]"}`}>{status.text}</span>}
+      {adding && (
+        <AddCustomConnectorDialog
+          existing={rows.map((r) => r.name)}
+          onClose={() => setAdding(false)}
+          onAdd={(name, server) => {
+            setAdding(false);
+            setOpenName(name);
+            void performAdd(name, server);
+          }}
+        />
+      )}
     </div>
   );
 }
