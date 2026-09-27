@@ -5,7 +5,7 @@ here: a durable record of what a WRITE_LOCAL/EXEC/EXTERNAL action did,
 when, and under what approval -- whether a human was actually watching in
 real time or not. That last part is the whole point: an unattended
 selfwake/scheduled-task run has no live approval UI to show anyone (see
-web/session.py's _SilentSocket), so without this, an autonomous run's
+web/session.py's SilentSocket), so without this, an autonomous run's
 approval-gated actions leave no trace anywhere for a human to review
 after the fact.
 

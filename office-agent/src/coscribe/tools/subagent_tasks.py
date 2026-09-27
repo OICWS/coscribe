@@ -54,6 +54,9 @@ class SubAgentTask:
     # Whether the parent is waiting on the result (spawn_agent) or went
     # on without it (spawn_agent_background).
     background: bool = False
+    # The parent has seen how a background run ended, so it needn't be
+    # told again.
+    reported: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -74,6 +77,7 @@ class SubAgentTask:
             "last_tool": self.last_tool,
             "pending_approval": self.pending_approval,
             "background": self.background,
+            "reported": self.reported,
         }
 
     @classmethod
@@ -100,6 +104,7 @@ class SubAgentTask:
             last_tool=data.get("last_tool"),
             pending_approval=data.get("pending_approval"),
             background=data.get("background", False),
+            reported=data.get("reported", False),
         )
 
 
@@ -231,20 +236,24 @@ def get_subagent_transcript(task_id: str) -> dict[str, Any] | None:
 
 
 def build_subagent_task_tools(thread_id: str, state_dir: str | Path) -> list[Callable[..., Any]]:
-    """Read-only tools for checking on delegated runs. Starting one needs a
-    model, so it lives in runtime_lg/subagents.py; stopping one is the
-    user's call, from the panel."""
+    """Tools for checking on and stopping delegated runs. Starting one
+    needs a model, so it lives in runtime_lg/subagents.py."""
     store = SubAgentTaskStore(state_dir)
+
+    def seen(task: SubAgentTask) -> dict[str, Any]:
+        if task.status in FINISHED_STATUSES and not task.reported:
+            task.reported = True
+            store.save(task)
+        return task.to_dict()
 
     def list_subagent_tasks() -> list[dict[str, Any]]:
         """List this conversation's sub-agents, running or finished."""
-        return [t.to_dict() for t in store.list_for_thread(thread_id)]
+        return [seen(t) for t in store.list_for_thread(thread_id)]
 
     def check_subagent_task(task_id: str) -> dict[str, Any]:
         """Check a background sub-agent's status -- its result once it
-        succeeds, or its error if it failed. Call this to poll instead of
-        using wake_on_subagent when you'd rather keep working on
-        something else in the meantime and check back yourself.
+        succeeds, or its error if it failed. You're told when one finishes
+        anyway; this is for checking on one that's still running.
 
         Args:
             task_id: id returned by spawn_agent_background (or spawn_agent).
@@ -252,9 +261,23 @@ def build_subagent_task_tools(thread_id: str, state_dir: str | Path) -> list[Cal
         task = store.load(task_id)
         if task is None or task.thread_id != thread_id:
             raise KeyError(f"No sub-agent task with id {task_id!r} in this conversation")
-        return task.to_dict()
+        return seen(task)
+
+    def stop_subagent(task_id: str) -> dict[str, Any]:
+        """Stop a sub-agent that's still running -- one that's stuck, or
+        whose work you no longer need.
+
+        Args:
+            task_id: id returned by spawn_agent_background.
+        """
+        task = store.load(task_id)
+        if task is None or task.thread_id != thread_id:
+            raise KeyError(f"No sub-agent task with id {task_id!r} in this conversation")
+        stop_subagent_task(state_dir, task_id)
+        return {"task_id": task_id, "status": "stopped"}
 
     return [
         tool_metadata(list_subagent_tasks, risk_category="READ", category="subagent_tasks"),
         tool_metadata(check_subagent_task, risk_category="READ", category="subagent_tasks"),
+        tool_metadata(stop_subagent, risk_category="READ", category="subagent_tasks"),
     ]

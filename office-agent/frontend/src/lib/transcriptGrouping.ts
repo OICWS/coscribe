@@ -339,6 +339,7 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   signal_event: (a) => ({ verb: "Signaled", object: str(a, "event_key") ?? "an event" }),
   check_subagent_task: () => ({ verb: "Checked on a sub-agent", object: null }),
   list_subagent_tasks: () => ({ verb: "Listed sub-agents", object: null }),
+  stop_subagent: () => ({ verb: "Stopped a sub-agent", object: null }),
   review_work: () => ({ verb: "Asked a reviewer to check the work", object: null }),
   load_skill: (a) => ({ verb: "Loaded skill", object: str(a, "name") ?? null }),
   draft_workflow: () => ({ verb: "Drafted a workflow", object: null }),

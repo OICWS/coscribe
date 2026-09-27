@@ -63,8 +63,12 @@ function App() {
   const [threadId, setThreadId] = useState(resolveThreadId);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [browserPanelOpen, setBrowserPanelOpen] = useState(false);
-  const [subAgentsPanelOpen, setSubAgentsPanelOpen] = useState(false);
+  // One side panel at a time: they share the chat's right edge.
+  const [sidePanel, setSidePanel] = useState<"browser" | "subagents" | null>(null);
+  const browserPanelOpen = sidePanel === "browser";
+  const subAgentsPanelOpen = sidePanel === "subagents";
+  const toggleSidePanel = (panel: "browser" | "subagents") =>
+    setSidePanel((open) => (open === panel ? null : panel));
   const [subAgentsTick, setSubAgentsTick] = useState(0);
   const [subAgentFocus, setSubAgentFocus] = useState<{ threadId: string; taskId: string } | null>(null);
   // Per conversation, this page load: whether the panel was opened or
@@ -174,8 +178,7 @@ function App() {
     () =>
       onBrowserAgent((payload) => {
         if (!payload.open) return;
-        setSubAgentsPanelOpen(false);
-        setBrowserPanelOpen(true);
+        setSidePanel("browser");
       }),
     [],
   );
@@ -227,8 +230,7 @@ function App() {
         if (event.type === "approval_required" && event.subagent_id) {
           // Its approval card lives in the Sub Agents panel.
           setSubAgentFocus({ threadId, taskId: event.subagent_id });
-          setSubAgentsPanelOpen(true);
-          setBrowserPanelOpen(false);
+          setSidePanel("subagents");
           setSubAgentsTick((tick) => tick + 1);
           return;
         }
@@ -326,8 +328,7 @@ function App() {
     const next = !taskPanelShown;
     setTaskPanelChoice((choices) => ({ ...choices, [threadId]: next }));
     if (next) {
-      setBrowserPanelOpen(false);
-      setSubAgentsPanelOpen(false);
+      setSidePanel(null);
     }
   };
   const selectedTask = scheduledTasks.find((t) => t.trigger_id === selectedTaskId) ?? null;
@@ -637,7 +638,7 @@ function App() {
       {browserPanelOpen && (
         <BrowserPanel
           threadId={threadId}
-          onClose={() => setBrowserPanelOpen(false)}
+          onClose={() => setSidePanel(null)}
           onSendToChat={onBrowserPanelCapture}
           onStopAgent={onStop}
         />
@@ -650,7 +651,7 @@ function App() {
           focusTaskId={subAgentFocus?.threadId === threadId ? subAgentFocus.taskId : null}
           onApprove={onApprove}
           onClose={() => {
-            setSubAgentsPanelOpen(false);
+            setSidePanel(null);
             setSubAgentFocus(null);
           }}
         />
@@ -732,7 +733,7 @@ function App() {
                 type="button"
                 title="Browser"
                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${browserPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
-                onClick={() => setBrowserPanelOpen((v) => !v)}
+                onClick={() => toggleSidePanel("browser")}
               >
                 <BrowserIcon className="h-[18px] w-[18px]" />
               </button>
@@ -740,7 +741,7 @@ function App() {
                 type="button"
                 title="Sub Agents"
                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${subAgentsPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
-                onClick={() => setSubAgentsPanelOpen((v) => !v)}
+                onClick={() => toggleSidePanel("subagents")}
               >
                 <SubAgentsIcon className="h-[18px] w-[18px]" />
               </button>

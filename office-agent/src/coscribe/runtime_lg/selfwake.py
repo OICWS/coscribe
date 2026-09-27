@@ -30,7 +30,7 @@ from ..tools.subagent_tasks import FINISHED_STATUSES, SubAgentTaskStore
 logger = logging.getLogger(__name__)
 
 
-class _SilentSocket:
+class SilentSocket:
     """Duck-typed WebSocket stand-in for a wake-triggered turn -- nobody is
     watching live, so every message is just discarded (debug-logged, not
     printed/streamed anywhere). In particular, unlike cli.py's _CliSocket,
@@ -128,7 +128,7 @@ async def poll_due_wakes(
         try:
             session = await get_session(wake.thread_id)
             message = f"[Scheduled wake-up reached ({wake.kind}) -- {wake.reason}]"
-            await session.handle_user_message(message, _SilentSocket())
+            await session.handle_user_message(message, SilentSocket())
         except Exception:
             logger.exception(
                 "selfwake: failed to resume thread %s for wake %s", wake.thread_id, wake.wake_id

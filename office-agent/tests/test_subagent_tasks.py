@@ -6,6 +6,7 @@ session's approval policy.
 """
 
 import asyncio
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,12 +21,13 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 
 from coscribe.runtime.types import tool_metadata
 from coscribe.runtime_lg.selfwake import poll_due_wakes
-from coscribe.runtime_lg.subagents import SubAgentHost, build_delegation_tools
+from coscribe.runtime_lg.subagents import SubAgentHost, build_delegation_tools, subagent_report
 from coscribe.tools import subagent_tasks
 from coscribe.tools.selfwake import WakeRequest, WakeStore
 from coscribe.tools.subagent_tasks import (
     SubAgentTask,
     SubAgentTaskStore,
+    build_subagent_task_tools,
     get_subagent_transcript,
     stop_subagent_task,
 )
@@ -246,7 +248,7 @@ async def test_stopping_a_waited_on_sub_agent_hands_the_parent_a_report(tmp_path
     stop_subagent_task(tmp_path, task.task_id)
     report = await asyncio.wait_for(parent, timeout=5)
 
-    assert report == "(the user stopped this sub-agent before it finished)"
+    assert report == "(this sub-agent was stopped before it finished)"
     assert store.load(task.task_id).status == "stopped"
 
 
@@ -394,3 +396,162 @@ async def test_subagent_wake_stays_pending_while_still_running(
     resolved = wake_store.load("wake-sa-2")
     assert resolved is not None
     assert resolved.status == "pending"
+
+
+def test_a_sub_agent_gets_none_of_its_parents_conversation_tools(tmp_path: Path) -> None:
+    def list_subagent_tasks() -> str:
+        """List."""
+        return ""
+
+    def task_create(content: str) -> str:
+        """Plan."""
+        return content
+
+    def sleep_for(seconds: int, reason: str) -> str:
+        """Sleep."""
+        return reason
+
+    parent_only = [
+        tool_metadata(list_subagent_tasks, risk_category="READ", category="subagent_tasks"),
+        tool_metadata(task_create, risk_category="READ", category="tasks"),
+        tool_metadata(sleep_for, risk_category="WRITE_LOCAL", category="selfwake"),
+    ]
+    spawn, _ = build_delegation_tools(_host(tmp_path, None), [*_tools(), *parent_only])
+
+    for name in ("list_subagent_tasks", "task_create", "sleep_for"):
+        with pytest.raises(ValueError, match="Unknown tool"):
+            asyncio.run(spawn(description="x", prompt="y", tool_names=name))
+
+
+class _SilentChatModel(FakeToolCallingChatModel):
+    """Never answers, like a provider connection that hangs."""
+
+    async def _agenerate(self, *args: Any, **kwargs: Any) -> ChatResult:
+        await asyncio.sleep(60)
+        raise AssertionError("unreachable")
+
+    async def _astream(self, *args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(60)
+        yield ChatGenerationChunk(message=AIMessageChunk(content=""))
+
+
+async def test_a_model_that_sends_nothing_fails_the_run(tmp_path: Path) -> None:
+    host = _host(tmp_path, _SilentChatModel(responses=[]))
+    host.model_stall_seconds = 0.2
+    _, spawn_background = build_delegation_tools(host, _tools())
+
+    started = await spawn_background(description="hang", prompt="anything")
+    task = await _wait_for_status(SubAgentTaskStore(tmp_path), started["task_id"], "failed")
+
+    assert "sent nothing for" in (task.error or "")
+
+
+async def test_a_slow_tool_is_not_taken_for_a_hung_model(tmp_path: Path) -> None:
+    def _slow_read() -> str:
+        """Read slowly."""
+        time.sleep(0.6)
+        return "slow but fine"
+
+    model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_call("_slow_read", {})]),
+            AIMessage(content="read it"),
+        ]
+    )
+    host = _host(tmp_path, model)
+    host.model_stall_seconds = 0.3
+    _, spawn_background = build_delegation_tools(
+        host, [tool_metadata(_slow_read, risk_category="READ", category="files")]
+    )
+
+    started = await spawn_background(description="slow", prompt="read slowly")
+    task = await _wait_for_status(SubAgentTaskStore(tmp_path), started["task_id"], "succeeded")
+
+    assert task.result == "read it"
+
+
+def _finished(status: str, **fields: Any) -> SubAgentTask:
+    return SubAgentTask(
+        task_id="t1",
+        thread_id="thread-1",
+        instructions="",
+        prompt="p",
+        tool_names="",
+        description="Research Bosch",
+        status=status,
+        started_at=datetime.now(UTC).isoformat(),
+        model="glm:glm-4.6v",
+        background=True,
+        **fields,
+    )
+
+
+def test_the_report_carries_the_result_or_the_error() -> None:
+    done = subagent_report(_finished("succeeded", result="Four sectors."))
+    failed = subagent_report(_finished("failed", error="Error code: 429"), ["summarize it"])
+
+    assert done == (
+        '[Sub-agent finished] "Research Bosch" (task t1, glm:glm-4.6v) finished. '
+        "Its report:\n\nFour sectors."
+    )
+    assert failed == (
+        '[Sub-agent finished] "Research Bosch" (task t1, glm:glm-4.6v) failed: '
+        "Error code: 429\n\nYou asked to be woken for it to: summarize it"
+    )
+
+
+def test_checking_a_finished_run_marks_it_seen(tmp_path: Path) -> None:
+    store = SubAgentTaskStore(tmp_path)
+    store.save(_finished("failed", error="boom"))
+    _, check, _ = build_subagent_task_tools("thread-1", tmp_path)
+
+    assert check("t1")["error"] == "boom"
+    assert store.load("t1").reported is True
+
+
+async def test_the_model_can_stop_a_run_of_its_own(tmp_path: Path) -> None:
+    release = asyncio.Event()
+
+    async def decide(request: dict[str, Any], task: SubAgentTask) -> Any:
+        await release.wait()
+        return {"type": "approve"}
+
+    model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[_call("_write_note", {"text": "x"})])]
+    )
+    _, spawn_background = _spawn_tools(_host(tmp_path, model, decide))
+    started = await spawn_background(description="write", prompt="write x")
+    await asyncio.sleep(0.05)
+    *_, stop = build_subagent_task_tools("thread-1", tmp_path)
+
+    assert stop(started["task_id"]) == {"task_id": started["task_id"], "status": "stopped"}
+    await _wait_for_status(SubAgentTaskStore(tmp_path), started["task_id"], "stopped")
+
+
+async def test_a_slow_tool_run_after_its_approval_is_not_taken_for_a_hung_model(
+    tmp_path: Path,
+) -> None:
+    def _slow_write(text: str) -> str:
+        """Write slowly."""
+        time.sleep(0.6)
+        return f"wrote {text}"
+
+    async def decide(request: dict[str, Any], task: SubAgentTask) -> Any:
+        return {"type": "approve"}
+
+    model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_call("_slow_write", {"text": "x"})]),
+            AIMessage(content="written"),
+        ]
+    )
+    host = _host(tmp_path, model, decide)
+    host.model_stall_seconds = 0.3
+    _, spawn_background = build_delegation_tools(
+        host, [tool_metadata(_slow_write, risk_category="WRITE_LOCAL", category="files")]
+    )
+
+    started = await spawn_background(description="slow write", prompt="write x")
+    task = await _wait_for_status(SubAgentTaskStore(tmp_path), started["task_id"], "succeeded")
+
+    assert task.result == "written"

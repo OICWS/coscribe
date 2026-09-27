@@ -23,12 +23,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-from ..runtime.types import tool_metadata
+from ..runtime.types import get_tool_metadata, tool_metadata
 from ..tools import QUESTION_TOOL_NAMES
 from ..tools.scheduled_tasks import TASK_DRAFT_TOOL_NAMES
 from ..tools.subagent_tasks import (
@@ -60,6 +60,22 @@ _NOT_FOR_SUBAGENTS = frozenset(
         *TASK_DRAFT_TOOL_NAMES,
     }
 )
+# Tools bound to the parent's own conversation: a child listing sub-agents
+# finds itself running and takes the task as someone else's, its to-do
+# list would fill the parent's, and a wake it set would resume the parent.
+_PARENT_ONLY_CATEGORIES = frozenset({"subagent_tasks", "selfwake", "tasks"})
+
+# A model call that hasn't sent a single chunk in this long is taken as
+# hung: a stuck connection otherwise holds the run open with no end.
+MODEL_STALL_SECONDS = 180.0
+
+
+def _for_subagents(tool: Callable[..., Any] | BaseTool) -> bool:
+    if _tool_name(tool) in _NOT_FOR_SUBAGENTS:
+        return False
+    if isinstance(tool, BaseTool):
+        return True
+    return get_tool_metadata(tool).category not in _PARENT_ONLY_CATEGORIES
 
 
 @dataclass
@@ -83,6 +99,7 @@ class SubAgentHost:
     # hook needs to see them all).
     interrupt_all: bool = False
     max_turns: int | None = None
+    model_stall_seconds: float = MODEL_STALL_SECONDS
 
 
 def _record_progress(task: SubAgentTask, update: Any, seen: set[str]) -> bool:
@@ -114,6 +131,55 @@ def _record_progress(task: SubAgentTask, update: Any, seen: set[str]) -> bool:
     return changed
 
 
+class _ModelStalled(Exception):
+    pass
+
+
+async def _stream_turn(
+    sub_agent: Any,
+    turn_input: Any,
+    child_config: dict[str, Any],
+    on_update: Callable[[Any], Awaitable[None]],
+    stall_seconds: float,
+    running_tools: set[str],
+) -> None:
+    """One astream pass, failing once a model call goes `stall_seconds`
+    without a token. Tool calls aren't timed: they run as long as the tool
+    allows, and a slow one isn't a hung one. `running_tools` holds the
+    calls still waiting on a result -- on a resume after approvals, the
+    pass starts by running them."""
+    stream = sub_agent.astream(
+        turn_input, config=child_config, stream_mode=["updates", "messages"]
+    ).__aiter__()
+    try:
+        while True:
+            try:
+                if running_tools:
+                    mode, chunk = await stream.__anext__()
+                else:
+                    mode, chunk = await asyncio.wait_for(stream.__anext__(), stall_seconds)
+            except StopAsyncIteration:
+                return
+            except TimeoutError:
+                raise _ModelStalled(
+                    f"The model sent nothing for {stall_seconds:.0f} seconds, so the run "
+                    "was stopped. Its connection may be stuck, or the provider overloaded."
+                ) from None
+            if mode != "updates" or not isinstance(chunk, dict):
+                continue
+            for node_update in chunk.values():
+                if not isinstance(node_update, dict):
+                    continue
+                for message in node_update.get("messages", []) or []:
+                    if isinstance(message, AIMessage):
+                        running_tools.update(str(call.get("id")) for call in message.tool_calls)
+                    elif isinstance(message, ToolMessage):
+                        running_tools.discard(str(message.tool_call_id))
+            await on_update(chunk)
+    finally:
+        await stream.aclose()
+
+
 async def _drive(
     host: SubAgentHost,
     store: SubAgentTaskStore,
@@ -127,13 +193,22 @@ async def _drive(
 
     turn_input: Any = {"messages": [{"role": "user", "content": task.prompt}]}
     seen: set[str] = set()
+
+    async def on_update(update: Any) -> None:
+        if _record_progress(task, update, seen):
+            await save()
+
+    running_tools: set[str] = set()
     try:
         while True:
-            async for update in sub_agent.astream(
-                turn_input, config=child_config, stream_mode="updates"
-            ):
-                if _record_progress(task, update, seen):
-                    await save()
+            await _stream_turn(
+                sub_agent,
+                turn_input,
+                child_config,
+                on_update,
+                host.model_stall_seconds,
+                running_tools,
+            )
             state = await sub_agent.aget_state(child_config)
             if not state.next:
                 break
@@ -175,11 +250,32 @@ async def _drive(
     await save()
 
 
+# Starts the message a finished background run sends its conversation;
+# the chat draws such a message as a notice rather than the user's words.
+SUBAGENT_REPORT_PREFIX = "[Sub-agent finished]"
+
+_REPORT_CHARS = 20000
+
+
+def subagent_report(task: SubAgentTask, reasons: Sequence[str] = ()) -> str:
+    """The message a background sub-agent's end sends its conversation."""
+    head = f'{SUBAGENT_REPORT_PREFIX} "{task.description}" (task {task.task_id}, {task.model})'
+    if task.status == "succeeded":
+        body = f"{head} finished. Its report:\n\n{task.result or '(no reply)'}"
+    else:
+        body = f"{head} failed: {task.error or 'unknown error'}"
+    if len(body) > _REPORT_CHARS:
+        body = body[:_REPORT_CHARS] + " [...] (check_subagent_task has the whole report)"
+    for reason in reasons:
+        body += f"\n\nYou asked to be woken for it to: {reason}"
+    return body
+
+
 def _outcome(task: SubAgentTask) -> str:
     if task.status == "succeeded":
         return task.result or "(the sub-agent gave no reply)"
     if task.status == "stopped":
-        return "(the user stopped this sub-agent before it finished)"
+        return "(this sub-agent was stopped before it finished)"
     return f"(the sub-agent failed: {task.error or 'unknown error'})"
 
 
@@ -187,9 +283,7 @@ def build_delegation_tools(
     host: SubAgentHost, available_tools: Sequence[Callable[..., Any] | BaseTool]
 ) -> list[Callable[..., Any]]:
     """spawn_agent and spawn_agent_background, bound to `host`."""
-    tools_by_name = {
-        _tool_name(t): t for t in available_tools if _tool_name(t) not in _NOT_FOR_SUBAGENTS
-    }
+    tools_by_name = {_tool_name(t): t for t in available_tools if _for_subagents(t)}
     store = SubAgentTaskStore(host.state_dir)
 
     def start(
@@ -296,9 +390,10 @@ def build_delegation_tools(
         tool_names: str = "",
     ) -> dict[str, Any]:
         """Like spawn_agent, but returns at once with a task_id instead of
-        waiting, so this conversation can go on. Then either end your turn
-        with wake_on_subagent(task_id, reason) to be resumed when it's done,
-        or check on it with check_subagent_task(task_id).
+        waiting, so this conversation can go on. When it ends -- its report,
+        or the error it failed with -- you're told in a message of its own,
+        so there's no need to poll; check_subagent_task(task_id) shows how
+        one is getting on, and stop_subagent(task_id) stops one.
 
         Args:
             description: a few plain words for the panel.

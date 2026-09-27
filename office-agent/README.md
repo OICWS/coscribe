@@ -1438,20 +1438,37 @@ The Coordinator can hand a self-contained task to a sub-agent
 
 - `spawn_agent(description, prompt, instructions="", model="", tool_names="")`
   waits for the sub-agent's report; `spawn_agent_background(...)` returns a
-  `task_id` at once, to be picked up with `wake_on_subagent` or
-  `check_subagent_task`. Only the report re-enters the conversation.
+  `task_id` at once. Only the report re-enters the conversation.
+- **A background sub-agent reports back by itself**: when it succeeds or
+  fails, its report (or error) arrives in the conversation as a message of
+  its own -- drawn as a "Sub-agent finished / failed" card -- and starts a
+  turn right away, or right after the turn in progress. No polling, and no
+  wake to set up. With nobody typing, a chain of these turns (a report,
+  another sub-agent, its report...) is asked to wind down on the third and
+  stops starting turns after the fifth, until the user speaks.
+  `check_subagent_task` shows one still running; `stop_subagent` stops one.
+- **A hung model call fails the run**: 180 seconds without a single
+  streamed token from the model ends a sub-agent with that error (tool
+  calls aren't timed -- a slow tool isn't a hung one).
 - **Model**: any configured model (`provider:model`); empty means the
   conversation's own. When more than one is configured, the Coordinator asks
   the user which to use the first time it delegates.
 - **Tools and folders**: by default the sub-agent gets the Coordinator's own
   tools (found through `search_tools` when tool deferral is on), bound to the
-  conversation's folders; `tool_names` narrows that to a list.
+  conversation's folders; `tool_names` narrows that to a list. Tools bound
+  to the parent's own conversation stay with the parent: the sub-agent
+  list/check/stop tools (a sub-agent listing them finds itself "running"
+  and takes its task as someone else's), wakes, and the to-do list.
 - **Approvals** go through the conversation's own policy -- plan mode,
-  Accept Edits, exec policy and hooks apply as they do to the Coordinator --
+  Accept Edits, exec policy and hooks apply as they do to the Coordinator;
+  Auto mode's reviewer also sees the task the sub-agent was handed, so "use
+  a sub-agent, don't do it yourself" doesn't read as a ban on the
+  sub-agent doing it --
   and a call that needs the user is answered in the **Sub Agents** panel,
   which opens by itself to it. A background sub-agent can ask after the
   parent's turn has ended, or with no tab open; it waits until answered.
-- **Sub Agents panel** (the header's branch icon): running sub-agents as
+- **Sub Agents panel** (the header's branch icon; it and the Browser panel
+  share the right side, one at a time): running sub-agents as
   cards with elapsed time, model, tokens, tool uses, what each is doing and
   a Stop button; finished ones folded under "Finished N" with a clear
   button. Opening one shows its model, the prompt it was given, and its

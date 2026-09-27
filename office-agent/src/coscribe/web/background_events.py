@@ -1,7 +1,7 @@
 """In-process pub/sub for background-completion events -- the plumbing the
 desktop shell's tray notification (office-agent-desktop) needs and that
 didn't exist before: `_wake_poll_loop` (web/app.py) fires wakes/scheduled
-tasks on its own timeline, with nobody watching, and a `_SilentSocket`
+tasks on its own timeline, with nobody watching, and a `SilentSocket`
 (runtime_lg/selfwake.py) throws away every message from those turns --
 there was no channel a *process*, as opposed to a browser tab with a live
 WebSocket, could subscribe to.
