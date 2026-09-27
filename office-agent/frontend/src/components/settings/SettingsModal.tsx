@@ -95,8 +95,6 @@ const CONFIG_KEYS = [
 interface SettingsModalProps {
   open: boolean;
   initialCategory?: SettingsCategory;
-  enabledSkills: string[];
-  onToggleSkill: (name: string, enabled: boolean) => void;
   onCreateSkill: () => void;
   onClose: () => void;
 }
@@ -104,8 +102,6 @@ interface SettingsModalProps {
 export function SettingsModal({
   open,
   initialCategory,
-  enabledSkills,
-  onToggleSkill,
   onCreateSkill,
   onClose,
 }: SettingsModalProps) {
@@ -254,8 +250,6 @@ export function SettingsModal({
             {category === "skills" && (
               <SkillsTab
                 active={category === "skills"}
-                enabledSkills={enabledSkills}
-                onToggle={onToggleSkill}
                 onCreateSkill={onCreateSkill}
               />
             )}

@@ -122,6 +122,7 @@ from ..tools.scheduled_tasks import (
     edit_draft,
     parse_run_thread_id,
 )
+from ..tools.skill_catalog import enabled_skill_names
 from ..tools.spreadsheets import SpreadsheetToolkit
 from ..tools.subagent_tasks import SubAgentTask, SubAgentTaskStore, running_subagent
 from ..workflows.engine import StepContext
@@ -354,8 +355,8 @@ _SEARCH_TOOLS_NOTE = (
     "Most tools beyond the basics aren't in your tool list yet -- this "
     "keeps this conversation's context small. If what you need isn't "
     "there (a PPTX/XLSX edit tool, a background script, a scheduled-task tool, "
-    "etc.), call search_tools(query) first -- e.g. search_tools(\"pptx "
-    "chart\") -- it makes any match callable by its real name starting "
+    'etc.), call search_tools(query) first -- e.g. search_tools("pptx '
+    'chart") -- it makes any match callable by its real name starting '
     "with your very next tool call. Don't assume something can't be done "
     "just because you don't see a tool for it yet; search before giving up "
     "or falling back to a workaround."
@@ -535,8 +536,7 @@ class ChatSessionLG:
         # scoped `skills_by_name` (the enable/disable toggle, correctly
         # keyed by display name -- that one was never broken).
         self.skills_by_slug = {
-            skill.slug: skill
-            for skill in load_builtin_skills() + load_skills(settings.skills_dir)
+            skill.slug: skill for skill in load_builtin_skills() + load_skills(settings.skills_dir)
         }
 
         # Kept for switch_model, which needs to rebuild both the tool list
@@ -1160,7 +1160,9 @@ class ChatSessionLG:
         await self.send_state(websocket)
         return True
 
-    async def set_enabled_skills(self, skill_names: set[str], websocket: WebSocket) -> None:
+    async def set_enabled_skills(
+        self, skill_names: set[str], websocket: WebSocket, *, announce: bool = True
+    ) -> None:
         """Toggle this thread's active built-in/local skills, live,
         mid-session -- deliberately with NO "once only" guard: the user
         asked for selectable-anytime toggling, like Claude Code's own
@@ -1214,7 +1216,8 @@ class ChatSessionLG:
             skill.slug: skill
             for skill in load_builtin_skills() + load_skills(self.settings.skills_dir)
         }
-        await self.send_state(websocket)
+        if announce:
+            await self.send_state(websocket)
 
     async def send_state(self, websocket: WebSocket, *, on_connect: bool = False) -> None:
         if self._context_window is None:
@@ -2581,9 +2584,7 @@ class ChatSessionLG:
         state = await self.lg_agent.aget_state(self.config)
         messages = list(state.values.get("messages", [])) if state.values else []
         if len(messages) < 4:
-            await websocket.send_json(
-                {"type": "error", "message": "Nothing much to compact yet."}
-            )
+            await websocket.send_json({"type": "error", "message": "Nothing much to compact yet."})
             return
         if state.next:
             await websocket.send_json(
@@ -2967,6 +2968,11 @@ class ChatSessionLG:
             "UserPromptSubmit",
             {"event": "UserPromptSubmit", "thread_id": self.thread_id, "text": text},
         )
+        # Skills are switched on and off globally in Settings; a conversation
+        # that's already open picks the change up at its next turn.
+        wanted_skills = enabled_skill_names(self.settings.skills_dir, self.settings.state_dir)
+        if wanted_skills != self.enabled_skill_names:
+            await self.set_enabled_skills(wanted_skills, websocket, announce=False)
         stripped_lower = text.strip().lower()
 
         if self.pending_save_skill_proposal is not None:
@@ -3138,9 +3144,7 @@ class ChatSessionLG:
             reply_text = f"{reply_text}\n\n[stopped]" if reply_text.strip() else "[stopped]"
             await websocket.send_json({"type": "agent_message", "text": reply_text})
         else:
-            await websocket.send_json(
-                {"type": "agent_message", "text": _format_reply(reply_text)}
-            )
+            await websocket.send_json({"type": "agent_message", "text": _format_reply(reply_text)})
         # self._last_usage_metadata is set by _stream_turn (see its
         # docstring) -- None if the model never populated usage_metadata at
         # all, in which case the event is omitted entirely rather than

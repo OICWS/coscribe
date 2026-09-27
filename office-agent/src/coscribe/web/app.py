@@ -60,7 +60,7 @@ import subprocess
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -131,6 +131,18 @@ from ..tools.script_env import (
     set_interpreter_override,
     uninstall_package,
     working_interpreters,
+)
+from ..tools.skill_catalog import SOURCE_MARKER as SKILL_SOURCE_MARKER
+from ..tools.skill_catalog import (
+    SkillCatalogError,
+    all_skills,
+    disabled_skill_names,
+    enabled_skill_names,
+    install_catalog_skill,
+    load_catalog,
+    remove_skill,
+    set_skill_enabled,
+    skill_source,
 )
 from ..tools.subagent_tasks import (
     SubAgentTaskStore,
@@ -323,7 +335,7 @@ PROVIDER_CATALOG = [
         # to the provider it's configuring, unlike a real cloud API key.
         "description": (
             "Ollama's local OpenAI-compatible API -- fully offline, no cloud "
-            "account. API key can be any placeholder text (e.g. \"ollama\"), "
+            'account. API key can be any placeholder text (e.g. "ollama"), '
             "it isn't actually checked. Fill in Default Model yourself with "
             "whatever you've already pulled via `ollama pull <model>` -- "
             "coscribe can't see what's installed, so there's no safe guess "
@@ -821,6 +833,10 @@ class ConfigUpdate(BaseModel):
     updates: dict[str, str]
 
 
+class SkillEnabledUpdate(BaseModel):
+    enabled: bool
+
+
 class OpenFileRequest(BaseModel):
     path: str
     reveal: bool = False
@@ -934,6 +950,7 @@ def _read_providers_raw(path: Path) -> dict[str, Any]:
     if not isinstance(raw.get("providers"), dict):
         raw["providers"] = {}
     return raw
+
 
 FIXED_COMMANDS = [
     {"name": "plan", "description": "Toggle Plan Mode (read-only tools only)"},
@@ -1100,53 +1117,13 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     # effect intact without bringing back the staleness bug.
     _skills_by_name()
 
-    # The 3 shipped skills (pptx/excel/word) default to *enabled* for a
-    # brand-new thread -- unlike a user-authored local skill (settings.
-    # skills_dir), which stays opt-in, since there's no way to know in
-    # advance whether an arbitrary local skill's guidance is something a
-    # given user actually wants applied by default. The model still
-    # decides whether to actually call load_skill(name) on any given
-    # turn (same "load a skill when it's relevant" judgment call as
-    # before) -- being in this default set only means it's *offered*,
-    # not force-loaded. A user can still turn any of them off from the
-    # Skills settings tab, same toggle as always.
-    default_enabled_skill_names = {s.name for s in load_builtin_skills()}
-
-    def _skills_sidecar_path(thread_id: str) -> Path:
-        return settings.state_dir / f"{thread_id}.skills"
-
-    def _write_skills_sidecar(thread_id: str, skill_names: set[str]) -> None:
-        settings.state_dir.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(sorted(skill_names))
-        _skills_sidecar_path(thread_id).write_text(payload, encoding="utf-8")
-
-    def _resolve_enabled_skills(thread_id: str, skills_param: str | None) -> set[str]:
-        """No "first time wins" restriction, unlike _resolve_folders --
-        skills are meant to be toggled anytime, so an explicit ?skills=
-        query param on (re)connect always wins over the sidecar and
-        rewrites it; only a reconnect with no query param at all falls back
-        to whatever was last saved. Unknown names are dropped rather than
-        rejected outright. A brand-new thread with no sidecar and no
-        ?skills= at all falls back to default_enabled_skill_names (the 3
-        built-ins), not the empty set -- see that variable's comment
-        above."""
-        sidecar = _skills_sidecar_path(thread_id)
-        known = _skills_by_name().keys()
-        if skills_param is not None:
-            names = {n for n in skills_param.split(",") if n} & known
-            _write_skills_sidecar(thread_id, names)
-            return names
-        if sidecar.is_file():
-            try:
-                saved = json.loads(sidecar.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                return set(default_enabled_skill_names)
-            return set(saved) & known
-        return set(default_enabled_skill_names)
+    def _enabled_skills() -> set[str]:
+        # One global on/off per skill (Settings > Skills), read fresh so a
+        # toggle applies to the next session without a restart.
+        return enabled_skill_names(settings.skills_dir, settings.state_dir)
 
     def _get_session(
         thread_id: str,
-        skills_param: str | None = None,
         workspace_param: str | None = None,
     ) -> ChatSessionLG:
         if thread_id not in sessions:
@@ -1177,7 +1154,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 extra_tools=extra_tools_holder["tools"],
                 checkpointer=checkpointer_holder["checkpointer"],
                 hooks_config=hooks_config,
-                enabled_skill_names=_resolve_enabled_skills(thread_id, skills_param),
+                enabled_skill_names=_enabled_skills(),
                 workspace_root=folders[0] if folders else settings.workspace_root,
                 workspace_explicit=bool(folders),
                 extra_folders=folders[1:],
@@ -1337,7 +1314,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         existed = await cursor.fetchone() is not None
         await checkpointer.adelete_thread(thread_id)
         (settings.state_dir / f"{thread_id}.tasks.json").unlink(missing_ok=True)
-        _skills_sidecar_path(thread_id).unlink(missing_ok=True)
         _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
         _title_sidecar_path(thread_id).unlink(missing_ok=True)
         sessions.pop(thread_id, None)
@@ -1830,9 +1806,11 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         workflow = parse_workflow(trigger.workflow) if trigger and trigger.workflow else None
         # A loop or branch around the failed step is recorded as failed
         # too; retrying means the step itself, on the pass that failed.
-        blocks = {
-            p.step.id for p in walk(workflow.steps) if isinstance(p.step, (BranchStep, LoopStep))
-        } if workflow else set()
+        blocks = (
+            {p.step.id for p in walk(workflow.steps) if isinstance(p.step, (BranchStep, LoopStep))}
+            if workflow
+            else set()
+        )
         step_id = payload.step_id or next(
             (
                 s["step_id"]
@@ -1944,22 +1922,60 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         return {"tools": tools}
 
     @app.get("/api/skills")
-    async def get_skills() -> list[dict[str, str]]:
-        # Built-in + user-local, same combined set build_coordinator_agent
-        # itself splices when skill_names=None -- the Skills settings tab
-        # renders one checkbox per entry here. `source` lets the frontend
-        # split the list into "Your skills" (custom) / "Discover"
-        # (built-in) tabs -- default_enabled_skill_names is exactly the
-        # built-in name set already computed above, reused rather than
-        # scanning builtin_skills/ a second time.
+    async def get_skills() -> list[dict[str, Any]]:
+        builtin_names = {skill.name for skill in load_builtin_skills()}
+        disabled = disabled_skill_names(settings.state_dir)
+        result = []
+        for skill in all_skills(settings.skills_dir):
+            updated = datetime.fromtimestamp((skill.dir / "SKILL.md").stat().st_mtime, UTC)
+            result.append(
+                {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "source": skill_source(skill, builtin_names),
+                    "enabled": skill.name not in disabled,
+                    "updated": updated.isoformat(),
+                }
+            )
+        return result
+
+    @app.post("/api/skills/{name}/enabled")
+    async def update_skill_enabled(name: str, payload: SkillEnabledUpdate) -> JSONResponse:
+        if name not in _skills_by_name():
+            return JSONResponse({"error": f"No skill named {name!r}."}, status_code=404)
+        set_skill_enabled(settings.state_dir, name, payload.enabled)
+        return JSONResponse({"name": name, "enabled": payload.enabled})
+
+    @app.delete("/api/skills/{name}")
+    async def delete_skill(name: str) -> JSONResponse:
+        try:
+            await asyncio.to_thread(remove_skill, settings.skills_dir, settings.state_dir, name)
+        except SkillCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"removed": name})
+
+    @app.get("/api/skills/catalog")
+    async def get_skill_catalog() -> list[dict[str, Any]]:
+        installed = set(_skills_by_name())
         return [
             {
-                "name": s.name,
-                "description": s.description,
-                "source": "builtin" if s.name in default_enabled_skill_names else "custom",
+                "name": entry["name"],
+                "description": entry["description"],
+                "license": entry["license"],
+                "size": sum(file["size"] for file in entry["files"]),
+                "added": entry["name"] in installed,
             }
-            for s in _skills_by_name().values()
+            for entry in load_catalog()["skills"]
         ]
+
+    @app.post("/api/skills/catalog/{name}")
+    async def add_catalog_skill(name: str) -> JSONResponse:
+        try:
+            await asyncio.to_thread(install_catalog_skill, settings.skills_dir, name)
+        except SkillCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        set_skill_enabled(settings.state_dir, name, True)
+        return JSONResponse({"added": name})
 
     @app.get("/api/skills/{name}/files")
     async def get_skill_files(name: str) -> JSONResponse:
@@ -1973,9 +1989,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         skill = _skills_by_name().get(name)
         if skill is None:
             return JSONResponse({"error": f"No skill named {name!r}."}, status_code=404)
-        scope = WorkspaceScope(skill.dir)
         files = sorted(
-            scope.relative(path) for path in skill.dir.rglob("*") if path.is_file()
+            path.relative_to(skill.dir).as_posix()
+            for path in skill.dir.rglob("*")
+            if path.is_file() and path.name != SKILL_SOURCE_MARKER
         )
         return JSONResponse({"files": files})
 
@@ -2763,11 +2780,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     async def ws_endpoint(
         websocket: WebSocket,
         thread_id: str,
-        skills: str | None = None,
         workspace: str | None = None,
     ) -> None:
         await websocket.accept()
-        session = _get_session(thread_id, skills, workspace)
+        session = _get_session(thread_id, workspace)
         # See ChatSessionLG.notify_resync's own docstring -- this is the
         # one place that knows "a real browser tab is watching this
         # thread right now," so it's the one place that sets/clears it.
@@ -2828,17 +2844,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     # does, and Starlette's WebSocket.send() has no
                     # internal locking against concurrent callers.
                     await session.switch_model(data["model"], websocket)
-                elif message_type == "select_skills":
-                    # Multi-select, callable any number of times per thread
-                    # -- no "already set" guard (see ChatSessionLG.
-                    # set_enabled_skills' own docstring for why). Unknown
-                    # names are dropped silently, same tolerance
-                    # _resolve_enabled_skills gives them at connect time,
-                    # rather than erroring the whole toggle over one bad
-                    # entry.
-                    requested = {n for n in data.get("skills", []) if n in _skills_by_name()}
-                    await session.set_enabled_skills(requested, websocket)
-                    _write_skills_sidecar(thread_id, requested)
                 elif message_type == "set_folders":
                     folders = [str(folder) for folder in data.get("folders", [])]
                     # Persisted only once the session took them, so the
@@ -2997,9 +3002,7 @@ async def _run_web_server(host: str, port: int) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Run coscribe's local web UI."
-    )
+    parser = argparse.ArgumentParser(description="Run coscribe's local web UI.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     # Not used by anything at runtime -- exists so the packaged desktop

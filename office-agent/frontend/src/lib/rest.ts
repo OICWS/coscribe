@@ -25,6 +25,7 @@ import type {
   ScriptEnvInstallResult,
   ScriptEnvInterpreterInfo,
   ScriptEnvPackage,
+  CatalogSkill,
   SkillFileContentResult,
   SkillFilesResponse,
   SkillsResponse,
@@ -86,7 +87,8 @@ async function sendForResult<T>(url: string, method: string, body: unknown): Pro
     method,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }).catch(() => null);
+  if (!res) return { error: "Couldn't reach coscribe. Check that it's still running." };
   if (res.ok) return res.json() as Promise<T>;
   const parsed = (await res.json().catch(() => null)) as { error?: string } | null;
   return { error: parsed?.error ?? `Request failed (${res.status})` };
@@ -136,6 +138,21 @@ export async function uploadSkill(file: File): Promise<UploadSkillResult> {
   const res = await fetch("/api/skills/upload", { method: "POST", body: form });
   return res.json() as Promise<UploadSkillResult>;
 }
+
+export const setSkillEnabled = (name: string, enabled: boolean) =>
+  sendForResult<{ name: string; enabled: boolean }>(
+    `/api/skills/${encodeURIComponent(name)}/enabled`,
+    "POST",
+    { enabled },
+  );
+
+export const removeSkill = (name: string) =>
+  sendForResult<{ removed: string }>(`/api/skills/${encodeURIComponent(name)}`, "DELETE", undefined);
+
+export const getSkillCatalog = () => getJson<CatalogSkill[]>("/api/skills/catalog");
+
+export const addCatalogSkill = (name: string) =>
+  sendForResult<{ added: string }>(`/api/skills/catalog/${encodeURIComponent(name)}`, "POST", undefined);
 
 export const getSkillFiles = (name: string) =>
   getJson<SkillFilesResponse>(`/api/skills/${encodeURIComponent(name)}/files`);

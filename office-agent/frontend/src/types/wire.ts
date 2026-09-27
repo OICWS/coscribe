@@ -23,9 +23,8 @@ export interface StateEvent {
   auto_mode: boolean;
   model: string;
   context_window: number;
-  /** Which built-in/local skills are currently spliced into this thread's
-   * instructions -- freely re-toggleable any number of times per thread
-   * (see SelectSkillsOut). */
+  /** Skills offered in this thread's instructions -- the global on/off
+   * set, re-read at the start of every turn. */
   enabled_skills: string[];
   /** This thread's main folder -- never null: a thread with no folders
    * falls back to the server's default workspace. */
@@ -376,16 +375,6 @@ export interface SwitchModelOut {
   model: string;
 }
 
-/** Callable any number of times per thread -- every message fully
- * replaces the enabled set (not additive/subtractive), so send the
- * complete next set of skill names, not just the one being toggled.
- * Responds with a `state` event reflecting the new enabled_skills.
- * Unknown names are dropped silently server-side, not rejected. */
-export interface SelectSkillsOut {
-  type: "select_skills";
-  skills: string[];
-}
-
 /** Replaces the conversation's folders, the main one first; empty goes
  * back to the default workspace. Answered with a `state` event, or an
  * `error` (a missing folder, a reply still running) leaving them as they
@@ -411,6 +400,5 @@ export type WsClientMessage =
   | QuestionResponseOut
   | StopOut
   | SwitchModelOut
-  | SelectSkillsOut
   | SetFoldersOut
   | LoadOlderMessagesOut;

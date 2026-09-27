@@ -56,6 +56,15 @@ def _succeeded_calls(messages: list[BaseMessage]) -> list[dict[str, Any]]:
     return calls
 
 
+def _lines_removed(result: Any) -> int:
+    try:
+        parsed = json.loads(result) if isinstance(result, str) else result
+    except ValueError:
+        return 0
+    removed = parsed.get("lines_removed") if isinstance(parsed, dict) else None
+    return removed if isinstance(removed, int) else 0
+
+
 def _script_files(result: Any) -> list[str]:
     try:
         parsed = json.loads(result) if isinstance(result, str) else None
@@ -87,8 +96,9 @@ def _file_entry(scope: WorkspaceScope, path: str) -> dict[str, Any] | None:
 def summarize_activity(
     messages: list[BaseMessage], catalog: dict[str, ToolMetadata], scope: WorkspaceScope
 ) -> dict[str, Any]:
-    output_paths: list[str] = []
-    input_paths: list[str] = []
+    # (path, action) in call order; action is "write" (produces a whole
+    # file), "edit" (changes one in place) or "read".
+    touches: list[tuple[str, str]] = []
     tool_counts: dict[str, int] = {}
     connectors: dict[str, dict[str, int]] = {}
     skills: list[str] = []
@@ -109,26 +119,48 @@ def summarize_activity(
         if name not in _UNLISTED_TOOLS:
             tool_counts[name] = tool_counts.get(name, 0) + 1
         if name in _SCRIPT_TOOLS:
-            output_paths.extend(_script_files(call["result"]))
+            touches.extend((p, "write") for p in _script_files(call["result"]))
         path = args.get("path")
         if isinstance(path, str) and path:
-            is_output = metadata is not None and metadata.risk_category in _OUTPUT_RISKS
-            (output_paths if is_output else input_paths).append(path)
-        input_paths.extend(a for k in _INPUT_PATH_ARGS if isinstance(a := args.get(k), str) and a)
+            if metadata is None or metadata.risk_category not in _OUTPUT_RISKS:
+                touches.append((path, "read"))
+            elif name.startswith("write_") and _lines_removed(call["result"]) == 0:
+                touches.append((path, "write"))
+            else:
+                touches.append((path, "edit"))
+        touches.extend(
+            (a, "read") for k in _INPUT_PATH_ARGS if isinstance(a := args.get(k), str) and a
+        )
 
+    # A file the conversation brought into being is "created" however often
+    # it was changed after; one it changed that already existed (touched
+    # first by a read or an in-place edit) is "edited"; the rest were read.
+    actions: dict[str, str] = {}
+    entries: dict[str, dict[str, Any]] = {}
+    last_touched: list[str] = []
+    for path, touch in touches:
+        entry = _file_entry(scope, path)
+        if entry is None:
+            continue
+        key = entry["path"]
+        entries[key] = entry
+        last_touched.append(key)
+        previous = actions.get(key)
+        if touch == "read":
+            actions.setdefault(key, "read")
+        elif previous is None:
+            actions[key] = "created" if touch == "write" else "edited"
+        elif previous == "read":
+            actions[key] = "edited"
     outputs: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for path in reversed(output_paths):  # most recently touched first
-        entry = _file_entry(scope, path)
-        if entry is not None and entry["path"] not in seen:
-            seen.add(entry["path"])
-            outputs.append(entry)
-    references: list[dict[str, Any]] = []
-    for path in input_paths:
-        entry = _file_entry(scope, path)
-        if entry is not None and entry["exists"] and entry["path"] not in seen:
-            seen.add(entry["path"])
-            references.append(entry)
+    for key in dict.fromkeys(reversed(last_touched)):  # most recently touched first
+        if actions[key] != "read":
+            outputs.append({**entries[key], "action": actions[key]})
+    references = [
+        {**entries[key], "action": "read"}
+        for key in dict.fromkeys(last_touched)  # in the order first read
+        if actions[key] == "read" and entries[key]["exists"]
+    ]
 
     return {
         "outputs": outputs,

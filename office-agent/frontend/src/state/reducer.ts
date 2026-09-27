@@ -84,9 +84,7 @@ export interface ChatState {
   autoMode: boolean;
   model: string;
   contextWindow: number;
-  /** Skills currently spliced into this thread's instructions -- freely
-   * re-toggleable any number of times (see SelectSkillsOut/the Skills
-   * settings tab). */
+  /** Skills offered in this thread's instructions (see StateEvent.enabled_skills). */
   enabledSkills: string[];
   /** This thread's file-tool root -- see wire.ts's StateEvent.workspace_root.
    * Empty string only until the first real "state" event lands (mirrors

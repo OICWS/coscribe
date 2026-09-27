@@ -61,7 +61,6 @@ something to fake here.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -83,9 +82,9 @@ from .runtime import (
 )
 from .runtime.provider_config import load_custom_providers
 from .runtime_lg import poll_due_scheduled_tasks, poll_due_wakes
-from .tools import load_builtin_skills, load_skills
 from .tools.interaction import PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL, PLAN_CHOICE_REVISE
 from .tools.scheduled_tasks import ScheduledTriggerStore, create_trigger, update_trigger
+from .tools.skill_catalog import enabled_skill_names
 
 app = typer.Typer(add_completion=False, no_args_is_help=False)
 logger = logging.getLogger(__name__)
@@ -419,12 +418,9 @@ async def _chat_async(
                 extra_tools=mcp_tools,
                 checkpointer=checkpointer,
                 hooks_config=hooks_config,
-                # Matches web/app.py's default_enabled_skill_names -- without
-                # this, ChatSessionLG's own default (an empty set, not None)
-                # means the 3 built-in skills silently never get offered to
-                # the CLI at all (confirmed live: a real DeepSeek run's
-                # load_skill("PPTX Slides") call had no tool to call).
-                enabled_skill_names={s.name for s in load_builtin_skills()},
+                # ChatSessionLG's own default is an empty set, which would
+                # offer no skills at all.
+                enabled_skill_names=enabled_skill_names(settings.skills_dir, settings.state_dir),
             )
             if accept_edits:
                 session.accept_edits = True
@@ -488,30 +484,8 @@ async def _check_wakes_async(settings: Any) -> None:
     a second flag to configure), both callers sharing the same
     get_session with a different resolver function each.
 
-    Unlike _chat_async, this may resume many different threads in one run
-    (whichever have a currently-due wake), each of which already has its
-    own enabled-skills choice saved from whenever it was last used
-    interactively -- so this reads each thread's own `.skills` sidecar
-    file, mirroring web/app.py's _resolve_enabled_skills exactly.
-    Duplicated rather than imported from there since that's a closure
-    private to create_app -- consistent with the existing amount of
-    construction-logic duplication between this module and web/app.py
-    (see _chat_async's own docstring-adjacent comments)."""
-    skills_by_name = {
-        s.name: s for s in load_builtin_skills() + load_skills(settings.skills_dir)
-    }
-    default_enabled_skill_names = {s.name for s in load_builtin_skills()}
-
-    def _resolve_enabled_skills(thread_id: str) -> set[str]:
-        sidecar = settings.state_dir / f"{thread_id}.skills"
-        if not sidecar.is_file():
-            return set(default_enabled_skill_names)
-        try:
-            saved = json.loads(sidecar.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return set(default_enabled_skill_names)
-        return set(saved) & skills_by_name.keys()
-
+    This may resume many different threads in one run (whichever have a
+    currently-due wake); each gets the skills switched on in Settings."""
     hooks_config: dict[str, list[str]] = empty_hooks_config()
     if settings.hooks_config_path is not None:
         hooks_config = load_hooks_config(settings.hooks_config_path)
@@ -542,7 +516,9 @@ async def _check_wakes_async(settings: Any) -> None:
                     extra_tools=mcp_tools,
                     checkpointer=checkpointer,
                     hooks_config=hooks_config,
-                    enabled_skill_names=_resolve_enabled_skills(thread_id),
+                    enabled_skill_names=enabled_skill_names(
+                        settings.skills_dir, settings.state_dir
+                    ),
                 )
 
             fired_wakes = await poll_due_wakes(settings.state_dir, _get_session)

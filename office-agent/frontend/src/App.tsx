@@ -554,13 +554,6 @@ function App() {
   const onBrowserPanelCapture = (capture: BrowserCapture) => setPendingBrowserCapture(capture);
   const onPptxShapePicked = (capture: PptxShapeCapture) => setPendingPptxCapture(capture);
 
-  const onToggleSkill = (name: string, enabled: boolean) => {
-    const next = new Set(state.enabledSkills);
-    if (enabled) next.add(name);
-    else next.delete(name);
-    socketRef.current?.send({ type: "select_skills", skills: [...next] });
-  };
-
   /** Settings > Skills > Add > Create a skill -- closes Settings, switches
    * to Create mode (Composer only renders there), and prefills
    * "/skill-creator " into the composer via pendingComposerText -- not
@@ -856,8 +849,6 @@ function App() {
         )}
         <SettingsModal
           open={settingsOpen}
-          enabledSkills={state.enabledSkills}
-          onToggleSkill={onToggleSkill}
           onCreateSkill={onCreateSkill}
           onClose={() => setSettingsOpen(false)}
         />

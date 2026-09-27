@@ -98,6 +98,8 @@ export interface ActivityFile {
   /** A document/media type the OS may open; anything else is reveal-only. */
   openable: boolean;
   modified_at: string | null;
+  /** What this conversation did to it; absent on a workflow run's outputs. */
+  action?: "created" | "edited" | "read";
 }
 
 export interface ActivityToolUse {

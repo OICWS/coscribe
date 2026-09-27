@@ -1308,42 +1308,42 @@ means one engine's soft block no longer empties the whole search.
 
 ## Skills
 
-Two sources, both parsed the same `SKILL.md` format (YAML frontmatter
-`name`+`description`, required, followed by markdown instructions) — the
-exact same convention [Claude Code's own
-Skills](https://code.claude.com/docs/en/skills) use:
+Every skill is a folder with a `SKILL.md` (YAML frontmatter
+`name`+`description`, then markdown instructions), optionally with
+reference files and scripts beside it -- the same format [Claude Code's
+Skills](https://code.claude.com/docs/en/skills) use. Settings → Skills
+lists them in three groups:
 
-- **Built in**: three skills shipped with coscribe itself — *PPTX Slides*,
-  *Excel Spreadsheets*, *Word Documents* — each a level deeper than the
-  base instructions on design/formula/formatting conventions for that file
-  type (color palettes, typography, the financial-model color convention,
-  when to use `write_docx`'s TOC/comments/tracked-changes). No setup: they
-  work out of the box for every install.
-- **Local**: `COSCRIBE_SKILLS_DIR` (default `./skills`, auto-created) holds
-  your own Skill subdirectories, optionally with `references/`/`assets/`/
-  `scripts/` files alongside each `SKILL.md`. Drop a folder in and it's
-  available next run; nothing to configure. A skill authored with Claude
-  Code's `/skill-creator` works here too (only the `SKILL.md` itself
-  transfers, not `/skill-creator`'s own Claude-Code-specific
-  evaluation/benchmarking workflow), and coscribe has no code-execution
-  tool yet, so a skill whose instructions depend on *running* a bundled
-  script is only partially usable until that lands.
+- **Built into coscribe**: *PPTX Slides*, *Excel Spreadsheets*, *Word
+  Documents* and *Skill Creator*. They can be switched off but not
+  removed.
+- **From Anthropic** (the **Discover** tab): Apache-2.0 skills from
+  [anthropics/skills](https://github.com/anthropics/skills) that work with
+  coscribe's own tools -- algorithmic-art, brand-guidelines,
+  canvas-design, claude-api, frontend-design, internal-comms, mcp-builder,
+  theme-factory. Nothing is bundled: **Add** downloads that one skill's
+  files, pinned to one upstream commit, and checks each against a SHA-256
+  in `src/coscribe/skill_catalog.json` before it lands (regenerate the
+  catalog with `scripts/build_skill_catalog.py <clone>`). Anthropic's
+  docx/pdf/pptx/xlsx skills aren't offered: their license forbids
+  redistribution, and coscribe's built-in skills cover those formats.
+  A removed skill shows up in Discover again.
+- **Created by you**: folders in `COSCRIBE_SKILLS_DIR` (default
+  `./skills`), whether dropped in by hand, uploaded (Add → Upload a
+  skill, `.zip`/`.skill`/`.md`) or written with Add → Create with
+  coscribe.
 
-**Selecting which skills are active** is per-thread and freely
-re-toggleable — the Settings → Skills tab lists every skill (built-in and
-local) as a checkbox; more than one can be on at once, and toggling takes
-effect immediately for that conversation, no restart. The three built-in
-skills are **on by default** for a brand-new thread — no setup needed for a
-new install to get better PPTX/Excel/Word output — while a local skill
-(`COSCRIBE_SKILLS_DIR`) stays off until you turn it on, since there's no
-way to know in advance whether an arbitrary local skill's guidance is
-something you want applied by default. Being enabled only means a skill is
-*offered*: the Coordinator still decides for itself whether a given turn
-actually calls `load_skill(name)`, the same judgment call as before. A
-skill toggle only changes which design guidance is on offer — it never
-narrows the *tool* set — aimed at a non-technical user who'd find
-authoring a whole config file too unfamiliar, but still wants to say
-"I'm making a PowerPoint today" and get better slides.
+Clicking a skill opens it: **Overview** (description, the coscribe tools
+it mentions) and **Contents** (its file tree; Markdown renders with a
+preview/source toggle, other text files show with line numbers). The ⋮
+menu turns a skill off or removes it.
+
+**On/off is global**: a switched-off skill isn't offered in any
+conversation, and the change applies from the next message, including in
+conversations already open. Every skill is on until switched off; the
+off-set lives in `<COSCRIBE_STATE_DIR>/skills.json`. Being on only means a
+skill is *offered*: the Coordinator still decides for itself whether a
+turn calls `load_skill(name)`. A skill never narrows the *tool* set.
 
 Every enabled skill's name and description are always visible to the
 Coordinator (so it knows what's on offer and when to reach for one); the
