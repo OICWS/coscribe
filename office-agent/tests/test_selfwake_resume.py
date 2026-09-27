@@ -29,6 +29,7 @@ from coscribe.config import Settings
 from coscribe.runtime_lg.selfwake import poll_due_wakes
 from coscribe.tools.background_tasks import BackgroundTask, BackgroundTaskStore
 from coscribe.tools.selfwake import WakeRequest, WakeStore
+from coscribe.tools.subagent_tasks import SubAgentTask, SubAgentTaskStore
 
 # Import order matters here: web/session.py does `from ..cli import
 # INIT_PROMPT`, and cli.py does `from .web.session import ChatSessionLG` --
@@ -180,7 +181,7 @@ async def test_wake_hitting_a_gated_tool_call_resolves_promptly_not_hangs(
     WRITE_LOCAL, requires approval) used to hang the calling coroutine
     forever -- _resolve_pending_approvals would create a real
     asyncio.Future and await it, resolved only by a genuine incoming WS
-    message that _SilentSocket (nobody is watching) can never send. For a
+    message that SilentSocket (nobody is watching) can never send. For a
     poll-loop caller like poll_due_wakes, that wedges the *entire*
     background poller on the very first unattended wake that happens to
     touch a gated tool, not just this one thread. Fixed by
@@ -339,3 +340,47 @@ async def test_task_wake_stays_pending_while_the_task_is_still_running(
 
     assert fired == []
     assert fake_model.i == 0
+
+
+def _finished_subagent(state_dir: Path, task_id: str) -> None:
+    SubAgentTaskStore(state_dir).save(
+        SubAgentTask(
+            task_id=task_id,
+            thread_id="thread-1",
+            instructions="",
+            prompt="p",
+            tool_names="",
+            description="research",
+            status="succeeded",
+            started_at=datetime.now(UTC).isoformat(),
+            result="all done",
+            background=True,
+        )
+    )
+
+
+async def test_a_chain_of_sub_agent_reports_winds_down_then_waits_for_the_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content=f"noted {i}") for i in range(3)]
+    )
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "c.sqlite")) as checkpointer:
+        session = await (await _make_get_session(settings, checkpointer, fake_model, monkeypatch))(
+            "thread-1"
+        )
+        for i in range(3):
+            _finished_subagent(settings.state_dir, f"t{i}")
+        session._report_turns_in_row = 2
+
+        await session._report_subagent("t0", [])
+        await session._report_subagent("t1", [])
+        session._report_turns_in_row = 5
+        await session._report_subagent("t2", [])
+
+        state = await session.lg_agent.aget_state(session.config)
+    humans = [str(m.content) for m in state.values["messages"] if m.type == "human"]
+    assert len(humans) == 2
+    assert "Tell the user where things stand" in humans[0]
+    assert SubAgentTaskStore(settings.state_dir).load("t2").reported is False

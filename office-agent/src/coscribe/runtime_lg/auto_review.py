@@ -95,14 +95,28 @@ async def review_action(
     risk: str,
     folders: list[str],
     user_requests: str,
+    delegated_task: str = "",
 ) -> Verdict | None:
-    """The reviewer's verdict, or None when it gave none it could read."""
+    """The reviewer's verdict, or None when it gave none it could read.
+    `delegated_task` is set when a sub-agent takes the action: the user's
+    words were addressed to the main assistant, so "delegate this, don't
+    do it yourself" would otherwise read as a boundary against the very
+    helper doing the delegated work."""
     if "temperature" in getattr(type(model), "model_fields", {}):
         model = model.model_copy(update={"temperature": 0})
     action = _clip(json.dumps(arguments, ensure_ascii=False, default=str), _ARGS_CHARS)
+    delegation = (
+        "The action comes from a helper the assistant handed part of the work to. "
+        "Doing the handed-over task is doing what the user asked, even where the user "
+        "told the assistant to delegate rather than do it itself. The task as handed "
+        f"over:\n{_clip(delegated_task, _CONTEXT_CHARS)}\n\n"
+        if delegated_task
+        else ""
+    )
     request = (
         f"The conversation's folders: {', '.join(folders) or '(none)'}\n\n"
         f"What the user has said, oldest first:\n{user_requests or '(nothing yet)'}\n\n"
+        f"{delegation}"
         f"The action: {tool_name}({action})\n"
         f"Its kind: {risk} (WRITE_LOCAL changes this computer's files or data, EXEC runs "
         "code, EXTERNAL acts outside this computer)"

@@ -500,8 +500,9 @@ sessions (a user preference, a stable project detail) -- keep it short and \
 curated, not a log. For a focused, self-contained sub-task, delegate it: \
 spawn_agent(description, prompt, ...) waits for the sub-agent's report, \
 spawn_agent_background(...) returns a task_id at once so this \
-conversation can go on (follow up with wake_on_subagent(task_id, reason) \
-or check_subagent_task(task_id)). Use the background one for anything \
+conversation can go on -- when it ends, its report or its error comes to \
+you in a message of its own, so don't poll; check_subagent_task(task_id) \
+shows one still running and stop_subagent(task_id) stops one. Use the background one for anything \
 long or open-ended, the waiting one only when your very next step needs \
 its answer. The sub-agent sees nothing of this conversation, so its \
 prompt must hold every path, fact and constraint; it gets your tools and \

@@ -6346,6 +6346,38 @@ built-in browser.
       conversation on the same site didn't prompt
       (`browser-settings.json` holds the site).
 
+## Phase 8bp -- Sub-agents that report back, and one side panel at a time (shipped)
+
+Found by a real test (DeepSeek delegating to GLM, then Gemini) and
+reproduced here before fixing:
+
+- [x] Auto mode blocked a sub-agent's own writes: the reviewer judged its
+      `write_file` against the parent's user message ("delegate it, don't
+      do it yourself"). The reviewer now gets the delegated task and is
+      told doing it is doing what the user asked.
+- [x] A sub-agent given the full tool set called `list_subagent_tasks`,
+      saw itself running, and gave up ("the task is being handled by a
+      sub-agent"). Tools bound to the parent's conversation (categories
+      `subagent_tasks`, `selfwake`, `tasks`) are no longer offered to
+      sub-agents -- its to-do items were also landing in the parent's list.
+- [x] A background sub-agent that failed in a second went unnoticed until
+      the user asked. Its end (succeeded / failed) now reaches the parent as
+      a message of its own, starting a turn at once (streamed live to an
+      open tab via `turn_started`) or after the one in progress; skipped if
+      the model already read the outcome. `wake_on_subagent` is gone
+      (pending ones on disk still resolve). Runaway chains wind down at the
+      third report turn in a row and stop at the fifth, until the user
+      speaks. Verified live: a 401 from GLM reached DeepSeek ~2s after its
+      turn ended; it re-delegated to another model by itself.
+- [x] A model call that never returned left a sub-agent "running, 0 tokens"
+      forever: 180s without a streamed token now fails it (tool calls not
+      timed). `stop_subagent` lets the model stop one of its own.
+- [x] Browser and Sub Agents panels share the right side: one state, one
+      panel at a time.
+- Not reproduced here: Gemini 3.1 Flash-Lite itself streamed normally in
+  this environment (2.4s for a tool call); the watchdog covers a stuck
+  connection wherever it happens.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

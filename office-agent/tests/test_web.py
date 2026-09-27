@@ -7204,3 +7204,86 @@ def test_appearance_settings_refuse_values_the_app_does_not_know(
 
     assert "COSCRIBE_THEME" in body["rejected"]
     assert "COSCRIBE_THEME" not in dotenv_values(tmp_path / ".env")
+
+
+class RoutedChatModel(FakeToolCallingChatModel):
+    """Answers by who is asking -- the parent, a sub-agent or the Auto
+    reviewer -- since a background sub-agent's calls interleave with the
+    parent's in no fixed order."""
+
+    route: Any = None
+
+    def _next(self, messages: list[BaseMessage]) -> AIMessage:
+        self.received.append(list(messages))
+        return self.route(messages)
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=self._next(messages))])
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        message = self._next(messages)
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(content=message.content or "", tool_calls=message.tool_calls)
+        )
+
+
+def test_a_background_sub_agent_is_reviewed_against_its_task_and_reports_back_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child_prompt = "Write hi to note.txt."
+    reviews: list[str] = []
+
+    def route(messages: list[BaseMessage]) -> AIMessage:
+        system = str(messages[0].content) if messages[0].type == "system" else ""
+        last = messages[-1]
+        if "You review one action" in system:
+            reviews.append(str(last.content))
+            return _verdict("allow", "the delegated task asks for this note")
+        if "delegated to you by another assistant" in system:
+            if last.type == "tool":
+                return AIMessage(content="wrote note.txt")
+            return AIMessage(content="", tool_calls=[_write_call("w1", "note.txt")])
+        if last.type == "human" and "[Sub-agent finished]" in str(last.content):
+            return AIMessage(content="The sub-agent wrote the note.")
+        if last.type == "tool":
+            return AIMessage(content="Handed to a sub-agent.")
+        return AIMessage(
+            content="",
+            tool_calls=[
+                _tool_call(
+                    "s1",
+                    "spawn_agent_background",
+                    {"description": "write the note", "prompt": child_prompt},
+                )
+            ],
+        )
+
+    fake_model = RoutedChatModel(responses=[], route=route)
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_sub_report") as ws:
+            _start_mode(ws, "/auto")
+            ws.send_json(
+                {"type": "user_message", "text": "Use a sub-agent to write the note, not yourself."}
+            )
+            _receive_until(ws, "tasks_changed")
+            started = _receive_until(ws, "turn_started")[-1]
+            reply = _receive_until(ws, "agent_message")[-1]
+
+    assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
+    assert "handed part of the work to" in reviews[0]
+    assert child_prompt in reviews[0]
+    assert started["text"].startswith('[Sub-agent finished] "write the note"')
+    assert "wrote note.txt" in started["text"]
+    assert reply["text"] == "The sub-agent wrote the note."

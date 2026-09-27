@@ -1250,7 +1250,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                         )
                     )
                     # poll_due_wakes already resumed wake.thread_id's own
-                    # checkpointer correctly (via _SilentSocket) -- this
+                    # checkpointer correctly (via SilentSocket) -- this
                     # is the other half, nudging a *live* browser tab (if
                     # any) that was already open on that thread to go
                     # re-fetch it, closing the real, previously-documented

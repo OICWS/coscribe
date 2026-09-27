@@ -666,6 +666,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "tasks_changed":
       return { ...state, turnInFlight: false, turnTick: state.turnTick + 1 };
 
+    case "turn_started":
+      return {
+        ...state,
+        turnInFlight: true,
+        error: null,
+        items: [
+          ...state.items,
+          { id: genId(), kind: "user", text: action.text, turnIndex: countUserItems(state.items) },
+        ],
+      };
+
     default: {
       const _exhaustive: never = action;
       return _exhaustive;

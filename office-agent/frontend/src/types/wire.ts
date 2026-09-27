@@ -225,6 +225,13 @@ export interface TasksChangedEvent {
   type: "tasks_changed";
 }
 
+/** The server started a turn of its own -- a background sub-agent
+ * reporting how it ended -- with `text` as the turn's message. */
+export interface TurnStartedEvent {
+  type: "turn_started";
+  text: string;
+}
+
 /** The conversation got a title from its first exchange. */
 export interface ThreadTitledEvent {
   type: "thread_titled";
@@ -289,6 +296,7 @@ export type WsServerEvent =
   | TaskDraftRequiredEvent
   | UsageEvent
   | TasksChangedEvent
+  | TurnStartedEvent
   | ThreadTitledEvent
   | ErrorEvent
   | AgentMessageEvent

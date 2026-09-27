@@ -1,5 +1,5 @@
 """Suspend/resume primitives (ROADMAP.md Phase 4): sleep_for/sleep_until,
-wake_on_task, wake_on_subagent, wake_on_event -- let the model end a turn
+wake_on_task, wake_on_event -- let the model end a turn
 saying "check back later" instead of the *user* having to schedule
 anything. Distinct from tools/scheduled_tasks.py: a wake resumes *this*
 conversation once; a scheduled task runs on its own schedule in fresh
@@ -17,11 +17,10 @@ hypothetical:
 - "task": wake_on_task(task_id) -- task_id is a tools/background_tasks.py
   BackgroundTask.task_id. Validated against that store up front, so a
   wake nothing could ever resolve is never registered.
-- "subagent": wake_on_subagent(task_id) -- task_id is a tools/
-  subagent_tasks.py SubAgentTask.task_id, a background spawn_agent_
-  background run -- a separate id space from "task". Due once the run
-  has finished (succeeded, failed or stopped); one waiting on the user's
-  approval isn't done yet (see runtime_lg/selfwake.py's _is_due).
+- "subagent": a tools/subagent_tasks.py SubAgentTask.task_id. No tool
+  creates one -- a background sub-agent reports to its conversation by
+  itself when it ends (web/session.py) -- but a pending one on disk still
+  resolves once the run has finished.
 - "event": wake_on_event(event_key) -- resolved by a signal_event call
   (this thread, another thread, or -- once ROADMAP.md Phase 5c's Slack/
   webhook work lands -- an external event source calling the same
@@ -44,7 +43,6 @@ from urllib.parse import quote
 
 from ..runtime.types import tool_metadata
 from .background_tasks import BackgroundTaskStore
-from .subagent_tasks import SubAgentTaskStore
 
 VALID_KINDS = ("timer", "task", "subagent", "event")
 VALID_STATUSES = ("pending", "woken", "cancelled")
@@ -191,7 +189,6 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
     wake_store = WakeStore(state_dir)
     signal_store = SignalStore(state_dir)
     task_store = BackgroundTaskStore(state_dir)
-    subagent_task_store = SubAgentTaskStore(state_dir)
 
     def _create(kind: str, reason: str, **fields: Any) -> dict[str, Any]:
         wake = WakeRequest(
@@ -266,26 +263,6 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
             raise ValueError(f"No background task with id {task_id!r}")
         return _create("task", reason, task_id=task_id)
 
-    def wake_on_subagent(task_id: str, reason: str) -> dict[str, Any]:
-        """Pause this conversation and automatically resume it once a
-        background sub-agent started via spawn_agent_background finishes
-        (succeeds, fails, is paused, or ends up blocked on an approval it
-        can't ask for in the background) -- for "let me know when that
-        sub-agent is done" instead of calling check_subagent_task
-        yourself over and over. task_id must be a real, currently-running
-        background sub-agent task id (see spawn_agent_background's own
-        return value, or list_subagent_tasks).
-
-        Args:
-            task_id: the task_id of an in-progress background sub-agent.
-            reason: what to do or check when you wake up -- e.g. "read
-                its result with check_subagent_task and summarize it."
-        """
-        subagent_task = subagent_task_store.load(task_id)
-        if subagent_task is None:
-            raise ValueError(f"No sub-agent task with id {task_id!r}")
-        return _create("subagent", reason, subagent_task_id=task_id)
-
     def wake_on_event(event_key: str, reason: str) -> dict[str, Any]:
         """Pause this conversation and automatically resume it once a named
         event fires -- for waiting on something external to this
@@ -350,7 +327,6 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
         tool_metadata(sleep_until, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(sleep_for, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on_task, risk_category="WRITE_LOCAL", category="selfwake"),
-        tool_metadata(wake_on_subagent, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on_event, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(signal_event, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(list_wakes, risk_category="READ", category="selfwake"),

@@ -103,6 +103,8 @@ from ..runtime_lg.messages import (
     strip_mode_note,
 )
 from ..runtime_lg.providers import with_prompt_cache_key
+from ..runtime_lg.selfwake import SilentSocket
+from ..runtime_lg.subagents import subagent_report
 from ..runtime_lg.tool_deferral import bound_tool_names, build_search_tools_tool
 from ..tools import (
     QUESTION_TOOL_NAMES,
@@ -122,6 +124,7 @@ from ..tools.scheduled_tasks import (
     edit_draft,
     parse_run_thread_id,
 )
+from ..tools.selfwake import WakeStore
 from ..tools.skill_catalog import enabled_skill_names
 from ..tools.spreadsheets import SpreadsheetToolkit
 from ..tools.subagent_tasks import SubAgentTask, SubAgentTaskStore, running_subagent
@@ -299,7 +302,7 @@ def _risks_of_gated_tools(lg_tools: list[Any]) -> dict[str, str]:
 def _can_resolve_approvals(websocket: Any) -> bool:
     """True for a real client connection able to actually answer an
     approval_required prompt; False for a silent/background stand-in
-    (runtime_lg/selfwake.py's _SilentSocket, driving an unattended
+    (runtime_lg/selfwake.py's SilentSocket, driving an unattended
     sleep/wake or Scheduled Task turn) where nobody is present to ever
     resolve one. Checked via a duck-typed attribute, not isinstance --
     this module can't import runtime_lg back without a circular import
@@ -375,6 +378,15 @@ def _clean_title(text: str) -> str:
     return title.strip("\"'“”「」《》*#。.").strip()[:80]
 
 
+_WIND_DOWN_REPORT_TURN = 3
+_MAX_REPORT_TURNS_IN_ROW = 5
+_WIND_DOWN_NOTE = (
+    "\n\n(Several sub-agent reports in a row have come in without a word from the "
+    "user. Tell the user where things stand now rather than starting more sub-agents, "
+    "unless they asked for more rounds.)"
+)
+
+
 class _SubAgentApprovalChannel:
     """Stands in for the websocket when a sub-agent's call is decided: an
     approval it needs is recorded on its task (the panel shows it from
@@ -385,6 +397,10 @@ class _SubAgentApprovalChannel:
     def __init__(self, session: ChatSessionLG, task: SubAgentTask) -> None:
         self._session = session
         self._task = task
+
+    @property
+    def delegated_task(self) -> str:
+        return self._task.prompt
 
     @property
     def can_resolve_approvals(self) -> bool:
@@ -438,6 +454,13 @@ class ChatSessionLG:
         # Approval request ids that belong to sub-agents, which a Stop of
         # the parent's turn must not deny.
         self._subagent_request_ids: set[str] = set()
+        # Background sub-agent runs whose end is being reported, and the
+        # tasks doing it (held so they aren't garbage-collected mid-turn).
+        self._reporting_subagents: set[str] = set()
+        self._report_tasks: set[asyncio.Task[None]] = set()
+        # Report turns since the user last spoke: each can start another
+        # sub-agent, whose report starts another turn, with nobody there.
+        self._report_turns_in_row = 0
         self.settings = settings
         # None (the old default, still used by anything that hasn't been
         # taught about per-thread workspaces) falls back to the global
@@ -664,6 +687,19 @@ class ChatSessionLG:
         )
 
     async def _subagent_changed(self, task: SubAgentTask) -> None:
+        # Before any await: the wake poller runs on this loop too, and must
+        # not also resume the thread for a wake this report takes over.
+        if (
+            task.background
+            and task.status in ("succeeded", "failed")
+            and not task.reported
+            and task.task_id not in self._reporting_subagents
+        ):
+            self._reporting_subagents.add(task.task_id)
+            reasons = self._take_subagent_wakes(task.task_id)
+            report = asyncio.create_task(self._report_subagent(task.task_id, reasons))
+            self._report_tasks.add(report)
+            report.add_done_callback(self._report_tasks.discard)
         websocket = self._live_websocket
         if websocket is None:
             return
@@ -673,6 +709,59 @@ class ChatSessionLG:
             )
         except Exception:  # noqa: BLE001 -- a closing tab mustn't fail the sub-agent's run
             logger.debug("subagents_changed not delivered", exc_info=True)
+
+    def _take_subagent_wakes(self, task_id: str) -> list[str]:
+        wake_store = WakeStore(self.settings.state_dir)
+        reasons = []
+        for wake in wake_store.list_pending():
+            if (
+                wake.thread_id == self.thread_id
+                and wake.kind == "subagent"
+                and wake.subagent_task_id == task_id
+            ):
+                wake.status = "woken"
+                wake.woken_at = datetime.now(UTC).isoformat()
+                wake_store.save(wake)
+                reasons.append(wake.reason)
+        return reasons
+
+    async def _report_subagent(self, task_id: str, reasons: list[str]) -> None:
+        """Tells the conversation how a background sub-agent ended, as a
+        turn of its own -- after the turn in progress, if there is one, so
+        the model hears it at its next chance rather than never. Skipped if
+        the model already read the outcome itself in the meantime."""
+        try:
+            async with self._turn_lock:
+                store = SubAgentTaskStore(self.settings.state_dir)
+                task = store.load(task_id)
+                if task is None or task.reported or self.is_workflow_run():
+                    return
+                if self._report_turns_in_row >= _MAX_REPORT_TURNS_IN_ROW:
+                    # Left unreported: the model finds it with
+                    # list_subagent_tasks once the user is back.
+                    await self.notify_resync()
+                    return
+                self._report_turns_in_row += 1
+                task.reported = True
+                store.save(task)
+                text = subagent_report(task, reasons)
+                if self._report_turns_in_row >= _WIND_DOWN_REPORT_TURN:
+                    text += _WIND_DOWN_NOTE
+                websocket: Any = self._live_websocket
+                if websocket is not None:
+                    try:
+                        await websocket.send_json({"type": "turn_started", "text": text})
+                    except Exception:  # noqa: BLE001 -- the tab went away; run unwatched
+                        websocket = None
+                self._current_turn_task = asyncio.current_task()
+                socket: Any = websocket or SilentSocket()
+                await self._handle_user_message_locked(text, socket, notice=True)
+            if websocket is None:
+                await self.notify_resync()
+        except Exception:
+            logger.exception("reporting sub-agent %s to its conversation failed", task_id)
+        finally:
+            self._reporting_subagents.discard(task_id)
 
     def _stop_waited_on_subagents(self) -> None:
         """Stop the sub-agents a turn is waiting on; background ones were
@@ -2108,7 +2197,9 @@ class ChatSessionLG:
             return {"type": "approve"}
         reviewer_note: str | None = None
         if self._auto_review_active():
-            verdict = await self._auto_review(name, args)
+            verdict = await self._auto_review(
+                name, args, delegated_task=getattr(websocket, "delegated_task", "")
+            )
             if verdict is not None and verdict.allow:
                 self._auto_blocks_in_row = 0
                 record_decision(
@@ -2272,7 +2363,9 @@ class ChatSessionLG:
             self.auto_mode and not self._auto_paused and self._effective_run_approval_mode() is None
         )
 
-    async def _auto_review(self, name: str, args: dict[str, Any]) -> Verdict | None:
+    async def _auto_review(
+        self, name: str, args: dict[str, Any], *, delegated_task: str = ""
+    ) -> Verdict | None:
         state = await self.lg_agent.aget_state(self.config)
         messages = list(state.values.get("messages", [])) if state.values else []
         return await review_action(
@@ -2288,6 +2381,7 @@ class ChatSessionLG:
                     if m.type == "human"
                 ]
             ),
+            delegated_task=delegated_task,
         )
 
     def _auto_approval_active(self) -> bool:
@@ -2956,6 +3050,7 @@ class ChatSessionLG:
             return
         async with self._turn_lock:
             self._current_turn_task = asyncio.current_task()
+            self._report_turns_in_row = 0
             await self._handle_user_message_locked(text, websocket, images=images)
 
     async def _handle_user_message_locked(
@@ -2963,6 +3058,8 @@ class ChatSessionLG:
         text: str,
         websocket: WebSocket,
         images: list[str] | None = None,
+        *,
+        notice: bool = False,
     ) -> None:
         await self._run_observational_hooks(
             "UserPromptSubmit",
@@ -2973,9 +3070,10 @@ class ChatSessionLG:
         wanted_skills = enabled_skill_names(self.settings.skills_dir, self.settings.state_dir)
         if wanted_skills != self.enabled_skill_names:
             await self.set_enabled_skills(wanted_skills, websocket, announce=False)
-        stripped_lower = text.strip().lower()
+        # A notice isn't the user's reply to anything, nor a command.
+        stripped_lower = "" if notice else text.strip().lower()
 
-        if self.pending_save_skill_proposal is not None:
+        if self.pending_save_skill_proposal is not None and not notice:
             await self._handle_pending_skill_save_proposal(text, websocket)
             return
 
