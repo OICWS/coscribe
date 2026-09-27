@@ -16,6 +16,30 @@ const SET_TITLE_BAR_COLORS_CHANNEL = "window:set-title-bar-colors";
 const SHOW_SHORTCUTS_CHANNEL = "app:show-shortcuts";
 const SET_THEME_SOURCE_CHANNEL = "window:set-theme-source";
 
+// What the page does for a menu item: the page owns conversations,
+// Settings and the composer, so the menu only names the command. Sent as
+// a page event with a user gesture rather than over IPC: Chromium opens a
+// file chooser only in response to one, and Open File needs it to.
+type MenuCommand =
+  | "new-session"
+  | "open-file"
+  | "open-folder"
+  | "settings"
+  | "close-session"
+  | "find"
+  | "find-next"
+  | "find-previous";
+
+function pageCommand(command: MenuCommand) {
+  return (_item: unknown, win: unknown) => {
+    const detail = JSON.stringify(command);
+    void (win as BrowserWindow | undefined)?.webContents.executeJavaScript(
+      `window.dispatchEvent(new CustomEvent("coscribe:menu-command", { detail: ${detail} }))`,
+      true,
+    );
+  };
+}
+
 interface TitleBarColors {
   color: string;
   symbolColor: string;
@@ -48,8 +72,37 @@ function goBy(win: BrowserWindow | undefined, offset: 1 | -1): void {
 
 function buildAppMenu(): Menu {
   return Menu.buildFromTemplate([
-    { role: "fileMenu" },
-    { role: "editMenu" },
+    {
+      label: "File",
+      submenu: [
+        { label: "New Session", accelerator: "Ctrl+N", click: pageCommand("new-session") },
+        { type: "separator" },
+        { label: "Open File…", click: pageCommand("open-file") },
+        { label: "Open Folder…", accelerator: "Ctrl+Shift+O", click: pageCommand("open-folder") },
+        { type: "separator" },
+        { label: "Settings…", accelerator: "Ctrl+,", click: pageCommand("settings") },
+        { type: "separator" },
+        { label: "Close Session", accelerator: "Ctrl+W", click: pageCommand("close-session") },
+        { role: "quit", label: "Exit" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "delete" },
+        { role: "selectAll" },
+        { type: "separator" },
+        { label: "Find…", accelerator: "Ctrl+F", click: pageCommand("find") },
+        { label: "Find Next", accelerator: "F3", click: pageCommand("find-next") },
+        { label: "Find Previous", accelerator: "Shift+F3", click: pageCommand("find-previous") },
+      ],
+    },
     { role: "viewMenu" },
     {
       label: "Go",
@@ -66,7 +119,6 @@ function buildAppMenu(): Menu {
         },
       ],
     },
-    { role: "windowMenu" },
     {
       role: "help",
       submenu: [

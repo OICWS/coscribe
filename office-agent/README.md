@@ -1913,6 +1913,25 @@ public repo never carried that Tauri shell itself (deliberately left
 out of the fork; the private `OICWS/project` repo keeps it as a
 rollback net).
 
+**Menu** (the ☰ button; shortcuts work without opening it), laid out
+like Claude's desktop app:
+- **File**: New Session (Ctrl+N), Open File… (the composer's attach
+  picker), Open Folder… (Ctrl+Shift+O, adds a folder to the conversation),
+  Settings… (Ctrl+,), Close Session (Ctrl+W, back to the new-session
+  screen), Exit. The items are carried out by the page; the shell sends
+  each as a page event with a user gesture, since Chromium only opens a
+  file chooser in response to one.
+- **Edit**: Undo, Redo, Cut, Copy, Paste, Delete, Select All, and **Find…**
+  (Ctrl+F) / Find Next (F3) / Find Previous (Shift+F3).
+- View, Go (Back / Forward), Help.
+
+**Find in page** (Ctrl+F in the desktop app and in a browser tab alike)
+opens a small bar under the conversation's header icons: matches in the
+chat are highlighted in place with the CSS Custom Highlight API (the
+chat's DOM isn't touched, and matches follow a reply as it streams), with
+a count, Enter / Shift+Enter or the arrows to step, Escape to close. A
+match split across two styles (half of it bold) isn't found.
+
 Two things only matter for the desktop build, not the browser one:
 - **`_exit_when_orphaned` (`web/app.py`)**: when the shell sets
   `COSCRIBE_EXIT_WITH_PARENT=1`/`COSCRIBE_PARENT_PID`, the sidecar

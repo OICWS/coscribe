@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useComposerAction } from "../lib/menuCommands";
 import { uploadFile } from "../lib/rest";
 import type { CommandInfo } from "../types/session";
 import type { BrowserCapture } from "./BrowserPanel";
@@ -133,6 +134,7 @@ export function Composer({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  useComposerAction("open-file", () => fileInputRef.current?.click());
   // Counts nested dragenter/dragleave pairs (they fire once per child
   // element the pointer crosses, not just once for the whole drop zone) --
   // a plain boolean flickers off every time the pointer passes over a

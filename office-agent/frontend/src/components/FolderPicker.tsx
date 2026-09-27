@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useComposerAction } from "../lib/menuCommands";
 import { readStored, writeStored } from "../lib/storage";
 import { useClickOutside } from "../lib/useClickOutside";
 import { CheckIcon, FolderIcon, PlusIcon } from "./icons";
@@ -47,6 +48,9 @@ export function FolderPicker({ folders, disabled, onChange }: FolderPickerProps)
   const [browsing, setBrowsing] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   useClickOutside(rootRef, () => setOpen(false), open);
+  useComposerAction("open-folder", () => {
+    if (!disabled) setBrowsing(true);
+  });
 
   const recent = open ? readRecent().filter((p) => !folders.includes(p)) : [];
   const rows = [...folders, ...recent];

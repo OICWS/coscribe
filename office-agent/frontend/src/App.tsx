@@ -6,6 +6,14 @@ import { ContextRing } from "./components/ContextRing";
 import { FolderPicker } from "./components/FolderPicker";
 import { ModePill } from "./components/ModePill";
 import { isElectron, onBrowserAgent, onShowShortcuts } from "./lib/electron";
+import {
+  type ComposerAction,
+  type MenuCommand,
+  onMenuCommand,
+  requestComposerAction,
+  requestFindStep,
+} from "./lib/menuCommands";
+import { FindInPage } from "./components/FindInPage";
 import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR, useTitleBarColors } from "./lib/titleBar";
 import type { PlanChoice, PlanItem } from "./components/PlanCard";
 import { ModelPicker } from "./components/ModelPicker";
@@ -64,6 +72,9 @@ function App() {
   const socketRef = useRef<AgentSocket | null>(null);
   const [threadId, setThreadId] = useState(resolveThreadId);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Find in page: null while closed; bumped to refocus an open one.
+  const [findKey, setFindKey] = useState<number | null>(null);
+  const [pendingComposerAction, setPendingComposerAction] = useState<ComposerAction | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // One side panel at a time, since they share the chat's right edge, and
   // remembered per conversation: each one's sub-agents and browsing are its own.
@@ -179,6 +190,28 @@ function App() {
 
   useEffect(() => {
     if (isElectron()) onShowShortcuts(() => setShortcutsOpen(true));
+  }, []);
+
+  // The desktop menu's File/Edit items; Ctrl+F does Find in a plain
+  // browser too, where there's no menu to carry the shortcut.
+  const menuHandler = useRef<(command: MenuCommand) => void>(() => {});
+  // Off a conversation, Ctrl+F is left to the browser's own find.
+  const findAvailable = useRef(false);
+  useEffect(() => onMenuCommand((command) => menuHandler.current(command)), []);
+  useEffect(() => {
+    if (isElectron()) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!findAvailable.current) return;
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        menuHandler.current("find");
+      } else if (event.key === "F3") {
+        event.preventDefault();
+        menuHandler.current(event.shiftKey ? "find-previous" : "find-next");
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
   // coscribe's AI started using the browser: show it, so the user watches
@@ -343,6 +376,33 @@ function App() {
   const selectedTask = scheduledTasks.find((t) => t.trigger_id === selectedTaskId) ?? null;
   // Browser and Sub Agents belong to a conversation, not the Scheduled pages.
   const inConversation = navMode === "create" && !onHome;
+
+  findAvailable.current = inConversation;
+  menuHandler.current = (command) => {
+    if (command === "new-session" || command === "close-session") startNewThread();
+    else if (command === "settings") setSettingsOpen(true);
+    else if (command === "find") {
+      if (inConversation) setFindKey((key) => (key ?? 0) + 1);
+    } else if (command === "find-next" || command === "find-previous") {
+      if (!inConversation) return;
+      if (findKey === null) setFindKey(1);
+      else requestFindStep(command === "find-next" ? 1 : -1);
+    } else if (navMode === "create") requestComposerAction(command);
+    else {
+      // From a Scheduled page: back to the conversation, whose composer
+      // then takes the action.
+      setPendingComposerAction(command);
+      showChat();
+    }
+  };
+
+  useEffect(() => {
+    if (!pendingComposerAction || navMode !== "create") return;
+    requestComposerAction(pendingComposerAction);
+    setPendingComposerAction(null);
+  }, [pendingComposerAction, navMode]);
+
+  useEffect(() => setFindKey(null), [threadId]);
   const showingScheduled = navMode === "run" || isScheduledTaskThread;
 
   useEffect(() => {
@@ -692,9 +752,10 @@ function App() {
       )}
       <div className="flex min-h-0 flex-1">
       <div
-        className="flex h-full min-w-0 flex-1 flex-col"
+        className="relative flex h-full min-w-0 flex-1 flex-col"
         style={navPinned ? { paddingLeft: NAV_RAIL_EXPANDED_WIDTH } : undefined}
       >
+        {inConversation && findKey !== null && <FindInPage focusKey={findKey} onClose={() => setFindKey(null)} />}
         {/* pl-12 lives here, not on the page-level wrapper above -- it only
          * needs to clear NavRail's own collapsed footprint (a 48px-square
          * toggle button pinned to the top-left corner, `absolute` so it

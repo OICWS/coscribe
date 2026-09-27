@@ -112,6 +112,8 @@
      takes a blue ring, as in Claude's settings. */
   --field-bg: #ffffff;
   --focus: var(--accent);
+  --find-bg: #fde68a;
+  --find-current-bg: #f59e0b;
   --user-bubble: var(--card-bg);
   --user-bubble-fg: var(--fg);
   --agent-bubble: transparent;
@@ -157,6 +159,8 @@
   --primary-fg: #232120;
   --field-bg: #2b2928;
   --focus: var(--accent);
+  --find-bg: #6b5313;
+  --find-current-bg: #d98a0b;
   --user-bubble: var(--card-bg);
   --user-bubble-fg: var(--fg);
   --agent-bubble: transparent;
@@ -436,4 +440,13 @@ body {
 .titlebar-controls-space {
   flex-shrink: 0;
   width: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
+
+/* Find in page (FindInPage.tsx). */
+::highlight(coscribe-find) {
+  background-color: var(--find-bg);
+}
+::highlight(coscribe-find-current) {
+  background-color: var(--find-current-bg);
+  color: #1f1f1f;
 }
