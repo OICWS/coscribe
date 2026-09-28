@@ -1332,20 +1332,33 @@ any words you wrote on it.
   like yours.
 - Instead of a ref, an action also takes the element the way the snapshot
   prints it -- `checkbox "All items"`, `textbox "Posting date" #2` for
-  the second field of that name -- and waits up to 15s for it to appear.
+  the second field of that name -- and waits for it to appear: 30s by
+  default, or whatever the step's `timeout` says (up to an hour), so a
+  workflow run on a slow network can be given more room in the step
+  editor.
   Refs are numbered afresh on every page load, so saved workflows name
   elements this way: drafting a workflow from a conversation rewrites
   each ref into its element's description, and a draft still holding a
   bare ref is sent back to the curator.
 - Every step waits for what it set off: a page load, and any request the
-  page made since the step began (up to 8s, for pages that poll), so
-  pages that swap in content by script -- SAP WebGUI, most web apps --
-  are ready for the next step. Keys include F1–F12 and combinations like
+  page made since the step began (500ms quiet, at most 8s -- a floor so
+  steps don't rush, not a limit: reaching it isn't an error), so pages
+  that swap in content by script -- SAP WebGUI, most web apps -- are
+  ready for the next step. Anything slower is waited for explicitly:
+  `browser_wait_for` waits for text to appear or go away ("Generating
+  export…"), for an element, or for a download to finish, with a
+  `timeout` of up to an hour. Keys include F1–F12 and combinations like
   `Shift+F4`.
-- **Downloads** started by the AI's steps are saved to the Downloads folder
-  without the save dialog (which would stall an unattended run), under a
-  new name if one is taken, and the step's result names the file. Your
-  own downloads still ask where to save.
+- **Downloads** started by the AI's steps are saved without the save
+  dialog (which would stall an unattended run) to `downloads/` in the
+  conversation's workspace -- a scheduled task's own workspace for its
+  runs -- where the AI's file tools can read them and runs don't mix;
+  a taken name gets " (1)". The step reports a quick download as
+  finished, and a slow one as started, for `browser_wait_for(download=True)`
+  to wait out. Your own downloads still ask where to save.
+- **Stop** also reaches the desktop app: the step in progress there (a
+  wait can run for an hour) ends at once, and steps that conversation
+  had queued are dropped.
 - **Iframes**, including ones from other sites (payment widgets, embedded
   forms), show indented under their `iframe` line with refs like
   `[ref=f1e3]` that click and type the same way. To keep embedded pages

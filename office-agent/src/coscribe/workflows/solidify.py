@@ -93,7 +93,11 @@ are numbered afresh on every load, so a step names its element the way the \
 page snapshot printed it -- the conversation's calls already show it so, e.g. \
 "ref": "checkbox \\"All items\\"" -- and never as a bare ref. Such a step \
 waits for its element to appear, so leave out snapshot calls that only \
-looked at the page. Navigate by URL.
+looked at the page. Navigate by URL. Where the page took long (a report, \
+an export), keep a browser_wait_for step and give it a timeout well above \
+what the conversation needed, for a slow day. A downloaded file's name \
+changes from run to run: read it from the download wait's result, \
+{{<its save_as>.file}}, never from the name the conversation saw.
 - "notes" lists what you weren't sure about: guesses, values you turned \
 into inputs, steps you dropped on purpose.
 """

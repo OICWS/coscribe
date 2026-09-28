@@ -63,6 +63,8 @@ function exceptionMessage(details: ExceptionDetails): string {
 export interface Download {
   path: string;
   state: "progressing" | "completed" | "cancelled" | "interrupted";
+  /** Told to the model as started / as finished. */
+  announced: boolean;
   reported: boolean;
 }
 
@@ -70,6 +72,8 @@ export class TabCdp {
   dialog: PageDialog | null = null;
   chooser: FileChooser | null = null;
   downloads: Download[] = [];
+  /** Where the conversation driving this tab wants its downloads. */
+  downloadDir = "";
   /** When the AI's current (or latest) step began, and ended. */
   stepStarted = 0;
   stepEnded = 0;

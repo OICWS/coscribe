@@ -30,7 +30,11 @@ _NAVIGATE_TIMEOUT = 60.0
 # The desktop app may first ask the user whether the AI can use the site
 # (it gives up after three minutes), so every call waits that much longer.
 _PERMISSION_WAIT = 190.0
-_MAX_WAIT_SECONDS = 30.0
+# How long a step waits for its element, text or download by default, and
+# at most -- a saved workflow may wait out a slow export.
+_DEFAULT_WAIT = 30.0
+_MAX_WAIT = 3600.0
+_DOWNLOADS_FOLDER = "downloads"
 _SNAPSHOT_CHARS = 12_000
 _EVALUATE_CHARS = 5_000
 
@@ -54,6 +58,7 @@ class BrowserHost:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._outbox: asyncio.Queue[dict[str, Any]] | None = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._threads: dict[str, str] = {}
         self._ids = itertools.count(1)
 
     @property
@@ -80,9 +85,24 @@ class BrowserHost:
 
     def _fail_pending(self, message: str) -> None:
         pending, self._pending = self._pending, {}
+        self._threads.clear()
         for future in pending.values():
             if not future.done():
                 future.set_result({"ok": False, "error": message})
+
+    def cancel(self, thread_id: str) -> None:
+        """Stop the conversation's browser step: the desktop app drops it
+        (a wait there can run for an hour) and whatever it queued, and the
+        tool call waiting on it returns now. Call on the server's loop."""
+        if self._outbox is not None:
+            self._outbox.put_nowait(
+                {"id": "", "thread_id": thread_id, "action": "cancel", "args": {}}
+            )
+        for request_id in [r for r, t in self._threads.items() if t == thread_id]:
+            future = self._pending.pop(request_id, None)
+            self._threads.pop(request_id, None)
+            if future is not None and not future.done():
+                future.set_result({"ok": False, "error": "Stopped by the user."})
 
     async def request(
         self, action: str, args: dict[str, Any], thread_id: str, timeout: float
@@ -92,6 +112,7 @@ class BrowserHost:
         request_id = str(next(self._ids))
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
+        self._threads[request_id] = thread_id
         await self._outbox.put(
             {"id": request_id, "thread_id": thread_id, "action": action, "args": args}
         )
@@ -101,6 +122,7 @@ class BrowserHost:
             raise ValueError(f"The browser didn't finish {action} within {timeout:.0f}s.") from exc
         finally:
             self._pending.pop(request_id, None)
+            self._threads.pop(request_id, None)
         if not reply.get("ok"):
             raise ValueError(str(reply.get("error") or f"The browser couldn't {action}."))
         result = reply.get("result")
@@ -144,8 +166,14 @@ def _with_tab(message: str, result: dict[str, Any]) -> str:
         )
     for download in result.get("downloads") or []:
         path, state = download.get("path"), download.get("state")
-        done = state == "completed"
-        lines.append(f"Downloaded {path}" if done else f"Download of {path}: {state}")
+        if state == "completed":
+            lines.append(f"Downloaded {path}")
+        elif state == "progressing":
+            lines.append(
+                f"Downloading {path} -- browser_wait_for(download=True) waits until it's done."
+            )
+        else:
+            lines.append(f"Download of {path}: {state}")
     line = _tab_line(result.get("tab"))
     if line:
         lines.append(line)
@@ -158,8 +186,21 @@ def build_browser_tools(
     *,
     scope: WorkspaceScope | None = None,
 ) -> list[Callable[..., Any]]:
-    def call(action: str, timeout: float = _DEFAULT_TIMEOUT, **args: Any) -> dict[str, Any]:
-        return host.call(action, args, thread_id, timeout + _PERMISSION_WAIT)
+    def call(action: str, limit: float = _DEFAULT_TIMEOUT, **args: Any) -> dict[str, Any]:
+        if scope is not None:
+            args["download_dir"] = str(scope.root / _DOWNLOADS_FOLDER)
+        result = host.call(action, args, thread_id, limit + _PERMISSION_WAIT)
+        if scope is not None:
+            # As the file tools take them: relative to the workspace.
+            for download in result.get("downloads") or []:
+                path = Path(str(download.get("path")))
+                download["path"] = scope.relative(path) if path.is_absolute() else str(path)
+        return result
+
+    def wait_limit(timeout: float) -> float:
+        if timeout <= 0:
+            raise ValueError("timeout must be more than 0 seconds.")
+        return min(float(timeout), _MAX_WAIT)
 
     def browser_navigate(url: str) -> str:
         """Open a URL in coscribe's browser (the Browser panel the user
@@ -185,9 +226,9 @@ def build_browser_tools(
         snapshot after anything that changes the page; refs from an older
         snapshot may no longer exist. In place of a ref those tools also
         take the element as the snapshot prints it, e.g. 'checkbox "All
-        items"' (add " #2" for the second such): it waits up to 15s for the
-        element to appear, and it's what a saved workflow must use, since
-        refs are numbered afresh on every page load.
+        items"' (add " #2" for the second such): it waits for the element
+        to appear (for the action's timeout), and it's what a saved
+        workflow must use, since refs are numbered afresh on every load.
 
         Args:
             start: character offset to continue a long page from (the
@@ -205,7 +246,7 @@ def build_browser_tools(
             )
         return f"{header}\n\n{text}" if header else text
 
-    def browser_click(ref: str, double: bool = False) -> str:
+    def browser_click(ref: str, double: bool = False, timeout: float = _DEFAULT_WAIT) -> str:
         """Click an element in coscribe's browser, by its ref from the latest
         browser_snapshot. Clicks as a real mouse would, so links open and
         buttons submit.
@@ -213,11 +254,16 @@ def build_browser_tools(
         Args:
             ref: the element's ref, e.g. "e12", or its description
             double: double-click instead of a single click
+            timeout: how long a described element may take to appear, in
+                seconds (default 30, up to 3600)
         """
-        result = call("click", ref=ref, double=double)
+        wait = wait_limit(timeout)
+        result = call("click", wait + _DEFAULT_TIMEOUT, ref=ref, double=double, timeout=wait)
         return _with_tab(f"Clicked {result.get('element') or ref}.", result)
 
-    def browser_type(ref: str, text: str, submit: bool = False) -> str:
+    def browser_type(
+        ref: str, text: str, submit: bool = False, timeout: float = _DEFAULT_WAIT
+    ) -> str:
         """Type into a text field in coscribe's browser, replacing what's in
         it, by the field's ref from the latest browser_snapshot.
 
@@ -225,8 +271,13 @@ def build_browser_tools(
             ref: the field's ref, e.g. "e7", or its description
             text: what to type
             submit: press Enter afterwards (e.g. to run a search)
+            timeout: how long a described element may take to appear, in
+                seconds (default 30, up to 3600)
         """
-        result = call("type", ref=ref, text=text, submit=submit)
+        wait = wait_limit(timeout)
+        result = call(
+            "type", wait + _DEFAULT_TIMEOUT, ref=ref, text=text, submit=submit, timeout=wait
+        )
         return _with_tab(f"Typed into {result.get('element') or ref}.", result)
 
     def browser_press_key(key: str) -> str:
@@ -239,27 +290,35 @@ def build_browser_tools(
         """
         return _with_tab(f"Pressed {key}.", call("press_key", key=key))
 
-    def browser_select_option(ref: str, values: list[str]) -> str:
+    def browser_select_option(ref: str, values: list[str], timeout: float = _DEFAULT_WAIT) -> str:
         """Choose option(s) in a dropdown (<select>) in coscribe's browser.
 
         Args:
             ref: the dropdown's ref from the latest browser_snapshot, or
                 its description
             values: the options to choose, by their visible text or value
+            timeout: how long a described element may take to appear, in
+                seconds (default 30, up to 3600)
         """
-        result = call("select_option", ref=ref, values=values)
+        wait = wait_limit(timeout)
+        result = call(
+            "select_option", wait + _DEFAULT_TIMEOUT, ref=ref, values=values, timeout=wait
+        )
         chosen = ", ".join(str(v) for v in result.get("selected") or values)
         return _with_tab(f"Selected {chosen}.", result)
 
-    def browser_hover(ref: str) -> str:
+    def browser_hover(ref: str, timeout: float = _DEFAULT_WAIT) -> str:
         """Move the mouse over an element in coscribe's browser, e.g. to open
         a menu that appears on hover.
 
         Args:
             ref: the element's ref from the latest browser_snapshot, or its
                 description
+            timeout: how long a described element may take to appear, in
+                seconds (default 30, up to 3600)
         """
-        result = call("hover", ref=ref)
+        wait = wait_limit(timeout)
+        result = call("hover", wait + _DEFAULT_TIMEOUT, ref=ref, timeout=wait)
         return _with_tab(f"Hovering over {result.get('element') or ref}.", result)
 
     def browser_scroll(direction: str = "down", ref: str = "") -> str:
@@ -275,22 +334,70 @@ def build_browser_tools(
         result = call("scroll", direction=direction, ref=ref or None)
         return _with_tab(str(result.get("note") or "Scrolled."), result)
 
-    def browser_wait_for(text: str = "", seconds: float = 0) -> str:
-        """Wait in coscribe's browser until some text appears on the page, or
-        for a number of seconds (up to 30) -- for pages that load results
-        after a moment.
+    def browser_wait_for(
+        text: str = "",
+        gone: str = "",
+        element: str = "",
+        download: bool = False,
+        seconds: float = 0,
+        timeout: float = _DEFAULT_WAIT,
+    ) -> str | dict[str, Any]:
+        """Wait in coscribe's browser for one thing: text to appear, text to
+        go away (e.g. "Loading…"), an element to appear, or a download to
+        finish -- or just for some seconds. Use it for anything slow, like
+        a report or export that takes minutes.
 
         Args:
             text: wait until this text is on the page
-            seconds: or just wait this long
+            gone: wait until this text is no longer on the page
+            element: wait until this element is there, as the snapshot
+                prints it, e.g. 'button "Download"'
+            download: wait until the page's download (started earlier or
+                while waiting) has finished; the result's "file" is where
+                it was saved -- the name changes from run to run
+            seconds: just wait this long
+            timeout: give up after this many seconds (default 30, up to 3600)
         """
-        if not text and seconds <= 0:
-            raise ValueError("Pass text to wait for, or seconds to wait.")
-        wait = min(float(seconds) if seconds > 0 else _MAX_WAIT_SECONDS, _MAX_WAIT_SECONDS)
-        result = call("wait_for", wait + 10, text=text or None, seconds=wait)
-        if text and not result.get("found"):
-            raise ValueError(f'"{text}" didn\'t appear within {wait:.0f}s.')
-        return _with_tab(f'"{text}" is on the page.' if text else f"Waited {wait:.0f}s.", result)
+        chosen = [n for n, v in (("text", text), ("gone", gone), ("element", element)) if v]
+        if download:
+            chosen.append("download")
+        if len(chosen) > 1:
+            raise ValueError(f"Wait for one thing at a time, not {' and '.join(chosen)}.")
+        limit = wait_limit(max(timeout, seconds))
+        if not chosen:
+            if seconds <= 0:
+                raise ValueError("Pass text, gone, element or download=True -- or seconds.")
+            result = call("wait_for", seconds + 10, seconds=seconds, timeout=limit)
+            return _with_tab(f"Waited {seconds:g}s.", result)
+        result = call(
+            "wait_for",
+            limit + 15,
+            text=text or None,
+            gone=gone or None,
+            element=element or None,
+            download=download,
+            timeout=limit,
+        )
+        if download:
+            # A saved workflow's next step reads the file from here: the
+            # name a site gives an export changes run to run.
+            files = [
+                str(d.get("path"))
+                for d in result.get("downloads") or []
+                if d.get("state") == "completed"
+            ]
+            return {
+                "file": files[-1] if files else "",
+                "files": files,
+                "message": _with_tab("The download finished.", result),
+            }
+        if element:
+            message = f"{element} is on the page."
+        elif gone:
+            message = f'"{gone}" is gone from the page.'
+        else:
+            message = f'"{text}" is on the page.'
+        return _with_tab(message, result)
 
     def browser_tabs(action: str = "list", tab_id: int = 0, url: str = "") -> str:
         """List, open, switch to or close tabs in coscribe's browser (at
