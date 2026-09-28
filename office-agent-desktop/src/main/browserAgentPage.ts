@@ -1,11 +1,11 @@
 /**
- * What coscribe's AI does *inside* a page: read it as a list of elements
- * with refs, find an element by ref, prepare a field for typing, pick
- * dropdown options, scroll. browserAgent.ts runs it with
- * `executeJavaScriptInIsolatedWorld`, as `(${pageAgent})(action, args)`,
- * so the function must stay self-contained: no imports, no helpers
- * outside its own body. The isolated world keeps the page's own scripts
- * from seeing or replacing any of this, while sharing its DOM.
+ * What coscribe's AI does *inside* a page or one of its frames: read it as
+ * a list of elements with refs, find an element by ref, prepare a field
+ * for typing, pick dropdown options, scroll. browserCdp.ts runs it in an
+ * isolated world of each frame as `(${pageAgent})(action, args)`, so the
+ * function must stay self-contained: no imports, no helpers outside its
+ * own body. The isolated world keeps the page's own scripts from seeing
+ * or replacing any of this, while sharing its DOM.
  *
  * Clicks and keystrokes are not sent from here: a DOM event dispatched by
  * script isn't trusted input and plenty of sites ignore it. This returns
@@ -17,12 +17,14 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
     refs: Map<string, WeakRef<Element>>;
     ids: WeakMap<Element, string>;
     next: number;
+    /** The iframes the latest snapshot showed, by the number it gave them. */
+    frames: Element[];
   }
   const w = window as unknown as { __coscribeAgent?: AgentState };
   // Refs live as long as the document: an element keeps its ref across
   // snapshots, so a ref the model read a moment ago still works if the
   // page only changed around it.
-  const state: AgentState = (w.__coscribeAgent ??= { refs: new Map(), ids: new WeakMap(), next: 1 });
+  const state: AgentState = (w.__coscribeAgent ??= { refs: new Map(), ids: new WeakMap(), next: 1, frames: [] });
 
   const refFor = (el: Element): string => {
     let ref = state.ids.get(el);
@@ -55,7 +57,7 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
     if (tag === "input") {
       const type = ((el as HTMLInputElement).type || "text").toLowerCase();
       if (type === "hidden") return "";
-      if (["button", "submit", "reset", "image"].includes(type)) return "button";
+      if (["button", "submit", "reset", "image", "file"].includes(type)) return "button";
       if (type === "checkbox") return "checkbox";
       if (type === "radio") return "radio";
       if (type === "range") return "slider";
@@ -130,8 +132,14 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
 
   const SKIP_TAGS = new Set(["script", "style", "noscript", "template", "head", "meta", "link"]);
 
+  // Smaller than this, an iframe is a tracker or an ad beacon, not
+  // something to read; showing it would only cost the model tokens.
+  const MIN_FRAME_WIDTH = 80;
+  const MIN_FRAME_HEIGHT = 40;
+
   if (action === "snapshot") {
     const lines: string[] = [];
+    state.frames = [];
     let buffer = "";
     const flush = () => {
       const text = clean(buffer, 400);
@@ -168,6 +176,10 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
             const value = tag === "select" ? (el as HTMLSelectElement).selectedOptions[0]?.text : input.value;
             if (value) line += ` value="${clean(value, 80)}"`;
           }
+          if (tag === "input" && input.type === "file") {
+            const chosen = Array.from(input.files ?? []).map((f) => f.name).join(", ");
+            line += chosen ? ` [file upload] value="${clean(chosen, 80)}"` : " [file upload]";
+          }
           if (role === "checkbox" || role === "radio" || role === "switch") {
             const checked = input.checked ?? el.getAttribute("aria-checked") === "true";
             line += checked ? " [checked]" : " [unchecked]";
@@ -195,9 +207,13 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
         if (alt) lines.push(`- img "${alt}"`);
         return;
       }
-      if (tag === "iframe") {
+      if (tag === "iframe" || tag === "frame") {
         flush();
-        lines.push(`- iframe "${clean(el.getAttribute("title") || el.getAttribute("src"), 80)}" (not readable)`);
+        const rect = el.getBoundingClientRect();
+        if (rect.width < MIN_FRAME_WIDTH || rect.height < MIN_FRAME_HEIGHT) return;
+        // browserAgent.ts replaces the marker with the frame's own contents.
+        lines.push(`- iframe "${clean(el.getAttribute("title") || el.getAttribute("src"), 80)}" @@frame:${state.frames.length}@@`);
+        state.frames.push(el);
         return;
       }
       const root = (el as HTMLElement).shadowRoot;
@@ -206,16 +222,28 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
     };
     walk(document.body ?? document.documentElement);
     flush();
-    const full = lines.join("\n");
-    const start = Number(args.start) || 0;
-    const max = Number(args.max_chars) || 12000;
-    let end = Math.min(full.length, start + max);
-    // Break at a line, not mid-element.
-    if (end < full.length) {
-      const cut = full.lastIndexOf("\n", end);
-      if (cut > start) end = cut;
-    }
-    return { text: full.slice(start, end), total_chars: full.length };
+    return { lines, url: location.href };
+  }
+
+  if (action === "frame_box") {
+    // Where an iframe's content starts in this frame's viewport, after
+    // bringing the iframe into view: its box minus border and padding.
+    const el = state.frames[Number(args.index)];
+    if (!el || !el.isConnected) throw new Error("That frame is gone from the page -- take a new browser_snapshot.");
+    el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" as ScrollBehavior });
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return {
+      x: rect.left + el.clientLeft + parseFloat(style.paddingLeft || "0"),
+      y: rect.top + el.clientTop + parseFloat(style.paddingTop || "0"),
+      width: window.innerWidth,
+      height: window.innerHeight,
+    };
+  }
+
+  if (action === "is_file_input") {
+    const el = find(String(args.ref));
+    return { file: el instanceof HTMLInputElement && el.type === "file", multiple: (el as HTMLInputElement).multiple === true, element: describe(el) };
   }
 
   if (action === "locate") return center(find(String(args.ref)));

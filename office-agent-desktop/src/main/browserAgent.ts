@@ -6,14 +6,15 @@
  * sidecar's tools/browser.py. No remote-debugging port is opened: that
  * would let any local program drive the user's signed-in pages.
  *
- * Reading the page and locating elements run in the page
- * (browserAgentPage.ts); clicks and keystrokes are sent as real input
- * events with `sendInputEvent`, which pages can't tell from the user's.
+ * Reading the page and locating elements run in the page and its frames
+ * (browserAgentPage.ts, through browserCdp.ts); clicks and keystrokes are
+ * sent as real input events, which pages can't tell from the user's.
  */
 
 import { Readable } from "node:stream";
 import { type BrowserWindow, type WebContents } from "electron";
 import { pageAgent } from "./browserAgentPage";
+import { type AgentFrame, type PageDialog, type TabCdp, cdpFor } from "./browserCdp";
 import { isAllowed, requestPermission } from "./browserPermissions";
 import {
   BROWSER_AGENT_EVENT,
@@ -35,9 +36,18 @@ import {
 
 
 const RECONNECT_DELAY_MS = 2000;
-// Its own world: separate from the page's scripts and from the content
-// preload's (999), so neither can see or clobber the agent's state.
+// The agent's frame and click marks: its own world, separate from the
+// page's scripts and from the content preload's (999).
 const AGENT_WORLD_ID = 1337;
+// An iframe shows at most this much of itself in a snapshot, and frames
+// nest at most this deep: an embedded page shouldn't crowd out the page.
+const FRAME_LINES = 80;
+const FRAME_CHARS = 5000;
+const MAX_FRAME_DEPTH = 2;
+const CHOOSER_WAIT_MS = 5000;
+// For CDP calls made while a page may be stuck behind a dialog, which
+// blocks its renderer.
+const BEST_EFFORT_MS = 1500;
 const LOAD_TIMEOUT_MS = 45_000;
 const SETTLE_TIMEOUT_MS = 10_000;
 
@@ -93,66 +103,73 @@ async function load(wc: WebContents, url: string): Promise<void> {
   }
 }
 
-function toViewPoint(wc: WebContents, point: { x: number; y: number }): { x: number; y: number } {
-  // The page reports CSS pixels; input events are in the view's DIPs.
-  const zoom = wc.getZoomFactor();
-  return { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) };
-}
-
-async function click(wc: WebContents, point: { x: number; y: number }, clickCount: number): Promise<void> {
+// Input goes through the DevTools protocol rather than sendInputEvent,
+// which hands every event to the tab's top frame: a click on an iframe
+// from another site would never reach it. Coordinates are the page's CSS
+// pixels, as the protocol takes them.
+async function click(wc: WebContents, cdp: TabCdp, point: { x: number; y: number }, clickCount: number): Promise<void> {
   void inPage(wc, "show_cursor", point).catch(() => undefined);
-  const { x, y } = toViewPoint(wc, point);
-  wc.sendInputEvent({ type: "mouseMove", x, y });
+  const { x, y } = point;
+  await cdp.input("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
   for (let n = 1; n <= clickCount; n++) {
-    wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: n });
-    wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: n });
+    await cdp.input("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: n });
+    await cdp.input("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: n });
   }
 }
 
-const KEY_NAMES: Record<string, string> = {
-  arrowdown: "Down",
-  arrowup: "Up",
-  arrowleft: "Left",
-  arrowright: "Right",
-  esc: "Escape",
-  escape: "Escape",
-  enter: "Enter",
-  return: "Enter",
-  tab: "Tab",
-  backspace: "Backspace",
-  delete: "Delete",
-  home: "Home",
-  end: "End",
-  pageup: "PageUp",
-  pagedown: "PageDown",
-  space: "Space",
-  " ": "Space",
-};
-const MODIFIERS: Record<string, "control" | "shift" | "alt" | "meta"> = {
-  control: "control",
-  ctrl: "control",
-  shift: "shift",
-  alt: "alt",
-  meta: "meta",
-  cmd: "meta",
-};
+interface KeySpec {
+  key: string;
+  code: string;
+  keyCode: number;
+  text?: string;
+}
 
-function pressKey(wc: WebContents, combo: string): void {
-  const parts = combo.split("+").map((p) => p.trim()).filter(Boolean);
-  const keyPart = parts.pop() ?? "";
-  const modifiers = parts.map((p) => {
-    const modifier = MODIFIERS[p.toLowerCase()];
-    if (!modifier) throw new Error(`Unknown modifier "${p}" in "${combo}".`);
-    return modifier;
-  });
-  const keyCode = KEY_NAMES[keyPart.toLowerCase()] ?? keyPart;
-  wc.sendInputEvent({ type: "keyDown", keyCode, modifiers });
-  const printable = keyPart.length === 1 || keyCode === "Space" || keyCode === "Enter";
-  if (printable && !modifiers.some((m) => m !== "shift")) {
-    const char = keyCode === "Space" ? " " : keyCode === "Enter" ? "\r" : keyPart;
-    wc.sendInputEvent({ type: "char", keyCode: char, modifiers });
+const NAMED_KEYS: Record<string, KeySpec> = {
+  arrowdown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  arrowup: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+  arrowleft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+  arrowright: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+  escape: { key: "Escape", code: "Escape", keyCode: 27 },
+  enter: { key: "Enter", code: "Enter", keyCode: 13, text: "\r" },
+  tab: { key: "Tab", code: "Tab", keyCode: 9 },
+  backspace: { key: "Backspace", code: "Backspace", keyCode: 8 },
+  delete: { key: "Delete", code: "Delete", keyCode: 46 },
+  home: { key: "Home", code: "Home", keyCode: 36 },
+  end: { key: "End", code: "End", keyCode: 35 },
+  pageup: { key: "PageUp", code: "PageUp", keyCode: 33 },
+  pagedown: { key: "PageDown", code: "PageDown", keyCode: 34 },
+  space: { key: " ", code: "Space", keyCode: 32, text: " " },
+};
+const KEY_ALIASES: Record<string, string> = { down: "arrowdown", up: "arrowup", left: "arrowleft", right: "arrowright", esc: "escape", return: "enter", " ": "space" };
+// The protocol's modifier bits.
+const MODIFIERS: Record<string, number> = { alt: 1, control: 2, ctrl: 2, meta: 4, cmd: 4, shift: 8 };
+
+function keySpec(name: string): KeySpec {
+  const lower = name.toLowerCase();
+  const named = NAMED_KEYS[KEY_ALIASES[lower] ?? lower];
+  if (named) return named;
+  if (name.length !== 1) throw new Error(`Unknown key "${name}".`);
+  const upper = name.toUpperCase();
+  const code = /[A-Z]/.test(upper) ? `Key${upper}` : /[0-9]/.test(name) ? `Digit${name}` : "";
+  return { key: name, code, keyCode: /[A-Z0-9]/.test(upper) ? upper.charCodeAt(0) : 0, text: name };
+}
+
+async function pressKey(cdp: TabCdp, combo: string): Promise<void> {
+  const parts = combo.split("+").map((p) => p.trim());
+  // "Control++" -- the key itself was "+".
+  const keyPart = parts.pop() || (combo.endsWith("+") ? "+" : "");
+  let modifiers = 0;
+  for (const part of parts.filter(Boolean)) {
+    const bit = MODIFIERS[part.toLowerCase()];
+    if (!bit) throw new Error(`Unknown modifier "${part}" in "${combo}".`);
+    modifiers |= bit;
   }
-  wc.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+  const spec = keySpec(keyPart);
+  // Text only when the key would type it: Control+a selects, it doesn't type "a".
+  const text = modifiers & ~MODIFIERS.shift ? undefined : spec.text;
+  const event = { key: spec.key, code: spec.code, windowsVirtualKeyCode: spec.keyCode, modifiers };
+  await cdp.input("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", ...event, text, unmodifiedText: text });
+  await cdp.input("Input.dispatchKeyEvent", { type: "keyUp", ...event });
 }
 
 function withTab(tab: Tab, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -170,6 +187,130 @@ function listTabs(): Record<string, unknown> {
   };
 }
 
+function bestEffort(work: Promise<unknown>): Promise<unknown> {
+  return Promise.race([work.catch(() => undefined), sleep(BEST_EFFORT_MS)]);
+}
+
+function describeDialog(dialog: PageDialog): string {
+  const kind = /^[aeiou]/.test(dialog.type) ? `An ${dialog.type}` : `A ${dialog.type}`;
+  return `${kind} dialog is open on the page: "${dialog.message}". Answer it with browser_handle_dialog before anything else.`;
+}
+
+/** "f2e7" -> frame "f2", element "e7"; "e7" is in the page itself. */
+function splitRef(ref: unknown): { key: string; inner: string } {
+  const text = String(ref ?? "").trim();
+  const match = /^(f\d+)(e\d+)$/.exec(text);
+  return match ? { key: match[1], inner: match[2] } : { key: "", inner: text };
+}
+
+/** A frame's snapshot lines, with each iframe it shows read in turn and
+ * indented under it. */
+async function snapshotFrame(cdp: TabCdp, frame: AgentFrame, depth: number): Promise<{ lines: string[]; url: string }> {
+  const { lines, url } = await cdp.agent<{ lines: string[]; url: string }>(frame, "snapshot");
+  const out: string[] = [];
+  for (const raw of lines) {
+    const line = frame.key ? raw.replace(/\[ref=e/g, `[ref=${frame.key}e`) : raw;
+    const marker = /\s*@@frame:(\d+)@@$/.exec(line);
+    if (!marker) {
+      out.push(line);
+      continue;
+    }
+    const head = line.slice(0, marker.index);
+    const child = depth < MAX_FRAME_DEPTH ? await cdp.childFrame(frame, Number(marker[1])).catch(() => null) : null;
+    if (!child) {
+      out.push(`${head} (not readable)`);
+      continue;
+    }
+    let inner: string[];
+    let innerUrl: string;
+    try {
+      ({ lines: inner, url: innerUrl } = await snapshotFrame(cdp, child, depth + 1));
+    } catch (err) {
+      out.push(`${head} [frame=${child.key}] (couldn't be read: ${err instanceof Error ? err.message : String(err)})`);
+      continue;
+    }
+    out.push(`${head} [frame=${child.key}]:`);
+    let chars = 0;
+    for (let i = 0; i < inner.length; i++) {
+      if (i >= FRAME_LINES || chars + inner[i].length > FRAME_CHARS) {
+        out.push(`  - (${inner.length - i} more lines in this frame not shown -- its page is ${innerUrl}, which browser_navigate can open)`);
+        break;
+      }
+      out.push(`  ${inner[i]}`);
+      chars += inner[i].length;
+    }
+    // A frame whose page hasn't arrived yet still holds its blank placeholder.
+    if (inner.length === 0) out.push(innerUrl === "about:blank" ? "  - (still loading -- wait, then take a new snapshot)" : "  - (empty)");
+  }
+  return { lines: out, url };
+}
+
+/** Where to click element `ref`, in the tab's viewport: its spot in its
+ * own frame plus the offset of each iframe it sits in. */
+async function locate(cdp: TabCdp, ref: unknown): Promise<{ x: number; y: number; element: string; frame: AgentFrame; inner: string }> {
+  const { key, inner } = splitRef(ref);
+  const frame = cdp.frame(key);
+  const point = await cdp.agent<{ x: number; y: number; element: string }>(frame, "locate", { ref: inner });
+  let { x, y } = point;
+  let bounds: { width: number; height: number } | null = null;
+  for (let f: AgentFrame = frame; f.parent; f = f.parent) {
+    const box = await cdp.agent<{ x: number; y: number; width: number; height: number }>(f.parent, "frame_box", { index: f.index });
+    x += box.x;
+    y += box.y;
+    bounds = box;
+  }
+  if (bounds && (x < 0 || y < 0 || x > bounds.width || y > bounds.height)) {
+    throw new Error(`${point.element} is outside the visible part of its frame -- scroll it into view first.`);
+  }
+  return { x, y, element: point.element, frame, inner };
+}
+
+async function upload(wc: WebContents, cdp: TabCdp, ref: unknown, files: string[]): Promise<string> {
+  let chooser = cdp.chooser;
+  let element = "the file chooser";
+  if (ref) {
+    const { key, inner } = splitRef(ref);
+    const frame = cdp.frame(key);
+    const field = await cdp.agent<{ file: boolean; multiple: boolean; element: string }>(frame, "is_file_input", { ref: inner });
+    if (field.file) {
+      if (files.length > 1 && !field.multiple) throw new Error(`${field.element} takes one file, not ${files.length}.`);
+      const objectId = await cdp.element(frame, inner);
+      await cdp.send("DOM.setFileInputFiles", { files, objectId }, frame.session);
+      return field.element;
+    }
+    // Most sites hide the real file field behind a styled button: click
+    // it, and catch the chooser it opens instead of letting it appear.
+    cdp.chooser = null;
+    await cdp.interceptFileChooser(true);
+    try {
+      const point = await locate(cdp, ref);
+      element = point.element;
+      await click(wc, cdp, point, 1);
+      const deadline = Date.now() + CHOOSER_WAIT_MS;
+      while (!cdp.chooser && !cdp.dialog && Date.now() < deadline) await sleep(100);
+    } finally {
+      await bestEffort(cdp.interceptFileChooser(false));
+    }
+    chooser = cdp.chooser;
+    if (!chooser) throw new Error(`Clicking ${element} didn't open a file chooser -- pass the ref of the upload button or file field.`);
+  }
+  if (!chooser) throw new Error("No file chooser is open -- pass the ref of the upload button or file field.");
+  if (files.length > 1 && !chooser.multiple) throw new Error(`This file chooser takes one file, not ${files.length}.`);
+  await cdp.send("DOM.setFileInputFiles", { files, backendNodeId: chooser.backendNodeId }, chooser.session);
+  cdp.chooser = null;
+  return element;
+}
+
+function describeValue(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 async function run(command: Command): Promise<Record<string, unknown>> {
   const args = command.args ?? {};
   if (command.action === "tabs") {
@@ -180,7 +321,10 @@ async function run(command: Command): Promise<Record<string, unknown>> {
       }
       const tab = createTab();
       selectTab(tab.id);
-      if (args.url) await load(tab.view.webContents, String(args.url));
+      if (args.url) {
+        await cdpFor(tab.view.webContents).ensure();
+        await load(tab.view.webContents, String(args.url));
+      }
     } else if (op === "select") {
       if (!selectTab(Number(args.tab_id))) throw new Error(`There's no tab ${args.tab_id}.`);
     } else if (op === "close") {
@@ -192,9 +336,33 @@ async function run(command: Command): Promise<Record<string, unknown>> {
 
   const tab = ensureActiveTab();
   const wc = tab.view.webContents;
-  const needsPage = command.action !== "navigate";
-  if (needsPage && tab.blank) throw new Error("The current tab is empty -- open a page with browser_navigate first.");
+  if (command.action !== "navigate" && tab.blank) {
+    throw new Error("The current tab is empty -- open a page with browser_navigate first.");
+  }
+  const cdp = cdpFor(wc);
+  await cdp.ensure();
+  if (cdp.dialog && command.action !== "handle_dialog") throw new Error(describeDialog(cdp.dialog));
 
+  let result: Record<string, unknown>;
+  try {
+    result = await act(command, tab, wc, cdp, args);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(cdp.dialog ? `${message} ${describeDialog(cdp.dialog)}` : message);
+  }
+  // What a step left open for the model to deal with next.
+  if (cdp.dialog) result.dialog = describeDialog(cdp.dialog);
+  if (cdp.chooser) result.file_chooser = true;
+  return result;
+}
+
+async function act(
+  command: Command,
+  tab: Tab,
+  wc: WebContents,
+  cdp: TabCdp,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
   switch (command.action) {
     case "navigate":
       await load(wc, String(args.url));
@@ -206,52 +374,68 @@ async function run(command: Command): Promise<Record<string, unknown>> {
       return withTab(tab);
     case "snapshot": {
       await settle(wc);
-      const result = await inPage<Record<string, unknown>>(wc, "snapshot", args);
-      return withTab(tab, result);
+      const full = (await snapshotFrame(cdp, cdp.main, 0)).lines.join("\n");
+      const start = Number(args.start) || 0;
+      const max = Number(args.max_chars) || 12000;
+      let end = Math.min(full.length, start + max);
+      // Break at a line, not mid-element.
+      if (end < full.length) {
+        const cut = full.lastIndexOf("\n", end);
+        if (cut > start) end = cut;
+      }
+      return withTab(tab, { text: full.slice(start, end), total_chars: full.length });
     }
     case "click": {
-      const point = await inPage<{ x: number; y: number; element: string }>(wc, "locate", { ref: args.ref });
-      await click(wc, point, args.double ? 2 : 1);
-      await settle(wc);
+      const point = await locate(cdp, args.ref);
+      // A click on an upload button would otherwise pop the system file
+      // dialog up in front of the user; the model answers it instead.
+      cdp.chooser = null;
+      await bestEffort(cdp.interceptFileChooser(true));
+      try {
+        await click(wc, cdp, point, args.double ? 2 : 1);
+        await settle(wc);
+      } finally {
+        await bestEffort(cdp.interceptFileChooser(false));
+      }
       return withTab(tab, { element: point.element });
     }
     case "hover": {
-      const point = await inPage<{ x: number; y: number; element: string }>(wc, "locate", { ref: args.ref });
-      const { x, y } = toViewPoint(wc, point);
-      wc.sendInputEvent({ type: "mouseMove", x, y });
+      const point = await locate(cdp, args.ref);
+      await cdp.input("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
       await sleep(300);
       return withTab(tab, { element: point.element });
     }
     case "type": {
-      const point = await inPage<{ x: number; y: number; element: string }>(wc, "locate", { ref: args.ref });
-      await click(wc, point, 1);
+      const point = await locate(cdp, args.ref);
+      await click(wc, cdp, point, 1);
       await sleep(100);
-      await inPage(wc, "select_all_in_focus");
+      await cdp.agent(point.frame, "select_all_in_focus");
       const text = String(args.text ?? "");
-      if (text) wc.insertText(text);
-      else pressKey(wc, "Backspace");
+      if (text) await cdp.input("Input.insertText", { text });
+      else await pressKey(cdp, "Backspace");
       if (args.submit) {
         await sleep(100);
-        pressKey(wc, "Enter");
+        await pressKey(cdp, "Enter");
       }
       await settle(wc);
       return withTab(tab, { element: point.element });
     }
     case "press_key":
-      pressKey(wc, String(args.key));
+      await pressKey(cdp, String(args.key));
       await settle(wc);
       return withTab(tab);
     case "select_option": {
-      const result = await inPage<Record<string, unknown>>(wc, "select_option", args);
+      const { key, inner } = splitRef(args.ref);
+      const result = await cdp.agent<Record<string, unknown>>(cdp.frame(key), "select_option", { ...args, ref: inner });
       await settle(wc);
       return withTab(tab, result);
     }
     case "scroll": {
       if (args.ref) {
-        const point = await inPage<{ element: string }>(wc, "locate", { ref: args.ref });
+        const point = await locate(cdp, args.ref);
         return withTab(tab, { note: `Scrolled ${point.element} into view.` });
       }
-      return withTab(tab, await inPage<Record<string, unknown>>(wc, "scroll", { direction: args.direction }));
+      return withTab(tab, await cdp.agent<Record<string, unknown>>(cdp.main, "scroll", { direction: args.direction }));
     }
     case "wait_for": {
       const deadline = Date.now() + Number(args.seconds ?? 5) * 1000;
@@ -260,10 +444,30 @@ async function run(command: Command): Promise<Record<string, unknown>> {
         return withTab(tab);
       }
       for (;;) {
-        const { found } = await inPage<{ found: boolean }>(wc, "has_text", { text: args.text }).catch(() => ({ found: false }));
-        if (found || Date.now() >= deadline) return withTab(tab, { found });
+        const { found } = await cdp
+          .agent<{ found: boolean }>(cdp.main, "has_text", { text: args.text })
+          .catch(() => ({ found: false }));
+        if (found || Date.now() >= deadline || cdp.dialog) return withTab(tab, { found });
         await sleep(500);
       }
+    }
+    case "handle_dialog": {
+      const accept = args.accept !== false;
+      const dialog = await cdp.handleDialog(accept);
+      await settle(wc);
+      return withTab(tab, { dialog_type: dialog.type, message: dialog.message, accepted: accept });
+    }
+    case "upload": {
+      const files = (Array.isArray(args.paths) ? args.paths : []).map(String);
+      if (!files.length) throw new Error("No files to upload.");
+      const element = await upload(wc, cdp, args.ref, files);
+      await settle(wc);
+      return withTab(tab, { element });
+    }
+    case "evaluate": {
+      const { value, opened } = await cdp.evaluateInPage(String(args.expression ?? ""));
+      await settle(wc);
+      return withTab(tab, { value: opened ? "(the script opened a dialog before it finished)" : describeValue(value) });
     }
     default:
       throw new Error(`Unknown browser action ${command.action}.`);

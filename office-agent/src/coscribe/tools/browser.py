@@ -19,9 +19,11 @@ from __future__ import annotations
 import asyncio
 import itertools
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ..runtime.types import tool_metadata
+from ._workspace import WorkspaceScope
 
 _DEFAULT_TIMEOUT = 30.0
 _NAVIGATE_TIMEOUT = 60.0
@@ -30,6 +32,7 @@ _NAVIGATE_TIMEOUT = 60.0
 _PERMISSION_WAIT = 190.0
 _MAX_WAIT_SECONDS = 30.0
 _SNAPSHOT_CHARS = 12_000
+_EVALUATE_CHARS = 5_000
 
 _UNAVAILABLE = (
     "coscribe's browser isn't reachable right now -- it runs inside the coscribe "
@@ -130,12 +133,26 @@ def _tab_line(tab: Any) -> str:
 
 
 def _with_tab(message: str, result: dict[str, Any]) -> str:
+    """The step's outcome, then what the page now holds open for the model
+    to deal with, then the tab it happened in."""
+    lines = [message]
+    if result.get("dialog"):
+        lines.append(str(result["dialog"]))
+    if result.get("file_chooser"):
+        lines.append(
+            "That opened a file chooser -- choose the files with browser_file_upload(paths=[...])."
+        )
     line = _tab_line(result.get("tab"))
-    return f"{message}\n{line}" if line else message
+    if line:
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def build_browser_tools(
-    thread_id: str, host: BrowserHost = BROWSER_HOST
+    thread_id: str,
+    host: BrowserHost = BROWSER_HOST,
+    *,
+    scope: WorkspaceScope | None = None,
 ) -> list[Callable[..., Any]]:
     def call(action: str, timeout: float = _DEFAULT_TIMEOUT, **args: Any) -> dict[str, Any]:
         return host.call(action, args, thread_id, timeout + _PERMISSION_WAIT)
@@ -172,7 +189,7 @@ def build_browser_tools(
         text = str(result.get("text") or "")
         total = int(result.get("total_chars") or len(text))
         end = max(0, start) + len(text)
-        header = _tab_line(result.get("tab"))
+        header = _with_tab("", result).strip()
         if end < total:
             text += (
                 f"\n\n[Page continues: {end} of {total} characters shown. "
@@ -288,6 +305,66 @@ def build_browser_tools(
         ]
         return "\n".join(lines) if lines else "No tabs are open."
 
+    def browser_handle_dialog(accept: bool = True) -> str:
+        """Answer the alert or confirm dialog open on the current page in
+        coscribe's browser (a step's result says when one opened; the page
+        waits until it's answered).
+
+        Args:
+            accept: OK (True) or Cancel (False)
+        """
+        result = call("handle_dialog", accept=accept)
+        kind = str(result.get("dialog_type") or "dialog")
+        answer = "Accepted" if result.get("accepted", accept) else "Dismissed"
+        return _with_tab(f'{answer} the {kind}: "{result.get("message") or ""}".', result)
+
+    def browser_file_upload(paths: list[str], ref: str = "") -> str:
+        """Upload files from the user's folders to the page in coscribe's
+        browser, as if the user had picked them. Pass the ref of the upload
+        button or file field; leave ref empty to answer a file chooser a
+        click just opened.
+
+        Args:
+            paths: the files, relative to the workspace or absolute under a
+                folder you can read
+            ref: the upload button or file field from browser_snapshot
+        """
+        if not paths:
+            raise ValueError("Pass at least one file in paths.")
+        if scope is None:
+            raise ValueError("Uploading files isn't available in this conversation.")
+        files = []
+        for path in paths:
+            resolved = scope.resolve(path)
+            if not resolved.is_file():
+                raise ValueError(f"No such file: {path}")
+            files.append(str(resolved))
+        result = call("upload", ref=ref or None, paths=files)
+        names = ", ".join(scope.relative(Path(f)) for f in files)
+        return _with_tab(f"Uploaded {names} to {result.get('element') or 'the page'}.", result)
+
+    def browser_evaluate(expression: str) -> str:
+        """Run a JavaScript expression in the current page of coscribe's
+        browser, as the page's own scripts would, and return its value
+        (awaited if it's a promise). For reading what a snapshot doesn't
+        show or doing what clicks can't; prefer the other browser_* tools
+        when they can do the job.
+
+        Args:
+            expression: e.g. "document.title" or
+                "[...document.querySelectorAll('h2')].map(h => h.textContent)"
+        """
+        if not expression.strip():
+            raise ValueError("Pass a JavaScript expression.")
+        result = call("evaluate", expression=expression)
+        value = str(result.get("value") if result.get("value") is not None else "null")
+        if len(value) > _EVALUATE_CHARS:
+            value = (
+                f"{value[:_EVALUATE_CHARS]}\n[... {len(value) - _EVALUATE_CHARS} more "
+                "characters -- return less, e.g. a slice or a count]"
+            )
+        return _with_tab(value, result)
+
     read: list[Callable[..., Any]] = [
         browser_navigate,
         browser_navigate_back,
@@ -302,7 +379,12 @@ def build_browser_tools(
         browser_type,
         browser_press_key,
         browser_select_option,
+        browser_handle_dialog,
+        browser_file_upload,
     ]
-    return [tool_metadata(f, risk_category="READ", category="browser") for f in read] + [
-        tool_metadata(f, risk_category="EXTERNAL", category="browser") for f in act
-    ]
+    return (
+        [tool_metadata(f, risk_category="READ", category="browser") for f in read]
+        + [tool_metadata(f, risk_category="EXTERNAL", category="browser") for f in act]
+        # Arbitrary script with the user's logins behind it.
+        + [tool_metadata(browser_evaluate, risk_category="EXEC", category="browser")]
+    )

@@ -182,3 +182,70 @@ def test_browser_tools_are_only_offered_inside_the_desktop_app(tmp_path: Path) -
     names, instructions = _coordinator_tools(tmp_path, browser_host_token="secret")
     assert {"browser_navigate", "browser_snapshot", "browser_click"} <= names
     assert "browser_* tools" in instructions
+
+
+def test_a_step_that_opens_a_dialog_says_so() -> None:
+    host = _FakeHost(
+        {
+            "click": {
+                "element": 'button "Delete"',
+                "dialog": 'A confirm dialog is open on the page: "Sure?". Answer it with '
+                "browser_handle_dialog before anything else.",
+            }
+        }
+    )
+    out = _tools(host)["browser_click"]("e3")
+    assert out.splitlines()[0] == 'Clicked button "Delete".'
+    assert "browser_handle_dialog" in out
+
+
+def test_handle_dialog_passes_the_answer() -> None:
+    host = _FakeHost(
+        {"handle_dialog": {"dialog_type": "confirm", "message": "Delete?", "accepted": False}}
+    )
+    out = _tools(host)["browser_handle_dialog"](accept=False)
+    assert host.calls[0][:2] == ("handle_dialog", {"accept": False})
+    assert out == 'Dismissed the confirm: "Delete?".'
+
+
+def test_a_click_that_opens_a_file_chooser_points_to_upload() -> None:
+    out = _tools(_FakeHost({"click": {"file_chooser": True}}))["browser_click"]("e5")
+    assert "browser_file_upload" in out
+
+
+def test_upload_sends_resolved_files_inside_the_workspace(tmp_path: Path) -> None:
+    from coscribe.tools._workspace import WorkspaceScope
+
+    (tmp_path / "report.pdf").write_bytes(b"%PDF")
+    host = _FakeHost({"upload": {"element": 'button "Attach"'}})
+    tools = {t.__name__: t for t in build_browser_tools("t1", host, scope=WorkspaceScope(tmp_path))}
+    out = tools["browser_file_upload"](["report.pdf"], ref="e9")
+    action, args, _ = host.calls[0]
+    assert action == "upload"
+    assert args == {"ref": "e9", "paths": [str((tmp_path / "report.pdf").resolve())]}
+    assert out.startswith('Uploaded report.pdf to button "Attach".')
+
+    with pytest.raises(ValueError, match="No such file"):
+        tools["browser_file_upload"](["missing.pdf"])
+    outside = tmp_path.parent / "secret.txt"
+    with pytest.raises(PermissionError):
+        tools["browser_file_upload"]([str(outside)])
+    assert len(host.calls) == 1
+
+
+def test_upload_without_a_workspace_is_refused() -> None:
+    with pytest.raises(ValueError, match="isn't available"):
+        _tools(_FakeHost({}))["browser_file_upload"](["a.txt"])
+
+
+def test_evaluate_returns_the_value_clipped() -> None:
+    host = _FakeHost({"evaluate": {"value": "x" * 6000}})
+    out = _tools(host)["browser_evaluate"]("'x'.repeat(6000)")
+    assert out.startswith("x" * 5000 + "\n[... 1000 more characters")
+
+
+def test_evaluate_runs_only_with_approval() -> None:
+    tools = _tools(_FakeHost({}))
+    assert get_tool_metadata(tools["browser_evaluate"]).risk_category == "EXEC"
+    assert get_tool_metadata(tools["browser_file_upload"]).risk_category == "EXTERNAL"
+    assert get_tool_metadata(tools["browser_handle_dialog"]).risk_category == "EXTERNAL"

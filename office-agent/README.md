@@ -1313,7 +1313,9 @@ In the desktop app, coscribe has its own browser: the **Browser panel**
 through the `browser_*` tools -- `browser_navigate`, `browser_snapshot`,
 `browser_click`, `browser_type`, `browser_press_key`,
 `browser_select_option`, `browser_hover`, `browser_scroll`,
-`browser_wait_for`, `browser_navigate_back`, `browser_tabs`. The panel
+`browser_wait_for`, `browser_navigate_back`, `browser_tabs`, and for
+what a page throws up along the way `browser_handle_dialog`,
+`browser_file_upload` and `browser_evaluate`. The panel
 opens by itself when the AI starts, every step happens in front of you (a
 blue frame marks the page it's working in, a dot where it clicks, and a
 "coscribe is using the browser · Stop" bar), and you can take over at any
@@ -1328,6 +1330,25 @@ any words you wrote on it.
   fields, each actionable one with a ref (`[ref=e12]`), and acts on refs.
   Clicks and typing are sent as real input events, so sites treat them
   like yours.
+- **Iframes**, including ones from other sites (payment widgets, embedded
+  forms), show indented under their `iframe` line with refs like
+  `[ref=f1e3]` that click and type the same way. To keep embedded pages
+  from crowding out the page itself: frames smaller than 80×40 or hidden
+  are left out, each frame shows at most 80 lines / 5000 characters (the
+  note says which address to open for the rest), and frames nest at most
+  two deep.
+- **Dialogs**: when a page opens an alert or confirm, the step's result
+  says so and the AI answers it with `browser_handle_dialog` (OK or
+  Cancel); nothing else runs on that page until it's answered, by the AI
+  or by you in the dialog box itself. `prompt()` never appears: Electron
+  doesn't support it and answers it as cancelled.
+- **Uploads**: `browser_file_upload` puts files from the conversation's
+  folders into a file field, or into the upload button most sites put in
+  front of a hidden one -- the system file dialog is caught and answered
+  instead of popping up. Paths outside the folders the conversation can
+  read are refused.
+- **`browser_evaluate`** runs a JavaScript expression in the page, for
+  what a snapshot doesn't show; it needs approval like running a script.
 - Sign-ins persist in the browser's own profile, separate from your
   everyday browser (⋮ → "Clear browsing data…" clears it; ⋮ → "Save
   screenshot…" saves the page as a PNG). Sites get no
@@ -1346,8 +1367,8 @@ any words you wrote on it.
   in built-in browser" switches to your own browser); the app window
   never navigates away.
 - Beyond the site prompt, reading a page needs no approval; clicking,
-  typing, pressing keys and choosing options are gated like other actions
-  with outside effects (automatic in Auto mode unless the reviewer
+  typing, pressing keys, choosing options, answering dialogs and
+  uploading are gated like other actions with outside effects (automatic in Auto mode unless the reviewer
   objects). The AI is told
   never to type passwords or payment details and to ask before anything
   that sends, buys, posts or deletes.
@@ -1364,7 +1385,12 @@ any words you wrote on it.
 - How it's wired: the desktop app starts the server with a random token,
   connects to `/internal/browser-host` with it and carries out each
   command on its tabs (`office-agent-desktop/src/main/browserAgent.ts`);
-  no remote-debugging port is opened. Outside the desktop app the tools
+  no remote-debugging port is opened. Pages, frames, dialogs and input go
+  through the DevTools protocol in-process (`webContents.debugger`,
+  `browserCdp.ts`), attached to a tab on the AI's first step there -- a
+  tab you only browse stays a plain one. The new tools are loaded on
+  demand like other less-used tools, so a conversation that never meets a
+  dialog or an upload doesn't carry them. Outside the desktop app the tools
   aren't offered, and the Browser panel falls back to a screencast of a
   headless browser.
 
