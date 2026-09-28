@@ -55,6 +55,8 @@ class WorkflowInput(_Model):
     label: str = ""
     type: Literal["text", "file", "number"] = "text"
     default: str | float | None = None
+    # An optional input may be left blank at run time; its steps get "".
+    required: bool = True
 
     _check_name = field_validator("name")(_identifier)
 

@@ -4,6 +4,12 @@ import type { WorkflowInput } from "../../types/workflow";
 import { PlayIcon } from "../icons";
 import { VarToken } from "./parts";
 
+function placeholderFor(input: WorkflowInput): string | undefined {
+  if (input.required === false) return "Can be left blank";
+  if (input.type === "file") return "A path in the workspace, e.g. reports/march.pdf";
+  return undefined;
+}
+
 interface RunInputsDialogProps {
   taskName: string;
   inputs: WorkflowInput[];
@@ -17,17 +23,17 @@ export function RunInputsDialog({ taskName, inputs, onCancel, onRun }: RunInputs
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(inputs.map((input) => [input.name, input.default === null ? "" : String(input.default)])),
   );
-  const missing = inputs.filter((input) => !values[input.name]?.trim());
+  const missing = inputs.filter((input) => input.required !== false && !values[input.name]?.trim());
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (missing.length > 0) return;
     onRun(
       Object.fromEntries(
-        inputs.map((input) => [
-          input.name,
-          input.type === "number" ? Number(values[input.name]) : values[input.name].trim(),
-        ]),
+        inputs.map((input) => {
+          const value = values[input.name].trim();
+          return [input.name, input.type === "number" && value !== "" ? Number(value) : value];
+        }),
       ),
     );
   };
@@ -44,15 +50,19 @@ export function RunInputsDialog({ taskName, inputs, onCancel, onRun }: RunInputs
         <div className="mt-4 flex flex-col gap-3.5">
           {inputs.map((input, index) => (
             <label key={input.name} className="flex flex-col gap-1.5">
-              <span className="flex items-center gap-2 text-sm">
-                {input.label || input.name}
-                <VarToken name={input.name} isInput />
+              {/* A long label pushes the name onto its own line instead of truncating it. */}
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                <span>{input.label || input.name}</span>
+                <span className="shrink-0">
+                  <VarToken name={input.name} isInput />
+                </span>
+                {input.required === false && <span className="text-xs text-[var(--muted)]">Optional</span>}
               </span>
               <input
                 autoFocus={index === 0}
                 type={input.type === "number" ? "number" : "text"}
                 value={values[input.name] ?? ""}
-                placeholder={input.type === "file" ? "A path in the workspace, e.g. reports/march.pdf" : undefined}
+                placeholder={placeholderFor(input)}
                 onChange={(e) => setValues((prev) => ({ ...prev, [input.name]: e.target.value }))}
                 className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-sm outline-none hover:border-[var(--border-hover)] focus:border-[var(--border-hover)]"
               />

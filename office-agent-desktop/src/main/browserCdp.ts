@@ -62,10 +62,16 @@ function exceptionMessage(details: ExceptionDetails): string {
 /** A file the page downloaded during the AI's steps, saved without asking. */
 export interface Download {
   path: string;
+  /** The name the site gave it, before any " (1)" to avoid a clash. */
+  name: string;
   state: "progressing" | "completed" | "cancelled" | "interrupted";
   /** Told to the model as started / as finished. */
   announced: boolean;
   reported: boolean;
+  /** Taken by a browser_wait_for(download): the step that started a quick
+   * download reports it, and a wait right after must still find it. */
+  claimed: boolean;
+  finishedAt: number;
 }
 
 export class TabCdp {

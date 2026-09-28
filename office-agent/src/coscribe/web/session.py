@@ -864,8 +864,10 @@ class ChatSessionLG:
                 "conversation to have done the task with tools already. Call it once, "
                 "as the last thing in your reply, after the work is finished -- a draft "
                 "made before more changes is already out of date. Call it again only "
-                "when the user asks for a new draft. `name`: a short name for it, or "
-                "empty to let the draft name itself."
+                "when the user asks for a new draft. If the task downloads files and the "
+                "user hasn't said where those should be kept, ask them first: the draft "
+                "makes that folder an input. `name`: a short name for it, or empty to let "
+                "the draft name itself."
             ),
         )
 

@@ -398,6 +398,9 @@ def resolve_inputs(workflow: Workflow, given: dict[str, Any]) -> dict[str, Any]:
     for spec in workflow.inputs:
         value = given.get(spec.name, spec.default)
         if value is None or value == "":
+            if not spec.required:
+                values[spec.name] = ""
+                continue
             raise WorkflowNotRunnable(f"input {spec.name!r} needs a value")
         values[spec.name] = value
     return values

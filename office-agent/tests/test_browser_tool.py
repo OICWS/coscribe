@@ -336,3 +336,48 @@ def test_wait_for_takes_one_thing_and_caps_the_timeout() -> None:
     wait_for(gone="Loading", timeout=99999)
     assert host.calls[-1][1]["gone"] == "Loading"
     assert host.calls[-1][1]["timeout"] == 3600
+
+
+def test_a_download_wait_moves_the_file_where_asked(tmp_path: Path) -> None:
+    from coscribe.tools._workspace import WorkspaceScope
+
+    (tmp_path / "downloads").mkdir()
+    (tmp_path / "downloads" / "EXPORT (3).XLSX").write_bytes(b"PK")
+    (tmp_path / "exports").mkdir()
+    (tmp_path / "exports" / "EXPORT.XLSX").write_bytes(b"old")
+    host = _FakeHost(
+        {
+            "wait_for": {
+                "downloads": [
+                    {
+                        "path": "downloads/EXPORT (3).XLSX",
+                        "name": "EXPORT.XLSX",
+                        "state": "completed",
+                    }
+                ]
+            }
+        }
+    )
+    tools = {t.__name__: t for t in build_browser_tools("t1", host, scope=WorkspaceScope(tmp_path))}
+    waited = tools["browser_wait_for"](download=True, save_to="exports")
+    # Never over an earlier export.
+    assert waited["file"] == "exports/EXPORT (1).XLSX"
+    assert (tmp_path / "exports" / "EXPORT (1).XLSX").read_bytes() == b"PK"
+    # Named as the site named it, not after the staging folder's clashes.
+    assert not (tmp_path / "downloads" / "EXPORT (3).XLSX").exists()
+    assert "Downloaded exports/EXPORT (1).XLSX" in waited["message"]
+
+
+def test_a_save_folder_outside_the_workspace_fails_before_waiting(tmp_path: Path) -> None:
+    from coscribe.tools._workspace import WorkspaceScope
+
+    host = _FakeHost({})
+    tools = {
+        t.__name__: t
+        for t in build_browser_tools("t1", host, scope=WorkspaceScope(tmp_path / "ws"))
+    }
+    with pytest.raises(PermissionError):
+        tools["browser_wait_for"](download=True, save_to=str(tmp_path / "elsewhere"))
+    assert host.calls == []
+    with pytest.raises(ValueError, match="goes with download"):
+        tools["browser_wait_for"](text="Done", save_to="exports")

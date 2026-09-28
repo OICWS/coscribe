@@ -1355,7 +1355,13 @@ any words you wrote on it.
   runs -- where the AI's file tools can read them and runs don't mix;
   a taken name gets " (1)". The step reports a quick download as
   finished, and a slow one as started, for `browser_wait_for(download=True)`
-  to wait out. Your own downloads still ask where to save.
+  to wait out; either way the wait takes it, and with `save_to` moves it
+  into a folder the conversation can write to, under the site's own file
+  name (" (1)" if taken). A workflow drafted from a conversation that
+  downloaded something gets a "folder to keep it in" input for this --
+  the user's folder if the conversation named one, else `downloads` --
+  and in chat the AI asks where to keep downloads before drafting. Your
+  own downloads still ask where to save.
 - **Stop** also reaches the desktop app: the step in progress there (a
   wait can run for an hour) ends at once, and steps that conversation
   had queued are dropped.

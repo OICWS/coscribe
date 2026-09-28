@@ -33,7 +33,10 @@ _TRANSCRIPT_CHARS = 60_000
 STEP_FORMAT = """\
 Inputs -- values that change from run to run (usually file paths, dates, \
 names): {"name": "pdf_path", "label": "PDF to audit", "type": "text" | \
-"file" | "number", "default": <the value used in the conversation>}.
+"file" | "number", "default": <the value used in the conversation>}. Add \
+"required": false only for an input that may be left blank at run time \
+(e.g. "run date, blank for today") -- the steps then get "" and must \
+handle it.
 
 Steps -- every step has "id" (lowercase identifier, unique) and "title" \
 (short, plain language), plus one "kind":
@@ -97,7 +100,10 @@ looked at the page. Navigate by URL. Where the page took long (a report, \
 an export), keep a browser_wait_for step and give it a timeout well above \
 what the conversation needed, for a slow day. A downloaded file's name \
 changes from run to run: read it from the download wait's result, \
-{{<its save_as>.file}}, never from the name the conversation saw.
+{{<its save_as>.file}}, never from the name the conversation saw. Give \
+a workflow that downloads files an input for the folder to keep them in \
+(default: the folder the user named in the conversation, else \
+"downloads") and pass it to the download wait as save_to.
 - "notes" lists what you weren't sure about: guesses, values you turned \
 into inputs, steps you dropped on purpose.
 """

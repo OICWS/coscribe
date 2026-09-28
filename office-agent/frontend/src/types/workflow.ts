@@ -19,6 +19,8 @@ export interface WorkflowInput {
   label: string;
   type: "text" | "file" | "number";
   default: string | number | null;
+  /** Absent means required. */
+  required?: boolean;
 }
 
 export interface OutputField {

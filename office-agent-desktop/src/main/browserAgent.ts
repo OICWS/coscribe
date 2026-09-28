@@ -64,6 +64,8 @@ const DOWNLOAD_WINDOW_MS = 15_000;
 // A quick download is reported by the step that started it; a slower one
 // is reported as started, and browser_wait_for(download) waits it out.
 const DOWNLOAD_QUICK_MS = 10_000;
+// A finished download no wait has taken is kept this long for one.
+const UNCLAIMED_KEEP_MS = 30 * 60_000;
 
 /** The step running now, and whether its conversation was stopped. */
 let running: { threadId: string; stop: boolean } | null = null;
@@ -386,41 +388,63 @@ function onDownload(item: DownloadItem, wc: WebContents): void {
   } catch {
     // setSavePath below then fails the download, which the step reports.
   }
-  const download: Download = { path: uniquePath(dir, item.getFilename()), state: "progressing", announced: false, reported: false };
+  const download: Download = {
+    path: uniquePath(dir, item.getFilename()),
+    name: item.getFilename(),
+    state: "progressing",
+    announced: false,
+    reported: false,
+    claimed: false,
+    finishedAt: 0,
+  };
   item.setSavePath(download.path);
   cdp.downloads.push(download);
   item.once("done", (_event, state) => {
     download.state = state;
+    download.finishedAt = Date.now();
   });
 }
 
+type DownloadReport = { path: string; name: string; state: string };
+
 /** What the model hasn't heard about the tab's downloads: finished ones,
  * and newly started ones still going after `waitMs`. */
-async function newDownloads(cdp: TabCdp, waitMs: number): Promise<Array<{ path: string; state: string }>> {
+async function newDownloads(cdp: TabCdp, waitMs: number): Promise<DownloadReport[]> {
   const deadline = Date.now() + waitMs;
   while (cdp.downloads.some((d) => d.state === "progressing") && Date.now() < deadline && !running?.stop) await sleep(200);
-  const news: Array<{ path: string; state: string }> = [];
+  const news: DownloadReport[] = [];
   for (const d of cdp.downloads) {
+    if (d.reported) continue;
     if (d.state !== "progressing") {
-      news.push({ path: d.path, state: d.state });
+      news.push({ path: d.path, name: d.name, state: d.state });
       d.reported = true;
     } else if (!d.announced) {
-      news.push({ path: d.path, state: d.state });
+      news.push({ path: d.path, name: d.name, state: d.state });
       d.announced = true;
     }
   }
-  cdp.downloads = cdp.downloads.filter((d) => !d.reported);
+  cdp.downloads = cdp.downloads.filter(
+    (d) => !(d.reported && (d.claimed || Date.now() - d.finishedAt > UNCLAIMED_KEEP_MS)),
+  );
   return news;
 }
 
-/** Until a download has finished (one already under way, or one that
- * starts while waiting) and none is still going. */
-async function waitForDownload(cdp: TabCdp, waitS: number): Promise<void> {
+/** Until a download no wait has taken yet has finished -- one already
+ * done, under way, or starting while waiting -- and none is still going;
+ * then takes them. */
+async function waitForDownload(cdp: TabCdp, waitS: number): Promise<DownloadReport[]> {
   const deadline = Date.now() + waitS * 1000;
   for (;;) {
     checkStop();
-    const going = cdp.downloads.filter((d) => d.state === "progressing");
-    if (!going.length && cdp.downloads.length) return;
+    const open = cdp.downloads.filter((d) => !d.claimed);
+    const going = open.filter((d) => d.state === "progressing");
+    if (!going.length && open.length) {
+      for (const d of open) {
+        d.claimed = true;
+        d.reported = true;
+      }
+      return open.map((d) => ({ path: d.path, name: d.name, state: d.state }));
+    }
     if (cdp.dialog) throw new Error(describeDialog(cdp.dialog));
     if (Date.now() >= deadline) {
       throw new Error(
@@ -496,7 +520,7 @@ async function run(command: Command): Promise<Record<string, unknown>> {
   // What a step left open for the model to deal with next.
   if (cdp.dialog) result.dialog = describeDialog(cdp.dialog);
   if (cdp.chooser) result.file_chooser = true;
-  const downloads = await newDownloads(cdp, DOWNLOAD_QUICK_MS);
+  const downloads = [...((result.downloads as unknown[] | undefined) ?? []), ...(await newDownloads(cdp, DOWNLOAD_QUICK_MS))];
   if (downloads.length) result.downloads = downloads;
   return result;
 }
@@ -584,10 +608,7 @@ async function act(
     }
     case "wait_for": {
       const waitS = waitSeconds(args);
-      if (args.download) {
-        await waitForDownload(cdp, waitS);
-        return withTab(tab);
-      }
+      if (args.download) return withTab(tab, { downloads: await waitForDownload(cdp, waitS) });
       if (args.element) {
         const ref = await resolveTarget(cdp, String(args.element), waitS);
         return withTab(tab, { element: ref });

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -178,6 +179,18 @@ def _with_tab(message: str, result: dict[str, Any]) -> str:
     if line:
         lines.append(line)
     return "\n".join(lines)
+
+
+def _free_path(folder: Path, name: str) -> Path:
+    """`name` in `folder`, as "name (1).ext" and so on if taken -- the way
+    the browser names a download that would overwrite a file."""
+    path = folder / name
+    stem, suffix = Path(name).stem, Path(name).suffix
+    n = 1
+    while path.exists():
+        path = folder / f"{stem} ({n}){suffix}"
+        n += 1
+    return path
 
 
 def build_browser_tools(
@@ -341,6 +354,7 @@ def build_browser_tools(
         download: bool = False,
         seconds: float = 0,
         timeout: float = _DEFAULT_WAIT,
+        save_to: str = "",
     ) -> str | dict[str, Any]:
         """Wait in coscribe's browser for one thing: text to appear, text to
         go away (e.g. "Loading…"), an element to appear, or a download to
@@ -357,7 +371,18 @@ def build_browser_tools(
                 it was saved -- the name changes from run to run
             seconds: just wait this long
             timeout: give up after this many seconds (default 30, up to 3600)
+            save_to: with download, a folder to move the file into (the
+                workspace's downloads/ otherwise); one you can write to
         """
+        if save_to and not download:
+            raise ValueError("save_to goes with download=True.")
+        folder = None
+        if save_to:
+            if scope is None:
+                raise ValueError("Saving downloads elsewhere isn't available in this conversation.")
+            # Before waiting: a folder outside the allowed ones should fail
+            # now, not after a twenty-minute export.
+            folder = scope.resolve(save_to, write=True)
         chosen = [n for n, v in (("text", text), ("gone", gone), ("element", element)) if v]
         if download:
             chosen.append("download")
@@ -381,11 +406,15 @@ def build_browser_tools(
         if download:
             # A saved workflow's next step reads the file from here: the
             # name a site gives an export changes run to run.
-            files = [
-                str(d.get("path"))
-                for d in result.get("downloads") or []
-                if d.get("state") == "completed"
-            ]
+            done = [d for d in result.get("downloads") or [] if d.get("state") == "completed"]
+            if folder is not None and scope is not None:
+                folder.mkdir(parents=True, exist_ok=True)
+                for item in done:
+                    source = scope.resolve(str(item.get("path")))
+                    target = _free_path(folder, str(item.get("name") or source.name))
+                    shutil.move(str(source), target)
+                    item["path"] = scope.relative(target)
+            files = [str(item.get("path")) for item in done]
             return {
                 "file": files[-1] if files else "",
                 "files": files,

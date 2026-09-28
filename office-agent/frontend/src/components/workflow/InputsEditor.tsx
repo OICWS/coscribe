@@ -29,7 +29,8 @@ function ReadOnlyInputs({ inputs }: { inputs: WorkflowInput[] }) {
         >
           <VarToken name={input.name} isInput />
           <span className="text-[13px] text-[var(--muted)]">
-            {input.label || INPUT_TYPE_LABEL[input.type]} · asked at each run
+            {input.label || INPUT_TYPE_LABEL[input.type]} ·{" "}
+            {input.required === false ? "optional at each run" : "asked at each run"}
           </span>
           <span className="flex-1" />
           {input.default !== null && input.default !== "" && (
@@ -45,7 +46,7 @@ function ReadOnlyInputs({ inputs }: { inputs: WorkflowInput[] }) {
 }
 
 function blankRow(index: number): Row {
-  return { name: `input${index + 1}`, label: "", type: "text", default: null, original: null };
+  return { name: `input${index + 1}`, label: "", type: "text", default: null, required: true, original: null };
 }
 
 interface InputsEditorProps {
@@ -106,17 +107,18 @@ export function InputsEditor({ inputs, onSave }: InputsEditorProps) {
         <ReadOnlyInputs inputs={inputs} />
       ) : (
         <div className="flex flex-col gap-2 rounded-xl border border-[color-mix(in_srgb,var(--accent)_70%,transparent)] p-3">
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_100px_minmax(0,1fr)_28px] gap-2 px-1 text-xs text-[var(--muted)]">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_100px_minmax(0,1fr)_64px_28px] gap-2 px-1 text-xs text-[var(--muted)]">
             <span>Name</span>
             <span>Shown as</span>
             <span>Type</span>
             <span>Default</span>
+            <span>Optional</span>
             <span />
           </div>
           {rows.map((row, index) => (
             <div
               key={index}
-              className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_100px_minmax(0,1fr)_28px] items-center gap-2"
+              className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_100px_minmax(0,1fr)_64px_28px] items-center gap-2"
             >
               <input
                 aria-label={`Input ${index + 1} name`}
@@ -157,6 +159,15 @@ export function InputsEditor({ inputs, onSave }: InputsEditorProps) {
                   })
                 }
               />
+              <label className="flex justify-center">
+                <input
+                  type="checkbox"
+                  aria-label={`Input ${row.name || index + 1} may be left blank`}
+                  className="h-4 w-4 accent-[var(--accent)]"
+                  checked={row.required === false}
+                  onChange={(e) => update(index, { required: !e.target.checked })}
+                />
+              </label>
               <RemoveButton
                 label={`Remove input ${row.name || index + 1}`}
                 onClick={() => setRows(rows.filter((_, i) => i !== index))}
