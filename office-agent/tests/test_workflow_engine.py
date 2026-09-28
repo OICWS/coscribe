@@ -20,6 +20,7 @@ from coscribe.workflows.engine import (
     WorkflowNotRunnable,
     WorkflowRun,
     fields_schema,
+    resolve_inputs,
 )
 from coscribe.workflows.spec import parse_workflow
 
@@ -341,6 +342,28 @@ async def test_an_input_without_a_value_or_default_is_refused(tmp_path: Path) ->
 
     with pytest.raises(WorkflowNotRunnable, match="input 'path' needs a value"):
         await Harness(tmp_path, []).run(InMemorySaver(), workflow).start({})
+
+
+def test_an_optional_input_may_be_left_blank() -> None:
+    workflow = parse_workflow(
+        {
+            "inputs": [
+                {"name": "run_date", "required": False},
+                {"name": "folder", "default": "downloads"},
+            ],
+            "steps": [
+                {
+                    "id": "a",
+                    "kind": "tool",
+                    "title": "A",
+                    "tool": "read_file",
+                    "args": {"path": "{{folder}}"},
+                }
+            ],
+        }
+    )
+    assert resolve_inputs(workflow, {"run_date": ""}) == {"run_date": "", "folder": "downloads"}
+    assert resolve_inputs(workflow, {})["run_date"] == ""
 
 
 def test_fields_schema_requires_every_field_and_nothing_else() -> None:

@@ -6572,6 +6572,45 @@ next -- or by none, if the export was last.
 - Not done: a setting to send AI downloads to the system Downloads folder
   instead; the workspace is the only destination for now.
 
+## Phase 8bv -- Download folders in workflows, optional inputs (shipped)
+
+From the user's saved FBL5N task: its Run dialog said "run date -- leave
+blank for today", but a blank input disabled Run (every input was
+required), and the long label squeezed the input's name chip to
+"run_da…". They also asked that a workflow choose where downloads go,
+with the AI asking when it drafts one.
+
+- [x] Inputs take `required` (default true). An optional one may be left
+      blank -- its steps get "" -- and the Run dialog says "Optional";
+      the inputs editor has an Optional column. The curator marks an
+      input optional only when a blank value is meant to work.
+- [x] Run dialog: the name chip wraps under a long label instead of
+      being truncated.
+- [x] `browser_wait_for(download=True, save_to=...)` moves the finished
+      file into that folder (checked against the conversation's writable
+      folders before waiting, so a bad folder fails at once rather than
+      after a long export), named as the site named it -- not after the
+      staging folder's " (4)" -- and returns the moved path.
+- [x] Fixed a gap from the previous phase: a quick download was reported
+      by the step that started it and dropped, so a download wait right
+      after waited for another one and timed out. Finished downloads now
+      stay until a wait takes them (kept 30 minutes).
+- [x] Curator: a workflow that downloads gets a folder input (the folder
+      the user named, else `downloads`) passed as `save_to`; the chat's
+      draft tool asks the user where downloads should go first.
+- [x] The Browser tab view (a native layer) stayed painted over the page
+      after a full reload of the app page with the panel open -- it
+      covered the Scheduled page and its dialogs. A main-frame,
+      cross-document navigation of the app page now closes the panel on
+      the desktop side too.
+- [x] Verified in Electron under Xvfb: the re-drafted FBL5N-style
+      workflow gained a `download_folder` input passed as `save_to`; runs
+      into `exports/fbl5n` with a fast export (claimed from the Shift+F4
+      step, 0s wait) and a 45s export both landed there, then again as
+      `EXPORT_20260928.XLSX` / `EXPORT_20260928 (1).XLSX`; a task with
+      the user's long optional run-date input ran with it blank from the
+      Run dialog; after a reload onto Scheduled the tab view was gone.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

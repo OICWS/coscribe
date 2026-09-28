@@ -387,6 +387,12 @@ export function destroyBrowserPanel(): void {
 
 export function registerBrowserPanelHandlers(window: BrowserWindow): void {
   win = window;
+  // A reload of the app page starts it with the panel closed; the tab
+  // view, a native layer, would otherwise stay painted over whatever the
+  // page shows next.
+  window.webContents.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument && panelRect) closePanel();
+  });
   ipcMain.on(CONTENT_PICKED_CHANNEL, (event, info: PickedElementInfo) => {
     const tab = tabFor(event.sender);
     if (tab) void handlePicked(tab, info);
