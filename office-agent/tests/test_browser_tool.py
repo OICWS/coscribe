@@ -249,3 +249,22 @@ def test_evaluate_runs_only_with_approval() -> None:
     assert get_tool_metadata(tools["browser_evaluate"]).risk_category == "EXEC"
     assert get_tool_metadata(tools["browser_file_upload"]).risk_category == "EXTERNAL"
     assert get_tool_metadata(tools["browser_handle_dialog"]).risk_category == "EXTERNAL"
+
+
+def test_a_step_that_downloads_names_the_file() -> None:
+    host = _FakeHost(
+        {
+            "click": {
+                "element": 'button "OK"',
+                "downloads": [
+                    {"path": "C:\\Users\\me\\Downloads\\EXPORT.XLSX", "state": "completed"},
+                    {"path": "C:\\Users\\me\\Downloads\\big.zip", "state": "interrupted"},
+                ],
+            }
+        }
+    )
+    lines = _tools(host)["browser_click"]("e4").splitlines()
+    assert lines[1:] == [
+        "Downloaded C:\\Users\\me\\Downloads\\EXPORT.XLSX",
+        "Download of C:\\Users\\me\\Downloads\\big.zip: interrupted",
+    ]

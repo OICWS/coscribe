@@ -11,10 +11,12 @@
  * sent as real input events, which pages can't tell from the user's.
  */
 
+import { existsSync } from "node:fs";
+import { join, parse } from "node:path";
 import { Readable } from "node:stream";
-import { type BrowserWindow, type WebContents } from "electron";
+import { type BrowserWindow, type DownloadItem, type WebContents, app } from "electron";
 import { pageAgent } from "./browserAgentPage";
-import { type AgentFrame, type PageDialog, type TabCdp, cdpFor } from "./browserCdp";
+import { type AgentFrame, type Download, type PageDialog, type TabCdp, cdpFor, existingCdp } from "./browserCdp";
 import { isAllowed, requestPermission } from "./browserPermissions";
 import {
   BROWSER_AGENT_EVENT,
@@ -25,6 +27,7 @@ import {
   createTab,
   ensureActiveTab,
   normalizeUrl,
+  onTabDownload,
   selectTab,
   setViewHidden,
   tabInfo,
@@ -49,6 +52,14 @@ const CHOOSER_WAIT_MS = 5000;
 // blocks its renderer.
 const BEST_EFFORT_MS = 1500;
 const LOAD_TIMEOUT_MS = 45_000;
+// An element named by description rather than ref (saved workflows do
+// this) may still be on its way when the step runs.
+const TARGET_WAIT_MS = 15_000;
+const REF_PATTERN = /^(f\d+)?e\d+$/;
+// Downloads this soon after an AI step are the AI's; the user's own still
+// get Electron's save dialog.
+const DOWNLOAD_WINDOW_MS = 15_000;
+const DOWNLOAD_WAIT_MS = 120_000;
 const SETTLE_TIMEOUT_MS = 10_000;
 
 interface Command {
@@ -80,6 +91,7 @@ async function settle(wc: WebContents, timeoutMs = SETTLE_TIMEOUT_MS): Promise<v
   await sleep(250);
   const deadline = Date.now() + timeoutMs;
   while (wc.isLoading() && Date.now() < deadline) await sleep(100);
+  await cdpFor(wc).idle();
 }
 
 async function load(wc: WebContents, url: string): Promise<void> {
@@ -139,6 +151,9 @@ const NAMED_KEYS: Record<string, KeySpec> = {
   pageup: { key: "PageUp", code: "PageUp", keyCode: 33 },
   pagedown: { key: "PageDown", code: "PageDown", keyCode: 34 },
   space: { key: " ", code: "Space", keyCode: 32, text: " " },
+  ...Object.fromEntries(
+    Array.from({ length: 12 }, (_, i) => [`f${i + 1}`, { key: `F${i + 1}`, code: `F${i + 1}`, keyCode: 112 + i }]),
+  ),
 };
 const KEY_ALIASES: Record<string, string> = { down: "arrowdown", up: "arrowup", left: "arrowleft", right: "arrowright", esc: "escape", return: "enter", " ": "space" };
 // The protocol's modifier bits.
@@ -301,6 +316,68 @@ async function upload(wc: WebContents, cdp: TabCdp, ref: unknown, files: string[
   return element;
 }
 
+/** A description as snapshots print elements -- 'checkbox "All items"',
+ * optionally ' #2' for the second such -- turned into the element's ref
+ * in a fresh snapshot, waiting for it to appear. A ref passes through. */
+async function resolveTarget(cdp: TabCdp, target: string): Promise<string> {
+  const text = target.trim();
+  if (REF_PATTERN.test(text)) return text;
+  const match = /^([a-z]+)(?:\s+"(.*)")?(?:\s+#(\d+))?$/is.exec(text);
+  if (!match) throw new Error(`"${target}" is neither a ref like e12 nor an element like button "Save".`);
+  const [, role, name, nth] = match;
+  const prefix = name === undefined ? `- ${role.toLowerCase()} [ref=` : `- ${role.toLowerCase()} "${name}" `;
+  const index = Math.max(Number(nth ?? 1), 1) - 1;
+  const deadline = Date.now() + TARGET_WAIT_MS;
+  for (;;) {
+    const { lines } = await snapshotFrame(cdp, cdp.main, 0);
+    const refsWhere = (hit: (line: string) => boolean) =>
+      lines.flatMap((line) => {
+        const trimmed = line.trimStart();
+        const ref = hit(trimmed) ? /\[ref=((?:f\d+)?e\d+)\]/.exec(trimmed)?.[1] : undefined;
+        return ref ? [ref] : [];
+      });
+    let found = refsWhere((line) => line.startsWith(prefix));
+    if (!found.length) found = refsWhere((line) => line.toLowerCase().startsWith(prefix.toLowerCase()));
+    if (found[index]) return found[index];
+    if (cdp.dialog) throw new Error(describeDialog(cdp.dialog));
+    if (Date.now() >= deadline) {
+      throw new Error(`No ${text} appeared on the page within ${TARGET_WAIT_MS / 1000}s -- take a browser_snapshot to see what's there.`);
+    }
+    await sleep(500);
+  }
+}
+
+function uniquePath(dir: string, fileName: string): string {
+  const { name, ext } = parse(fileName || "download");
+  let path = join(dir, `${name}${ext}`);
+  for (let n = 1; existsSync(path); n++) path = join(dir, `${name} (${n})${ext}`);
+  return path;
+}
+
+function onDownload(item: DownloadItem, wc: WebContents): void {
+  const cdp = existingCdp(wc);
+  const aiStep = cdp && (cdp.stepEnded < cdp.stepStarted || Date.now() - cdp.stepEnded < DOWNLOAD_WINDOW_MS);
+  if (!cdp || !aiStep) return;
+  // The system save dialog would stop the AI (and a scheduled run) until
+  // someone answers it; save where the browser would by default instead.
+  const download: Download = { path: uniquePath(app.getPath("downloads"), item.getFilename()), state: "progressing", reported: false };
+  item.setSavePath(download.path);
+  cdp.downloads.push(download);
+  item.once("done", (_event, state) => {
+    download.state = state;
+  });
+}
+
+/** Downloads not yet told to the model, once they've finished. */
+async function newDownloads(cdp: TabCdp): Promise<Array<{ path: string; state: string }>> {
+  const pending = cdp.downloads.filter((d) => !d.reported);
+  const deadline = Date.now() + DOWNLOAD_WAIT_MS;
+  while (pending.some((d) => d.state === "progressing") && Date.now() < deadline) await sleep(200);
+  for (const d of pending) d.reported = true;
+  cdp.downloads = cdp.downloads.filter((d) => !d.reported);
+  return pending.map((d) => ({ path: d.path, state: d.state }));
+}
+
 function describeValue(value: unknown): string {
   if (value === undefined) return "undefined";
   if (typeof value === "string") return value;
@@ -312,7 +389,7 @@ function describeValue(value: unknown): string {
 }
 
 async function run(command: Command): Promise<Record<string, unknown>> {
-  const args = command.args ?? {};
+  let args = command.args ?? {};
   if (command.action === "tabs") {
     const op = String(args.op);
     if (op === "new") {
@@ -322,8 +399,11 @@ async function run(command: Command): Promise<Record<string, unknown>> {
       const tab = createTab();
       selectTab(tab.id);
       if (args.url) {
-        await cdpFor(tab.view.webContents).ensure();
+        const cdp = cdpFor(tab.view.webContents);
+        cdp.stepStarted = Date.now();
+        await cdp.ensure();
         await load(tab.view.webContents, String(args.url));
+        cdp.stepEnded = Date.now();
       }
     } else if (op === "select") {
       if (!selectTab(Number(args.tab_id))) throw new Error(`There's no tab ${args.tab_id}.`);
@@ -340,19 +420,25 @@ async function run(command: Command): Promise<Record<string, unknown>> {
     throw new Error("The current tab is empty -- open a page with browser_navigate first.");
   }
   const cdp = cdpFor(wc);
+  cdp.stepStarted = Date.now();
   await cdp.ensure();
   if (cdp.dialog && command.action !== "handle_dialog") throw new Error(describeDialog(cdp.dialog));
 
   let result: Record<string, unknown>;
   try {
+    if (typeof args.ref === "string" && args.ref.trim()) args = { ...args, ref: await resolveTarget(cdp, args.ref) };
     result = await act(command, tab, wc, cdp, args);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(cdp.dialog ? `${message} ${describeDialog(cdp.dialog)}` : message);
+  } finally {
+    cdp.stepEnded = Date.now();
   }
   // What a step left open for the model to deal with next.
   if (cdp.dialog) result.dialog = describeDialog(cdp.dialog);
   if (cdp.chooser) result.file_chooser = true;
+  const downloads = await newDownloads(cdp);
+  if (downloads.length) result.downloads = downloads;
   return result;
 }
 
@@ -502,6 +588,7 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
   const headers = { "x-coscribe-browser-token": token };
   let queue: Promise<void> = Promise.resolve();
   let frameOffTimer: ReturnType<typeof setTimeout> | undefined;
+  onTabDownload(onDownload);
 
   const notify = (payload: Record<string, unknown>) => {
     const win = getWindow();

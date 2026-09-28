@@ -10,6 +10,7 @@ before anything is saved, so this only has to be a good first pass."""
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -87,11 +88,12 @@ undone later.
 - Add a check wherever the conversation verified something (counts that \
 must match, a value that must not be empty), grounded in what it found.
 - Keep it as short as the task allows; the reviewer can add steps later.
-- Browser steps must work on a fresh page load. An element reference taken \
-from a page snapshot (like ref "e42") is made anew on every load, so never \
-copy one into a step: navigate by URL, and act on elements through a tool \
-that takes a CSS selector or runs code against the page, using selectors \
-the conversation showed to work.
+- Browser steps must work on a fresh page load. Element refs like "e42" \
+are numbered afresh on every load, so a step names its element the way the \
+page snapshot printed it -- the conversation's calls already show it so, e.g. \
+"ref": "checkbox \\"All items\\"" -- and never as a bare ref. Such a step \
+waits for its element to appear, so leave out snapshot calls that only \
+looked at the page. Navigate by URL.
 - "notes" lists what you weren't sure about: guesses, values you turned \
 into inputs, steps you dropped on purpose.
 """
@@ -162,13 +164,59 @@ def _as_json(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
 
 
+_BARE_REF = re.compile(r"(?:f\d+)?e\d+")
+# A snapshot line: '- checkbox "All items" [ref=e322] [checked]'.
+_SNAPSHOT_LINE = re.compile(r'^\s*- ([a-z]+)( ".*")? \[ref=((?:f\d+)?e\d+)\]')
+# What an action reports it acted on: 'Clicked checkbox "All items".'
+_ACTED_ON = re.compile(r"^(?:Clicked|Typed into|Hovering over|Uploaded .+ to) (.+)\.$", re.M)
+
+
+def _element_names(snapshot: str) -> dict[str, str]:
+    """Ref -> the element as the browser resolves a description: its
+    snapshot line's role and name, with " #n" for the n-th alike."""
+    seen: dict[str, int] = {}
+    names = {}
+    for line in snapshot.splitlines():
+        match = _SNAPSHOT_LINE.match(line)
+        if not match:
+            continue
+        base = f"{match[1]}{match[2] or ''}"
+        seen[base] = seen.get(base, 0) + 1
+        names[match[3]] = base if seen[base] == 1 else f"{base} #{seen[base]}"
+    return names
+
+
+def describe_browser_refs(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The tool calls with each browser ref replaced by the element it
+    named, so a workflow drafted from them still finds it after a reload,
+    when the page numbers its refs afresh."""
+    names: dict[str, str] = {}
+    out = []
+    for entry in entries:
+        if entry["kind"] != "tool" or not str(entry.get("tool_name", "")).startswith("browser_"):
+            out.append(entry)
+            continue
+        result = _as_json(entry.get("result") or "")
+        if entry["tool_name"] == "browser_snapshot":
+            names.update(_element_names(result))
+        args = entry.get("arguments")
+        ref = args.get("ref") if isinstance(args, dict) else None
+        if isinstance(args, dict) and isinstance(ref, str) and _BARE_REF.fullmatch(ref.strip()):
+            acted = _ACTED_ON.search(result)
+            name = names.get(ref.strip()) or (acted[1] if acted else None)
+            if name:
+                entry = {**entry, "arguments": {**args, "ref": name}}
+        out.append(entry)
+    return out
+
+
 def render_conversation(messages: list[Any]) -> tuple[str, list[str]]:
     """The conversation as the curator reads it, and the tools it used
     successfully, in first-use order."""
     lines: list[str] = []
     used: list[str] = []
     call_number = 0
-    for entry in serialize_history_for_ws_lg(messages):
+    for entry in describe_browser_refs(serialize_history_for_ws_lg(messages)):
         if entry["kind"] == "user":
             lines.append(f"[user] {_clip(entry['text'], _TEXT_CHARS)}")
         elif entry["kind"] == "agent":
@@ -238,6 +286,12 @@ def check_draft(workflow: Workflow, tools: dict[str, Any]) -> list[str]:
         if step.tool in UNAVAILABLE_TOOLS or step.tool not in tools:
             problems.append(f"step {index}: there's no tool called {step.tool!r} to use")
             continue
+        ref = step.args.get("ref")
+        if step.tool.startswith("browser_") and isinstance(ref, str) and _BARE_REF.fullmatch(ref):
+            problems.append(
+                f"step {index}: ref {ref!r} only existed on the conversation's page; name the "
+                "element as the snapshot printed it, e.g. 'checkbox \"All items\"'"
+            )
         params = {p["name"]: p for p in describe_params(tools[step.tool])}
         unknown = sorted(set(step.args) - set(params))
         if unknown:

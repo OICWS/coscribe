@@ -6486,6 +6486,44 @@ tokens on a task this browser did in ~27K).
   way. The app opens no such port, so it's a harness issue: the chat
   driver now attaches only to send the message and to read the reply.
 
+## Phase 8bt -- Browser steps that survive a replay: descriptions, waiting, downloads, F-keys (shipped)
+
+Found by a user's real SAP WebGUI run (FBL5N, customer open items):
+Shift+F4 was refused ("Unknown key"), the model then reached for a
+leftover Playwright connector that opened an empty browser, the export
+stopped at Electron's save-location dialog, and the conversation saved as
+a fixed workflow failed at step 6 with "No element with ref e322" -- a
+ref copied from the conversation's page, while an earlier step had
+"typed" into a transaction box before SAP had drawn the next screen.
+
+- [x] F1–F12 in `browser_press_key`, with modifiers (`Shift+F4`).
+- [x] Element descriptions in place of refs, as the snapshot prints them
+      (`checkbox "All items"`, `textbox "Posting date" #2`), resolved from
+      a fresh snapshot (frames included) and waited for up to 15s.
+- [x] Drafting a workflow from a conversation rewrites each browser ref
+      into its element's description (from the snapshots in that
+      conversation, or the element the step reported acting on); the
+      curator is told to keep them, and a draft with a bare ref goes back
+      to it as a problem.
+- [x] Each step waits for the requests it set off (Network domain, main
+      frame; streams excluded; 500ms quiet, 8s cap) -- SAP-style pages
+      swap content in by script with no page load to wait for.
+- [x] Downloads during AI steps save to the Downloads folder without the
+      dialog, renamed on a clash, and the step's result names the file;
+      the user's own downloads still ask.
+- [x] The browser instructions tell the model to leave connector browser
+      tools (e.g. `playwright_*`) alone for pages in coscribe's browser.
+- [x] Verified in Electron under Xvfb against a fake WebGUI (content by
+      fetch after 2s, Execute by fetch, Shift+F4 exports an XLSX):
+      deepseek-flash did the task in chat, the conversation was drafted
+      into a workflow whose steps all named elements by description, and
+      the saved task ran start to finish in 11s with no model -- the
+      transaction step waited 2.7s for the screen, the export saved
+      without a dialog.
+- Workflows saved before this still hold refs like `e322`; re-draft them
+  from their conversation, or edit the step's ref to the element's
+  description.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
