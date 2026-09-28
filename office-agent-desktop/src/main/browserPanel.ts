@@ -27,6 +27,7 @@ import {
   shell,
   type BrowserWindow,
   type Rectangle,
+  type DownloadItem,
   type Session,
   type WebContents,
 } from "electron";
@@ -134,9 +135,18 @@ export function normalizeUrl(input: string): string {
   return `https://www.bing.com/search?q=${encodeURIComponent(text)}`;
 }
 
+let downloadHandler: ((item: DownloadItem, wc: WebContents) => void) | undefined;
+
+/** Called for every download a tab starts, before Electron asks where to
+ * save it; setting a save path there skips the question. */
+export function onTabDownload(handler: (item: DownloadItem, wc: WebContents) => void): void {
+  downloadHandler = handler;
+}
+
 function tabSession(): Session {
   if (browserSession) return browserSession;
   browserSession = session.fromPartition(PARTITION);
+  browserSession.on("will-download", (_event, item, wc) => downloadHandler?.(item, wc));
   // Electron grants every permission by default; a site shouldn't get the
   // camera, microphone or location just by asking.
   const allowed = new Set(["clipboard-sanitized-write", "fullscreen", "pointerLock"]);

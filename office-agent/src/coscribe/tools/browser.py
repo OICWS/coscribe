@@ -142,6 +142,10 @@ def _with_tab(message: str, result: dict[str, Any]) -> str:
         lines.append(
             "That opened a file chooser -- choose the files with browser_file_upload(paths=[...])."
         )
+    for download in result.get("downloads") or []:
+        path, state = download.get("path"), download.get("state")
+        done = state == "completed"
+        lines.append(f"Downloaded {path}" if done else f"Download of {path}: {state}")
     line = _tab_line(result.get("tab"))
     if line:
         lines.append(line)
@@ -179,7 +183,11 @@ def build_browser_tools(
         you can act on has a ref like [ref=e12] -- pass it to browser_click,
         browser_type, browser_select_option or browser_hover. Take a new
         snapshot after anything that changes the page; refs from an older
-        snapshot may no longer exist.
+        snapshot may no longer exist. In place of a ref those tools also
+        take the element as the snapshot prints it, e.g. 'checkbox "All
+        items"' (add " #2" for the second such): it waits up to 15s for the
+        element to appear, and it's what a saved workflow must use, since
+        refs are numbered afresh on every page load.
 
         Args:
             start: character offset to continue a long page from (the
@@ -203,7 +211,7 @@ def build_browser_tools(
         buttons submit.
 
         Args:
-            ref: the element's ref, e.g. "e12"
+            ref: the element's ref, e.g. "e12", or its description
             double: double-click instead of a single click
         """
         result = call("click", ref=ref, double=double)
@@ -214,7 +222,7 @@ def build_browser_tools(
         it, by the field's ref from the latest browser_snapshot.
 
         Args:
-            ref: the field's ref, e.g. "e7"
+            ref: the field's ref, e.g. "e7", or its description
             text: what to type
             submit: press Enter afterwards (e.g. to run a search)
         """
@@ -223,8 +231,8 @@ def build_browser_tools(
 
     def browser_press_key(key: str) -> str:
         """Press a key in coscribe's browser, on whatever has focus -- e.g.
-        "Enter", "Escape", "Tab", "ArrowDown", "PageDown", "Backspace", or a
-        combination like "Control+a".
+        "Enter", "Escape", "Tab", "ArrowDown", "PageDown", "Backspace",
+        "F1".."F12", or a combination like "Control+a" or "Shift+F4".
 
         Args:
             key: the key or combination
@@ -235,7 +243,8 @@ def build_browser_tools(
         """Choose option(s) in a dropdown (<select>) in coscribe's browser.
 
         Args:
-            ref: the dropdown's ref from the latest browser_snapshot
+            ref: the dropdown's ref from the latest browser_snapshot, or
+                its description
             values: the options to choose, by their visible text or value
         """
         result = call("select_option", ref=ref, values=values)
@@ -247,7 +256,8 @@ def build_browser_tools(
         a menu that appears on hover.
 
         Args:
-            ref: the element's ref from the latest browser_snapshot
+            ref: the element's ref from the latest browser_snapshot, or its
+                description
         """
         result = call("hover", ref=ref)
         return _with_tab(f"Hovering over {result.get('element') or ref}.", result)

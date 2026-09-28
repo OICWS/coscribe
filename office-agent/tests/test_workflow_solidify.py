@@ -284,3 +284,67 @@ async def test_a_revision_the_reviser_refuses_explains_why() -> None:
 
     with pytest.raises(DraftFailed, match="no email tool"):
         await revise_workflow(model, "Error audit", SAVED, "email it to me", [], TOOLS)
+
+
+SNAPSHOT = """Tab 1: FBL5N -- https://poe.example/sap
+- checkbox "Open items" [ref=e320] [checked]
+- checkbox "All items" [ref=e322] [unchecked]
+- textbox "Posting date" [ref=e330]
+- textbox "Posting date" [ref=e331]
+- iframe "Help" [frame=f1]:
+  - button "Close" [ref=f1e2]"""
+
+BROWSER_CONVERSATION = [
+    HumanMessage("Tick All items and fill the dates."),
+    _call("s1", "browser_snapshot", {}),
+    ToolMessage(SNAPSHOT, tool_call_id="s1"),
+    _call("c1", "browser_click", {"ref": "e322"}),
+    ToolMessage('Clicked checkbox "All items".', tool_call_id="c1"),
+    _call("c2", "browser_type", {"ref": "e331", "text": "2026.09.10"}),
+    ToolMessage('Typed into textbox "Posting date".', tool_call_id="c2"),
+    _call("c3", "browser_click", {"ref": "f1e2"}),
+    ToolMessage('Clicked button "Close".', tool_call_id="c3"),
+    _call("c4", "browser_click", {"ref": "e999"}),
+    ToolMessage('Clicked button "Execute".', tool_call_id="c4"),
+]
+
+
+def test_the_transcript_names_browser_elements_instead_of_page_refs() -> None:
+    transcript, _ = render_conversation(BROWSER_CONVERSATION)
+    assert '"ref": "checkbox \\"All items\\""' in transcript
+    # The second field with the same name is told apart the way the
+    # browser counts them.
+    assert '"ref": "textbox \\"Posting date\\" #2"' in transcript
+    assert '"ref": "button \\"Close\\""' in transcript
+    # Not in any snapshot: the element the step reported acting on.
+    assert '"ref": "button \\"Execute\\""' in transcript
+    assert '"e322"' not in transcript
+
+
+def test_check_draft_refuses_a_bare_page_ref_in_a_browser_step() -> None:
+    def browser_click(ref: str) -> str:
+        """Click."""
+        return ""
+
+    workflow = parse_workflow(
+        {
+            "steps": [
+                {
+                    "id": "a",
+                    "kind": "tool",
+                    "title": "A",
+                    "tool": "browser_click",
+                    "args": {"ref": "e322"},
+                },
+                {
+                    "id": "b",
+                    "kind": "tool",
+                    "title": "B",
+                    "tool": "browser_click",
+                    "args": {"ref": 'checkbox "All items"'},
+                },
+            ]
+        }
+    )
+    problems = check_draft(workflow, {"browser_click": browser_click})
+    assert len(problems) == 1 and problems[0].startswith("step 1: ref 'e322'")

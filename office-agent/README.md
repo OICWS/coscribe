@@ -1330,6 +1330,22 @@ any words you wrote on it.
   fields, each actionable one with a ref (`[ref=e12]`), and acts on refs.
   Clicks and typing are sent as real input events, so sites treat them
   like yours.
+- Instead of a ref, an action also takes the element the way the snapshot
+  prints it -- `checkbox "All items"`, `textbox "Posting date" #2` for
+  the second field of that name -- and waits up to 15s for it to appear.
+  Refs are numbered afresh on every page load, so saved workflows name
+  elements this way: drafting a workflow from a conversation rewrites
+  each ref into its element's description, and a draft still holding a
+  bare ref is sent back to the curator.
+- Every step waits for what it set off: a page load, and any request the
+  page made since the step began (up to 8s, for pages that poll), so
+  pages that swap in content by script -- SAP WebGUI, most web apps --
+  are ready for the next step. Keys include F1–F12 and combinations like
+  `Shift+F4`.
+- **Downloads** started by the AI's steps are saved to the Downloads folder
+  without the save dialog (which would stall an unattended run), under a
+  new name if one is taken, and the step's result names the file. Your
+  own downloads still ask where to save.
 - **Iframes**, including ones from other sites (payment widgets, embedded
   forms), show indented under their `iframe` line with refs like
   `[ref=f1e3]` that click and type the same way. To keep embedded pages
@@ -1382,6 +1398,8 @@ any words you wrote on it.
 - This replaces the Playwright connector, which is no longer in the
   connector catalog: it drove a separate browser window with none of the
   panel's sign-ins, and returned a full page snapshot after every action.
+  If you still have one configured, the AI is told not to use it for
+  pages in coscribe's browser.
 - How it's wired: the desktop app starts the server with a random token,
   connects to `/internal/browser-host` with it and carries out each
   command on its tabs (`office-agent-desktop/src/main/browserAgent.ts`);

@@ -15,6 +15,13 @@ import { pageAgent } from "./browserAgentPage";
 
 const WORLD_NAME = "coscribe-agent";
 const EVAL_TIMEOUT_MS = 20_000;
+// A step is done once the requests it set off have finished and none has
+// started for this long -- pages like SAP's WebGUI swap in their content
+// by script, with no page load to wait for.
+const IDLE_QUIET_MS = 500;
+const IDLE_MAX_MS = 8000;
+// Streams that stay open by design never finish.
+const LONG_LIVED = new Set(["EventSource", "WebSocket", "Ping"]);
 
 export interface PageDialog {
   type: string;
@@ -52,9 +59,22 @@ function exceptionMessage(details: ExceptionDetails): string {
   return raw.split("\n")[0].replace(/^(Uncaught )?Error:\s*/, "");
 }
 
+/** A file the page downloaded during the AI's steps, saved without asking. */
+export interface Download {
+  path: string;
+  state: "progressing" | "completed" | "cancelled" | "interrupted";
+  reported: boolean;
+}
+
 export class TabCdp {
   dialog: PageDialog | null = null;
   chooser: FileChooser | null = null;
+  downloads: Download[] = [];
+  /** When the AI's current (or latest) step began, and ended. */
+  stepStarted = 0;
+  stepEnded = 0;
+  /** Requests in flight on the tab's own frame, by id, with when they began. */
+  private requests = new Map<string, number>();
   readonly main: AgentFrame = { key: "", frameId: "", index: -1 };
   /** Frames by key ("f1"), and keys by frame id, so a frame keeps its key
    * (and its refs stay "f1e3") across snapshots. */
@@ -77,6 +97,7 @@ export class TabCdp {
     this.chooser = null;
     this.sessions.clear();
     this.contexts.clear();
+    this.requests.clear();
   }
 
   send<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}, session?: string): Promise<T> {
@@ -99,6 +120,7 @@ export class TabCdp {
 
   private async enable(session?: string): Promise<void> {
     await this.send("Page.enable", {}, session);
+    if (!session) await this.send("Network.enable", { maxTotalBufferSize: 1_000_000, maxResourceBufferSize: 100_000 });
     await this.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, session);
   }
 
@@ -117,6 +139,10 @@ export class TabCdp {
         session,
         multiple: params.mode === "selectMultiple",
       };
+    } else if (method === "Network.requestWillBeSent" && !session) {
+      if (!LONG_LIVED.has(String(params.type))) this.requests.set(String(params.requestId), Date.now());
+    } else if ((method === "Network.loadingFinished" || method === "Network.loadingFailed") && !session) {
+      this.requests.delete(String(params.requestId));
     } else if (method === "Target.attachedToTarget") {
       const info = params.targetInfo as { targetId: string; type: string };
       const child = String(params.sessionId);
@@ -224,6 +250,23 @@ export class TabCdp {
     return handle.objectId;
   }
 
+  /** Waits until the requests started since the current step began have
+   * finished and none has started for a moment, or a dialog opens, or
+   * IDLE_MAX_MS passes (a page may poll forever). */
+  async idle(): Promise<void> {
+    const deadline = Date.now() + IDLE_MAX_MS;
+    let quietSince = Date.now();
+    // A long poll never reports back; don't keep it forever.
+    for (const [id, began] of this.requests) if (began < deadline - 10 * 60_000) this.requests.delete(id);
+    while (Date.now() < deadline && !this.dialog) {
+      let busy = false;
+      for (const began of this.requests.values()) if (began >= this.stepStarted) busy = true;
+      if (busy) quietSince = Date.now();
+      else if (Date.now() - quietSince >= IDLE_QUIET_MS) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
   /** Waits for `command`, or until the page puts up a dialog: a dialog
    * holds the page -- and any command waiting on it -- until someone
    * answers it. Undefined in that case. */
@@ -289,6 +332,12 @@ export class TabCdp {
 }
 
 const cdps = new WeakMap<WebContents, TabCdp>();
+
+/** The tab's protocol connection if the AI has used the tab, without
+ * making one. */
+export function existingCdp(wc: WebContents): TabCdp | undefined {
+  return cdps.get(wc);
+}
 
 export function cdpFor(wc: WebContents): TabCdp {
   let cdp = cdps.get(wc);
