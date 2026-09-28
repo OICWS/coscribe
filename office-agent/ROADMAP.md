@@ -6429,6 +6429,63 @@ reproduced here before fixing:
 - [x] Connectors list: padded grid rows whose icons line up with the
       "Connector" heading, and a rounded hover background.
 
+## Phase 8bs -- The built-in browser handles dialogs, uploads, iframes and scripts (shipped)
+
+What was left for Playwright MCP to do better, done in the built-in
+browser instead -- its tabs keep the user's sign-ins and its snapshots
+stay small (in the user's own comparison, Playwright MCP spent ~114K
+tokens on a task this browser did in ~27K).
+
+- [x] In-process DevTools protocol (`webContents.debugger`,
+      `browserCdp.ts`), attached on the AI's first step in a tab, never
+      to a tab the user only browses; no port opened. Pages are read in
+      an isolated world per frame; cross-site iframes (their own
+      processes) through auto-attached flat sessions.
+- [x] Input moved from `sendInputEvent` to `Input.dispatch*`:
+      `sendInputEvent` hands every event to the top frame's widget, so a
+      click inside a cross-site iframe landed nowhere (the click mark sat
+      on "Pay now", nothing happened). Protocol coordinates are CSS
+      pixels; verified correct at 121% tab zoom.
+- [x] Iframes: `[frame=f1]` with refs `f1e3`; frames under 80×40 or
+      hidden left out, 80 lines / 5000 chars per frame (the note names the
+      frame's address), two levels deep; a frame still on its blank
+      placeholder says "still loading" rather than "empty". Keys stay stable
+      across snapshots and are dropped when the tab navigates, so a stale
+      `f1e2` is refused rather than hitting a new frame.
+- [x] Dialogs: alert/confirm caught with `Page.javascriptDialogOpening`,
+      reported in the step's result, answered by `browser_handle_dialog`;
+      every other step refuses until then. Commands waiting on the page
+      (a click, `browser_evaluate`) return when a dialog opens instead of
+      hanging -- the desktop runs one command at a time, so one stuck
+      evaluate had blocked the answer too. Electron also shows its own
+      unparented message box and closes it only on the internal
+      `-cancel-dialogs` event, so answering through the protocol left it
+      on screen; the tab now emits that event after answering. `prompt()`
+      isn't offered: Electron's handler answers it as cancelled without
+      showing anything.
+- [x] Uploads (`browser_file_upload`): a file field gets
+      `DOM.setFileInputFiles` directly; a styled button in front of a
+      hidden field is clicked with the file chooser intercepted, so no
+      system dialog appears; any click that opens a chooser is reported
+      so the model can answer it. Paths resolved through the
+      conversation's folders; single-file fields refuse several.
+- [x] `browser_evaluate`, gated as EXEC, result clipped at 5000 chars.
+- [x] The three new tools are deferred (found through `search_tools`), so
+      a conversation that needs none of this pays nothing for it.
+- [x] Verified in Electron under Xvfb through a debug channel (every path
+      above, nested cross-site frames included) and in chat with
+      deepseek-flash, 11 browser steps: it cancelled the confirm, clicked
+      Attach files, answered the chooser the result reported with
+      `q3-report.txt`, then typed "Ada" and paid inside the cross-site
+      widget, reporting cancelled / q3-report.txt:31 / paid by Ada.
+- Testing note: a Playwright client attached over the remote-debugging
+  port *before* a tab's first load holds that tab's new cross-site frames
+  paused (Chrome keeps one hold per debugger; our own
+  `runIfWaitingForDebugger` doesn't release Playwright's), so the frame
+  never commits and the load times out. Two earlier chat runs failed that
+  way. The app opens no such port, so it's a harness issue: the chat
+  driver now attaches only to send the message and to read the reply.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

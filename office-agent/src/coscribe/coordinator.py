@@ -42,6 +42,7 @@ from .tools import (
     load_pptx_templates,
     load_skills,
 )
+from .tools._workspace import WorkspaceScope
 
 # The always-bound tool set when Settings.defer_tools is on (see
 # web/session.py's _build_lg_agent and runtime_lg/tool_deferral.py) --
@@ -656,7 +657,9 @@ whatever they've signed in to there. Use it when a page needs a login, \
 JavaScript, clicking or filling in forms, or when the user asks you to do \
 something on a website; plain reading of a public page is cheaper with \
 read_web_page. Work in small steps: navigate, browser_snapshot to get refs, \
-act on a ref, snapshot again. The first time you use a site in a \
+act on a ref, snapshot again. A step's result says when the page opened a \
+dialog or a file chooser; answer it with browser_handle_dialog or \
+browser_file_upload. The first time you use a site in a \
 conversation the user may be asked to allow it; if they don't, leave that \
 site alone unless they ask again. Never type passwords, payment details or \
 other secrets yourself -- if a page asks for a login or a CAPTCHA, stop and \
@@ -800,7 +803,12 @@ def build_coordinator_agent(
     )
     instructions = f"{INSTRUCTIONS}\n\n{_describe_folders(root, extra_folders)}"
     if settings.browser_host_token:
-        tools += build_browser_tools(thread_id)
+        tools += build_browser_tools(
+            thread_id,
+            scope=WorkspaceScope(
+                root, extra_readable=extra_readable, extra_writable=extra_writable
+            ),
+        )
         instructions = f"{instructions}\n\n{BROWSER_INSTRUCTIONS}"
     extra_dirs_note = _describe_extra_dirs(
         settings.extra_readable_dirs, settings.extra_writable_dirs
