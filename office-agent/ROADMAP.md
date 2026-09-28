@@ -6524,6 +6524,54 @@ ref copied from the conversation's page, while an earlier step had
   from their conversation, or edit the step's ref to the element's
   description.
 
+## Phase 8bu -- Waits that fit slow pages and long exports; downloads into the workspace (shipped)
+
+The user asked what happens with fixed waits on a slow network or an
+export that takes 20 minutes. Honest answer at the time: an element named
+by description waited a fixed 15s, a download was waited on for at most
+120s and then never mentioned again, and an export that only started
+downloading after the step returned was reported by whatever step came
+next -- or by none, if the export was last.
+
+- [x] Fixed numbers are only a floor now: each step still waits for the
+      requests it set off (500ms quiet, 8s cap -- reaching the cap isn't
+      an error); anything slower is an explicit condition with a timeout.
+- [x] Element actions take `timeout` (default 30s, up to 3600s), editable
+      per step in a saved workflow.
+- [x] `browser_wait_for`: text to appear, text to go away ("Generating
+      export…"), an element, or a download to finish, one at a time, with
+      `timeout` up to an hour. A download wait returns `file` (and
+      `files`) so a workflow's later steps read `{{step.file}}`: sites
+      name exports differently every run, and a fixed name read a stale
+      file in a live run (see below).
+- [x] A download that finishes within 10s is reported by the step that
+      started it; a slower one is reported as started, and
+      `browser_wait_for(download=True)` waits it out.
+- [x] AI downloads go to `downloads/` in the conversation's workspace (a
+      scheduled task's own workspace for its runs), not the system
+      Downloads folder: the file tools can read them and runs don't mix.
+      The user's own downloads still get the save dialog.
+- [x] Stop reaches the desktop app: the conversation's step in progress
+      ends at once and the steps it had queued are dropped, so an hour's
+      wait can't hold the one-at-a-time command queue.
+- [x] Curator: keep a download/slow-page wait with a timeout well above
+      what the conversation needed, and read the file from the wait's
+      result.
+- [x] Verified in Electron under Xvfb against a fake WebGUI: a screen
+      that takes 40s fails at the 30s default and passes with `timeout`
+      90 (33s); an export that starts downloading after 45s is waited out
+      (45s) into `downloads/`; a 20s transfer is announced after 10s and
+      completed by the wait; Stop during a 600s wait returned in under a
+      second and the next command ran at once. deepseek-flash did the
+      slow export in chat, reading the file from `downloads/`. The first
+      workflow drafted from it checked `downloads/EXPORT_20260928.XLSX`
+      -- the chat's file, while the run had saved `... (1).XLSX` -- which
+      is why download waits now return the path; re-drafted, the workflow
+      waits 600s for the download and checks `{{download.file}}`, and two
+      runs each read their own new file.
+- Not done: a setting to send AI downloads to the system Downloads folder
+  instead; the workspace is the only destination for now.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

@@ -115,6 +115,7 @@ from ..tools import (
 )
 from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
+from ..tools.browser import BROWSER_HOST
 from ..tools.documents import DocumentToolkit
 from ..tools.interaction import PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL, PLAN_CHOICE_REVISE
 from ..tools.presentations import PresentationToolkit
@@ -1010,6 +1011,9 @@ class ChatSessionLG:
         case and deliberately avoids it there too."""
         self._stop_requested = True
         self._stop_waited_on_subagents()
+        # A browser step can be waiting out a slow page for an hour, in the
+        # desktop app where cancelling this turn doesn't reach.
+        BROWSER_HOST.cancel(self.thread_id)
         has_pending_interrupt = False
         for request_id, future in list(self._pending_approvals.items()):
             if request_id in self._subagent_request_ids:

@@ -11,7 +11,7 @@
  * sent as real input events, which pages can't tell from the user's.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join, parse } from "node:path";
 import { Readable } from "node:stream";
 import { type BrowserWindow, type DownloadItem, type WebContents, app } from "electron";
@@ -52,14 +52,30 @@ const CHOOSER_WAIT_MS = 5000;
 // blocks its renderer.
 const BEST_EFFORT_MS = 1500;
 const LOAD_TIMEOUT_MS = 45_000;
-// An element named by description rather than ref (saved workflows do
-// this) may still be on its way when the step runs.
-const TARGET_WAIT_MS = 15_000;
+// How long a step waits for what it needs -- an element named by
+// description, text, a download -- unless the step says otherwise; a
+// saved workflow step can allow up to an hour for a slow export.
+const DEFAULT_WAIT_S = 30;
+const MAX_WAIT_S = 3600;
 const REF_PATTERN = /^(f\d+)?e\d+$/;
 // Downloads this soon after an AI step are the AI's; the user's own still
 // get Electron's save dialog.
 const DOWNLOAD_WINDOW_MS = 15_000;
-const DOWNLOAD_WAIT_MS = 120_000;
+// A quick download is reported by the step that started it; a slower one
+// is reported as started, and browser_wait_for(download) waits it out.
+const DOWNLOAD_QUICK_MS = 10_000;
+
+/** The step running now, and whether its conversation was stopped. */
+let running: { threadId: string; stop: boolean } | null = null;
+
+function checkStop(): void {
+  if (running?.stop) throw new Error("Stopped by the user.");
+}
+
+function waitSeconds(args: Record<string, unknown>): number {
+  const seconds = Number(args.timeout);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, MAX_WAIT_S) : DEFAULT_WAIT_S;
+}
 const SETTLE_TIMEOUT_MS = 10_000;
 
 interface Command {
@@ -67,6 +83,8 @@ interface Command {
   thread_id: string;
   action: string;
   args: Record<string, unknown>;
+  /** When the desktop app got it: a stop covers what arrived before it. */
+  receivedAt?: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -319,7 +337,7 @@ async function upload(wc: WebContents, cdp: TabCdp, ref: unknown, files: string[
 /** A description as snapshots print elements -- 'checkbox "All items"',
  * optionally ' #2' for the second such -- turned into the element's ref
  * in a fresh snapshot, waiting for it to appear. A ref passes through. */
-async function resolveTarget(cdp: TabCdp, target: string): Promise<string> {
+async function resolveTarget(cdp: TabCdp, target: string, waitS = DEFAULT_WAIT_S): Promise<string> {
   const text = target.trim();
   if (REF_PATTERN.test(text)) return text;
   const match = /^([a-z]+)(?:\s+"(.*)")?(?:\s+#(\d+))?$/is.exec(text);
@@ -327,8 +345,9 @@ async function resolveTarget(cdp: TabCdp, target: string): Promise<string> {
   const [, role, name, nth] = match;
   const prefix = name === undefined ? `- ${role.toLowerCase()} [ref=` : `- ${role.toLowerCase()} "${name}" `;
   const index = Math.max(Number(nth ?? 1), 1) - 1;
-  const deadline = Date.now() + TARGET_WAIT_MS;
+  const deadline = Date.now() + waitS * 1000;
   for (;;) {
+    checkStop();
     const { lines } = await snapshotFrame(cdp, cdp.main, 0);
     const refsWhere = (hit: (line: string) => boolean) =>
       lines.flatMap((line) => {
@@ -341,7 +360,7 @@ async function resolveTarget(cdp: TabCdp, target: string): Promise<string> {
     if (found[index]) return found[index];
     if (cdp.dialog) throw new Error(describeDialog(cdp.dialog));
     if (Date.now() >= deadline) {
-      throw new Error(`No ${text} appeared on the page within ${TARGET_WAIT_MS / 1000}s -- take a browser_snapshot to see what's there.`);
+      throw new Error(`No ${text} appeared on the page within ${waitS}s -- take a browser_snapshot to see what's there.`);
     }
     await sleep(500);
   }
@@ -359,8 +378,15 @@ function onDownload(item: DownloadItem, wc: WebContents): void {
   const aiStep = cdp && (cdp.stepEnded < cdp.stepStarted || Date.now() - cdp.stepEnded < DOWNLOAD_WINDOW_MS);
   if (!cdp || !aiStep) return;
   // The system save dialog would stop the AI (and a scheduled run) until
-  // someone answers it; save where the browser would by default instead.
-  const download: Download = { path: uniquePath(app.getPath("downloads"), item.getFilename()), state: "progressing", reported: false };
+  // someone answers it. Into the conversation's own folder instead, where
+  // the AI can read it and runs don't mix.
+  const dir = cdp.downloadDir || app.getPath("downloads");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    // setSavePath below then fails the download, which the step reports.
+  }
+  const download: Download = { path: uniquePath(dir, item.getFilename()), state: "progressing", announced: false, reported: false };
   item.setSavePath(download.path);
   cdp.downloads.push(download);
   item.once("done", (_event, state) => {
@@ -368,14 +394,43 @@ function onDownload(item: DownloadItem, wc: WebContents): void {
   });
 }
 
-/** Downloads not yet told to the model, once they've finished. */
-async function newDownloads(cdp: TabCdp): Promise<Array<{ path: string; state: string }>> {
-  const pending = cdp.downloads.filter((d) => !d.reported);
-  const deadline = Date.now() + DOWNLOAD_WAIT_MS;
-  while (pending.some((d) => d.state === "progressing") && Date.now() < deadline) await sleep(200);
-  for (const d of pending) d.reported = true;
+/** What the model hasn't heard about the tab's downloads: finished ones,
+ * and newly started ones still going after `waitMs`. */
+async function newDownloads(cdp: TabCdp, waitMs: number): Promise<Array<{ path: string; state: string }>> {
+  const deadline = Date.now() + waitMs;
+  while (cdp.downloads.some((d) => d.state === "progressing") && Date.now() < deadline && !running?.stop) await sleep(200);
+  const news: Array<{ path: string; state: string }> = [];
+  for (const d of cdp.downloads) {
+    if (d.state !== "progressing") {
+      news.push({ path: d.path, state: d.state });
+      d.reported = true;
+    } else if (!d.announced) {
+      news.push({ path: d.path, state: d.state });
+      d.announced = true;
+    }
+  }
   cdp.downloads = cdp.downloads.filter((d) => !d.reported);
-  return pending.map((d) => ({ path: d.path, state: d.state }));
+  return news;
+}
+
+/** Until a download has finished (one already under way, or one that
+ * starts while waiting) and none is still going. */
+async function waitForDownload(cdp: TabCdp, waitS: number): Promise<void> {
+  const deadline = Date.now() + waitS * 1000;
+  for (;;) {
+    checkStop();
+    const going = cdp.downloads.filter((d) => d.state === "progressing");
+    if (!going.length && cdp.downloads.length) return;
+    if (cdp.dialog) throw new Error(describeDialog(cdp.dialog));
+    if (Date.now() >= deadline) {
+      throw new Error(
+        going.length
+          ? `Still downloading ${going.map((d) => d.path).join(", ")} after ${waitS}s.`
+          : `No download started within ${waitS}s.`,
+      );
+    }
+    await sleep(500);
+  }
 }
 
 function describeValue(value: unknown): string {
@@ -401,6 +456,7 @@ async function run(command: Command): Promise<Record<string, unknown>> {
       if (args.url) {
         const cdp = cdpFor(tab.view.webContents);
         cdp.stepStarted = Date.now();
+        if (typeof args.download_dir === "string") cdp.downloadDir = args.download_dir;
         await cdp.ensure();
         await load(tab.view.webContents, String(args.url));
         cdp.stepEnded = Date.now();
@@ -421,12 +477,15 @@ async function run(command: Command): Promise<Record<string, unknown>> {
   }
   const cdp = cdpFor(wc);
   cdp.stepStarted = Date.now();
+  if (typeof args.download_dir === "string") cdp.downloadDir = args.download_dir;
   await cdp.ensure();
   if (cdp.dialog && command.action !== "handle_dialog") throw new Error(describeDialog(cdp.dialog));
 
   let result: Record<string, unknown>;
   try {
-    if (typeof args.ref === "string" && args.ref.trim()) args = { ...args, ref: await resolveTarget(cdp, args.ref) };
+    if (typeof args.ref === "string" && args.ref.trim()) {
+      args = { ...args, ref: await resolveTarget(cdp, args.ref, waitSeconds(args)) };
+    }
     result = await act(command, tab, wc, cdp, args);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -437,7 +496,7 @@ async function run(command: Command): Promise<Record<string, unknown>> {
   // What a step left open for the model to deal with next.
   if (cdp.dialog) result.dialog = describeDialog(cdp.dialog);
   if (cdp.chooser) result.file_chooser = true;
-  const downloads = await newDownloads(cdp);
+  const downloads = await newDownloads(cdp, DOWNLOAD_QUICK_MS);
   if (downloads.length) result.downloads = downloads;
   return result;
 }
@@ -524,16 +583,36 @@ async function act(
       return withTab(tab, await cdp.agent<Record<string, unknown>>(cdp.main, "scroll", { direction: args.direction }));
     }
     case "wait_for": {
-      const deadline = Date.now() + Number(args.seconds ?? 5) * 1000;
-      if (!args.text) {
-        await sleep(Math.max(0, deadline - Date.now()));
+      const waitS = waitSeconds(args);
+      if (args.download) {
+        await waitForDownload(cdp, waitS);
         return withTab(tab);
       }
+      if (args.element) {
+        const ref = await resolveTarget(cdp, String(args.element), waitS);
+        return withTab(tab, { element: ref });
+      }
+      const text = String(args.text || args.gone || "");
+      if (!text) {
+        const deadline = Date.now() + Math.min(Number(args.seconds) || 0, waitS) * 1000;
+        while (Date.now() < deadline) {
+          checkStop();
+          await sleep(Math.min(500, Math.max(0, deadline - Date.now())));
+        }
+        return withTab(tab);
+      }
+      const wantGone = !args.text;
+      const deadline = Date.now() + waitS * 1000;
       for (;;) {
+        checkStop();
         const { found } = await cdp
-          .agent<{ found: boolean }>(cdp.main, "has_text", { text: args.text })
+          .agent<{ found: boolean }>(cdp.main, "has_text", { text })
           .catch(() => ({ found: false }));
-        if (found || Date.now() >= deadline || cdp.dialog) return withTab(tab, { found });
+        if (found !== wantGone) return withTab(tab, { found });
+        if (cdp.dialog) throw new Error(describeDialog(cdp.dialog));
+        if (Date.now() >= deadline) {
+          throw new Error(`"${text}" ${wantGone ? "was still on the page" : "didn't appear"} after ${waitS}s.`);
+        }
         await sleep(500);
       }
     }
@@ -607,7 +686,15 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
     }
   };
 
+  // Conversations stopped, and when: their steps that arrived before then
+  // are dropped rather than carried out.
+  const stoppedAt = new Map<string, number>();
+
   const execute = async (command: Command) => {
+    if ((stoppedAt.get(command.thread_id) ?? 0) >= (command.receivedAt ?? 0)) {
+      await reply(command.id, { ok: false, error: "Stopped by the user." });
+      return;
+    }
     // The user should see the AI work, so the panel opens first.
     if (!isPanelOpen()) {
       notify({ open: true, threadId: command.thread_id });
@@ -627,12 +714,14 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
     clearTimeout(frameOffTimer);
     const frameTab = command.action === "tabs" ? undefined : ensureActiveTab();
     if (frameTab && !frameTab.blank) void inPage(frameTab.view.webContents, "agent_frame", { on: true }).catch(() => undefined);
+    running = { threadId: command.thread_id, stop: false };
     try {
       const result = await run(command);
       await reply(command.id, { ok: true, result });
     } catch (err) {
       await reply(command.id, { ok: false, error: err instanceof Error ? err.message : String(err) });
     } finally {
+      running = null;
       notify({ busy: false, threadId: command.thread_id });
       // Steps come a few seconds apart while the model thinks; the frame
       // stays up between them instead of flickering.
@@ -673,6 +762,13 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
               } catch {
                 continue;
               }
+              // A stop can't queue behind the step it is stopping.
+              if (command.action === "cancel") {
+                stoppedAt.set(command.thread_id, Date.now());
+                if (running?.threadId === command.thread_id) running.stop = true;
+                continue;
+              }
+              command.receivedAt = Date.now();
               // One step at a time, in order: two clicks racing on one
               // page would land unpredictably.
               queue = queue.then(() => execute(command));

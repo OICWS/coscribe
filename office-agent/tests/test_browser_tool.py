@@ -222,7 +222,8 @@ def test_upload_sends_resolved_files_inside_the_workspace(tmp_path: Path) -> Non
     out = tools["browser_file_upload"](["report.pdf"], ref="e9")
     action, args, _ = host.calls[0]
     assert action == "upload"
-    assert args == {"ref": "e9", "paths": [str((tmp_path / "report.pdf").resolve())]}
+    assert args["ref"] == "e9"
+    assert args["paths"] == [str((tmp_path / "report.pdf").resolve())]
     assert out.startswith('Uploaded report.pdf to button "Attach".')
 
     with pytest.raises(ValueError, match="No such file"):
@@ -268,3 +269,70 @@ def test_a_step_that_downloads_names_the_file() -> None:
         "Downloaded C:\\Users\\me\\Downloads\\EXPORT.XLSX",
         "Download of C:\\Users\\me\\Downloads\\big.zip: interrupted",
     ]
+
+
+def test_stop_cancels_the_conversations_step_on_both_ends() -> None:
+    host = BrowserHost()
+
+    async def scenario() -> tuple[str, list[dict[str, Any]], bool]:
+        outbox = host.attach()
+        mine = asyncio.create_task(host.request("wait_for", {}, "t1", timeout=60))
+        other = asyncio.create_task(host.request("snapshot", {}, "t2", timeout=60))
+        sent = [await outbox.get(), await outbox.get()]
+        host.cancel("t1")
+        sent.append(await outbox.get())
+        try:
+            await mine
+            error = ""
+        except ValueError as exc:
+            error = str(exc)
+        still_waiting = not other.done()
+        other.cancel()
+        return error, sent, still_waiting
+
+    error, sent, still_waiting = asyncio.run(scenario())
+    assert error == "Stopped by the user."
+    assert sent[-1]["action"] == "cancel" and sent[-1]["thread_id"] == "t1"
+    # Another conversation's step carries on.
+    assert still_waiting
+
+
+def test_downloads_go_to_the_workspace_and_come_back_relative(tmp_path: Path) -> None:
+    from coscribe.tools._workspace import WorkspaceScope
+
+    saved = tmp_path / "downloads" / "EXPORT.XLSX"
+    host = _FakeHost(
+        {
+            "click": {"downloads": [{"path": str(saved), "state": "completed"}]},
+            "wait_for": {"downloads": [{"path": str(saved), "state": "completed"}]},
+        }
+    )
+    tools = {t.__name__: t for t in build_browser_tools("t1", host, scope=WorkspaceScope(tmp_path))}
+    out = tools["browser_click"]('button "Export"')
+    action, args, _ = host.calls[0]
+    assert args["download_dir"] == str(tmp_path.resolve() / "downloads")
+    assert args["timeout"] == 30
+    assert "Downloaded downloads/EXPORT.XLSX" in out
+
+    waited = tools["browser_wait_for"](download=True, timeout=1800)
+    assert host.calls[1][1]["download"] is True and host.calls[1][1]["timeout"] == 1800
+    assert waited["file"] == "downloads/EXPORT.XLSX"
+    assert waited["message"].startswith("The download finished.")
+
+
+def test_a_slow_download_is_announced_with_how_to_wait_for_it() -> None:
+    host = _FakeHost({"click": {"downloads": [{"path": "big.zip", "state": "progressing"}]}})
+    out = _tools(host)["browser_click"]("e4")
+    assert "Downloading big.zip -- browser_wait_for(download=True)" in out
+
+
+def test_wait_for_takes_one_thing_and_caps_the_timeout() -> None:
+    host = _FakeHost({})
+    wait_for = _tools(host)["browser_wait_for"]
+    with pytest.raises(ValueError, match="one thing at a time"):
+        wait_for(text="Done", download=True)
+    with pytest.raises(ValueError, match="seconds"):
+        wait_for()
+    wait_for(gone="Loading", timeout=99999)
+    assert host.calls[-1][1]["gone"] == "Loading"
+    assert host.calls[-1][1]["timeout"] == 3600
