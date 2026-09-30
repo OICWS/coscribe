@@ -5,12 +5,11 @@ import {
   pauseScheduledTask,
   resumeScheduledTask,
   saveTaskNotes,
-  updateScheduledTask,
+  patchScheduledTask,
 } from "../lib/rest";
 import { goToThread } from "../lib/nav";
 import { capitalize, formatRunTime, RUN_STATUS_LABEL, runDuration, runSourceLabel } from "../lib/runLabels";
 import { describeSchedule } from "../lib/scheduleLabels";
-import { taskPayload } from "../lib/taskPayload";
 import { countModelSteps } from "../lib/workflowLabels";
 import { allSteps } from "../lib/workflowTree";
 import type { ScheduledTask } from "../types/settings";
@@ -134,7 +133,7 @@ function NotesSection({ task, onChanged }: { task: ScheduledTask; onChanged: () 
   };
 
   const toggleNotes = async () => {
-    await updateScheduledTask(task.trigger_id, taskPayload(task, { notes_enabled: !task.notes_enabled }));
+    await patchScheduledTask(task.trigger_id, { notes_enabled: !task.notes_enabled });
     onChanged();
   };
 
@@ -269,7 +268,7 @@ export function ScheduledTaskDetail({
   };
 
   const saveWorkflow = async (next: Workflow) => {
-    const result = await updateScheduledTask(task.trigger_id, taskPayload(task, { workflow: next }));
+    const result = await patchScheduledTask(task.trigger_id, { workflow: next });
     if ("error" in result) return result.error;
     onChanged();
     return null;

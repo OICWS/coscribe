@@ -6635,6 +6635,56 @@ with the AI asking when it drafts one.
       completed run, red after a failed one, amber when it needs the
       user; hollow grey before any run or once stopped.
 
+## Phase 8bx -- Steps that wait for a settled page; the assistant tests its workflows (shipped)
+
+Direction agreed with the user: the fixed workflow runs without a model
+deciding anything; the assistant works outside the run -- it writes the
+steps, runs them for real, fixes what failed, and only then hands the
+draft over for review. A failed run stops there instead of producing
+doubtful data.
+
+- [x] An element named by description is acted on only once two looks
+      agree and the page has been still for 400ms (a MutationObserver in
+      the page), or the same match has held for 3s on a page that never
+      stops changing (a ticker). Two looks 300ms apart alone matched the
+      same phase of a flickering page. Verified on test pages: typed into
+      the right box once a flipping form settled (~4.8s), clicked on a
+      constantly ticking page after ~3.9s; ordinary SAP-like steps still
+      take ~1.1-1.4s.
+- [x] Typing reads the field back and types once more if the page
+      swallowed it (empty or unchanged; reformatting is accepted), then
+      fails with what the field holds -- before pressing Enter.
+- [x] A saved workflow's run doesn't ask for site permission: the user
+      approved the steps when saving. Found live: a run "stuck" for
+      minutes was waiting on that prompt in its own thread, which nobody
+      was looking at.
+- [x] Saving a task's workflow, notes toggle or form sends only the
+      fields that changed (PATCH), merged into the stored task: two open
+      views each saving their whole copy overwrote each other's changes.
+- [x] `test_workflow` runs a draft (or a saved task, to reproduce a
+      failure) once for real on a throwaway checkpointer, under the
+      browser-runs lock, stopping at the first failure or before an
+      approval step. It reports every step's status, time, output and
+      error, plus the page snapshot when a browser step failed. Gated as
+      EXTERNAL: a test repeats real actions.
+- [x] Drafts have ids and live in the conversation itself (the tool
+      results), so `revise_workflow(draft_id=...)` changes a draft as it
+      does a saved task. `draft_workflow` and the instructions ask for
+      draft -> test -> revise -> test, at most 3 rounds, then a short
+      report of whether the last test passed.
+- [x] Test progress ("Testing workflow 3/9") in the composer's status
+      line. The reducer's default branch returned an unknown event as
+      the new state, which blanked the app when the first progress event
+      arrived; an unknown event is now ignored.
+- [x] A turn or run starting (and a test starting) marks the tab's
+      finished, already-reported downloads as taken. Found live with
+      DeepSeek: the test's download wait took the export from the manual
+      run earlier in the same conversation, which the model had already
+      moved, and failed three rounds on "file not found"; the model then
+      stopped and asked the user, as instructed. After the fix, the same
+      conversation's draft passed its first test (9 steps, 10.4s) with
+      the export in `exports/`.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

@@ -63,11 +63,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args
+from typing import TYPE_CHECKING, Annotated, Any, get_args
 
 import uvicorn
 from dotenv import dotenv_values, load_dotenv, set_key
-from fastapi import FastAPI, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -131,6 +131,7 @@ from ..tools.scheduled_tasks import (
     compute_next_run_at,
     create_trigger,
     parse_run_thread_id,
+    patch_trigger,
     update_trigger,
 )
 from ..tools.script_env import (
@@ -1807,6 +1808,18 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 workflow=payload.workflow,
                 workspace=payload.workspace,
             )
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse(trigger.to_dict())
+
+    @app.patch("/api/scheduled-tasks/{trigger_id}")
+    async def patch_scheduled_task_endpoint(
+        trigger_id: str, changes: Annotated[dict[str, Any], Body()]
+    ) -> JSONResponse:
+        try:
+            trigger = patch_trigger(ScheduledTriggerStore(settings.state_dir), trigger_id, changes)
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except ValueError as exc:

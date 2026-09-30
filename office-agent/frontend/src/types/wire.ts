@@ -182,6 +182,17 @@ export interface WorkflowStepEvent {
   record: StepRecord;
 }
 
+/** A step of a test_workflow run started or ended; `done` of `total`
+ * steps have finished. */
+export interface WorkflowTestProgressEvent {
+  type: "workflow_test_progress";
+  tool_call_id: string;
+  step: string;
+  status: string;
+  done: number;
+  total: number;
+}
+
 /** create_scheduled_task's arguments as the model drafted them -- nothing
  * is saved until the user reviews it; answered with question_response. */
 export interface TaskDraft {
@@ -293,6 +304,7 @@ export type WsServerEvent =
   | PlanReadyEvent
   | ScheduledRunStartedEvent
   | WorkflowStepEvent
+  | WorkflowTestProgressEvent
   | TaskDraftRequiredEvent
   | UsageEvent
   | TasksChangedEvent

@@ -240,8 +240,13 @@ export const resumeScheduledTask = (triggerId: string) =>
   postJson<ScheduledTaskResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/resume`, {});
 export const deleteScheduledTask = (triggerId: string) =>
   del<ScheduledTaskDeleteResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`);
-export const updateScheduledTask = (triggerId: string, payload: CreateScheduledTaskPayload): Promise<ScheduledTaskResult> =>
-  sendForResult<ScheduledTask>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`, "PUT", payload);
+/** Changes only these fields; the server keeps the rest as stored, not as
+ * this page last loaded them. */
+export const patchScheduledTask = (
+  triggerId: string,
+  changes: Partial<CreateScheduledTaskPayload>,
+): Promise<ScheduledTaskResult> =>
+  sendForResult<ScheduledTask>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}`, "PATCH", changes);
 export const runScheduledTaskNow = (triggerId: string, inputs?: Record<string, unknown>): Promise<RunNowResult> =>
   sendForResult<{ task: ScheduledTask; run: ScheduledRun }>(
     `/api/scheduled-tasks/${encodeURIComponent(triggerId)}/run`,

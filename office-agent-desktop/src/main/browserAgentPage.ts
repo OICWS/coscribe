@@ -19,12 +19,21 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
     next: number;
     /** The iframes the latest snapshot showed, by the number it gave them. */
     frames: Element[];
+    /** When elements last came or went, so an action waits for the page
+     * to hold still rather than hit an element mid-redraw. */
+    lastChange: number;
   }
   const w = window as unknown as { __coscribeAgent?: AgentState };
   // Refs live as long as the document: an element keeps its ref across
   // snapshots, so a ref the model read a moment ago still works if the
   // page only changed around it.
-  const state: AgentState = (w.__coscribeAgent ??= { refs: new Map(), ids: new WeakMap(), next: 1, frames: [] });
+  const state: AgentState = (w.__coscribeAgent ??= (() => {
+    const fresh: AgentState = { refs: new Map(), ids: new WeakMap(), next: 1, frames: [], lastChange: 0 };
+    new MutationObserver(() => {
+      fresh.lastChange = Date.now();
+    }).observe(document, { childList: true, subtree: true });
+    return fresh;
+  })());
 
   const refFor = (el: Element): string => {
     let ref = state.ids.get(el);
@@ -247,6 +256,17 @@ export function pageAgent(action: string, args: Record<string, unknown>): unknow
   }
 
   if (action === "locate") return center(find(String(args.ref)));
+
+  if (action === "still_for") return { ms: Date.now() - state.lastChange };
+
+  if (action === "value_of") {
+    const el = find(String(args.ref));
+    const value =
+      el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
+        ? el.value
+        : (el.textContent ?? "");
+    return { value };
+  }
 
   if (action === "select_all_in_focus") {
     const el = document.activeElement as HTMLElement | null;

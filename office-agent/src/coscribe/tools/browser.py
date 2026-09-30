@@ -157,6 +157,10 @@ class BrowserHost:
 
 BROWSER_HOST = BrowserHost()
 
+# Workflow runs and test runs that use the browser take turns: they share
+# its tabs, and two at once would navigate them out from under each other.
+BROWSER_RUNS = asyncio.Lock()
+
 
 def _tab_line(tab: Any) -> str:
     if not isinstance(tab, dict):
@@ -208,10 +212,17 @@ def build_browser_tools(
     host: BrowserHost = BROWSER_HOST,
     *,
     scope: WorkspaceScope | None = None,
+    saved_workflow: bool = False,
 ) -> list[Callable[..., Any]]:
+    """`saved_workflow`: these tools run a saved workflow's steps, which
+    the user reviewed and saved -- consent to the sites they visit -- so
+    the desktop app doesn't stop an unattended run to ask."""
+
     def call(action: str, limit: float = _DEFAULT_TIMEOUT, **args: Any) -> dict[str, Any]:
         if scope is not None:
             args["download_dir"] = str(scope.root / _DOWNLOADS_FOLDER)
+        if saved_workflow:
+            args["saved_workflow"] = True
         result = host.call(action, args, thread_id, limit + _PERMISSION_WAIT)
         if scope is not None:
             # As the file tools take them: relative to the workspace.

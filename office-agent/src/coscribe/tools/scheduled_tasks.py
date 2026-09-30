@@ -690,6 +690,37 @@ def update_trigger(
     return trigger
 
 
+def patch_trigger(
+    store: ScheduledTriggerStore, trigger_id: str, changes: dict[str, Any]
+) -> ScheduledTrigger:
+    """Change only the given fields, keeping the rest as stored -- not as a
+    page last loaded them. Two cards saved one after the other (a workflow
+    revision, then a settings edit) otherwise undo each other with stale
+    copies of the fields they didn't mean to touch."""
+    trigger = store.load(trigger_id)
+    if trigger is None:
+        raise KeyError(f"No scheduled task with id {trigger_id!r}")
+    rule = trigger.schedule
+    current: dict[str, Any] = {
+        "name": trigger.name,
+        "kind": rule.kind,
+        "at": rule.at,
+        "prompt": trigger.prompt,
+        "weekday": rule.weekday,
+        "day_of_month": rule.day_of_month,
+        "start_date": rule.start_date,
+        "model": trigger.model,
+        "approval_mode": trigger.approval_mode,
+        "notes_enabled": trigger.notes_enabled,
+        "workflow": trigger.workflow,
+        "workspace": trigger.workspace,
+    }
+    unknown = sorted(set(changes) - set(current))
+    if unknown:
+        raise ValueError(f"Can't change {', '.join(unknown)}")
+    return update_trigger(store, trigger_id, **{**current, **changes})
+
+
 def edit_draft(store: ScheduledTriggerStore, changes: dict[str, Any]) -> dict[str, Any]:
     """The whole task as edit_scheduled_task would leave it -- what the user
     reviews -- with `trigger_id` and the names of the fields it changes."""

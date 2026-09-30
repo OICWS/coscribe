@@ -39,7 +39,7 @@ import {
   getThreads,
   retryWorkflowRun,
   runScheduledTaskNow,
-  updateScheduledTask,
+  patchScheduledTask,
   type WorkflowDraftResult,
 } from "./lib/rest";
 import {
@@ -53,7 +53,6 @@ import {
 } from "./lib/nav";
 import { latestRun, taskForThread } from "./lib/runLabels";
 import { describeSchedule } from "./lib/scheduleLabels";
-import { taskPayload } from "./lib/taskPayload";
 import type { WorkflowDraftEntry } from "./lib/transcriptGrouping";
 import { EMPTY_WORKFLOW } from "./lib/workflowEdit";
 import { recordKey, workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
@@ -505,7 +504,7 @@ function App() {
   const saveWorkflowRevision = async (triggerId: string, workflow: Workflow) => {
     const task = scheduledTasks.find((t) => t.trigger_id === triggerId);
     if (!task) return "That task no longer exists.";
-    const result = await updateScheduledTask(triggerId, taskPayload(task, { workflow }));
+    const result = await patchScheduledTask(triggerId, { workflow });
     if ("error" in result) return result.error;
     refreshScheduledTasks();
     showScheduledTaskPage(result);
@@ -654,6 +653,7 @@ function App() {
     <Composer
       turnInFlight={state.turnInFlight}
       totalTokens={state.totalTokens}
+      workflowTest={state.workflowTest}
       commands={commands}
       modePill={
         onHome ? null : (

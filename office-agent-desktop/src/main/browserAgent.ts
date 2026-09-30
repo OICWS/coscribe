@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join, parse } from "node:path";
 import { Readable } from "node:stream";
-import { type BrowserWindow, type DownloadItem, type WebContents, app } from "electron";
+import { type BrowserWindow, type DownloadItem, type WebContents, app, webContents } from "electron";
 import { pageAgent } from "./browserAgentPage";
 import { type AgentFrame, type Download, type PageDialog, type TabCdp, cdpFor, existingCdp } from "./browserCdp";
 import { isAllowed, requestPermission } from "./browserPermissions";
@@ -58,6 +58,8 @@ const LOAD_TIMEOUT_MS = 45_000;
 const DEFAULT_WAIT_S = 30;
 const MAX_WAIT_S = 3600;
 const REF_PATTERN = /^(f\d+)?e\d+$/;
+const PAGE_STILL_MS = 400;
+const STEADY_ENOUGH_MS = 3000;
 // Downloads this soon after an AI step are the AI's; the user's own still
 // get Electron's save dialog.
 const DOWNLOAD_WINDOW_MS = 15_000;
@@ -351,6 +353,12 @@ async function resolveTarget(cdp: TabCdp, target: string, waitS = DEFAULT_WAIT_S
   const prefix = name === undefined ? `- ${role.toLowerCase()} [ref=` : `- ${role.toLowerCase()} "${name}" `;
   const index = Math.max(Number(nth ?? 1), 1) - 1;
   const deadline = Date.now() + waitS * 1000;
+  // Mid-redraw a page can briefly hold an extra copy of a field, so "the
+  // fourth 'to' box" lands on the wrong one: act only once two looks agree
+  // and nothing has been added or removed for a moment -- two looks alone
+  // can both land on the same phase of a flicker.
+  let previous = "";
+  let agreedSince = Date.now();
   for (;;) {
     checkStop();
     const { lines } = await snapshotFrame(cdp, cdp.main, 0);
@@ -362,12 +370,25 @@ async function resolveTarget(cdp: TabCdp, target: string, waitS = DEFAULT_WAIT_S
       });
     let found = refsWhere((line) => line.startsWith(prefix));
     if (!found.length) found = refsWhere((line) => line.toLowerCase().startsWith(prefix.toLowerCase()));
-    if (found[index]) return found[index];
+    const seen = found[index] ? `${found[index]}/${found.length}` : "";
+    if (seen && seen === previous) {
+      const { ms } = await cdp.agent<{ ms: number }>(cdp.main, "still_for").catch(() => ({ ms: PAGE_STILL_MS }));
+      // A page that never stops changing (a clock, a ticker) still gets
+      // acted on once the same element has held for a while.
+      if (ms >= PAGE_STILL_MS || Date.now() - agreedSince >= STEADY_ENOUGH_MS) return found[index];
+    } else {
+      agreedSince = Date.now();
+    }
+    previous = seen;
     if (cdp.dialog) throw new Error(describeDialog(cdp.dialog));
     if (Date.now() >= deadline) {
-      throw new Error(`No ${text} appeared on the page within ${waitS}s -- take a browser_snapshot to see what's there.`);
+      throw new Error(
+        seen
+          ? `${text} kept changing on the page for ${waitS}s -- take a browser_snapshot to see what's there.`
+          : `No ${text} appeared on the page within ${waitS}s -- take a browser_snapshot to see what's there.`,
+      );
     }
-    await sleep(500);
+    await sleep(seen ? 300 : 500);
   }
 }
 
@@ -437,6 +458,18 @@ async function newDownloads(cdp: TabCdp, waitMs: number): Promise<DownloadReport
   return news;
 }
 
+/** A turn or run starting: the finished downloads its conversation was
+ * already told about belong to earlier work, so a wait from now on
+ * doesn't take them -- one may have been moved or deleted since. */
+function startActivity(threadId: string): void {
+  activeThreads.add(threadId);
+  for (const wc of webContents.getAllWebContents()) {
+    const cdp = existingCdp(wc);
+    if (cdp?.threadId !== threadId) continue;
+    for (const d of cdp.downloads) if (d.reported && d.state !== "progressing") d.claimed = true;
+  }
+}
+
 /** Until a download no wait has taken yet has finished -- one already
  * done, under way, or starting while waiting -- and none is still going;
  * then takes them. */
@@ -462,6 +495,17 @@ async function waitForDownload(cdp: TabCdp, waitS: number): Promise<DownloadRepo
       );
     }
     await sleep(500);
+  }
+}
+
+/** What a text field holds now, or null if it can't be read (it may be
+ * gone, which the next step will report). */
+async function fieldValue(cdp: TabCdp, point: { frame: AgentFrame; inner: string }): Promise<string | null> {
+  try {
+    const { value } = await cdp.agent<{ value: string }>(point.frame, "value_of", { ref: point.inner });
+    return value;
+  } catch {
+    return null;
   }
 }
 
@@ -585,13 +629,28 @@ async function act(
       return withTab(tab, { element: point.element });
     }
     case "type": {
-      const point = await locate(cdp, args.ref);
-      await click(wc, cdp, point, 1);
-      await sleep(100);
-      await cdp.agent(point.frame, "select_all_in_focus");
       const text = String(args.text ?? "");
-      if (text) await cdp.input("Input.insertText", { text });
-      else await pressKey(cdp, "Backspace");
+      let point = await locate(cdp, args.ref);
+      // A page that redraws or pops something up just then can swallow the
+      // text without an error -- and a query then runs with a field empty.
+      // Not an exact match: fields reformat what's typed (dates, numbers).
+      for (let attempt = 1; ; attempt++) {
+        const before = await fieldValue(cdp, point);
+        await click(wc, cdp, point, 1);
+        await sleep(100);
+        await cdp.agent(point.frame, "select_all_in_focus");
+        if (text) await cdp.input("Input.insertText", { text });
+        else await pressKey(cdp, "Backspace");
+        await sleep(150);
+        const after = await fieldValue(cdp, point);
+        const took = text ? after !== null && after.trim() !== "" && (after !== before || before === text) : after === "";
+        if (took || after === null) break;
+        if (attempt === 2) {
+          throw new Error(`Typed "${text}" into ${point.element}, but it holds "${after}" -- the page may have redrawn or moved focus; take a browser_snapshot.`);
+        }
+        await settle(wc);
+        point = await locate(cdp, args.ref);
+      }
       if (args.submit) {
         await sleep(100);
         await pressKey(cdp, "Enter");
@@ -733,7 +792,13 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
     }
     try {
       const site = siteFor(command);
-      if (site && !isAllowed(site, command.thread_id)) await requestPermission(site, command.thread_id, getWindow());
+      // A saved workflow's steps were reviewed and saved by the user --
+      // that's consent to its sites -- and a prompt would stall a run no
+      // one is watching.
+      const savedWorkflow = command.args?.saved_workflow === true;
+      if (site && !savedWorkflow && !isAllowed(site, command.thread_id)) {
+        await requestPermission(site, command.thread_id, getWindow());
+      }
     } catch (err) {
       await reply(command.id, { ok: false, error: err instanceof Error ? err.message : String(err) });
       return;
@@ -795,7 +860,7 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
               }
               // A stop can't queue behind the step it is stopping.
               if (command.action === "activity") {
-                if (command.args?.active) activeThreads.add(command.thread_id);
+                if (command.args?.active) startActivity(command.thread_id);
                 else activeThreads.delete(command.thread_id);
                 continue;
               }

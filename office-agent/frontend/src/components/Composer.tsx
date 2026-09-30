@@ -74,6 +74,7 @@ const MAX_ATTACHED_FILES = 5;
 interface ComposerProps {
   turnInFlight: boolean;
   totalTokens: number;
+  workflowTest?: { done: number; total: number } | null;
   commands: CommandInfo[];
   modePill: ReactNode;
   folderPicker: ReactNode;
@@ -108,6 +109,7 @@ interface ComposerProps {
 export function Composer({
   turnInFlight,
   totalTokens,
+  workflowTest = null,
   commands,
   modePill,
   folderPicker,
@@ -601,7 +603,7 @@ export function Composer({
           {folderPicker}
           {modePill}
         </div>
-        <RunStatus turnInFlight={turnInFlight} totalTokens={totalTokens} />
+        <RunStatus turnInFlight={turnInFlight} totalTokens={totalTokens} workflowTest={workflowTest} />
         <div className="flex items-center gap-1.5">
           {modelPicker}
           {usageRing}
