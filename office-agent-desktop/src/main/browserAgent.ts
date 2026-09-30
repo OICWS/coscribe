@@ -29,6 +29,7 @@ import {
   hiddenTabSize,
   normalizeUrl,
   onTabDownload,
+  openerOf,
   selectTab,
   setViewHidden,
   tabInfo,
@@ -406,15 +407,32 @@ function uniquePath(dir: string, fileName: string): string {
   return path;
 }
 
+/** The AI's connection to the tab a download began in, or to the tab that
+ * opened it. */
+function downloadOwner(wc: WebContents): TabCdp | undefined {
+  for (let tab: WebContents | undefined = wc; tab; tab = openerOf(tab)) {
+    const cdp = existingCdp(tab);
+    if (cdp) return cdp;
+  }
+  return undefined;
+}
+
 function onDownload(item: DownloadItem, wc: WebContents): void {
-  const cdp = existingCdp(wc);
+  const cdp = downloadOwner(wc);
   // The tab's turn or run is still going -- an export can take minutes to
   // start downloading after the click, while a script step waits -- or a
   // step just ended.
   const aiStep =
     cdp &&
     (activeThreads.has(cdp.threadId) || cdp.stepEnded < cdp.stepStarted || Date.now() - cdp.stepEnded < DOWNLOAD_WINDOW_MS);
-  if (!cdp || !aiStep) return;
+  if (!cdp || !aiStep) {
+    // What the person sees is a system save dialog; this says why.
+    console.warn(
+      `[browser] download of ${item.getFilename()} from ${wc.getURL()} left to the save dialog: ` +
+        (cdp ? "no AI step is running in its tab" : "its tab was never used by the AI"),
+    );
+    return;
+  }
   // The system save dialog would stop the AI (and a scheduled run) until
   // someone answers it. Into the conversation's own folder instead, where
   // the AI can read it and runs don't mix.

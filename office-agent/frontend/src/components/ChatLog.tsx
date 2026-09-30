@@ -140,7 +140,7 @@ export function ChatLog({
     testProgress: null,
     ...draftCards,
     latestDraftId: latestWorkflowDraftId(allItems),
-    tests: workflowTests(allItems),
+    tests: workflowTests(allItems, turnInFlight),
     onReview: onReviewWorkflowDraft,
   };
   const latestDraft = latestWorkflowDraft(allItems);

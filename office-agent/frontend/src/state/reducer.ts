@@ -467,7 +467,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       } else {
         items.push({ id: genId(), kind: "agent", text: action.text, streaming: false });
       }
-      return { ...state, items, turnInFlight: false };
+      return { ...state, items, turnInFlight: false, workflowTest: null };
     }
 
     case "tool_started":

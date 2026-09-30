@@ -151,15 +151,18 @@ function parsedResult(result: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
 
-/** Each draft's latest test_workflow call among `items`, by draft id. */
-export function workflowTests(items: LogItem[]): Map<string, DraftTest> {
+/** Each draft's latest test_workflow call among `items`, by draft id. A
+ * call with no result is running only while a turn is: Stop cancels it
+ * without one. */
+export function workflowTests(items: LogItem[], turnInFlight: boolean): Map<string, DraftTest> {
   const tests = new Map<string, DraftTest>();
-  for (const item of items) {
+  const lastUser = items.map((i) => i.kind).lastIndexOf("user");
+  for (const [index, item] of items.entries()) {
     if ((item.kind !== "tool" && item.kind !== "approval") || item.toolName !== "test_workflow") continue;
     const draftId = item.arguments.draft_id;
     if (typeof draftId !== "string" || !draftId) continue;
     if (item.result === undefined) {
-      const running = item.kind === "tool" || item.status === "approved";
+      const running = turnInFlight && index > lastUser && (item.kind === "tool" || item.status === "approved");
       tests.set(draftId, { result: null, running });
       continue;
     }

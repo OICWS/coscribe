@@ -139,6 +139,14 @@ export function normalizeUrl(input: string): string {
   return `https://www.bing.com/search?q=${encodeURIComponent(text)}`;
 }
 
+/** The tab a tab was opened from. Sites start an export by opening a
+ * window for the file, so the download begins in a tab the AI never used. */
+const openers = new WeakMap<WebContents, WebContents>();
+
+export function openerOf(wc: WebContents): WebContents | undefined {
+  return openers.get(wc);
+}
+
 let downloadHandler: ((item: DownloadItem, wc: WebContents) => void) | undefined;
 
 /** Called for every download a tab starts, before Electron asks where to
@@ -313,8 +321,13 @@ export function createTab(url?: string): Tab {
   // separate native window without any browser chrome.
   wc.setWindowOpenHandler(({ url: target }) => {
     // With every tab in use, the link replaces this page instead.
-    if (tabLimitReached()) void wc.loadURL(normalizeUrl(target)).catch(() => undefined);
-    else selectTab(createTab(target).id);
+    if (tabLimitReached()) {
+      void wc.loadURL(normalizeUrl(target)).catch(() => undefined);
+    } else {
+      const opened = createTab(target);
+      openers.set(opened.view.webContents, wc);
+      selectTab(opened.id);
+    }
     return { action: "deny" };
   });
   wc.on("before-input-event", (_event, input) => {

@@ -6808,6 +6808,22 @@ doubtful data.
       run; LangGraph StateGraph per workflow), the built-in browser, run
       conversations shown live, and the "not doing" list.
 
+## Phase 8cc -- Downloads from opened windows; Stop ends a workflow test card (shipped)
+
+- [x] A download that starts in a window the page opened (window.open,
+      target="_blank" -- how SAP hands over an export) is saved like the
+      tab's own: the desktop app follows it back to the tab the AI used,
+      so it lands in the conversation's downloads folder and the step's
+      download wait sees it. It used to reach the system save dialog,
+      which stops an unattended run. Reproduced in Electron against a
+      fake page that opens the file in a new window (dialog before, saved
+      after). When a download is still left to the dialog, the sidecar
+      log now says why.
+- [x] Stopping a conversation while its workflow test runs no longer
+      leaves the card on "Testing": a `test_workflow` call with no result
+      counts as running only while a turn is in flight, and the final
+      reply clears the step counter.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
