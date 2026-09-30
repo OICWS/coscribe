@@ -22,7 +22,7 @@ import { ImageLightbox } from "./ImageLightbox";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { type PlanChoice, PlanCard, type PlanItem } from "./PlanCard";
 import { QuestionCard } from "./QuestionCard";
-import { RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
+import { INVESTIGATION_PREFIX, InvestigationCard, RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
 import { SUBAGENT_REPORT_PREFIX, SubAgentReportCard } from "./SubAgentReportCard";
 import { TaskDraftCard } from "./TaskDraftCard";
 import { type DraftCards, DraftCardsContext } from "./workflow/draftCards";
@@ -1018,6 +1018,7 @@ function LogItemView({
 }) {
   if (item.kind === "user") {
     if (item.text.startsWith(RUN_PROMPT_PREFIX)) return <ScheduledRunCard text={item.text} />;
+    if (item.text.startsWith(INVESTIGATION_PREFIX)) return <InvestigationCard text={item.text} />;
     if (item.text.startsWith(SUBAGENT_REPORT_PREFIX)) return <SubAgentReportCard text={item.text} />;
     return <UserMessageView item={item} onEditMessage={onEditMessage} />;
   }

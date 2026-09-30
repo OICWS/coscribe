@@ -37,7 +37,9 @@ import {
   getCommands,
   getScheduledTasks,
   getThreads,
+  investigateWorkflowRun,
   retryWorkflowRun,
+  stopWorkflowRun,
   runScheduledTaskNow,
   patchScheduledTask,
   type WorkflowDraftResult,
@@ -128,6 +130,7 @@ function App() {
     initialName?: string;
     initialWorkspace?: string | null;
     fromDraft?: string;
+    fromThread?: string;
   } | null>(null);
   // A workflow being drafted from a conversation, shown in place of the
   // Scheduled page until it's saved, discarded or navigated away from.
@@ -495,6 +498,19 @@ function App() {
     const error = await answerWorkflowStep(task.trigger_id, run.run_id, approved, note);
     refreshScheduledTasks();
     return error;
+  };
+
+  const stopWorkflow = async (task: ScheduledTask, run: ScheduledRun) => {
+    const error = await stopWorkflowRun(task.trigger_id, run.run_id);
+    refreshScheduledTasks();
+    return error;
+  };
+
+  const investigateWorkflow = async (task: ScheduledTask, run: ScheduledRun, model: string | null) => {
+    const result = await investigateWorkflowRun(task.trigger_id, run.run_id, model);
+    if ("error" in result) return result.error;
+    goToThread(result.thread_id);
+    return null;
   };
 
   const runTaskNow = async (task: ScheduledTask, inputs?: Record<string, unknown>) => {
@@ -877,6 +893,8 @@ function App() {
             onRetry={(stepId) => retryWorkflow(threadTask, threadRun, stepId)}
             onAnswer={(approved, note) => answerWorkflow(threadTask, threadRun, approved, note)}
             onEditStep={(stepId) => editWorkflowStep(threadTask, stepId)}
+            onStop={() => stopWorkflow(threadTask, threadRun)}
+            onInvestigate={(model) => investigateWorkflow(threadTask, threadRun, model)}
           />
         ) : navMode === "create" && onHome ? (
           // A new conversation: greeting and message box centered in the page.
@@ -937,6 +955,7 @@ function App() {
                 initialName: name,
                 initialWorkspace: workflowDraft.workspace,
                 fromDraft: workflowDraft.draftId,
+                fromThread: workflowDraft.threadId,
               })
             }
           />
@@ -962,6 +981,7 @@ function App() {
             initialName={scheduledTaskModal.initialName}
             initialWorkspace={scheduledTaskModal.initialWorkspace}
             fromDraft={scheduledTaskModal.fromDraft}
+            fromThread={scheduledTaskModal.fromThread}
             onClose={() => setScheduledTaskModal(null)}
             onSaved={onTaskSaved}
           />

@@ -77,9 +77,11 @@ export function stoppedInside(step: WorkflowStep, run: ScheduledRun): boolean {
 
 // -- Side panel and header ----------------------------------------------------------
 
-function progressOf(status: StepStatus | undefined): ProgressStatus {
+function progressOf(status: StepStatus | undefined, runGoing: boolean): ProgressStatus {
   if (status === "done" || status === "skipped") return "completed";
-  if (status === "running" || status === "waiting") return "in_progress";
+  // A stopped run leaves its last step's record at "running".
+  if (status === "running") return runGoing ? "in_progress" : "pending";
+  if (status === "waiting") return "in_progress";
   if (status === "failed") return "failed";
   return "pending";
 }
@@ -89,6 +91,7 @@ function progressOf(status: StepStatus | undefined): ProgressStatus {
  * arm a branch took is listed. */
 export function workflowProgress(workflow: Workflow, run: ScheduledRun): ProgressItem[] {
   const records = recordMap(run);
+  const going = run.status === "running";
   const items: ProgressItem[] = [];
   const visit = (steps: WorkflowStep[]) => {
     for (const step of steps) {
@@ -96,10 +99,10 @@ export function workflowProgress(workflow: Workflow, run: ScheduledRun): Progres
       if (step.kind === "loop") {
         const progress = loopProgress(record);
         const counted = progress ? ` · ${progress.done} of ${progress.total}` : "";
-        items.push({ id: step.id, content: `${step.title}${counted}`, status: progressOf(record?.status) });
+        items.push({ id: step.id, content: `${step.title}${counted}`, status: progressOf(record?.status, going) });
         continue;
       }
-      items.push({ id: step.id, content: step.title, status: progressOf(record?.status) });
+      items.push({ id: step.id, content: step.title, status: progressOf(record?.status, going) });
       if (step.kind === "branch" && record?.status === "done") {
         const arm = (record.output as { arm?: string } | null)?.arm;
         visit(arm === "then" ? step.then : step.otherwise);
@@ -124,7 +127,11 @@ export function workflowRunLabel(workflow: Workflow, run: ScheduledRun): string 
   };
   if (run.status === "failed") {
     const at = where("failed");
-    return at ? `Stopped at ${at}` : "Stopped";
+    return at ? `Failed at ${at}` : "Failed";
+  }
+  if (run.status === "stopped") {
+    const at = where("running");
+    return at ? `Stopped at ${at}` : null;
   }
   if (run.status === "needs_approval") {
     const at = where("waiting");

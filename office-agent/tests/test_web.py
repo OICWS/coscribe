@@ -6278,6 +6278,56 @@ def test_a_failed_workflow_step_can_be_retried_from_an_earlier_one_lg(
     assert waiting["steps"][1]["output"] == {"words": 2}
 
 
+def test_a_failed_workflow_run_is_looked_into_in_a_new_conversation_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "notes.txt").write_text("one two", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="Counted."),
+            _structured({"words": 0}),
+            AIMessage(content="The count step read an empty file."),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_source") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "统计 notes.txt 的字数"})
+            _receive_until(ws, "tasks_changed")
+        response = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Word count", "kind": "manual", "at": "", "workflow": _NOTES_WORKFLOW,
+                  "from_thread": "t_source"},
+        )  # fmt: skip
+        task = response.json()
+        run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
+        failed = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        base = f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}"
+        not_going = client.post(f"{base}/stop")
+        started = client.post(f"{base}/investigate", json={})
+        thread_id = started.json()["thread_id"]
+        deadline = time.time() + 5
+        while len(fake_model.received) < 3 and time.time() < deadline:
+            time.sleep(0.05)
+        with client.websocket_connect(f"/ws/{thread_id}") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()["entries"]
+        titles = {t["thread_id"]: t["preview"] for t in client.get("/api/threads").json()}
+
+    assert task["source_thread"] == "t_source"
+    assert failed["status"] == "failed"
+    assert not_going.status_code == 409
+    prompt = str(fake_model.received[2][-1].content)
+    assert '[Look into a failed run of "Word count"' in prompt
+    assert "Failed step: Has words (sane)" in prompt
+    assert "What the user asked for when the task was made: 统计 notes.txt 的字数" in prompt
+    assert history[0]["text"].startswith('[Look into a failed run of "Word count"')
+    assert history[-1]["text"] == "The count step read an empty file."
+    assert titles[thread_id] == "Look into: Word count"
+
+
 def test_a_workflow_task_with_a_bad_reference_is_refused_with_the_step_named_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

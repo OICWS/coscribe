@@ -6710,6 +6710,38 @@ doubtful data.
       <task>" with Open task and the pinned bar goes away -- verified by
       saving the draft above.
 
+## Phase 8bz -- A run page that says where a run stands; the assistant looks into failures (shipped)
+
+- [x] A banner above a workflow run's steps: running (with the current
+      step and **Stop run**), waiting for the user (amber, naming the
+      approval step), stopped ("Stopped at <step>. Nothing after that
+      ran."), or failed ("Failed at <step>", the error, "the run stopped
+      there, so nothing after this step produced data", and a thumbnail
+      of the page at that moment). A stopped step shows "Stopped here"
+      instead of a spinner, in the run and in the side panel's progress.
+- [x] Stop is its own state, not a failure: the server keeps the task
+      driving each run (`_running`), Stop cancels it and tells the
+      desktop app to drop the step's wait. Verified: a run stopped 6s
+      into a 30s element wait was recorded as stopped within
+      milliseconds. The scheduler gathers runs with return_exceptions so
+      one stopped run doesn't cut short the others due with it.
+- [x] A browser workflow's failed run keeps a screenshot and the page's
+      text, captured before the next run takes the tab.
+- [x] **Let AI look into it** (model: the default, or one picked next to
+      the button) opens a new conversation, "Look into: <task>", that
+      starts from the failure -- step, error, inputs, the page, the last
+      good run, and the user's first request in the conversation the task
+      was saved from (tasks now keep `source_thread`) -- and is asked to
+      reproduce with test_workflow, find the cause, revise, retest, and
+      explain; the revision goes on a card for the user to save. The
+      opening message shows as a collapsible card. Verified with
+      DeepSeek on the fake SAP with a "System Information / password
+      expires" popup covering the transaction field (the case from the
+      user's own FBL5N session): it reproduced the failure, looked at
+      the page, dismissed the popup by hand to confirm, and drafted a
+      revision that dismisses it only when it is there; the revision's
+      test passed (13.1s, 449-row export).
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..tools.browser import BROWSER_HOST, BROWSER_RUNS
+from ..tools.browser import BROWSER_HOST, BROWSER_RUNS, page_screenshot
 from ..tools.scheduled_tasks import (
     ScheduledRun,
     ScheduledTrigger,
@@ -35,10 +36,41 @@ from ..tools.scheduled_tasks import (
 from ..workflows.engine import RunOutcome, StepRecord, WorkflowNotRunnable, WorkflowRun
 from ..workflows.spec import parse_workflow, walk
 from ..workflows.testing import uses_browser
+from .messages import extract_text, strip_mode_note
 
 logger = logging.getLogger(__name__)
 
 RUN_PROMPT_PREFIX = "[Scheduled run of "
+INVESTIGATION_PREFIX = "[Look into a failed run of "
+_PAGE_CHARS = 6000
+
+# The task driving each run that's going now, so Stop can cancel it.
+_RUNNING: dict[str, asyncio.Task[Any]] = {}
+
+
+@contextlib.contextmanager
+def _running(run_id: str) -> Any:
+    task = asyncio.current_task()
+    if task is not None:
+        _RUNNING[run_id] = task
+    try:
+        yield
+    finally:
+        if _RUNNING.get(run_id) is task:
+            del _RUNNING[run_id]
+
+
+def stop_run(run_id: str, thread_id: str) -> bool:
+    """Cancel a run that's going now -- it's recorded as stopped, not
+    failed. False if it isn't running here."""
+    task = _RUNNING.get(run_id)
+    if task is None or task.done():
+        return False
+    # A browser step can be waiting on the desktop app for an hour.
+    BROWSER_HOST.cancel(thread_id)
+    task.cancel()
+    return True
+
 
 _NOTES_INSTRUCTIONS = (
     "Before you finish, call update_task_notes with the complete updated "
@@ -177,6 +209,9 @@ async def _run_workflow(
         BROWSER_HOST.set_active(run.thread_id, True)
         try:
             outcome = await action(workflow_run)
+            if outcome.status == "failed" and uses_browser(workflow):
+                # Before another run takes the tab.
+                await _record_failure_page(store, trigger, run, session)
         except WorkflowNotRunnable as exc:
             return "failed", str(exc)
         finally:
@@ -188,6 +223,108 @@ async def _run_workflow(
     titles = {placed.step.id: placed.step.title for placed in walk(workflow.steps)}
     title = titles.get(outcome.step_id or "", "A step")
     return "failed", f"{title}: {outcome.error}"
+
+
+async def _record_failure_page(
+    store: ScheduledTriggerStore, trigger: ScheduledTrigger, run: ScheduledRun, session: Any
+) -> None:
+    screenshot = await asyncio.to_thread(
+        page_screenshot, run.thread_id, Path(session.settings.state_dir), saved_workflow=True
+    )
+    snapshot = session.workflow_context(trigger.model).tools.get("browser_snapshot")
+    page = None
+    if snapshot is not None:
+        try:
+            page = str(await asyncio.to_thread(snapshot))[:_PAGE_CHARS]
+        except Exception:  # noqa: BLE001 -- the failure itself is what's recorded
+            logger.info("scheduled_tasks: no page text for failed run %s", run.run_id)
+    store.record_failure_page(trigger.trigger_id, run.run_id, screenshot, page)
+
+
+async def _first_request(get_session: Callable[[str], Awaitable[Any]], thread_id: str) -> str:
+    """The first thing the user asked in `thread_id`, or "" -- it tells the
+    assistant what the task was for, and in which language to answer."""
+    try:
+        session = await get_session(thread_id)
+        state = await session.lg_agent.aget_state(session.config)
+    except Exception:  # noqa: BLE001 -- the context is a help, not a need
+        logger.info("scheduled_tasks: couldn't read conversation %s", thread_id, exc_info=True)
+        return ""
+    for message in (state.values or {}).get("messages", []):
+        if getattr(message, "type", "") == "human":
+            return strip_mode_note(extract_text(message.content))[:500]
+    return ""
+
+
+def build_investigation_prompt(trigger: ScheduledTrigger, run: ScheduledRun, request: str) -> str:
+    """What a conversation looking into a failed workflow run starts from."""
+    titles: dict[str, str] = {}
+    if trigger.workflow is not None:
+        titles = {p.step.id: p.step.title for p in walk(parse_workflow(trigger.workflow).steps)}
+    failed = next((s for s in reversed(run.steps) if s.get("status") == "failed"), None)
+    step_id = str(failed.get("step_id")) if failed else ""
+    last_ok = next((r for r in reversed(trigger.runs) if r.status == "completed"), None)
+    lines = [
+        f'{INVESTIGATION_PREFIX}"{trigger.name}" · task {trigger.trigger_id} · run {run.run_id}]',
+        "",
+        "This saved fixed workflow's run failed. Find the cause and propose a fix. Don't save "
+        "anything or change the task yourself: the user reviews your revision and saves it.",
+        "",
+        f"Failed step: {titles.get(step_id, step_id or 'unknown')} ({step_id or '-'})",
+        f"Error: {run.error or '(none recorded)'}",
+        f"Inputs: {json.dumps(run.inputs or {}, ensure_ascii=False)}",
+        f"Run started: {run.started_at}",
+        f"Last successful run: {last_ok.started_at if last_ok else 'none yet'}",
+    ]
+    if request:
+        lines.append(f"What the user asked for when the task was made: {request}")
+    if run.page:
+        lines += ["", "The page when it failed:", run.page]
+    lines += [
+        "",
+        "1. Reproduce it: test_workflow(task_id, the same inputs).",
+        "2. Find the cause from the failed step, its error and the page.",
+        "3. Fix it with revise_workflow(task_id, request=the cause and the fix), then test the "
+        "revision with test_workflow(draft_id) -- at most 3 rounds.",
+        "4. Tell the user in a few sentences what went wrong and what the revision changes, in "
+        "the language of their request above.",
+        "If the reproduction passes and the failure looks temporary (the site was down, a login "
+        "had expired), say so instead of changing the workflow.",
+    ]
+    return "\n".join(lines)
+
+
+async def start_investigation(
+    state_dir: str | Path,
+    trigger_id: str,
+    run_id: str,
+    thread_id: str,
+    model: str | None,
+    get_session: Callable[[str], Awaitable[Any]],
+    *,
+    attended: bool,
+) -> None:
+    """Open conversation `thread_id` on a failed workflow run and let the
+    assistant work on it. `attended`: someone is watching, so an approval
+    waits for them; otherwise it's parked for later, as in a run."""
+    store = ScheduledTriggerStore(state_dir)
+    trigger = store.load(trigger_id)
+    run = trigger.find_run(run_id) if trigger is not None else None
+    if trigger is None or run is None:
+        raise KeyError(f"No run {run_id!r} of scheduled task {trigger_id!r}")
+    request = (
+        await _first_request(get_session, trigger.source_thread) if trigger.source_thread else ""
+    )
+    prompt = build_investigation_prompt(trigger, run, request)
+    session = await get_session(thread_id)
+    socket = _RelaySocket(session)
+    socket.can_resolve_approvals = attended
+    if model and model != getattr(session, "_model_string", None):
+        await session.switch_model(model, socket)
+    session._title_path().parent.mkdir(parents=True, exist_ok=True)
+    session._title_path().write_text(f"Look into: {trigger.name}", encoding="utf-8")
+    await socket.send_json({"type": "scheduled_run_started", "text": prompt})
+    await session.handle_user_message(prompt, socket)
 
 
 async def continue_workflow_run(
@@ -207,8 +344,9 @@ async def continue_workflow_run(
     if trigger is None or run is None:
         return None
     try:
-        session = await get_session(run.thread_id)
-        status, error = await _run_workflow(store, trigger, run, session, action)
+        with _running(run_id):
+            session = await get_session(run.thread_id)
+            status, error = await _run_workflow(store, trigger, run, session, action)
     except asyncio.CancelledError:
         store.finish_run(trigger_id, run_id, "stopped")
         raise
@@ -235,16 +373,17 @@ async def execute_run(
     if trigger is None or run is None:
         return None
     try:
-        session = await get_session(run.thread_id)
-        if trigger.workflow is not None:
-            inputs = run.inputs or {}
-            status, error = await _run_workflow(
-                store, trigger, run, session, lambda wf: wf.start(inputs)
-            )
-        else:
-            status, error = await _run_in_session(
-                trigger, run, store.read_notes(trigger_id), session
-            )
+        with _running(run_id):
+            session = await get_session(run.thread_id)
+            if trigger.workflow is not None:
+                inputs = run.inputs or {}
+                status, error = await _run_workflow(
+                    store, trigger, run, session, lambda wf: wf.start(inputs)
+                )
+            else:
+                status, error = await _run_in_session(
+                    trigger, run, store.read_notes(trigger_id), session
+                )
     except asyncio.CancelledError:
         store.finish_run(trigger_id, run_id, "stopped")
         raise
@@ -292,7 +431,8 @@ async def poll_due_scheduled_tasks(
             await on_pruned(pruned)
         fired.append(trigger)
         executions.append(execute_run(state_dir, trigger.trigger_id, run.run_id, get_session))
-    await asyncio.gather(*executions)
+    # A run stopped by the user ends in CancelledError; the others go on.
+    await asyncio.gather(*executions, return_exceptions=True)
     return [store.load(t.trigger_id) or t for t in fired]
 
 

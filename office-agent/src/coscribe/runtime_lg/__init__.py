@@ -19,6 +19,8 @@ from .scheduled_tasks import (
     fire_trigger_now,
     poll_due_scheduled_tasks,
     reconcile_interrupted_runs,
+    start_investigation,
+    stop_run,
 )
 from .selfwake import poll_due_wakes
 from .skill_authoring import SkillSaveProposal, propose_skill_save_lg, write_skill_lg
@@ -46,6 +48,8 @@ __all__ = [
     "poll_due_wakes",
     "reconcile_interrupted_runs",
     "record_decision",
+    "start_investigation",
+    "stop_run",
     "redact_secrets",
     "SkillSaveProposal",
     "propose_skill_save_lg",

@@ -284,6 +284,8 @@ export interface ScheduledRun {
   /** A workflow run's steps, in the order they first ran. Empty otherwise. */
   steps: StepRecord[];
   inputs: Record<string, unknown> | null;
+  /** Where a browser workflow run failed: a file under /api/screenshots/. */
+  screenshot?: string | null;
 }
 
 export interface ScheduledTask {
@@ -307,6 +309,8 @@ export interface ScheduledTask {
   workspace?: string | null;
   /** Ids of the conversation drafts saved into this task. */
   drafts?: string[];
+  /** The conversation the task was saved from. */
+  source_thread?: string | null;
 }
 
 export interface CreateScheduledTaskPayload {
@@ -322,8 +326,9 @@ export interface CreateScheduledTaskPayload {
   notes_enabled?: boolean;
   workflow?: Workflow | null;
   workspace?: string | null;
-  /** The conversation draft this task is saved from. */
+  /** The conversation draft this task is saved from, and that conversation. */
   from_draft?: string;
+  from_thread?: string;
 }
 
 export type ScheduledTaskResult = ScheduledTask | { error: string };

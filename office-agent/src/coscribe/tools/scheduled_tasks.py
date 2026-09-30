@@ -267,6 +267,10 @@ class ScheduledRun:
     # in the order the steps first ran, and the inputs it was given.
     steps: list[dict[str, Any]] = field(default_factory=list)
     inputs: dict[str, Any] | None = None
+    # Where a browser workflow run failed: a page_screenshot file name and
+    # the page's text, for the person and the assistant looking into it.
+    screenshot: str | None = None
+    page: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -279,6 +283,8 @@ class ScheduledRun:
             "error": self.error,
             "steps": self.steps,
             "inputs": self.inputs,
+            "screenshot": self.screenshot,
+            "page": self.page,
         }
 
     @classmethod
@@ -293,6 +299,8 @@ class ScheduledRun:
             error=data.get("error"),
             steps=data.get("steps") or [],
             inputs=data.get("inputs"),
+            screenshot=data.get("screenshot"),
+            page=data.get("page"),
         )
 
 
@@ -328,6 +336,8 @@ class ScheduledTrigger:
     # The conversation drafts (draft_workflow/revise_workflow ids) saved
     # into this task, so a conversation can show a draft as saved.
     drafts: list[str] = field(default_factory=list)
+    # The conversation the task was saved from, if any.
+    source_thread: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -347,6 +357,7 @@ class ScheduledTrigger:
             "workflow": self.workflow,
             "workspace": self.workspace,
             "drafts": self.drafts,
+            "source_thread": self.source_thread,
         }
 
     @classmethod
@@ -383,6 +394,7 @@ class ScheduledTrigger:
             workflow=data.get("workflow"),
             workspace=data.get("workspace"),
             drafts=list(data.get("drafts") or []),
+            source_thread=data.get("source_thread"),
         )
 
     def find_run(self, run_id: str) -> ScheduledRun | None:
@@ -480,6 +492,17 @@ class ScheduledTriggerStore:
         self.save(trigger)
         return trigger
 
+    def record_failure_page(
+        self, trigger_id: str, run_id: str, screenshot: str | None, page: str | None
+    ) -> None:
+        trigger = self.load(trigger_id)
+        run = trigger.find_run(run_id) if trigger is not None else None
+        if trigger is None or run is None:
+            return
+        run.screenshot = screenshot
+        run.page = page
+        self.save(trigger)
+
     def record_step(self, trigger_id: str, run_id: str, record: dict[str, Any]) -> None:
         """Replace this step's record on the run -- this pass of it, inside
         a loop -- or append it."""
@@ -509,6 +532,8 @@ class ScheduledTriggerStore:
         run.status = "running"
         run.error = None
         run.finished_at = None
+        run.screenshot = None
+        run.page = None
         if trigger.runs[-1] is run:
             trigger.last_run_status = "running"
         self.save(trigger)

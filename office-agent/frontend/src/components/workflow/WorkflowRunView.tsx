@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { capitalize, formatRunTime, runDuration, runSourceLabel } from "../../lib/runLabels";
 import {
   describeCheckResult,
@@ -19,11 +19,12 @@ import {
 } from "../../lib/workflowProgress";
 import { placeSteps } from "../../lib/workflowTree";
 import type { BranchStep, CheckResult, LoopStep, StepRecord, Workflow, WorkflowStep } from "../../types/workflow";
-import { CheckIcon, ChevronDownIcon, ClockIcon, CloseIcon } from "../icons";
+import { CheckIcon, ChevronDownIcon, ClockIcon, CloseIcon, SparkIcon, StopIcon } from "../icons";
 import { ConditionText, VarToken } from "./parts";
+import { Screenshot } from "./Screenshot";
 import { StepOutput } from "./StepOutput";
 
-type RowStatus = StepRecord["status"] | "not_reached";
+type RowStatus = StepRecord["status"] | "not_reached" | "stopped";
 
 const primaryButton =
   "h-8 rounded-md bg-[var(--primary)] px-3 text-[13px] font-medium text-[var(--primary-fg)] hover:bg-[var(--primary-hover)] disabled:opacity-50";
@@ -51,6 +52,13 @@ function StatusDot({ status }: { status: RowStatus }) {
     return (
       <span className={base} style={tint("var(--warning)")} role="img" aria-label="Waiting for you">
         <ClockIcon className="h-3 w-3" strokeWidth={2.5} />
+      </span>
+    );
+  }
+  if (status === "stopped") {
+    return (
+      <span className={`${base} bg-[var(--card-bg)] text-[var(--muted)]`} role="img" aria-label="Stopped">
+        <span className="h-2 w-2 rounded-[2px] bg-current" />
       </span>
     );
   }
@@ -278,6 +286,7 @@ function branchArm(record: StepRecord | undefined): "then" | "otherwise" | null 
 function rowSummary(step: WorkflowStep, record: StepRecord | undefined, status: RowStatus): string {
   if (status === "not_reached") return "Not reached";
   if (status === "pending") return "Up next";
+  if (status === "stopped") return "Stopped here";
   if (step.kind === "loop") {
     const progress = loopProgress(record);
     if (!progress) return status === "running" ? "Starting…" : "";
@@ -474,7 +483,8 @@ function StepRow({
   ctx: RunContext;
 }) {
   const record = ctx.records.get(recordKey(step.id, path));
-  const status: RowStatus = record?.status ?? (upNext ? "pending" : "not_reached");
+  const stopped = record?.status === "running" && ctx.run.status !== "running";
+  const status: RowStatus = stopped ? "stopped" : (record?.status ?? (upNext ? "pending" : "not_reached"));
   const [open, setOpen] = useState(step.kind === "llm");
   const duration = stepDuration(record?.started_at ?? null, record?.finished_at ?? null);
   const blockStopped = stoppedInside(step, ctx.run);
@@ -563,13 +573,169 @@ interface WorkflowRunViewProps {
   onRetry: (stepId?: string) => Promise<string | null>;
   onAnswer: (approved: boolean, note: string) => Promise<string | null>;
   onEditStep: (stepId: string) => void;
+  onStop: () => Promise<string | null>;
+  /** Opens a conversation looking into this failed run, with `model`
+   * (null: the default); resolves to an error message, or null. */
+  onInvestigate: (model: string | null) => Promise<string | null>;
+}
+
+function stepTitle(workflow: Workflow, stepId: string | undefined): string {
+  if (!stepId) return "a step";
+  return placeSteps(workflow.steps).find((placed) => placed.step.id === stepId)?.step.title ?? stepId;
+}
+
+function useModels(enabled: boolean): string[] {
+  const [models, setModels] = useState<string[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    fetch("/api/providers")
+      .then((res) => res.json())
+      .then((providers: Record<string, { default_model?: string }>) =>
+        setModels(
+          Object.entries(providers)
+            .filter(([, info]) => info.default_model)
+            .map(([key, info]) => `${key}:${info.default_model}`),
+        ),
+      )
+      .catch(() => setModels([]));
+  }, [enabled]);
+  return models;
+}
+
+/** How the run stands, and what can be done about it, above the steps. */
+function RunBanner({
+  run,
+  workflow,
+  onStop,
+  onInvestigate,
+}: Pick<WorkflowRunViewProps, "run" | "workflow" | "onStop" | "onInvestigate">) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [model, setModel] = useState("");
+  const failedRecord = run.steps.findLast((r) => r.status === "failed");
+  const models = useModels(run.status === "failed" && failedRecord !== undefined);
+  const act = async (action: () => Promise<string | null>) => {
+    setBusy(true);
+    setError(await action());
+    setBusy(false);
+  };
+  const box = "flex flex-col gap-2.5 rounded-xl border px-4 py-3 text-sm";
+
+  if (run.status === "running") {
+    const current = run.steps.findLast((r) => r.status === "running");
+    return (
+      <div className={`${box} border-[var(--border)]`} data-testid="run-banner">
+        <div className="flex items-center gap-3">
+          <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)] motion-reduce:animate-none" />
+          <span className="min-w-0 flex-1 truncate">
+            Running{current ? ` · ${stepTitle(workflow, current.step_id)}` : ""}
+          </span>
+          <button type="button" className={secondaryButton} disabled={busy} onClick={() => act(onStop)}>
+            <span className="flex items-center gap-1.5">
+              <StopIcon className="h-3.5 w-3.5" />
+              Stop run
+            </span>
+          </button>
+        </div>
+        {error && <p className="text-[13px] text-[var(--danger)]">{error}</p>}
+      </div>
+    );
+  }
+  if (run.status === "needs_approval") {
+    const waiting = run.steps.findLast((r) => r.status === "waiting");
+    return (
+      <div
+        className={`${box} border-[color-mix(in_srgb,var(--warning)_45%,transparent)] bg-[color-mix(in_srgb,var(--warning)_8%,transparent)]`}
+        data-testid="run-banner"
+      >
+        <div className="flex items-center gap-2.5">
+          <ClockIcon className="h-4 w-4 shrink-0 text-[var(--warning)]" />
+          <span>
+            Waiting for you at <span className="font-medium">{stepTitle(workflow, waiting?.step_id)}</span> -- answer
+            it below to go on.
+          </span>
+        </div>
+      </div>
+    );
+  }
+  if (run.status === "stopped") {
+    const at = run.steps.findLast((r) => r.status === "running");
+    return (
+      <div className={`${box} border-[var(--border)] text-[var(--muted)]`} data-testid="run-banner">
+        Stopped{at ? ` at ${stepTitle(workflow, at.step_id)}` : ""}. Nothing after that ran.
+      </div>
+    );
+  }
+  if (run.status === "failed" && failedRecord) {
+    return (
+      <div
+        className={`${box} border-[color-mix(in_srgb,var(--danger)_40%,transparent)] bg-[color-mix(in_srgb,var(--danger)_5%,transparent)]`}
+        data-testid="run-banner"
+      >
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">Failed at {stepTitle(workflow, failedRecord.step_id)}</div>
+            {failedRecord.error && (
+              <div className="mt-0.5 line-clamp-4 break-words text-[13px] text-[var(--muted)]">
+                {failedRecord.error}
+              </div>
+            )}
+            <div className="mt-1 text-[13px] text-[var(--muted)]">
+              The run stopped there, so nothing after this step produced data.
+            </div>
+          </div>
+          {run.screenshot && <Screenshot name={run.screenshot} alt="The page when the step failed" />}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className={primaryButton}
+            disabled={busy}
+            onClick={() => act(() => onInvestigate(model || null))}
+          >
+            <span className="flex items-center gap-1.5">
+              <SparkIcon className="h-3.5 w-3.5" />
+              Let AI look into it
+            </span>
+          </button>
+          <select
+            aria-label="Model to look into it"
+            className="h-8 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-[13px]"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+          >
+            <option value="">Default model</option>
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m.split(":", 2)[1] ?? m}
+              </option>
+            ))}
+          </select>
+          <span className="text-[13px] text-[var(--muted)]">
+            Opens a new conversation that reproduces it and drafts a fix for you to review.
+          </span>
+        </div>
+        {error && <p className="text-[13px] text-[var(--danger)]">{error}</p>}
+      </div>
+    );
+  }
+  return null;
 }
 
 /** One workflow run, step by step (the Run artboard of
  * https://claude.ai/artifact/4G5JyZ3r4tMPF6QcFG3Vj1): what each step did,
  * where it stopped and why, and the way on from there. A branch shows the
  * arm it took; a loop shows one item's pass at a time. */
-export function WorkflowRunView({ task, run, workflow, onRetry, onAnswer, onEditStep }: WorkflowRunViewProps) {
+export function WorkflowRunView({
+  task,
+  run,
+  workflow,
+  onRetry,
+  onAnswer,
+  onEditStep,
+  onStop,
+  onInvestigate,
+}: WorkflowRunViewProps) {
   const duration = runDuration(run);
   const crashed = run.status === "failed" && !run.steps.some((record) => record.status === "failed");
   const [retrying, setRetrying] = useState(false);
@@ -607,6 +773,8 @@ export function WorkflowRunView({ task, run, workflow, onRetry, onAnswer, onEdit
             </div>
           )}
         </div>
+
+        <RunBanner run={run} workflow={workflow} onStop={onStop} onInvestigate={onInvestigate} />
 
         {crashed && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] px-4 py-3 text-sm">
