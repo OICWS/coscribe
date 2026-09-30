@@ -142,9 +142,7 @@ interface ScheduledTaskModalProps {
   fromThread?: string;
 }
 
-/** The Create/Edit scheduled task form -- matches
- * docs/ui-references/sheduled-edit-tasks.png (edit) and the analogous
- * "Create scheduled task" screenshot pixel-for-pixel in layout; reachable
+/** The Create/Edit scheduled task form; reachable
  * from RunPanel's "New task" menu, a task card/sidebar row's "Edit"
  * action, and the detail page's pencil icon (all pass a different `task`
  * prop into the same component rather than duplicating the form three
@@ -311,8 +309,7 @@ export function ScheduledTaskModal({
 
           {/* w-24 on both labels is load-bearing, not decorative -- it's
            * what keeps the Frequency/Permissions dropdowns' left edges
-           * aligned despite the two labels being different lengths,
-           * matching sheduled-edit-tasks.png's layout. */}
+           * aligned despite the two labels being different lengths. */}
           <div className="flex flex-wrap items-center gap-2">
             <label className="w-24 shrink-0 text-sm font-medium">Frequency</label>
             <select

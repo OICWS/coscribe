@@ -41,8 +41,7 @@ function parseRunPrompt(text: string): ParsedRunPrompt {
 }
 
 /** Stands in for a scheduled run's own prompt, which the run sent -- not
- * the user (docs/ui-references/scheduled-siderbar-task-running.png's
- * "Ran scheduled task" row). Expands to show what the run was told,
+ * the user. Expands to show what the run was told,
  * including the notes carried over from earlier runs. */
 export function ScheduledRunCard({ text }: { text: string }) {
   const [open, setOpen] = useState(false);

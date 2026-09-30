@@ -1999,10 +1999,8 @@ index.ts`'s own module docs for the design. Browser mode (`coscribe-web`
 + a normal browser tab) keeps working completely independently.
 
 This replaced an earlier Tauri shell at the Browser panel native-window
-migration's Phase 4 cutover (see `../office-agent/ROADMAP.md`) -- this
-public repo never carried that Tauri shell itself (deliberately left
-out of the fork; the private `OICWS/project` repo keeps it as a
-rollback net).
+migration's Phase 4 cutover (see `../office-agent/ROADMAP.md`); that
+shell has since been removed.
 
 **Menu** (the ☰ button; shortcuts work without opening it), laid out
 like Claude's desktop app:

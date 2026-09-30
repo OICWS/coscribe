@@ -167,7 +167,7 @@ def test_load_builtin_skills_bodies_reference_the_real_tool_names() -> None:
 
 # ---------------------------------------------------------------------
 # save_uploaded_skill -- Settings > Skills > Add > Upload skill's real
-# backend half (docs/ui-references/skills-add-uploadskills.png).
+# backend half.
 # ---------------------------------------------------------------------
 
 

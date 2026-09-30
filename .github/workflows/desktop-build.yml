@@ -1,14 +1,10 @@
 name: desktop build (Windows)
 
 # Manual-only: a heavy job, not run on every push. This is the Electron
-# shell, the primary (and only, in this repo) desktop build as of the
-# migration's Phase 4 cutover -- see office-agent/ROADMAP.md's Browser
-# panel native-window migration plan for the full history, and
-# office-agent-desktop/README.md for what this shell is. This repo
-# never carried the original Tauri shell it replaced (only the working
-# tree as of this migration's Sixth real-hardware finding was forked
-# into this public repo, and the Tauri shell was deliberately left out
-# of that fork).
+# shell, the only desktop build since the migration's Phase 4 cutover --
+# see office-agent/ROADMAP.md's Browser panel native-window migration
+# plan for the full history, and office-agent-desktop/README.md for what
+# this shell is.
 #
 # No code-signing secrets are configured -- the resulting installer/
 # portable exe is unsigned and will trigger Windows SmartScreen's usual

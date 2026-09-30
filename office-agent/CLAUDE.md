@@ -9,12 +9,9 @@ deliberately short; it's a map, not the content.
 - `README.md` -- what coscribe is, setup, feature docs.
 - `../ARCHITECTURE.md` -- why the runtime is built the way it is.
 - `ROADMAP.md` -- the running log of shipped/planned architecture and
-  frontend work, phase-numbered. **Phase 8am** (near the end) is the
-  current frontend-redesign direction -- recorded, not yet built. Its
-  reference screenshots are real files at `docs/ui-references/*.png`
-  (private repo only) -- `Read` them directly before touching any of
-  that work; the prose description alone is not enough for pixel-level
-  UI fidelity.
+  frontend work, phase-numbered, newest near the end. Entries that name
+  `docs/ui-references/*.png` refer to reference screenshots that were
+  deleted once that redesign was built (2026-09-30).
 - `PPTX_DESIGN.md` -- every PPTX-tool design decision, numbered
   sections, chronological. Read before touching anything in
   `tools/presentations.py`.
@@ -104,31 +101,26 @@ the subagent's diff before committing.
 ## Dual-repo sync -- every commit goes to both
 
 Private (`OICWS/project`, branch `claude/local-office-agent-system-k2cle1-13gepc`)
-is where real development happens. Public (`OICWS/coscribe`, `dev` and
-`main`, kept in lockstep) is a fork missing a few things on purpose
-(no Tauri legacy shell, no `docs/ui-references/` screenshots) --
-expect exactly those diffs when cherry-picking, nothing else.
+is where real development happens. Public (`OICWS/coscribe`, branch
+`main` only -- there is no `dev`) carries the same tree: since
+2026-09-30 the two are identical, file for file.
 
 ```bash
 # 1. Commit + push to the private branch first, full test suite green,
 #    ruff/mypy clean, OCR review pass done.
 git push -u origin claude/local-office-agent-system-k2cle1-13gepc
 
-# 2. Cherry-pick to the public repo's dev
-cd /home/user/coscribe && git checkout dev
+# 2. Cherry-pick onto the public main
+cd /home/user/coscribe && git checkout main && git pull
 git remote add private-project https://github.com/OICWS/project
 git fetch private-project claude/local-office-agent-system-k2cle1-13gepc --depth=5
-git cherry-pick <sha>   # skip any commit that's private-only (e.g. adding docs/ui-references/ images)
-git diff private-project/claude/local-office-agent-system-k2cle1-13gepc HEAD -- <touched files>
-#   ^ confirm the only diffs are the known, expected ones (Tauri wording, missing ui-references/)
-git push origin dev
+git cherry-pick <sha>
+git diff --stat private-project/claude/local-office-agent-system-k2cle1-13gepc HEAD
+#   ^ must be empty: the two repos hold the same files
+git push origin main
 
-# 3. Fast-forward main to match
-git fetch origin main && git checkout -B main origin/main
-git merge --ff-only dev && git push origin main
-
-# 4. Clean up
-git remote remove private-project && git checkout dev
+# 3. Clean up
+git remote remove private-project
 ```
 
 `git fetch` through this environment's proxy can return a stale

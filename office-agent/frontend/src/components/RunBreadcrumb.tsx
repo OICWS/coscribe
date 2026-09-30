@@ -17,8 +17,7 @@ interface RunBreadcrumbProps {
   statusLabel?: string | null;
 }
 
-/** "Scheduled / <task> ⌄" above a run's conversation
- * (docs/ui-references/scheduled-siderbar-task-running.png). The task name
+/** "Scheduled / <task> ⌄" above a run's conversation. The task name
  * opens a menu to the task's page and its other runs, so moving between
  * runs never needs a trip back to the portal. */
 export function RunBreadcrumb({ task, threadId, onOpenPortal, onOpenTask, statusLabel }: RunBreadcrumbProps) {

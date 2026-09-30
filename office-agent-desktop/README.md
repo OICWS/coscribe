@@ -5,12 +5,11 @@ starts the existing server as a supervised local sidecar process on a
 free port and opens a window pointed directly at it. See
 `src/main/index.ts`'s own module docs for the entry point.
 
-This is the **primary (and only, in this repo) desktop distribution**
-as of the Electron migration's Phase 4 cutover -- see
-`office-agent/ROADMAP.md`'s "Browser panel: native second-window
-architecture" migration plan for the full history of **why this
-package exists**: the original Tauri shell it replaced (not part of
-this repo -- see below) hit six real-hardware rounds of unresolved,
+This is the **only desktop distribution** as of the Electron
+migration's Phase 4 cutover -- see `office-agent/ROADMAP.md`'s "Browser
+panel: native second-window architecture" migration plan for the full
+history of **why this package exists**: the original Tauri shell it
+replaced (since removed -- see below) hit six real-hardware rounds of unresolved,
 framework-level bugs trying to embed a live browser panel as a second
 Tauri window on Windows. This package replaces that shell entirely,
 using Electron's `WebContentsView` (a genuine embedded child view, not
@@ -25,16 +24,9 @@ exists only because electron-builder expects one to be present-but-
 valid even when unused; it is not an active target, and Windows is the
 only platform this has been (or will be) verified on.
 
-**This repo never carried the Tauri shell.** Real-hardware testing for
-this migration continues from this public repo (forked from the
-private working tree at this migration's Sixth real-hardware finding,
-to work around a private-repo GitHub Actions storage-quota wall --
-public repos get unlimited free Actions minutes/storage), which
-deliberately left the Tauri shell and its own CI workflow out of the
-fork -- it was never needed to test the Electron path this repo
-actually exists for. The private `OICWS/project` repo keeps the
-retired Tauri shell as a rollback net for one release cycle; this repo
-doesn't need one.
+**The Tauri shell is gone.** It was kept for a while after the cutover
+as a rollback net, was never needed, and was deleted on 2026-09-30;
+`office-agent/ROADMAP.md` keeps the history.
 
 ## Window chrome
 
@@ -105,7 +97,7 @@ check clicks with real input (xdotool under Xvfb, or Windows itself).
   normal dependencies (`pip install pyinstaller` inside
   `office-agent/.venv`) -- needed to freeze the sidecar.
 - Icons were copied from the original Tauri shell's own `src-tauri/
-  icons/` (not part of this repo) -- if that placeholder branding ever
+  icons/` (since removed) -- if that placeholder branding ever
   gets replaced with real artwork, regenerate from whatever the real
   source becomes; there is no separate icon generation step for this
   package.

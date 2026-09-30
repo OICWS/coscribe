@@ -196,9 +196,8 @@ class SkillUploadError(ValueError):
 
 def save_uploaded_skill(skills_dir: str | Path, filename: str, content: bytes) -> SkillInfo:
     """Validate and write an uploaded skill into skills_dir/<slug>/ -- the
-    real half of Settings > Skills > Add > Upload skill
-    (docs/ui-references/skills-add-uploadskills.png). Two accepted shapes,
-    matching that screenshot's own bullet points:
+    real half of Settings > Skills > Add > Upload skill. Two accepted
+    shapes, as that page lists them:
     - a bare `.md` file: becomes skills_dir/<slug>/SKILL.md directly.
     - a `.zip`/`.skill` archive: must contain a SKILL.md, either at the
       archive's top level or one directory level down (the shape you get

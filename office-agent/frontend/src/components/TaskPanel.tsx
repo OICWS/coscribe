@@ -45,9 +45,7 @@ function readCollapsed(): Set<SectionId> {
   return new Set(raw ? (raw.split(",").filter(Boolean) as SectionId[]) : []);
 }
 
-/** The right-hand panel beside a conversation
- * (docs/ui-references/scheduled-siderbar-task-running.png): what the
- * model planned, which files it produced, and what it drew on. */
+/** The right-hand panel beside a conversation: what the model planned, which files it produced, and what it drew on. */
 export function TaskPanel({
   threadId,
   title,

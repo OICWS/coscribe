@@ -3,10 +3,8 @@
 # resources/sidecar/, where package.json's build.extraResources entry
 # expects it (electron-builder's analog of Tauri's bundle.resources).
 #
-# Self-contained in this repo -- the office-agent-desktop (Tauri) shell
-# this originally delegated to (see office-agent/ROADMAP.md's migration
-# plan for why the Electron shell exists) isn't part of this repo, which
-# only carries the Electron shell forward, not the Tauri one it replaced.
+# Self-contained: it once delegated to the Tauri shell's copy of this
+# script, and that shell has since been removed.
 #
 # PyInstaller does not cross-compile: run this on each target platform
 # before building that platform's app -- a Linux-built sidecar cannot
@@ -14,26 +12,26 @@
 #
 # Always rebuilds the frontend first (below), rather than trusting
 # whatever happens to already be sitting in src/coscribe/web/static/ --
-# a real, costly live bug, not a hypothetical: a checkout that was
-# several commits behind at the time of one `npm run build` (against
-# the private repo) left a stale frontend baked into every sidecar
-# built afterward, even once the branch itself was correctly updated to
-# HEAD (nothing here or in git ties the build *output* to the source
-# commit it came from). The symptom looked exactly like a native-
-# embedding bug -- the stale frontend predated isElectron() detection
-# working, so the Browser panel silently fell back to the legacy
-# screencast implementation instead, produced CDP-relay errors, and
-# cost a long real-hardware debugging session before the actual cause
-# (stale static assets, not a runtime bug) was found. Rebuilding here
-# every time this script runs is cheap compared to that.
+# a real, costly live bug, not a hypothetical: a checkout that was 30
+# commits behind at the time of one `npm run build` left a stale
+# frontend baked into every sidecar built afterward, even once the repo
+# itself was correctly updated to HEAD (nothing here or in git ties the
+# build *output* to the source commit it came from). The symptom looked
+# exactly like a native-embedding bug -- the stale frontend predated
+# isElectron() detection working, so the Browser panel silently fell
+# back to the legacy screencast implementation instead, produced
+# CDP-relay errors, and cost a long real-hardware debugging session
+# before the actual cause (stale static assets, not a runtime bug) was
+# found. Rebuilding here every time this script runs is cheap compared
+# to that.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ELECTRON_ROOT="$(dirname "$SCRIPT_DIR")"
-REPO_ROOT="$(dirname "$ELECTRON_ROOT")"
+DESKTOP_ROOT="$(dirname "$SCRIPT_DIR")"
+REPO_ROOT="$(dirname "$DESKTOP_ROOT")"
 OFFICE_AGENT="$REPO_ROOT/office-agent"
 
-SIDECAR_DEST="$ELECTRON_ROOT/resources/sidecar"
+SIDECAR_DEST="$DESKTOP_ROOT/resources/sidecar"
 
 echo "==> Building frontend (coscribe-web's static assets)"
 (

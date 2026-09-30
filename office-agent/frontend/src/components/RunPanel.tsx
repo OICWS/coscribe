@@ -27,8 +27,7 @@ interface TaskCardMenuProps {
 }
 
 /** The hover "..." menu on a portal card -- Run now/Pause-Resume/Edit/
- * Delete (the sidebar's own menu, a separate component, drops Pause --
- * see sheduled-siderbar-workflow-display-settings.png). */
+ * Delete (the sidebar's own menu, a separate component, drops Pause). */
 function TaskCardMenu({ task, onEdit, onRunNow, onChanged }: TaskCardMenuProps) {
   const [open, setOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -181,8 +180,7 @@ interface RunPanelProps {
   focusStepId?: string | null;
 }
 
-/** Scheduled mode's main content: the card-grid portal
- * (docs/ui-references/sheduled-main-portal.png), or ScheduledTaskDetail
+/** Scheduled mode's main content: the card-grid portal, or ScheduledTaskDetail
  * for whichever task is selected. Selection lives in App.tsx since a
  * sidebar row (NavRail) and a card here both drive it. */
 export function RunPanel({

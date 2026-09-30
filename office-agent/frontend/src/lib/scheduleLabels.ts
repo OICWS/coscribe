@@ -36,8 +36,7 @@ export function scheduleKindLabel(kind: ScheduleKind): string {
 }
 
 /** Full sentence description, e.g. "Monthly on the 19th at 9:00 AM" --
- * matches docs/ui-references/sheduled-main-portal.png's green pill text
- * and sheduled-display-tasks.png's "Repeats" value. */
+ * the portal card's pill and the task page's "Repeats" value. */
 export function describeSchedule(schedule: ScheduleRule): string {
   switch (schedule.kind) {
     case "manual":

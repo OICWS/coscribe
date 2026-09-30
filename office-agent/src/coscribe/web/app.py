@@ -2215,9 +2215,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/skills/upload")
     async def upload_skill(file: UploadFile) -> JSONResponse:
         # The real half of Settings > Skills > Add > Upload skill (see
-        # tools/skills.py's save_uploaded_skill for the accepted shapes
-        # and docs/ui-references/skills-add-uploadskills.png for the
-        # reference UI). Always writes into settings.skills_dir, i.e.
+        # tools/skills.py's save_uploaded_skill for the accepted shapes).
+        # Always writes into settings.skills_dir, i.e.
         # always a "custom" skill -- there's no UI path to add a builtin
         # one, those only ever come from the package itself.
         content = await file.read()

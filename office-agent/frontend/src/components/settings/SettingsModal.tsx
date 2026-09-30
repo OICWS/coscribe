@@ -55,8 +55,7 @@ interface CategoryDef {
 // Create/Run split" design pass; Settings is reachable from the nav
 // rail's own Settings icon now, not a top-bar gear (see NavRail.tsx).
 //
-// Grouped toward the "Settings modal" reference screenshot
-// (docs/ui-references/settings-modal.png): a plain "Settings" group for
+// Grouped like Claude's settings modal: a plain "Settings" group for
 // the core config categories, then "Customize" pulled out specifically
 // for Skills/Connectors -- the one thing the roadmap explicitly called
 // out to align on. The reference's third "Platform" group (an "API

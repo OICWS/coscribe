@@ -550,9 +550,8 @@ function DiscoverRow({ entry, adding, onAdd }: { entry: CatalogSkill; adding: bo
   );
 }
 
-/** Settings > Skills > Add > Upload skill -- the real half of
- * docs/ui-references/skills-add-uploadskills.png (no security-scan UI,
- * we don't scan). Top-level, not nested in SkillsTab. */
+/** Settings > Skills > Add > Upload skill (no security-scan UI: we don't
+ * scan). Top-level, not nested in SkillsTab. */
 function UploadSkillView({ onBack, onUploaded }: { onBack: () => void; onUploaded: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);

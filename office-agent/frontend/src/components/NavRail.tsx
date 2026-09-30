@@ -167,12 +167,11 @@ function RunDot({ status }: { status: RunStatus | null }) {
   );
 }
 
-/** One Scheduled sidebar row -- matches
- * docs/ui-references/sheduled-sidebar-workflow-display.png: a leading
+/** One Scheduled sidebar row: a leading
  * bullet, the name, and (until hovered) the schedule kind right-aligned
  * in muted text; hovering swaps that label for a "..." menu (Run now/
- * Edit/Delete -- no Pause, see sheduled-siderbar-workflow-display-
- * settings.png, unlike the portal card's own menu which keeps it).
+ * Edit/Delete -- no Pause, unlike the portal card's own menu which keeps
+ * it).
  * Clicking the row opens its latest run (or the task's page, before it
  * has run). Its dot shows how the latest run is going or went, so that's
  * visible without opening anything. */
@@ -295,7 +294,7 @@ interface NavRailProps {
 }
 
 /** A narrow icon-only rail that expands into a full nav panel on hover
- * or when pinned (docs/ui-references/nav-rail.png). Collapsed, it shows
+ * or when pinned. Collapsed, it shows
  * the pin toggle and the two mode icons (chat / scheduled); expanded, it
  * lists either chat sessions or scheduled tasks, depending on mode. */
 export function NavRail({

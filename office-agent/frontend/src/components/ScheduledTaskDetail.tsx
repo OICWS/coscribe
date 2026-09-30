@@ -260,8 +260,7 @@ function WorkflowBadge({ task }: { task: ScheduledTask }) {
   );
 }
 
-/** One scheduled task: its settings (docs/ui-references/
- * sheduled-display-tasks.png), its notes, and every run it has made --
+/** One scheduled task: its settings, its notes, and every run it has made --
  * each run opening its own conversation. */
 export function ScheduledTaskDetail({
   task,
