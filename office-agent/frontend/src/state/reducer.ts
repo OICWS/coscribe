@@ -96,6 +96,8 @@ export interface ChatState {
   /** See wire.ts's StateEvent.folders. */
   folders: string[];
   items: LogItem[];
+  /** The workflow test running in this turn, if any. */
+  workflowTest: { done: number; total: number } | null;
   totalTokens: number;
   /** Prompt-cache stats from the most recent "usage" event, null when
    * the provider hasn't reported any yet this session (see UsageEvent's
@@ -161,6 +163,7 @@ export const initialChatState: ChatState = {
   turnInFlight: false,
   error: null,
   turnTick: 0,
+  workflowTest: null,
   historyReceived: false,
   olderItems: [],
   olderStatus: "none",
@@ -406,6 +409,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "history": {
       return {
         ...state,
+        workflowTest: null,
         historyReceived: true,
         olderStatus: action.has_older ? "idle" : "none",
         items: historyToItems(action.entries),
@@ -480,6 +484,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // itself unchanged when there's nothing to close -- items[i] = ...
       // below must never end up mutating that shared reference in place.
       const items = [...closeStreamingBubble(state.items)];
+      const workflowTest = action.tool_name === "test_workflow" ? null : state.workflowTest;
       for (let i = items.length - 1; i >= 0; i -= 1) {
         const item = items[i];
         if (item.kind === "tool" && item.toolName === action.tool_name && item.result === undefined) {
@@ -489,7 +494,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             result: action.result,
             isError: action.is_error,
           };
-          return { ...state, items };
+          return { ...state, items, workflowTest };
         }
         // A gated call only ever produced an "approval" LogItem live --
         // there's no separate "tool call started" WS event to have
@@ -513,7 +518,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             result: action.result,
             isError: action.is_error,
           };
-          return { ...state, items };
+          return { ...state, items, workflowTest };
         }
       }
       items.push({
@@ -524,7 +529,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         result: action.result,
         isError: action.is_error,
       });
-      return { ...state, items };
+      return { ...state, items, workflowTest };
     }
 
     case "approval_required":
@@ -664,7 +669,10 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return state;
 
     case "tasks_changed":
-      return { ...state, turnInFlight: false, turnTick: state.turnTick + 1 };
+      return { ...state, turnInFlight: false, turnTick: state.turnTick + 1, workflowTest: null };
+
+    case "workflow_test_progress":
+      return { ...state, workflowTest: { done: action.done, total: action.total } };
 
     case "turn_started":
       return {
@@ -678,8 +686,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
 
     default: {
+      // Types still demand every event be handled; at runtime an event
+      // this build doesn't know must not become the state.
       const _exhaustive: never = action;
-      return _exhaustive;
+      void _exhaustive;
+      return state;
     }
   }
 }

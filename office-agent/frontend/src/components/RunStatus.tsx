@@ -4,6 +4,7 @@ import { formatElapsed, formatTokenCount } from "../lib/format";
 interface RunStatusProps {
   turnInFlight: boolean;
   totalTokens: number;
+  workflowTest?: { done: number; total: number } | null;
 }
 
 /** Live "2m 5s · 1.2k tokens" line shown in the composer while a turn is
@@ -19,7 +20,7 @@ interface RunStatusProps {
  * "Editing Fundamentals.md ▾" running action list Claude Code's own
  * status line also shows -- that needs a live list of in-progress
  * actions coscribe doesn't track yet, a separate, larger piece of work. */
-export function RunStatus({ turnInFlight, totalTokens }: RunStatusProps) {
+export function RunStatus({ turnInFlight, totalTokens, workflowTest = null }: RunStatusProps) {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [startTokens, setStartTokens] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -46,6 +47,11 @@ export function RunStatus({ turnInFlight, totalTokens }: RunStatusProps) {
 
   return (
     <span className="text-xs tabular-nums text-[var(--muted)]" data-testid="run-status">
+      {workflowTest && (
+        <span data-testid="workflow-test-progress">
+          Testing workflow {workflowTest.done}/{workflowTest.total} ·{" "}
+        </span>
+      )}
       {formatElapsed(now - startedAt)}
       {tokenDelta > 0 && <> · {formatTokenCount(tokenDelta)} tokens</>}
     </span>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { createScheduledTask, updateScheduledTask } from "../lib/rest";
+import { createScheduledTask, patchScheduledTask } from "../lib/rest";
 import type { Workflow } from "../types/workflow";
 import type { ApprovalMode, ScheduledTask, ScheduleKind } from "../types/settings";
 import type { TaskDraft } from "../types/wire";
@@ -206,7 +206,10 @@ export function ScheduledTaskModal({
     };
     setSaving(true);
     setError(null);
-    const result = isEdit ? await updateScheduledTask(task.trigger_id, payload) : await createScheduledTask(payload);
+    // An edit leaves the steps and notes to their own editors, which may
+    // have saved since this form loaded.
+    const { workflow: _steps, notes_enabled: _notes, ...formFields } = payload;
+    const result = isEdit ? await patchScheduledTask(task.trigger_id, formFields) : await createScheduledTask(payload);
     setSaving(false);
     if ("error" in result) {
       setError(result.error);

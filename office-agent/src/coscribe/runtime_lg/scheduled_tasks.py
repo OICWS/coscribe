@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ..tools.browser import BROWSER_HOST
+from ..tools.browser import BROWSER_HOST, BROWSER_RUNS
 from ..tools.scheduled_tasks import (
     ScheduledRun,
     ScheduledTrigger,
@@ -33,11 +33,10 @@ from ..tools.scheduled_tasks import (
     compute_next_run_at,
 )
 from ..workflows.engine import RunOutcome, StepRecord, WorkflowNotRunnable, WorkflowRun
-from ..workflows.spec import ToolStep, parse_workflow, walk
+from ..workflows.spec import parse_workflow, walk
+from ..workflows.testing import uses_browser
 
 logger = logging.getLogger(__name__)
-
-_BROWSER_RUNS = asyncio.Lock()
 
 RUN_PROMPT_PREFIX = "[Scheduled run of "
 
@@ -172,14 +171,8 @@ async def _run_workflow(
         run.thread_id,
         on_step,
     )
-    uses_browser = any(
-        isinstance(placed.step, ToolStep) and placed.step.tool.startswith("browser_")
-        for placed in walk(workflow.steps)
-    )
-    # Runs share one browser: two at once -- tasks due together, or runs
-    # caught up after the computer was off -- would drive the same tab
-    # out from under each other.
-    async with _BROWSER_RUNS if uses_browser else contextlib.nullcontext():
+    # Tasks due together, or runs caught up after the computer was off.
+    async with BROWSER_RUNS if uses_browser(workflow) else contextlib.nullcontext():
         # Downloads from the run's tab, however late, are the run's.
         BROWSER_HOST.set_active(run.thread_id, True)
         try:

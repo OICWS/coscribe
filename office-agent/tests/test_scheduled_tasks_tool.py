@@ -14,6 +14,7 @@ from coscribe.tools.scheduled_tasks import (
     compute_next_run_at,
     create_trigger,
     parse_run_thread_id,
+    patch_trigger,
     run_thread_id,
     update_trigger,
 )
@@ -247,6 +248,25 @@ def test_update_trigger_changes_name_schedule_and_permission_fields(tmp_path: Pa
     reloaded = store.load(created.trigger_id)
     assert reloaded is not None
     assert reloaded.name == "New name"
+
+
+def test_patch_keeps_what_another_save_changed_meanwhile(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    step = {"id": "a", "kind": "tool", "title": "A", "tool": "read_file", "args": {"path": "x"}}
+    created = create_trigger(
+        store, name="Export", kind="daily", at="09:00", prompt="", workflow={"steps": [step]}
+    )
+    revised = {"steps": [step, {**step, "id": "b", "title": "B"}]}
+    patch_trigger(store, created.trigger_id, {"workflow": revised})
+    # A settings form that loaded the task before the revision was saved.
+    patch_trigger(store, created.trigger_id, {"approval_mode": "auto", "name": "Monthly export"})
+
+    reloaded = store.load(created.trigger_id)
+    assert reloaded is not None
+    assert [s["id"] for s in reloaded.workflow["steps"]] == ["a", "b"]
+    assert (reloaded.name, reloaded.approval_mode) == ("Monthly export", "auto")
+    with pytest.raises(ValueError, match="Can't change runs"):
+        patch_trigger(store, created.trigger_id, {"runs": []})
 
 
 def test_update_trigger_preserves_enabled_state(tmp_path: Path) -> None:

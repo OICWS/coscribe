@@ -43,6 +43,7 @@ from .tools import (
     load_skills,
 )
 from .tools._workspace import WorkspaceScope
+from .tools.scheduled_tasks import ScheduledTriggerStore, parse_run_thread_id
 
 # The always-bound tool set when Settings.defer_tools is on (see
 # web/session.py's _build_lg_agent and runtime_lg/tool_deferral.py) --
@@ -81,6 +82,8 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset(
         "read_pptx",
         "read_xlsx",
         "draft_workflow",
+        "revise_workflow",
+        "test_workflow",
     }
 )
 
@@ -570,12 +573,20 @@ works it out again each run, adapting to what it finds); if the work \
 hasn't been done here with tools yet, only written instructions are \
 possible, so say that instead of asking. draft_workflow only drafts: the user \
 reviews it on a card and saves it themselves -- say so plainly, without \
-listing the steps' internals unless asked. \
+listing the steps' internals unless asked. Before handing a draft over, \
+test it: test_workflow(draft_id) really runs every step once; on a failure \
+find the cause from the failed step, its error and the page, fix it with \
+revise_workflow(draft_id=..., request=what failed and the fix) and test the \
+new draft -- at most 3 rounds. Then tell the user in a sentence or two \
+whether the last test passed and, if not, what still fails. \
 To change a task that's already saved, change it in place -- never make \
-a second copy: revise_workflow(task_id, request) edits a fixed workflow's \
-steps, edit_scheduled_task(trigger_id, ...) its instructions, name, \
-schedule, model or approval setting (ids from list_scheduled_tasks). Both \
-only propose: the user reviews the change and saves it. \
+a second copy: revise_workflow(task_id=..., request) edits a fixed \
+workflow's steps, edit_scheduled_task(trigger_id, ...) its instructions, \
+name, schedule, model or approval setting (ids from list_scheduled_tasks). \
+Both only propose: the user reviews the change and saves it. A saved fixed \
+workflow's failed run is reproduced with test_workflow(task_id=...) and \
+fixed the same way, as a revision the user saves -- never by changing \
+anything yourself. \
 For a prompt task, call create_scheduled_task (kind="manual" for one \
 that only runs when the user starts it). The user reviews and can edit \
 your draft before it's saved; the tool result says whether they saved \
@@ -727,6 +738,14 @@ def _describe_folders(root: Path, extra_folders: Sequence[Path]) -> str:
     return "\n".join(lines)
 
 
+def _is_saved_workflow_run(settings: Settings, thread_id: str) -> bool:
+    parsed = parse_run_thread_id(thread_id)
+    if parsed is None:
+        return False
+    trigger = ScheduledTriggerStore(settings.state_dir).load(parsed[0])
+    return trigger is not None and trigger.workflow is not None
+
+
 def build_coordinator_agent(
     settings: Settings,
     thread_id: str,
@@ -812,6 +831,7 @@ def build_coordinator_agent(
             scope=WorkspaceScope(
                 root, extra_readable=extra_readable, extra_writable=extra_writable
             ),
+            saved_workflow=_is_saved_workflow_run(settings, thread_id),
         )
         instructions = f"{instructions}\n\n{BROWSER_INSTRUCTIONS}"
     extra_dirs_note = _describe_extra_dirs(
