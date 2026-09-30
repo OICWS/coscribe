@@ -75,18 +75,13 @@ message or gets deleted outright -- never both.
 ## Commit authorship
 
 Commits are authored as the user, not as Claude (decided 2026-09-26).
-A fresh container starts with git's identity set to Claude, so set it in
-both clones before the first commit:
+A fresh container starts with git's identity set to Claude, so set it
+in the clone before the first commit:
 
 ```bash
-for r in /home/user/project /home/user/coscribe; do
-  git -C $r config user.name "OICWS"
-  git -C $r config user.email "OICW1803508708@outlook.com"
-done
+git config user.name "OICWS"
+git config user.email "OICW1803508708@outlook.com"
 ```
-
-Cherry-picks keep the original author, so the public repo follows
-automatically once the private commit is right.
 
 ## Delegating simple code changes
 
@@ -98,34 +93,18 @@ thinking and design, complex or high-risk backend code, all frontend
 code, prompt/instruction wording, and live verification -- and reviews
 the subagent's diff before committing.
 
-## Dual-repo sync -- every commit goes to both
+## Repository -- develop on public `main` only
 
-Private (`OICWS/project`, branch `claude/local-office-agent-system-k2cle1-13gepc`)
-is where real development happens. Public (`OICWS/coscribe`, branch
-`main` only -- there is no `dev`) carries the same tree: since
-2026-09-30 the two are identical, file for file.
-
-```bash
-# 1. Commit + push to the private branch first, full test suite green,
-#    ruff/mypy clean, OCR review pass done.
-git push -u origin claude/local-office-agent-system-k2cle1-13gepc
-
-# 2. Cherry-pick onto the public main
-cd /home/user/coscribe && git checkout main && git pull
-git remote add private-project https://github.com/OICWS/project
-git fetch private-project claude/local-office-agent-system-k2cle1-13gepc --depth=5
-git cherry-pick <sha>
-git diff --stat private-project/claude/local-office-agent-system-k2cle1-13gepc HEAD
-#   ^ must be empty: the two repos hold the same files
-git push origin main
-
-# 3. Clean up
-git remote remove private-project
-```
+All development happens in `OICWS/coscribe`, branch `main` (there is no
+`dev`). The private `OICWS/project` repo was the development repo until
+2026-09-30, when the two held identical trees; it is frozen now and is
+neither pushed to nor read. Commit on `main` with the full test suite
+green, ruff/mypy clean and the OCR review pass done, then
+`git push origin main`.
 
 `git fetch` through this environment's proxy can return a stale
-cached read -- if a branch state looks wrong, cross-check with
-`git ls-remote origin <ref>` (a live query) before trusting `fetch`.
+cached read -- if the branch state looks wrong, cross-check with
+`git ls-remote origin main` (a live query) before trusting `fetch`.
 
 ## Test discipline
 

@@ -6790,6 +6790,10 @@ doubtful data.
       cherry-picked onto it directly. The two repos now hold the same
       files, so a sync is checked with an empty whole-tree diff instead
       of a list of known exceptions.
+- [x] Development moved to the public repo alone: commits go straight
+      to `main` and the private `OICWS/project` repo is frozen, no
+      longer pushed to or read. `CLAUDE.md`'s dual-repo sync section is
+      replaced by a single-repo one.
 - [x] Removed the Tauri desktop shell (`office-agent-desktop-tauri-legacy/`),
       kept since the Electron cutover as a rollback net and never
       needed, with its CI workflow and the two Nuitka sidecar experiment
