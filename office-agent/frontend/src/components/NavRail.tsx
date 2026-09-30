@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { deleteScheduledTask, deleteThread, renameThread } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
 import { goToThread, startNewThread } from "../lib/nav";
-import { latestRun } from "../lib/runLabels";
+import { latestRun, RUN_STATUS_LABEL } from "../lib/runLabels";
 import { scheduleKindLabel } from "../lib/scheduleLabels";
-import type { ScheduledTask } from "../types/settings";
+import type { RunStatus, ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { RunStatusIcon } from "./RunStatusIcon";
@@ -145,6 +145,28 @@ interface ScheduledTaskRowProps {
   onChanged: () => void;
 }
 
+const DOT_COLOR: Partial<Record<RunStatus, string>> = {
+  completed: "var(--success)",
+  failed: "var(--danger)",
+  needs_approval: "var(--warning)",
+};
+
+/** The task's latest run at a glance: a spinner while it runs, then a
+ * solid dot in the outcome's color; hollow before any run, or once
+ * stopped. */
+function RunDot({ status }: { status: RunStatus | null }) {
+  if (status === "running") return <RunStatusIcon status="running" className="h-2.5 w-2.5" />;
+  const color = status ? DOT_COLOR[status] : undefined;
+  return (
+    <span
+      role="img"
+      aria-label={status ? RUN_STATUS_LABEL[status] : "Not run yet"}
+      className="inline-block h-2 w-2 shrink-0 rounded-full border-[1.5px]"
+      style={color ? { background: color, borderColor: color } : { borderColor: "var(--muted)" }}
+    />
+  );
+}
+
 /** One Scheduled sidebar row -- matches
  * docs/ui-references/sheduled-sidebar-workflow-display.png: a leading
  * bullet, the name, and (until hovered) the schedule kind right-aligned
@@ -152,8 +174,8 @@ interface ScheduledTaskRowProps {
  * Edit/Delete -- no Pause, see sheduled-siderbar-workflow-display-
  * settings.png, unlike the portal card's own menu which keeps it).
  * Clicking the row opens its latest run (or the task's page, before it
- * has run). A running or stalled latest run replaces the bullet with its
- * status, so it's visible without opening anything. */
+ * has run). Its dot shows how the latest run is going or went, so that's
+ * visible without opening anything. */
 function ScheduledTaskRow({ task, active, onSelect, onEdit, onRunNow, onChanged }: ScheduledTaskRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -165,7 +187,6 @@ function ScheduledTaskRow({ task, active, onSelect, onEdit, onRunNow, onChanged 
     onRunNow();
   };
   const run = latestRun(task);
-  const showStatus = run !== null && (run.status === "running" || run.status === "needs_approval" || run.status === "failed");
 
   const confirmDelete = async () => {
     setDeleteConfirm(false);
@@ -180,13 +201,9 @@ function ScheduledTaskRow({ task, active, onSelect, onEdit, onRunNow, onChanged 
       }`}
       onClick={onSelect}
     >
-      {showStatus ? (
-        <span className="flex w-3 shrink-0 justify-center">
-          <RunStatusIcon status={run.status} className="h-3 w-3" />
-        </span>
-      ) : (
-        <span className="w-3 shrink-0 text-center text-[var(--muted)]">○</span>
-      )}
+      <span className="flex w-3 shrink-0 justify-center">
+        <RunDot status={run?.status ?? null} />
+      </span>
       <span className="min-w-0 flex-1 truncate" title={task.name}>
         {task.name}
       </span>

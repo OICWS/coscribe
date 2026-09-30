@@ -381,3 +381,22 @@ def test_a_save_folder_outside_the_workspace_fails_before_waiting(tmp_path: Path
     assert host.calls == []
     with pytest.raises(ValueError, match="goes with download"):
         tools["browser_wait_for"](text="Done", save_to="exports")
+
+
+def test_a_turn_or_run_tells_the_desktop_app_when_it_starts_and_ends() -> None:
+    from coscribe.web.turn_lock import TurnLock
+
+    host = BrowserHost()
+
+    async def scenario() -> list[dict[str, Any]]:
+        outbox = host.attach()
+        lock = TurnLock(lambda active: host.set_active("t1", active))
+        async with lock:
+            assert lock.locked()
+        return [outbox.get_nowait(), outbox.get_nowait()]
+
+    sent = asyncio.run(scenario())
+    assert [(m["action"], m["thread_id"], m["args"]) for m in sent] == [
+        ("activity", "t1", {"active": True}),
+        ("activity", "t1", {"active": False}),
+    ]

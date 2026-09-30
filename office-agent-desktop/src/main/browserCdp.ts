@@ -80,6 +80,8 @@ export class TabCdp {
   downloads: Download[] = [];
   /** Where the conversation driving this tab wants its downloads. */
   downloadDir = "";
+  /** The conversation (or workflow run) whose steps last drove this tab. */
+  threadId = "";
   /** When the AI's current (or latest) step began, and ended. */
   stepStarted = 0;
   stepEnded = 0;

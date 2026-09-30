@@ -91,6 +91,16 @@ class BrowserHost:
             if not future.done():
                 future.set_result({"ok": False, "error": message})
 
+    def set_active(self, thread_id: str, active: bool) -> None:
+        """Tell the desktop app a conversation's turn or a workflow run has
+        started or ended: a download from its tab in between is saved
+        without asking, even one that begins long after the step that set
+        it off. Call on the server's loop."""
+        if self._outbox is not None:
+            self._outbox.put_nowait(
+                {"id": "", "thread_id": thread_id, "action": "activity", "args": {"active": active}}
+            )
+
     def cancel(self, thread_id: str) -> None:
         """Stop the conversation's browser step: the desktop app drops it
         (a wait there can run for an hour) and whatever it queued, and the
