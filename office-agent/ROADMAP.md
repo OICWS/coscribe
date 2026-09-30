@@ -6835,6 +6835,33 @@ doubtful data.
       placeholder results to the request (the saved history is left
       alone), so no path can send the provider an invalid history.
 
+## Phase 8ce -- One folder rule for scripts and workflows (planned)
+
+Decided with you: scripts stay without an OS sandbox, approval is still
+what protects you (same trust model as Claude Code on native Windows).
+What changes is that "where can this write" has one answer everywhere:
+the workspace plus the folders you added.
+
+- [ ] Script folder guard: `run_node_script` runs with Node's
+      `--permission` limited to those folders (checked: writes and reads
+      outside are refused, so is starting a process); `run_python_script`
+      gets an audit-hook prelude refusing writes outside them and
+      starting processes. A guard rail against a model's mistakes, not a
+      boundary -- Python code calling the system directly gets past it,
+      and the UI says so. A refusal names the folder and offers "Add
+      folder" / "Just this once" in the chat.
+- [ ] Workflow permissions: derived from the steps -- folders read and
+      written, sites visited, scripts and other high-risk tools -- shown
+      on the review card; saving is the consent. A saved run is held to
+      that list: a step that needs more stops as "waiting for you"
+      (notification included) instead of asking mid-run or silently
+      going ahead. A revision that widens the list shows what is new.
+- [ ] After a run, the run page lists what it actually touched: files
+      written, sites visited.
+- Not in this phase: fewer approval modes, script environment variables
+  (API keys are still passed), network limits -- network is still the
+  way data would leave, and nothing here closes it.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
