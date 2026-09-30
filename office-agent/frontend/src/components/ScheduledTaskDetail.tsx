@@ -84,6 +84,27 @@ function InstructionsSection({ prompt }: { prompt: string }) {
 
 type NotesState = "idle" | "saving" | "saved" | "error";
 
+/** Whether a failed run starts a conversation that looks into it. */
+function FailuresSection({ task, onChanged }: { task: ScheduledTask; onChanged: () => void }) {
+  const toggle = async () => {
+    await patchScheduledTask(task.trigger_id, { auto_investigate: !task.auto_investigate });
+    onChanged();
+  };
+  return (
+    <div>
+      <SectionLabel>When a run fails</SectionLabel>
+      <div className="flex items-start justify-between gap-4">
+        <div className="text-sm text-[var(--muted)]">
+          {task.auto_investigate
+            ? "coscribe looks into it right away: it reproduces the failure and drafts a fix for you to review. It never saves the fix itself."
+            : "The run stops and you get a notification. You can ask coscribe to look into it from the run's page."}
+        </div>
+        <ToggleSwitch on={task.auto_investigate ?? false} onClick={toggle} label="Look into failures automatically" />
+      </div>
+    </div>
+  );
+}
+
 /** The task's memory across runs: shown to every run at its start and
  * rewritten by the run itself, but also the user's to read and correct.
  * Saved on blur rather than with a button -- it's a scratchpad, not a
@@ -370,6 +391,7 @@ export function ScheduledTaskDetail({
               </>
             )}
           </div>
+          {workflow && <FailuresSection task={task} onChanged={onChanged} />}
           {!workflow && <NotesSection task={task} onChanged={onChanged} />}
           <RunsSection task={task} />
         </div>

@@ -170,7 +170,7 @@ from ..workflows.catalog import describe_params, tool_description
 from ..workflows.solidify import DraftFailed
 from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflow_error
 from .activity import OPENABLE_EXTENSIONS, open_in_os
-from .background_events import BackgroundEvent, BackgroundEventBus
+from .background_events import BackgroundEvent, BackgroundEventBus, run_event
 from .browser_panel import BrowserPanelError, BrowserPanelSession
 from .session import ChatSessionLG
 
@@ -802,7 +802,7 @@ LIVE_SETTINGS = {
 # restart_required computation is keyed off COSCRIBE_ENV_VARS membership,
 # and this one needs no coscribe-web restart to take effect (the desktop
 # shell just re-reads the file at the next window-close, live).
-DESKTOP_ENV_VARS = ["COSCRIBE_BACKGROUND_ON_CLOSE"]
+DESKTOP_ENV_VARS = ["COSCRIBE_BACKGROUND_ON_CLOSE", "COSCRIBE_NOTIFICATIONS"]
 
 # Kept in .env rather than the browser's own storage: the desktop app
 # serves the page from a new port each launch, and browser storage
@@ -1341,16 +1341,47 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             )
             return
         for trigger in fired_triggers:
-            if not trigger.runs:
-                continue
-            background_events.publish(
-                BackgroundEvent(
-                    kind="scheduled_task",
-                    status="failed" if trigger.runs[-1].status == "failed" else "completed",
-                    title=trigger.name,
-                    thread_id=trigger.runs[-1].thread_id,
+            if trigger.runs:
+                await _announce_run(trigger.trigger_id, trigger.runs[-1])
+
+    async def _announce_run(trigger_id: str, run: ScheduledRun | None) -> None:
+        """Tell the desktop app how a run ended -- and, for a failed run of a
+        task set to, start a conversation looking into it first, so the
+        notification can open that."""
+        if run is None:
+            return
+        store = ScheduledTriggerStore(settings.state_dir)
+        trigger = store.load(trigger_id)
+        if trigger is None:
+            return
+        investigation = None
+        if (
+            run.status == "failed"
+            and trigger.auto_investigate
+            and trigger.workflow is not None
+            and run.investigation is None
+        ):
+            investigation = uuid.uuid4().hex[:8]
+            _track_background(
+                asyncio.create_task(
+                    start_investigation(
+                        settings.state_dir,
+                        trigger_id,
+                        run.run_id,
+                        investigation,
+                        None,
+                        _get_session_async,
+                        attended=False,
+                    )
                 )
             )
+        event = run_event(trigger, run, investigation)
+        if event is not None:
+            background_events.publish(event)
+
+    async def _execute_and_announce(trigger_id: str, run_id: str) -> None:
+        run = await execute_run(settings.state_dir, trigger_id, run_id, _get_session_async)
+        await _announce_run(trigger_id, run)
 
     background_tasks: set[asyncio.Task[Any]] = set()
 
@@ -1861,11 +1892,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         await _delete_run_threads(pruned)
-        _track_background(
-            asyncio.create_task(
-                execute_run(settings.state_dir, trigger_id, run.run_id, _get_session_async)
-            )
-        )
+        _track_background(asyncio.create_task(_execute_and_announce(trigger_id, run.run_id)))
         return JSONResponse({"task": trigger.to_dict(), "run": run.to_dict()})
 
     def _reopen_workflow_run(trigger_id: str, run_id: str) -> tuple[Any, Any] | JSONResponse:
@@ -1883,13 +1910,13 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         return existing, run
 
     def _continue_in_background(trigger_id: str, run_id: str, action: Any) -> None:
-        _track_background(
-            asyncio.create_task(
-                continue_workflow_run(
-                    settings.state_dir, trigger_id, run_id, _get_session_async, action
-                )
+        async def go() -> None:
+            run = await continue_workflow_run(
+                settings.state_dir, trigger_id, run_id, _get_session_async, action
             )
-        )
+            await _announce_run(trigger_id, run)
+
+        _track_background(asyncio.create_task(go()))
 
     @app.post("/api/scheduled-tasks/{trigger_id}/runs/{run_id}/stop")
     async def stop_workflow_run(trigger_id: str, run_id: str) -> JSONResponse:
@@ -3038,7 +3065,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # cancels that task without ever resolving the approval or
             # resuming the graph, so the checkpointer's real pending state
             # is untouched and a genuine reconnect still redelivers it.
-            session.abandon_orphaned_turn()
+            session.abandon_orphaned_turn(websocket)
             await session.run_session_end_hooks()
         finally:
             # Only clear if this is still *this* connection's own socket --

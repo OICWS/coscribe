@@ -35,7 +35,7 @@ from ..tools.scheduled_tasks import (
 )
 from ..workflows.engine import RunOutcome, StepRecord, WorkflowNotRunnable, WorkflowRun
 from ..workflows.spec import parse_workflow, walk
-from ..workflows.testing import uses_browser
+from ..workflows.testing import output_files, uses_browser
 from .messages import extract_text, strip_mode_note
 
 logger = logging.getLogger(__name__)
@@ -196,9 +196,10 @@ async def _run_workflow(
         store.record_step(trigger.trigger_id, run.run_id, data)
         await socket.send_json({"type": "workflow_step", "run_id": run.run_id, "record": data})
 
+    ctx = session.workflow_context(trigger.model)
     workflow_run = WorkflowRun(
         workflow,
-        session.workflow_context(trigger.model),
+        ctx,
         session.checkpointer,
         run.thread_id,
         on_step,
@@ -217,6 +218,14 @@ async def _run_workflow(
         finally:
             BROWSER_HOST.set_active(run.thread_id, False)
     if outcome.status == "completed":
+        # From the stored run, so steps before a resume count too.
+        stored = store.load(trigger.trigger_id)
+        done = stored.find_run(run.run_id) if stored is not None else None
+        steps = done.steps if done is not None else []
+        outputs = [s.get("output") for s in steps if s.get("status") == "done"]
+        since = int(datetime.fromisoformat(run.started_at).timestamp())
+        files = await asyncio.to_thread(output_files, outputs, ctx.workspace_root, since)
+        store.record_evidence(trigger.trigger_id, run.run_id, files=files)
         return "completed", None
     if outcome.status == "waiting":
         return "needs_approval", None
@@ -238,7 +247,7 @@ async def _record_failure_page(
             page = str(await asyncio.to_thread(snapshot))[:_PAGE_CHARS]
         except Exception:  # noqa: BLE001 -- the failure itself is what's recorded
             logger.info("scheduled_tasks: no page text for failed run %s", run.run_id)
-    store.record_failure_page(trigger.trigger_id, run.run_id, screenshot, page)
+    store.record_evidence(trigger.trigger_id, run.run_id, screenshot=screenshot, page=page)
 
 
 async def _first_request(get_session: Callable[[str], Awaitable[Any]], thread_id: str) -> str:
@@ -316,6 +325,7 @@ async def start_investigation(
         await _first_request(get_session, trigger.source_thread) if trigger.source_thread else ""
     )
     prompt = build_investigation_prompt(trigger, run, request)
+    store.record_evidence(trigger_id, run_id, investigation=thread_id)
     session = await get_session(thread_id)
     socket = _RelaySocket(session)
     socket.can_resolve_approvals = attended
@@ -324,7 +334,13 @@ async def start_investigation(
     session._title_path().parent.mkdir(parents=True, exist_ok=True)
     session._title_path().write_text(f"Look into: {trigger.name}", encoding="utf-8")
     await socket.send_json({"type": "scheduled_run_started", "text": prompt})
-    await session.handle_user_message(prompt, socket)
+    # Turning on auto-investigation is consent to replay the task's own
+    # steps; anything else the assistant tries still waits for the user.
+    session.preapproved_tools = frozenset() if attended else frozenset({"test_workflow"})
+    try:
+        await session.handle_user_message(prompt, socket)
+    finally:
+        session.preapproved_tools = frozenset()
 
 
 async def continue_workflow_run(

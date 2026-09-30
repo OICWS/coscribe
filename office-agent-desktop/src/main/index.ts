@@ -10,7 +10,7 @@ import { app, BrowserWindow } from "electron";
 import { freePort } from "./paths";
 import { startSidecar, killSidecar } from "./sidecar";
 import { watchBackgroundEvents } from "./backgroundEvents";
-import { createMainWindow, showMainWindow, preloadPath, iconsDirFromApp, markQuitting } from "./mainWindow";
+import { createMainWindow, getMainWindow, showMainWindow, preloadPath, iconsDirFromApp, markQuitting } from "./mainWindow";
 import { createTray } from "./tray";
 import { registerDialogHandlers } from "./dialog";
 import { registerWindowChromeHandlers } from "./windowChrome";
@@ -36,7 +36,12 @@ if (!gotLock) {
 
     const browserHostToken = randomBytes(32).toString("hex");
     startSidecar(port, browserHostToken);
-    void watchBackgroundEvents(port);
+    void watchBackgroundEvents(port, (threadId) => {
+      showMainWindow();
+      void getMainWindow()
+        ?.loadURL(`http://127.0.0.1:${port}/?thread=${encodeURIComponent(threadId)}`)
+        .catch(() => undefined);
+    });
 
     registerWindowChromeHandlers();
     const win = createMainWindow(port, preloadPath());

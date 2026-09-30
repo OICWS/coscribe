@@ -34,7 +34,7 @@ from typing import Any, Literal
 
 Decision = Literal["approve", "reject"]
 AutoApproveReason = Literal[
-    "accept_edits", "approval_mode_auto", "approval_mode_skip", "auto_review"
+    "accept_edits", "approval_mode_auto", "approval_mode_skip", "auto_review", "preapproved"
 ]
 Reason = Literal[
     "hook_veto",

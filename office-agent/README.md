@@ -504,6 +504,34 @@ exists, the model changes it in place rather than drafting a copy:
 Either way the task keeps its runs and notes, and nothing changes until
 the user saves.
 
+**Tested before review.** A fixed workflow runs without a model deciding
+anything; the assistant works outside the run. After drafting, it runs
+the draft once for real with `test_workflow` (every step, stopping at the
+first failure or before an approval step), fixes what failed with
+`revise_workflow(draft_id=...)` and tests again, at most 3 rounds, then
+says whether the last test passed. The draft card leads with that
+result: passed or failed at which step, the files the steps wrote (rows x
+columns for xlsx/csv), and a screenshot of the page the test ended on.
+The newest unsaved draft stays pinned at the bottom of the conversation
+while its card is out of view.
+
+**When a run fails.** The run stops there -- nothing after the failed
+step produces data -- and its page shows the step, the error and a
+screenshot of the page at that moment. **Let AI look into it** (with the
+default model or one picked beside it) opens a new conversation that
+reproduces the failure with `test_workflow(task_id=...)`, finds the
+cause, and drafts a tested revision for the user to save; it never saves
+anything itself. A task's **Look into failures automatically** switch
+does this on its own after a failed run (reproducing the task's steps
+without asking; anything else still waits for the user). A running run
+can be stopped from its page; a stopped run is recorded as stopped, not
+failed.
+
+**Notifications** (desktop app): when a task run finishes -- "Completed
+· 448 rows · saved to exports/...", "Failed -- <step>: <error>", or
+waiting for the user -- set to All, Problems only or Off in Settings >
+General. Clicking one opens the run, or the conversation looking into it.
+
 **Connector tools in steps.** A tool step can call a connected
 connector's (MCP) tools, not only built-in ones -- the Office 365
 connector's, for example, so a task done once in chat can become fixed

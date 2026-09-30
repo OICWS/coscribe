@@ -6742,6 +6742,50 @@ doubtful data.
       revision that dismisses it only when it is there; the revision's
       test passed (13.1s, 449-row export).
 
+## Phase 8ca -- Notifications, looking into failures unattended, and browser runs from the tray (shipped)
+
+- [x] Every task run's end is announced to the desktop app (Run now and
+      continued runs too, not only scheduled ones), worded by the server:
+      "Completed · 448 rows · saved to exports/FBL5N_....XLSX" (a
+      completed workflow run now records the files its steps wrote),
+      "Failed -- <step>: <error>", "Waiting for you at <step>". Settings >
+      General > Notifications: All / Problems only / Off, read by the
+      desktop app from .env each time. Clicking a notification opens the
+      run (or the conversation looking into it). Verified the event
+      stream live; the native toast and its click can't be shown in this
+      Linux container (no notification daemon) -- to be confirmed on
+      Windows.
+- [x] Per task: **Look into failures automatically**. A failed run of
+      such a task starts the same investigation conversation as the
+      button, unattended; it may run test_workflow without asking (the
+      switch is consent to replay the task's own steps) while anything
+      else still parks for the user. Verified with DeepSeek, the popup
+      case, the app on another page: reproduced, found the popup,
+      drafted a revision that dismisses it, and its test passed (449-row
+      export).
+- [x] Found live while verifying the above -- browser steps failed
+      whenever the Browser panel wasn't showing the page: a tab detached
+      from the window lays out at 0x0 and no click lands (keys still
+      did), and with the window in the tray the page counts as hidden
+      and takes no clicks at all. So every scheduled browser run from
+      the tray would have failed at its first click. Now the active tab
+      stays attached off-window with the panel's last size as its
+      viewport, and agent tabs never count as hidden. Verified with the
+      panel closed and with the window hidden (`win.hide()`, as the
+      tray does): click, type and checkbox all worked, and the saved
+      FBL5N task completed from the tray.
+- [x] Also found live: with the panel closed, each browser step waited
+      5s for a panel that the app (on another page, or in the tray)
+      would never open -- a 12-step run took a minute longer. Now it
+      doesn't wait when the window isn't visible, and after one
+      unanswered request stops waiting for that conversation for a
+      minute: steps back to ~0.8s.
+- [x] Also found live: closing any tab on a conversation cancelled
+      whatever turn was running in it, including a background one -- a
+      user glancing at a run being looked into and navigating away
+      killed it. Only a turn driven by the connection that closed is
+      abandoned now.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

@@ -22,6 +22,7 @@ import type { BranchStep, CheckResult, LoopStep, StepRecord, Workflow, WorkflowS
 import { CheckIcon, ChevronDownIcon, ClockIcon, CloseIcon, SparkIcon, StopIcon } from "../icons";
 import { ConditionText, VarToken } from "./parts";
 import { Screenshot } from "./Screenshot";
+import { goToThread } from "../../lib/nav";
 import { StepOutput } from "./StepOutput";
 
 type RowStatus = StepRecord["status"] | "not_reached" | "stopped";
@@ -666,6 +667,33 @@ function RunBanner({
       </div>
     );
   }
+  if (run.status === "completed" && run.files?.length) {
+    return (
+      <div
+        className={`${box} border-[color-mix(in_srgb,var(--success)_40%,transparent)] bg-[color-mix(in_srgb,var(--success)_5%,transparent)]`}
+        data-testid="run-banner"
+      >
+        <div className="flex items-center gap-2 font-medium">
+          <CheckIcon className="h-4 w-4 text-[var(--success)]" strokeWidth={3} />
+          Completed
+        </div>
+        <ul className="flex flex-col gap-1">
+          {run.files.map((file) => (
+            <li key={file.path} className="flex min-w-0 gap-2 text-[13px]">
+              <span className="min-w-0 truncate" title={file.path}>
+                {file.path}
+              </span>
+              {file.rows !== undefined && file.columns !== undefined && (
+                <span className="shrink-0 tabular-nums text-[var(--muted)]">
+                  {file.rows} rows × {file.columns} columns
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   if (run.status === "failed" && failedRecord) {
     return (
       <div
@@ -687,15 +715,20 @@ function RunBanner({
           {run.screenshot && <Screenshot name={run.screenshot} alt="The page when the step failed" />}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {run.investigation && (
+            <button type="button" className={primaryButton} onClick={() => goToThread(run.investigation!)}>
+              Open the conversation looking into it
+            </button>
+          )}
           <button
             type="button"
-            className={primaryButton}
+            className={run.investigation ? secondaryButton : primaryButton}
             disabled={busy}
             onClick={() => act(() => onInvestigate(model || null))}
           >
             <span className="flex items-center gap-1.5">
               <SparkIcon className="h-3.5 w-3.5" />
-              Let AI look into it
+              {run.investigation ? "Look into it again" : "Let AI look into it"}
             </span>
           </button>
           <select

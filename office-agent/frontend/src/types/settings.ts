@@ -286,6 +286,10 @@ export interface ScheduledRun {
   inputs: Record<string, unknown> | null;
   /** Where a browser workflow run failed: a file under /api/screenshots/. */
   screenshot?: string | null;
+  /** What a completed workflow run wrote. */
+  files?: { path: string; size: number; rows?: number; columns?: number }[];
+  /** The conversation looking into this failed run. */
+  investigation?: string | null;
 }
 
 export interface ScheduledTask {
@@ -311,6 +315,8 @@ export interface ScheduledTask {
   drafts?: string[];
   /** The conversation the task was saved from. */
   source_thread?: string | null;
+  /** A failed run starts a conversation that looks into it. */
+  auto_investigate?: boolean;
 }
 
 export interface CreateScheduledTaskPayload {
@@ -329,6 +335,7 @@ export interface CreateScheduledTaskPayload {
   /** The conversation draft this task is saved from, and that conversation. */
   from_draft?: string;
   from_thread?: string;
+  auto_investigate?: boolean;
 }
 
 export type ScheduledTaskResult = ScheduledTask | { error: string };

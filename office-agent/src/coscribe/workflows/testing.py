@@ -91,13 +91,13 @@ def _table_shape(path: Path) -> dict[str, int]:
     return {}
 
 
-def output_files(records: list[StepRecord], root: Path, since: float) -> list[dict[str, Any]]:
-    """Files the steps' results name that were written during the run --
-    what a reviewer checks first."""
+def output_files(outputs: list[Any], root: Path, since: float) -> list[dict[str, Any]]:
+    """Files the steps' results (`outputs`) name that were written during
+    the run -- what a reviewer checks first."""
     files: list[dict[str, Any]] = []
     seen: set[Path] = set()
-    for record in records:
-        for name in _named_files(record.output):
+    for output in outputs:
+        for name in _named_files(output):
             path = (root / name).resolve() if not Path(name).is_absolute() else Path(name)
             if path in seen or not path.is_file() or path.stat().st_mtime < since:
                 continue
@@ -166,7 +166,7 @@ async def run_test(
         "status": status,
         "seconds": round(time.monotonic() - started, 1),
         "steps": steps,
-        "files": output_files(list(records.values()), ctx.workspace_root, started_at),
+        "files": output_files([r.output for r in records.values()], ctx.workspace_root, started_at),
         "failed_step": outcome.step_id if status == "failed" else None,
         "error": outcome.error if status == "failed" else None,
     }

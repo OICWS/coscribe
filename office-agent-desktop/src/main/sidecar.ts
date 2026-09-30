@@ -91,21 +91,25 @@ export function killSidecar(): void {
  * reason the Rust side chose `dotenvy` over one: correct quoting
  * semantics for a file the web Settings panel's own `set_key()`-style
  * writer produces. */
+function readEnvFile(): Record<string, string> {
+  try {
+    return parseDotenv(readFileSync(appDataSubpath(".env"), "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
 export function shouldKeepRunningInBackground(): boolean {
-  const envPath = appDataSubpath(".env");
-  let raw: string;
-  try {
-    raw = readFileSync(envPath, "utf-8");
-  } catch {
-    return true;
-  }
-  let parsed: Record<string, string>;
-  try {
-    parsed = parseDotenv(raw);
-  } catch {
-    return true;
-  }
-  const value = parsed.COSCRIBE_BACKGROUND_ON_CLOSE;
+  const value = readEnvFile().COSCRIBE_BACKGROUND_ON_CLOSE;
   if (value === undefined) return true;
   return value.trim().toLowerCase() !== "false";
+}
+
+export type NotificationLevel = "all" | "problems" | "off";
+
+/** Which finished runs get a notification (`COSCRIBE_NOTIFICATIONS`, set
+ * in Settings), read fresh each time like the close setting above. */
+export function notificationLevel(): NotificationLevel {
+  const value = readEnvFile().COSCRIBE_NOTIFICATIONS?.trim().toLowerCase();
+  return value === "problems" || value === "off" ? value : "all";
 }

@@ -2867,6 +2867,7 @@ def test_background_event_bus_fans_out_to_every_subscriber() -> None:
                 "status": "completed",
                 "title": "research done",
                 "thread_id": "t1",
+                "body": "",
             }
         )
         bus.unsubscribe(q1)
@@ -2901,11 +2902,17 @@ def test_wake_poll_loop_publishes_background_events_for_fired_wakes_and_triggers
     async def _fake_poll_due_wakes(state_dir: Any, get_session: Any) -> list[Any]:
         return [types.SimpleNamespace(reason="research done", thread_id="thread-a")]
 
+    from coscribe.tools.scheduled_tasks import ScheduledTriggerStore, create_trigger
+
+    store = ScheduledTriggerStore(tmp_path / "state")
+    digest = create_trigger(store, name="daily digest", kind="manual", at="", prompt="p")
+    _, fired_run, _ = store.start_run(digest.trigger_id, "scheduled")
+    store.finish_run(digest.trigger_id, fired_run.run_id, "failed", "no network")
+
     async def _fake_poll_due_scheduled_tasks(
         state_dir: Any, get_session: Any, on_pruned: Any = None
     ) -> list[Any]:
-        run = types.SimpleNamespace(thread_id="thread-b", status="failed")
-        return [types.SimpleNamespace(name="daily digest", runs=[run])]
+        return [store.load(digest.trigger_id)]
 
     monkeypatch.setattr("coscribe.web.app.poll_due_wakes", _fake_poll_due_wakes)
     monkeypatch.setattr("coscribe.web.app.poll_due_scheduled_tasks", _fake_poll_due_scheduled_tasks)
@@ -2919,7 +2926,7 @@ def test_wake_poll_loop_publishes_background_events_for_fired_wakes_and_triggers
     events = {(e["kind"], e["status"], e["title"], e["thread_id"]) for e in (first, second)}
     assert events == {
         ("wake", "completed", "research done", "thread-a"),
-        ("scheduled_task", "failed", "daily digest", "thread-b"),
+        ("scheduled_task", "failed", "daily digest", fired_run.thread_id),
     }
 
 
@@ -6309,7 +6316,10 @@ def test_a_failed_workflow_run_is_looked_into_in_a_new_conversation_lg(
         started = client.post(f"{base}/investigate", json={})
         thread_id = started.json()["thread_id"]
         deadline = time.time() + 5
-        while len(fake_model.received) < 3 and time.time() < deadline:
+        while time.time() < deadline:
+            threads = {t["thread_id"]: t for t in client.get("/api/threads").json()}
+            if threads.get(thread_id, {}).get("message_count", 0) >= 2:
+                break
             time.sleep(0.05)
         with client.websocket_connect(f"/ws/{thread_id}") as ws:
             ws.receive_json()  # state
@@ -6326,6 +6336,97 @@ def test_a_failed_workflow_run_is_looked_into_in_a_new_conversation_lg(
     assert history[0]["text"].startswith('[Look into a failed run of "Word count"')
     assert history[-1]["text"] == "The count step read an empty file."
     assert titles[thread_id] == "Look into: Word count"
+
+
+class _SlowSecondReplyModel(FakeToolCallingChatModel):
+    """The second reply takes a while, so a test can open and close a tab
+    while that turn is still going."""
+
+    slow_started: list[bool] = []
+
+    def _stream(
+        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        if self.i == 1:
+            self.slow_started.append(True)
+            time.sleep(1.0)
+        yield from super()._stream(messages, stop, run_manager, **kwargs)
+
+
+def test_closing_a_tab_on_a_run_being_looked_into_leaves_it_going_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "notes.txt").write_text("one two", encoding="utf-8")
+    fake_model = _SlowSecondReplyModel(
+        responses=[_structured({"words": 0}), AIMessage(content="The file was empty.")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        task = _create_workflow_task(client)
+        run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
+        _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        base = f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}"
+        thread_id = client.post(f"{base}/investigate", json={}).json()["thread_id"]
+        deadline = time.time() + 5
+        while not fake_model.slow_started and time.time() < deadline:
+            time.sleep(0.02)
+        # A tab opens the conversation mid-turn and is closed again.
+        with client.websocket_connect(f"/ws/{thread_id}") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+        time.sleep(1.5)
+        with client.websocket_connect(f"/ws/{thread_id}") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()["entries"]
+
+    assert any(e.get("text") == "The file was empty." for e in history), history
+
+
+def test_a_failed_run_of_a_task_set_to_is_looked_into_and_announced_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "notes.txt").write_text("one two", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            _structured({"words": 0}),
+            AIMessage(
+                content="", tool_calls=[_tool_call("c1", "test_workflow", {"task_id": "gone"})]
+            ),
+            AIMessage(content="The file was empty."),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        task = _create_workflow_task(client)
+        patched = client.patch(
+            f"/api/scheduled-tasks/{task['trigger_id']}", json={"auto_investigate": True}
+        ).json()
+        bus = client.app.state.background_events
+        queue = client.portal.call(bus.subscribe)
+        run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
+        event = client.portal.call(queue.get)
+        deadline = time.time() + 5
+        while len(fake_model.received) < 3 and time.time() < deadline:
+            time.sleep(0.05)
+        failed = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        with client.websocket_connect(f"/ws/{event['thread_id']}") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()["entries"]
+
+    assert patched["auto_investigate"] is True
+    assert event["status"] == "failed" and event["title"] == "Word count"
+    assert event["body"] == (
+        "Failed -- Has words: 1 of 1 checks failed. coscribe is looking into it."
+    )
+    assert failed["investigation"] == event["thread_id"]
+    assert '[Look into a failed run of "Word count"' in str(fake_model.received[1][-1].content)
+    # Nobody is there to approve the reproduction, and it didn't wait.
+    [tested] = [e for e in history if e.get("tool_name") == "test_workflow"]
+    assert tested["result"] == {
+        "status": "failed",
+        "error": "There's no scheduled task with id 'gone'.",
+    }
+    assert any(e.get("text") == "The file was empty." for e in history)
 
 
 def test_a_workflow_task_with_a_bad_reference_is_refused_with_the_step_named_lg(

@@ -95,6 +95,15 @@ export const WORKSPACE_FIELDS: SettingsField[] = [
  * DESKTOP_ENV_VARS), unlike everything in that list. */
 export const BACKGROUND_ON_CLOSE_KEY = "COSCRIBE_BACKGROUND_ON_CLOSE";
 
+/** Desktop-shell-only, like BACKGROUND_ON_CLOSE_KEY: which finished task
+ * runs get a notification. */
+export const NOTIFICATIONS_KEY = "COSCRIBE_NOTIFICATIONS";
+export const NOTIFICATION_LEVELS = [
+  { value: "all", label: "All" },
+  { value: "problems", label: "Problems only" },
+  { value: "off", label: "Off" },
+] as const;
+
 export const WORKSPACE_ROOT_KEY = "COSCRIBE_WORKSPACE_ROOT";
 export const READABLE_DIRS_KEY = "COSCRIBE_EXTRA_READABLE_DIRS";
 export const WRITABLE_DIRS_KEY = "COSCRIBE_EXTRA_WRITABLE_DIRS";
