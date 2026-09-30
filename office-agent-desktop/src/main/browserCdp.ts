@@ -105,11 +105,26 @@ export class TabCdp {
   }
 
   private reset(): void {
+    this.sized = false;
     this.dialog = null;
     this.chooser = null;
     this.sessions.clear();
     this.contexts.clear();
     this.requests.clear();
+  }
+
+  /** Off the panel a page has no viewport of its own (see browserPanel's
+   * layout), so it's given the panel's size to lay out at. */
+  private sized = false;
+
+  async sizeWhileHidden(hidden: boolean, width: number, height: number): Promise<void> {
+    if (hidden === this.sized || !this.wc.debugger.isAttached()) return;
+    if (hidden) {
+      await this.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+    } else {
+      await this.send("Emulation.clearDeviceMetricsOverride");
+    }
+    this.sized = hidden;
   }
 
   send<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}, session?: string): Promise<T> {

@@ -271,6 +271,10 @@ class ScheduledRun:
     # the page's text, for the person and the assistant looking into it.
     screenshot: str | None = None
     page: str | None = None
+    # What a completed run wrote ({"path", "size", "rows"?, "columns"?}),
+    # and the conversation looking into a failed one.
+    files: list[dict[str, Any]] = field(default_factory=list)
+    investigation: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -285,6 +289,8 @@ class ScheduledRun:
             "inputs": self.inputs,
             "screenshot": self.screenshot,
             "page": self.page,
+            "files": self.files,
+            "investigation": self.investigation,
         }
 
     @classmethod
@@ -301,6 +307,8 @@ class ScheduledRun:
             inputs=data.get("inputs"),
             screenshot=data.get("screenshot"),
             page=data.get("page"),
+            files=data.get("files") or [],
+            investigation=data.get("investigation"),
         )
 
 
@@ -338,6 +346,8 @@ class ScheduledTrigger:
     drafts: list[str] = field(default_factory=list)
     # The conversation the task was saved from, if any.
     source_thread: str | None = None
+    # After a failed run, open a conversation that looks into it.
+    auto_investigate: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -358,6 +368,7 @@ class ScheduledTrigger:
             "workspace": self.workspace,
             "drafts": self.drafts,
             "source_thread": self.source_thread,
+            "auto_investigate": self.auto_investigate,
         }
 
     @classmethod
@@ -395,6 +406,7 @@ class ScheduledTrigger:
             workspace=data.get("workspace"),
             drafts=list(data.get("drafts") or []),
             source_thread=data.get("source_thread"),
+            auto_investigate=bool(data.get("auto_investigate", False)),
         )
 
     def find_run(self, run_id: str) -> ScheduledRun | None:
@@ -492,15 +504,16 @@ class ScheduledTriggerStore:
         self.save(trigger)
         return trigger
 
-    def record_failure_page(
-        self, trigger_id: str, run_id: str, screenshot: str | None, page: str | None
-    ) -> None:
+    def record_evidence(self, trigger_id: str, run_id: str, **fields: Any) -> None:
+        """Set a run's screenshot, page, files or investigation."""
         trigger = self.load(trigger_id)
         run = trigger.find_run(run_id) if trigger is not None else None
         if trigger is None or run is None:
             return
-        run.screenshot = screenshot
-        run.page = page
+        for name, value in fields.items():
+            if name not in {"screenshot", "page", "files", "investigation"}:
+                raise ValueError(f"{name!r} isn't run evidence")
+            setattr(run, name, value)
         self.save(trigger)
 
     def record_step(self, trigger_id: str, run_id: str, record: dict[str, Any]) -> None:
@@ -534,6 +547,7 @@ class ScheduledTriggerStore:
         run.finished_at = None
         run.screenshot = None
         run.page = None
+        run.files = []
         if trigger.runs[-1] is run:
             trigger.last_run_status = "running"
         self.save(trigger)
@@ -732,6 +746,7 @@ def patch_trigger(
         raise KeyError(f"No scheduled task with id {trigger_id!r}")
     changes = dict(changes)
     draft = changes.pop("from_draft", None)
+    auto_investigate = changes.pop("auto_investigate", None)
     rule = trigger.schedule
     current: dict[str, Any] = {
         "name": trigger.name,
@@ -751,6 +766,9 @@ def patch_trigger(
     if unknown:
         raise ValueError(f"Can't change {', '.join(unknown)}")
     trigger = update_trigger(store, trigger_id, **{**current, **changes})
+    if auto_investigate is not None:
+        trigger.auto_investigate = bool(auto_investigate)
+        store.save(trigger)
     if draft:
         record_draft(store, trigger, str(draft))
     return trigger

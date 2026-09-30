@@ -665,6 +665,9 @@ class ChatSessionLG:
         # The executing scheduled run's approval_mode, also set by
         # runtime_lg/scheduled_tasks.py -- see _auto_approves.
         self.run_approval_mode: str | None = None
+        # Gated tools the current turn may call without asking, set by
+        # whoever started it for someone who isn't there to be asked.
+        self.preapproved_tools: frozenset[str] = frozenset()
         self._offer_task: asyncio.Task[None] | None = None
 
     def _build_lg_tools(self, model: Any) -> list[Callable[..., Any] | BaseTool]:
@@ -1192,7 +1195,7 @@ class ChatSessionLG:
         ):
             self._current_turn_task.cancel()
 
-    def abandon_orphaned_turn(self) -> None:
+    def abandon_orphaned_turn(self, websocket: Any) -> None:
         """Called from app.py's WebSocketDisconnect handler, not
         request_stop -- a real, previously-unhandled deadlock a concurrency
         review caught: _turn_lock (see __init__) means any turn still
@@ -1215,7 +1218,13 @@ class ChatSessionLG:
         reaching a Command(resume=...) call, so the checkpointer's real
         pending state is left exactly as it was. The lock still gets
         released correctly either way, since `async with` releases on
-        cancellation the same as on any other exception."""
+        cancellation the same as on any other exception.
+
+        Only a turn driven by `websocket`, the connection that went away: a
+        background turn (a scheduled run, a run being looked into) only
+        shows in whichever tab is open, and must outlive one closing."""
+        if self._turn_websocket is not websocket:
+            return
         if self._current_turn_task is not None and not self._current_turn_task.done():
             self._current_turn_task.cancel()
 
@@ -2501,6 +2510,8 @@ class ChatSessionLG:
         exec-policy "forbidden" rule is checked before this and still wins
         under either tier -- those are the user's own standing rules, not
         approvals."""
+        if name in self.preapproved_tools:
+            return "preapproved"
         if self.accept_edits and self._gated_tool_risks.get(name) == "WRITE_LOCAL":
             return "accept_edits"
         mode = self._effective_run_approval_mode()
@@ -2556,6 +2567,7 @@ class ChatSessionLG:
     def _auto_approval_active(self) -> bool:
         return (
             self.accept_edits
+            or bool(self.preapproved_tools)
             or self._auto_review_active()
             or self._effective_run_approval_mode() in ("auto", "skip")
         )

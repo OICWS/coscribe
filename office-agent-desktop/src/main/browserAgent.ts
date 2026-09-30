@@ -26,12 +26,14 @@ import {
   closeTab,
   createTab,
   ensureActiveTab,
+  hiddenTabSize,
   normalizeUrl,
   onTabDownload,
   selectTab,
   setViewHidden,
   tabInfo,
   tabLimitReached,
+  tabShown,
   waitForPanelOpen,
   isPanelOpen,
   type Tab,
@@ -65,6 +67,9 @@ const STEADY_ENOUGH_MS = 3000;
 // Downloads this soon after an AI step are the AI's; the user's own still
 // get Electron's save dialog.
 const DOWNLOAD_WINDOW_MS = 15_000;
+// How long a conversation's steps stop waiting for the panel after it
+// didn't open for one.
+const PANEL_RETRY_MS = 60_000;
 // A quick download is reported by the step that started it; a slower one
 // is reported as started, and browser_wait_for(download) waits it out.
 const DOWNLOAD_QUICK_MS = 10_000;
@@ -536,7 +541,10 @@ async function run(command: Command): Promise<Record<string, unknown>> {
         cdp.stepStarted = Date.now();
         cdp.threadId = command.thread_id;
         if (typeof args.download_dir === "string") cdp.downloadDir = args.download_dir;
+        tab.view.webContents.setBackgroundThrottling(false);
         await cdp.ensure();
+        const size = hiddenTabSize();
+        await cdp.sizeWhileHidden(!tabShown(tab), size.width, size.height);
         await load(tab.view.webContents, String(args.url));
         cdp.stepEnded = Date.now();
       }
@@ -558,7 +566,12 @@ async function run(command: Command): Promise<Record<string, unknown>> {
   cdp.stepStarted = Date.now();
   cdp.threadId = command.thread_id;
   if (typeof args.download_dir === "string") cdp.downloadDir = args.download_dir;
+  // With the window in the tray the page would count as hidden, and a
+  // hidden page takes no clicks: a scheduled run would fail at its first.
+  wc.setBackgroundThrottling(false);
   await cdp.ensure();
+  const size = hiddenTabSize();
+  await cdp.sizeWhileHidden(!tabShown(tab), size.width, size.height);
   if (cdp.dialog && command.action !== "handle_dialog") throw new Error(describeDialog(cdp.dialog));
 
   let result: Record<string, unknown>;
@@ -788,16 +801,23 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
   // Conversations stopped, and when: their steps that arrived before then
   // are dropped rather than carried out.
   const stoppedAt = new Map<string, number>();
+  const panelDeclinedAt = new Map<string, number>();
 
   const execute = async (command: Command) => {
     if ((stoppedAt.get(command.thread_id) ?? 0) >= (command.receivedAt ?? 0)) {
       await reply(command.id, { ok: false, error: "Stopped by the user." });
       return;
     }
-    // The user should see the AI work, so the panel opens first.
-    if (!isPanelOpen()) {
+    // The user should see the AI work, so the panel opens first -- when
+    // the page can open it: not with the window in the tray, nor while
+    // the user is on another page, where every step would wait in vain.
+    const win = getWindow();
+    if (!isPanelOpen() && win?.isVisible() && !win.isMinimized()) {
       notify({ open: true, threadId: command.thread_id });
-      await waitForPanelOpen(5000);
+      const declined = panelDeclinedAt.get(command.thread_id) ?? 0;
+      if (Date.now() - declined > PANEL_RETRY_MS && !(await waitForPanelOpen(5000))) {
+        panelDeclinedAt.set(command.thread_id, Date.now());
+      }
     }
     try {
       const site = siteFor(command);

@@ -29,13 +29,18 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..tools.scheduled_tasks import ScheduledRun, ScheduledTrigger
+from ..workflows.spec import parse_workflow, walk
+
 
 @dataclass
 class BackgroundEvent:
     kind: str  # "wake" | "scheduled_task"
-    status: str  # "completed" | "failed"
+    status: str  # "completed" | "failed" | "needs_approval"
     title: str  # human-readable label: wake's reason, or trigger's name
     thread_id: str
+    # The notification's text; empty lets the desktop app word it.
+    body: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,7 +49,56 @@ class BackgroundEvent:
             "status": self.status,
             "title": self.title,
             "thread_id": self.thread_id,
+            "body": self.body,
         }
+
+
+_BODY_CHARS = 180
+
+
+def _clip(text: str) -> str:
+    return text if len(text) <= _BODY_CHARS else f"{text[: _BODY_CHARS - 1]}…"
+
+
+def _files_line(files: list[dict[str, Any]]) -> str:
+    if not files:
+        return ""
+    first = files[0]
+    rows = first.get("rows")
+    # A header row isn't data.
+    shape = f" · {rows - 1} rows" if isinstance(rows, int) and rows > 1 else ""
+    more = f" (+{len(files) - 1} more)" if len(files) > 1 else ""
+    return f"{shape} · saved to {first['path']}{more}"
+
+
+def run_event(
+    trigger: ScheduledTrigger, run: ScheduledRun, investigation: str | None = None
+) -> BackgroundEvent | None:
+    """The notification for how `run` ended, or None when there's nothing
+    to tell (it was stopped, or is still going). `investigation`: the
+    conversation now looking into a failure, which the notification opens."""
+    if run.status == "completed":
+        body = f"Completed{_files_line(run.files)}"
+    elif run.status == "failed":
+        body = f"Failed -- {run.error or 'it stopped before it finished'}"
+        if investigation:
+            body = f"{body.rstrip('.')}. coscribe is looking into it."
+    elif run.status == "needs_approval":
+        waiting = next((s for s in reversed(run.steps) if s.get("status") == "waiting"), None)
+        titles: dict[str, str] = {}
+        if trigger.workflow is not None:
+            titles = {p.step.id: p.step.title for p in walk(parse_workflow(trigger.workflow).steps)}
+        step = str(waiting.get("step_id")) if waiting else ""
+        body = "Waiting for you" + (f" at {titles.get(step, step)}" if step else "")
+    else:
+        return None
+    return BackgroundEvent(
+        kind="scheduled_task",
+        status=run.status,
+        title=trigger.name,
+        thread_id=investigation or run.thread_id,
+        body=_clip(body),
+    )
 
 
 @dataclass

@@ -33,6 +33,7 @@ import {
 } from "electron";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { existingCdp } from "./browserCdp";
 import { browserSettings, updateBrowserSettings } from "./browserPermissions";
 
 // preload/index.ts repeats these strings: a sandboxed preload can only
@@ -110,6 +111,9 @@ let activeId: number | null = null;
 let nextId = 1;
 let win: BrowserWindow | undefined;
 let panelRect: PanelRect | null = null;
+// The size the active tab keeps while the panel is closed: the panel's
+// last, so the page looks the same when it's opened again.
+let lastPanelSize = { width: 1024, height: 768 };
 let pickModeActive = false;
 // While the user annotates, the panel shows a still screenshot and its
 // own drawing layer, which the live view would otherwise cover.
@@ -233,10 +237,29 @@ function layout(): void {
     if (show) {
       if (!attached) win.contentView.addChildView(tab.view);
       setBoundsReliably(tab.view, panelRect!);
+      lastPanelSize = { width: panelRect!.width, height: panelRect!.height };
+      void existingCdp(tab.view.webContents)
+        ?.sizeWhileHidden(false, 0, 0)
+        .catch(() => undefined);
+    } else if (tab.id === activeId && !tab.blank) {
+      // The AI may be working in it with the panel closed. Detached, the
+      // page takes no clicks; off-window it takes them but gets no
+      // viewport, which the agent then sets (tabShown, hiddenTabSize).
+      if (!attached) win.contentView.addChildView(tab.view);
+      setBoundsReliably(tab.view, { x: -(lastPanelSize.width + 10_000), y: 0, ...lastPanelSize });
     } else if (attached) {
       win.contentView.removeChildView(tab.view);
     }
   }
+}
+
+/** Whether the tab's page is on screen in the panel. */
+export function tabShown(tab: Tab): boolean {
+  return panelRect !== null && tab.id === activeId && !tab.blank && !viewHidden;
+}
+
+export function hiddenTabSize(): { width: number; height: number } {
+  return lastPanelSize;
 }
 
 export function tabLimitReached(): boolean {

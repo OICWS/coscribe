@@ -5,6 +5,8 @@ import { MonitorIcon, MoonIcon, SunIcon } from "../icons";
 import { ToggleSwitch } from "../ToggleSwitch";
 import {
   BACKGROUND_ON_CLOSE_KEY,
+  NOTIFICATION_LEVELS,
+  NOTIFICATIONS_KEY,
   GENERAL_FIELDS,
   LOG_LEVEL_KEY,
   LOG_LEVELS,
@@ -188,6 +190,19 @@ export function GeneralTab({ values, onChange }: GeneralTabProps) {
                 onClick={() =>
                   onChange(BACKGROUND_ON_CLOSE_KEY, values[BACKGROUND_ON_CLOSE_KEY] === "false" ? "true" : "false")
                 }
+              />
+            }
+          />
+          <SettingRow
+            label="Notifications"
+            description="When a task run finishes. Problems only: when a run fails or is waiting for you. Clicking one opens the run."
+            control={
+              <SegmentedControl
+                value={
+                  NOTIFICATION_LEVELS.find((level) => level.value === values[NOTIFICATIONS_KEY])?.value ?? "all"
+                }
+                options={NOTIFICATION_LEVELS}
+                onChange={(v) => onChange(NOTIFICATIONS_KEY, v)}
               />
             }
           />
