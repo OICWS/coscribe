@@ -17,8 +17,10 @@ reply.
 from __future__ import annotations
 
 import asyncio
+import base64
 import itertools
 import shutil
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -205,6 +207,34 @@ def _free_path(folder: Path, name: str) -> Path:
         path = folder / f"{stem} ({n}){suffix}"
         n += 1
     return path
+
+
+SCREENSHOT_FOLDER = "screenshots"
+
+
+def page_screenshot(
+    thread_id: str,
+    state_dir: Path,
+    host: BrowserHost = BROWSER_HOST,
+    *,
+    saved_workflow: bool = False,
+) -> str | None:
+    """The conversation's current page as a PNG under the state folder:
+    its file name, or None when there's no page to capture. Blocks; call
+    it off the server's loop."""
+    args: dict[str, Any] = {"saved_workflow": True} if saved_workflow else {}
+    try:
+        result = host.call("screenshot", args, thread_id, _DEFAULT_TIMEOUT)
+    except Exception:  # noqa: BLE001 -- evidence is optional; the run's own result stands
+        return None
+    png = result.get("png")
+    if not isinstance(png, str):
+        return None
+    folder = state_dir / SCREENSHOT_FOLDER
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}.png"
+    (folder / name).write_bytes(base64.b64decode(png))
+    return name
 
 
 def build_browser_tools(

@@ -305,6 +305,8 @@ export interface ScheduledTask {
   workflow: Workflow | null;
   /** The folder runs work in; null is the app's default workspace. */
   workspace?: string | null;
+  /** Ids of the conversation drafts saved into this task. */
+  drafts?: string[];
 }
 
 export interface CreateScheduledTaskPayload {
@@ -320,6 +322,8 @@ export interface CreateScheduledTaskPayload {
   notes_enabled?: boolean;
   workflow?: Workflow | null;
   workspace?: string | null;
+  /** The conversation draft this task is saved from. */
+  from_draft?: string;
 }
 
 export type ScheduledTaskResult = ScheduledTask | { error: string };

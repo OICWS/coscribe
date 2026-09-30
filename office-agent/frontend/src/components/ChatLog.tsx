@@ -3,7 +3,9 @@ import {
   groupHasPendingApproval,
   groupToolRuns,
   groupTurns,
+  latestWorkflowDraft,
   latestWorkflowDraftId,
+  workflowTests,
   isRunning,
   summarizeGroupParts,
   summarizeItemParts,
@@ -23,7 +25,8 @@ import { QuestionCard } from "./QuestionCard";
 import { RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
 import { SUBAGENT_REPORT_PREFIX, SubAgentReportCard } from "./SubAgentReportCard";
 import { TaskDraftCard } from "./TaskDraftCard";
-import { WorkflowDraftCard } from "./workflow/WorkflowDraftCard";
+import { type DraftCards, DraftCardsContext } from "./workflow/draftCards";
+import { PinnedDraftBar, WorkflowDraftCard } from "./workflow/WorkflowDraftCard";
 
 /** react-markdown + remark/rehype + katex is the single biggest dependency
  * added to this app (roughly triples the production bundle) -- code-split
@@ -82,6 +85,8 @@ interface ChatLogProps {
   onReviewTaskDraft: (item: TaskDraftItem) => void;
   onDismissTaskDraft: (item: TaskDraftItem) => void;
   onReviewWorkflowDraft?: (entry: WorkflowDraftEntry) => void;
+  /** Workflow draft cards' other buttons, and what they show. */
+  draftCards?: Pick<DraftCards, "saved" | "testProgress" | "onTestAgain" | "onContinue" | "onOpenTask">;
   /** A shape clicked in a pptx preview (PptxShapeOverlay) -- threaded up
    * to App.tsx exactly like BrowserPanel's own onSendToChat. */
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
@@ -118,6 +123,7 @@ export function ChatLog({
   onReviewTaskDraft,
   onDismissTaskDraft,
   onReviewWorkflowDraft,
+  draftCards,
   onPptxShapePicked,
   olderItems,
   olderStatus,
@@ -128,7 +134,39 @@ export function ChatLog({
   const scrollRef = useRef<HTMLDivElement>(null);
   const turns = groupTurns(items);
   const olderTurns = groupTurns(olderItems);
-  const latestDraftId = latestWorkflowDraftId([...olderItems, ...items]);
+  const allItems = [...olderItems, ...items];
+  const cards: DraftCards = {
+    saved: new Map(),
+    testProgress: null,
+    ...draftCards,
+    latestDraftId: latestWorkflowDraftId(allItems),
+    tests: workflowTests(allItems),
+    onReview: onReviewWorkflowDraft,
+  };
+  const latestDraft = latestWorkflowDraft(allItems);
+  const pinnable = latestDraft !== null && !(latestDraft.draftId && cards.saved.has(latestDraft.draftId));
+  const [latestCardVisible, setLatestCardVisible] = useState(true);
+  const latestCardId = pinnable ? latestDraft.id : null;
+
+  useEffect(() => {
+    const root = scrollRef.current;
+    const card = latestCardId ? root?.querySelector(`[data-draft-card="${latestCardId}"]`) : null;
+    if (!root || !card) {
+      setLatestCardVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(([entry]) => setLatestCardVisible(entry.isIntersecting), {
+      root,
+      threshold: 0.2,
+    });
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, [latestCardId, items.length]);
+
+  const showLatestCard = () => {
+    const card = latestCardId ? scrollRef.current?.querySelector(`[data-draft-card="${latestCardId}"]`) : null;
+    card?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
@@ -202,6 +240,7 @@ export function ChatLog({
   }
 
   return (
+    <DraftCardsContext.Provider value={cards}>
     <div data-testid="chat-log" className="chat-font flex-1 overflow-y-auto" ref={scrollRef}>
       <div className="mx-auto flex w-full max-w-[880px] flex-col gap-3 px-4 py-4">
         {olderStatus === "loading" && (
@@ -234,15 +273,15 @@ export function ChatLog({
             onRewindMessage={onRewindMessage}
             onReviewTaskDraft={onReviewTaskDraft}
             onDismissTaskDraft={onDismissTaskDraft}
-            onReviewWorkflowDraft={onReviewWorkflowDraft}
-            latestDraftId={latestDraftId}
             live={turnInFlight && i === turns.length - 1}
             onPptxShapePicked={onPptxShapePicked}
           />
         ))}
         <div ref={endRef} />
+        {pinnable && !latestCardVisible && <PinnedDraftBar entry={latestDraft} onShow={showLatestCard} />}
       </div>
     </div>
+    </DraftCardsContext.Provider>
   );
 }
 
@@ -291,8 +330,6 @@ function TurnView({
   onRewindMessage,
   onReviewTaskDraft,
   onDismissTaskDraft,
-  onReviewWorkflowDraft,
-  latestDraftId = null,
   live = false,
   onPptxShapePicked,
 }: {
@@ -307,8 +344,6 @@ function TurnView({
   onRewindMessage?: (turnIndex: number, text: string) => void;
   onReviewTaskDraft?: (item: TaskDraftItem) => void;
   onDismissTaskDraft?: (item: TaskDraftItem) => void;
-  onReviewWorkflowDraft?: (entry: WorkflowDraftEntry) => void;
-  latestDraftId?: string | null;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const entries = groupToolRuns(turn.items);
@@ -339,12 +374,7 @@ function TurnView({
         ) : entry.kind === "task_draft" ? (
           <TaskDraftCard key={entry.id} item={entry} onReview={onReviewTaskDraft} onDismiss={onDismissTaskDraft} />
         ) : entry.kind === "workflow_draft" ? (
-          <WorkflowDraftCard
-            key={entry.id}
-            entry={entry}
-            onReview={onReviewWorkflowDraft}
-            superseded={latestDraftId !== null && entry.id !== latestDraftId}
-          />
+          <WorkflowDraftCard key={entry.id} entry={entry} />
         ) : (
           <LogItemView key={entry.id} item={entry} onEditMessage={isLastTurn ? onEditMessage : undefined} />
         ),

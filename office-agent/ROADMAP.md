@@ -6685,6 +6685,31 @@ doubtful data.
       conversation's draft passed its first test (9 steps, 10.4s) with
       the export in `exports/`.
 
+## Phase 8by -- The draft card leads with what the test showed (shipped)
+
+- [x] A workflow draft's card now opens with its latest test: "Tested ·
+      every step passed in 11.1s", "Test failed at <step>" with the
+      error, or "Not tested yet"; while a test runs, "Testing 3/9" with a
+      bar. Below that, the evidence: the files the steps wrote, moved or
+      downloaded during the test (named in the steps' results and
+      modified since the test began), with rows x columns for xlsx/csv
+      and the size, and a thumbnail of the page the test ended on (the
+      desktop app's new `screenshot` command, stored under the state
+      folder, served from `/api/screenshots/`). Then what changed since
+      the last draft, the steps collapsed (each with its test mark and
+      time), and Review and save / Test again / Continue in chat.
+      Verified with DeepSeek on the fake SAP: "exports/FBL5N_2026.09.01_
+      2026.09.10.XLSX · 449 rows x 6 columns · 17.6 KB" plus the result
+      page, after a real fix round (the first test failed moving the
+      file; the revision took the path from the download wait).
+- [x] The newest unsaved draft stays pinned at the bottom of the
+      conversation, with its test status and Review and save, whenever
+      its card is scrolled out of view; clicking it scrolls to the card.
+- [x] A task remembers the drafts saved into it (`drafts`, set by
+      `from_draft` on create and on PATCH), so the card shows "Saved to
+      <task>" with Open task and the pinned bar goes away -- verified by
+      saving the draft above.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

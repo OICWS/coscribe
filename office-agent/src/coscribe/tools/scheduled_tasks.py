@@ -325,6 +325,9 @@ class ScheduledTrigger:
     workflow: dict[str, Any] | None = None
     # The folder a run reads and writes in; None is the app's default.
     workspace: str | None = None
+    # The conversation drafts (draft_workflow/revise_workflow ids) saved
+    # into this task, so a conversation can show a draft as saved.
+    drafts: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -343,6 +346,7 @@ class ScheduledTrigger:
             "runs": [run.to_dict() for run in self.runs],
             "workflow": self.workflow,
             "workspace": self.workspace,
+            "drafts": self.drafts,
         }
 
     @classmethod
@@ -378,6 +382,7 @@ class ScheduledTrigger:
             runs=runs,
             workflow=data.get("workflow"),
             workspace=data.get("workspace"),
+            drafts=list(data.get("drafts") or []),
         )
 
     def find_run(self, run_id: str) -> ScheduledRun | None:
@@ -700,6 +705,8 @@ def patch_trigger(
     trigger = store.load(trigger_id)
     if trigger is None:
         raise KeyError(f"No scheduled task with id {trigger_id!r}")
+    changes = dict(changes)
+    draft = changes.pop("from_draft", None)
     rule = trigger.schedule
     current: dict[str, Any] = {
         "name": trigger.name,
@@ -718,7 +725,17 @@ def patch_trigger(
     unknown = sorted(set(changes) - set(current))
     if unknown:
         raise ValueError(f"Can't change {', '.join(unknown)}")
-    return update_trigger(store, trigger_id, **{**current, **changes})
+    trigger = update_trigger(store, trigger_id, **{**current, **changes})
+    if draft:
+        record_draft(store, trigger, str(draft))
+    return trigger
+
+
+def record_draft(store: ScheduledTriggerStore, trigger: ScheduledTrigger, draft_id: str) -> None:
+    """Note that the conversation draft `draft_id` was saved into `trigger`."""
+    if draft_id not in trigger.drafts:
+        trigger.drafts.append(draft_id)
+        store.save(trigger)
 
 
 def edit_draft(store: ScheduledTriggerStore, changes: dict[str, Any]) -> dict[str, Any]:
