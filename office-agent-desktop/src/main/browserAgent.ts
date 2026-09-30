@@ -69,6 +69,9 @@ const UNCLAIMED_KEEP_MS = 30 * 60_000;
 
 /** The step running now, and whether its conversation was stopped. */
 let running: { threadId: string; stop: boolean } | null = null;
+/** Conversations with a turn under way and workflow runs in progress, as
+ * the server reports them. */
+const activeThreads = new Set<string>();
 
 function checkStop(): void {
   if (running?.stop) throw new Error("Stopped by the user.");
@@ -377,7 +380,12 @@ function uniquePath(dir: string, fileName: string): string {
 
 function onDownload(item: DownloadItem, wc: WebContents): void {
   const cdp = existingCdp(wc);
-  const aiStep = cdp && (cdp.stepEnded < cdp.stepStarted || Date.now() - cdp.stepEnded < DOWNLOAD_WINDOW_MS);
+  // The tab's turn or run is still going -- an export can take minutes to
+  // start downloading after the click, while a script step waits -- or a
+  // step just ended.
+  const aiStep =
+    cdp &&
+    (activeThreads.has(cdp.threadId) || cdp.stepEnded < cdp.stepStarted || Date.now() - cdp.stepEnded < DOWNLOAD_WINDOW_MS);
   if (!cdp || !aiStep) return;
   // The system save dialog would stop the AI (and a scheduled run) until
   // someone answers it. Into the conversation's own folder instead, where
@@ -480,6 +488,7 @@ async function run(command: Command): Promise<Record<string, unknown>> {
       if (args.url) {
         const cdp = cdpFor(tab.view.webContents);
         cdp.stepStarted = Date.now();
+        cdp.threadId = command.thread_id;
         if (typeof args.download_dir === "string") cdp.downloadDir = args.download_dir;
         await cdp.ensure();
         await load(tab.view.webContents, String(args.url));
@@ -501,6 +510,7 @@ async function run(command: Command): Promise<Record<string, unknown>> {
   }
   const cdp = cdpFor(wc);
   cdp.stepStarted = Date.now();
+  cdp.threadId = command.thread_id;
   if (typeof args.download_dir === "string") cdp.downloadDir = args.download_dir;
   await cdp.ensure();
   if (cdp.dialog && command.action !== "handle_dialog") throw new Error(describeDialog(cdp.dialog));
@@ -784,6 +794,11 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
                 continue;
               }
               // A stop can't queue behind the step it is stopping.
+              if (command.action === "activity") {
+                if (command.args?.active) activeThreads.add(command.thread_id);
+                else activeThreads.delete(command.thread_id);
+                continue;
+              }
               if (command.action === "cancel") {
                 stoppedAt.set(command.thread_id, Date.now());
                 if (running?.threadId === command.thread_id) running.stop = true;

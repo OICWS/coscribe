@@ -6611,6 +6611,30 @@ with the AI asking when it drafts one.
       the user's long optional run-date input ran with it blank from the
       Run dialog; after a reload onto Scheduled the tab view was gone.
 
+## Phase 8bw -- Downloads that start late, browser runs that take turns, run dots (shipped)
+
+- [x] A saved FBL5N workflow clicked OK on SAP's export dialog, then
+      polled for the file in a script step; SAP took longer than 15s to
+      start the download, which by then fell outside the "AI step just
+      ended" window, so Electron asked where to save. The server now
+      reports when a conversation's turn or a workflow run starts and
+      ends (`TurnLock` for turns, around the run for workflows), each tab
+      remembers whose steps last drove it, and a download from a tab
+      whose turn or run is still going is saved without asking however
+      late it starts. Verified: an export that starts downloading 45s
+      after Shift+F4, while a script step polls, landed in `downloads/`
+      with no dialog.
+- [x] Workflow runs that use the browser take turns (one lock): tasks
+      due at the same time, or several caught up at start-up after the
+      computer was off, drove the same tab out from under each other --
+      found live when five test tasks due at 23:59 all ran at 04:31 and
+      four failed on elements that another run had navigated away.
+      Verified: three browser runs started together finished 10s, 21s
+      and 30s later, all completed.
+- [x] Sidebar task dot: a spinner while running, then solid green after a
+      completed run, red after a failed one, amber when it needs the
+      user; hollow grey before any run or once stopped.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

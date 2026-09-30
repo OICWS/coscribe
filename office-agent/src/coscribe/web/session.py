@@ -133,6 +133,7 @@ from ..workflows.engine import StepContext
 from ..workflows.solidify import DraftFailed, WorkflowDraft, draft_workflow, revise_workflow
 from .activity import summarize_activity, summarize_workflow_run
 from .context_usage import build_context_breakdown
+from .turn_lock import TurnLock
 
 logger = logging.getLogger(__name__)
 
@@ -525,7 +526,7 @@ class ChatSessionLG:
         # NOT gated by this lock, same as ChatSession's identical methods
         # -- they have to be able to reach whichever turn is *currently*
         # in flight, not queue behind it.
-        self._turn_lock = asyncio.Lock()
+        self._turn_lock = TurnLock(lambda active: BROWSER_HOST.set_active(thread_id, active))
         # The task currently holding _turn_lock (handle_user_message or
         # resume_after_reconnect), if any -- see abandon_orphaned_turn's
         # docstring for why this exists: a turn lock alone would let an
