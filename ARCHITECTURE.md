@@ -223,9 +223,12 @@ AI 只在运行之外工作：
   fade/fly-in 两种进入动画；docx track changes 不做表格级标记。
 - **`run_python_script`/`run_node_script`**：补上真实代码执行能力
   （xlsx 大数据处理、pptxgenjs 等）。架构决定"零沙盒、纯靠审批"——沿用
-  Claude Code 自己在原生 Windows 无 WSL2 时同样零沙盒的信任模型。是包里
-  唯一 `risk_level="high"` 且没有 `WorkspaceScope` 校验的工具，故意不做
-  import 白名单/黑名单（容易绕过，只给假安全感）。各自用独立
+  Claude Code 自己在原生 Windows 无 WSL2 时同样零沙盒的信任模型。故意
+  不做 import 白名单/黑名单（容易绕过，只给假安全感）。唯一加的是文件夹
+  护栏（`tools/script_guard.py`）：写入只允许工作区和会话添加的文件夹
+  （Node 用 `--permission`，Python 用 audit hook），越界即拒绝并提示添加
+  文件夹。它是防模型失误的护栏，不是边界——仍可读任意文件、联网、启动
+  程序，直接调系统函数的 Python 也能绕过；界面和文档都如实这么写。各自用独立
   venv/`NODE_PATH` 跟 coscribe 自己的运行环境隔开（稳定性考虑）。网络
   访问不做限制（本地桌面应用没有对应的容器网络策略基础设施）。
 - **`web_search`**：内置而非 MCP，用于事实核实/grounding（非 RAG）。

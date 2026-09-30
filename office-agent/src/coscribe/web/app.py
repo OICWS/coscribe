@@ -3045,6 +3045,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     # sidecar never names folders the agent isn't using.
                     if await session.set_folders(folders, websocket):
                         _write_workspace_sidecar(thread_id, [str(f) for f in session.folders])
+                elif message_type == "add_folder":
+                    if await session.add_folder(str(data.get("folder", "")), websocket):
+                        _write_workspace_sidecar(thread_id, [str(f) for f in session.folders])
                 elif message_type == "load_older_messages":
                     # Directly awaited, not asyncio.create_task like
                     # user_message -- same reasoning as switch_model above:

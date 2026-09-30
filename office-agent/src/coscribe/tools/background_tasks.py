@@ -48,7 +48,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,6 +57,15 @@ from typing import Any
 from ..runtime.types import tool_metadata
 from .node_env import ensure_node_env
 from .script_env import ensure_script_env, venv_python
+from .script_guard import (
+    blocked_write,
+    node_guard_args,
+    refusal_note,
+    suggested_folder,
+    without_guard_warnings,
+    writable_roots,
+    write_python_wrapper,
+)
 
 VALID_LANGUAGES = ("python", "node")
 VALID_STATUSES = ("running", "succeeded", "failed", "timed_out", "killed")
@@ -264,7 +273,11 @@ async def _supervise(
 
 
 def build_background_task_tools(
-    thread_id: str, workspace_root: str | Path, state_dir: str | Path
+    thread_id: str,
+    workspace_root: str | Path,
+    state_dir: str | Path,
+    *,
+    extra_writable: Sequence[str | Path] = (),
 ) -> list[Callable[..., Any]]:
     """Return the tool callables the Coordinator agent can call. `state_dir`
     is required for the same reason run_python_script's is -- the script-env/
@@ -273,6 +286,7 @@ def build_background_task_tools(
     root = Path(workspace_root)
     state = Path(state_dir)
     store = BackgroundTaskStore(state)
+    write_roots = writable_roots(root, [Path(p) for p in extra_writable])
 
     async def run_background_script(
         language: str, script: str, description: str, timeout_seconds: float = _DEFAULT_TIMEOUT
@@ -283,8 +297,9 @@ def build_background_task_tools(
         big OCR/data-processing job, a long batch pipeline), where waiting
         synchronously would tie up the whole conversation. Like those two
         tools, there is no sandbox around it (see this module's docstring):
-        the script can read/write any file the coscribe process can reach
-        and make any network call. Runs with its working directory set to
+        the script can read any file the coscribe process can reach and
+        make any network call; writes outside the workspace and the
+        folders added to this conversation are refused. Runs with its working directory set to
         the workspace root and against the exact same dedicated Python/
         Node environment run_python_script/run_node_script use (same
         pre-installed packages, same "you manage extra packages from the
@@ -324,19 +339,29 @@ def build_background_task_tools(
             # itself on a Windows machine with a non-UTF-8 locale, the
             # 'charmap' codec can't encode characters bug documented in
             # PPTX_DESIGN.md §23.
-            env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+            env = {
+                **os.environ,
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONUTF8": "1",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "MPLCONFIGDIR": str(scratch_dir),
+            }
+            wrapper, guard_config = write_python_wrapper(scratch_dir, write_roots)
+            guard_args = [str(wrapper), str(guard_config)]
         else:
             node_env_dir = await asyncio.to_thread(ensure_node_env, state)
             interpreter = shutil.which("node") or "node"
             scratch_dir = Path(tempfile.mkdtemp(prefix="coscribe_bg_node_script_"))
             script_path = scratch_dir / "script.js"
             env = {**os.environ, "NODE_PATH": str(node_env_dir / "node_modules")}
+            guard_args = node_guard_args(interpreter, write_roots) or []
         # encoding="utf-8" for the same reason as the write above's own
         # comment: Path.write_text has no UTF-8 default on Windows.
         script_path.write_text(script, encoding="utf-8")
 
         proc = await asyncio.create_subprocess_exec(
             interpreter,
+            *guard_args,
             str(script_path),
             cwd=str(root),
             env=env,
@@ -393,7 +418,13 @@ def build_background_task_tools(
             raise KeyError(f"No background task with id {task_id!r} in this conversation")
         tail_bytes = min(max(tail_bytes, 1), _MAX_TAIL_BYTES)
         result = task.to_dict()
-        result["output"] = store.tail(task_id, tail_bytes)
+        blocked, output = blocked_write(without_guard_warnings(store.tail(task_id, tail_bytes)))
+        result["output"] = output + (refusal_note(blocked) if blocked else "")
+        if blocked:
+            result["blocked_write"] = blocked
+            folder = suggested_folder(blocked)
+            if folder:
+                result["blocked_folder"] = folder
         return result
 
     def list_background_tasks() -> list[dict[str, Any]]:

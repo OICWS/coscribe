@@ -151,6 +151,20 @@ function parsedResult(result: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
 
+/** A script the folder guard stopped from writing: the path it tried, and
+ * the folder to offer adding (none when that would be a whole drive). */
+export interface BlockedWrite {
+  path: string;
+  folder: string | null;
+}
+
+export function blockedWriteOf(item: ToolOrApprovalItem): BlockedWrite | null {
+  if (item.result === undefined) return null;
+  const data = parsedResult(item.result);
+  if (data === null || typeof data.blocked_write !== "string") return null;
+  return { path: data.blocked_write, folder: typeof data.blocked_folder === "string" ? data.blocked_folder : null };
+}
+
 /** Each draft's latest test_workflow call among `items`, by draft id. A
  * call with no result is running only while a turn is: Stop cancels it
  * without one. */

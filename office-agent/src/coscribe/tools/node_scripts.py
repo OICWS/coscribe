@@ -8,7 +8,9 @@ approach Anthropic's own pptx Skill uses.
 Same safety posture as ``run_python_script``, restated here rather than
 just cross-referenced since it's the whole justification for this tool's
 existence: **no sandbox**, the approval prompt showing the full script
-text before it runs is the entire safety mechanism, and deliberately no
+text before it runs is the safety mechanism -- plus the write guard of
+``tools/script_guard.py`` (Node's ``--permission``, when the installed Node
+has it), a guard rail rather than a boundary -- and deliberately no
 import/library allowlist (trivially bypassable, same reasoning as Claude
 Code's own Bash tool). The one thing genuinely different from
 ``run_python_script``: which packages the script can ``require()`` comes
@@ -24,7 +26,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,14 @@ from ..runtime.types import tool_metadata
 from ._files_written import snapshot_workspace, with_files_written
 from ._output_truncation import truncate_script_output
 from .node_env import ensure_node_env
+from .script_guard import (
+    blocked_write,
+    node_guard_args,
+    refusal_note,
+    suggested_folder,
+    without_guard_warnings,
+    writable_roots,
+)
 
 # Matches run_python_script's own timeout constants exactly -- same
 # already-battle-tested balance (120s default, 600s/10min hard cap), no
@@ -42,7 +52,11 @@ _MAX_TIMEOUT = 600.0
 
 
 def _run_node_script(
-    workspace_root: Path, state_dir: Path, script: str, timeout: float
+    workspace_root: Path,
+    state_dir: Path,
+    script: str,
+    timeout: float,
+    extra_writable: Sequence[Path] = (),
 ) -> dict[str, object]:
     timeout = min(max(timeout, 1.0), _MAX_TIMEOUT)
     node_env_dir = ensure_node_env(state_dir)
@@ -57,6 +71,8 @@ def _run_node_script(
     # process writing script.js to disk) needs the explicit encoding here;
     # the subprocess.run encoding below still has to match on the read side.
     env = {**os.environ, "NODE_PATH": str(node_env_dir / "node_modules")}
+    node = shutil.which("node") or "node"
+    guard = node_guard_args(node, writable_roots(workspace_root, list(extra_writable)))
     before = snapshot_workspace(workspace_root)
     try:
         try:
@@ -66,7 +82,7 @@ def _run_node_script(
                 # `node` is a real .exe on Windows (not a .cmd like npm/
                 # npx), but the same PATH-search gap still applies to
                 # locating it via a bare name through CreateProcess.
-                [shutil.which("node") or "node", str(script_path)],
+                [node, *(guard or []), str(script_path)],
                 cwd=str(workspace_root),
                 env=env,
                 capture_output=True,
@@ -86,25 +102,37 @@ def _run_node_script(
                 "timed_out": True,
             }
             return with_files_written(timed_out, before, workspace_root)
+        blocked, stderr = blocked_write(without_guard_warnings(result.stderr))
         finished: dict[str, object] = {
             "exit_code": result.returncode,
             "stdout": truncate_script_output(result.stdout),
-            "stderr": truncate_script_output(result.stderr),
+            "stderr": truncate_script_output(stderr + (refusal_note(blocked) if blocked else "")),
             "timed_out": False,
         }
+        if blocked:
+            finished["blocked_write"] = blocked
+            folder = suggested_folder(blocked)
+            if folder:
+                finished["blocked_folder"] = folder
+        if guard is None:
+            finished["folder_guard"] = "off: this Node is too old (22 or newer needed)"
         return with_files_written(finished, before, workspace_root)
     finally:
         shutil.rmtree(scratch_dir, ignore_errors=True)
 
 
 def build_node_script_tools(
-    workspace_root: str | Path, state_dir: str | Path
+    workspace_root: str | Path,
+    state_dir: str | Path,
+    *,
+    extra_writable: Sequence[str | Path] = (),
 ) -> list[Callable[..., Any]]:
     """Return the tool callables the Coordinator agent can call. `state_dir`
     is required for the same reason run_python_script's is -- the node-env
     directory this tool depends on has nowhere else to live."""
     root = Path(workspace_root)
     state = Path(state_dir)
+    folders = [Path(p) for p in extra_writable]
 
     def run_node_script(
         script: str, description: str, timeout: float = _DEFAULT_TIMEOUT
@@ -114,11 +142,12 @@ def build_node_script_tools(
         markdown-to-fixed-layout model can't express: custom shapes,
         multi-column layouts, precise positioning, icons. Like
         run_python_script, there is no sandbox around it (see this
-        module's docstring): the script can read/write any file the
-        coscribe process can reach and make any network call, not just
-        things under the workspace. It runs with its working directory
-        set to the workspace root, so relative paths in the script land
-        there by default.
+        module's docstring): the script can read any file the coscribe
+        process can reach and make any network call. Writes are limited to
+        the workspace and the folders added to this conversation; a write
+        anywhere else is refused, and the result's `blocked_write` names
+        the path. It runs with its working directory set to the workspace
+        root, so relative paths land there.
 
         Runs against a dedicated Node.js environment (not connected to
         this project's own frontend/ build) that already has pptxgenjs
@@ -143,7 +172,7 @@ def build_node_script_tools(
             description: one sentence, plain language, what this script does
             timeout: seconds to allow before killing the script (capped at 600)
         """
-        return _run_node_script(root, state, script, timeout)
+        return _run_node_script(root, state, script, timeout, folders)
 
     return [
         tool_metadata(run_node_script, risk_category="EXEC", category="scripts"),

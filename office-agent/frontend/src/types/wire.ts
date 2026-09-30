@@ -404,6 +404,13 @@ export interface SetFoldersOut {
   folders: string[];
 }
 
+/** One more folder for the conversation, keeping the ones it has. Answered
+ * like SetFoldersOut. */
+export interface AddFolderOut {
+  type: "add_folder";
+  folder: string;
+}
+
 /** No payload -- reveals one whole pre-/compact epoch's worth of older
  * messages, prepended above whatever's currently shown. Responds with an
  * OlderMessagesEvent. See ChatSessionLG.load_older_messages's own
@@ -421,4 +428,5 @@ export type WsClientMessage =
   | StopOut
   | SwitchModelOut
   | SetFoldersOut
+  | AddFolderOut
   | LoadOlderMessagesOut;

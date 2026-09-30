@@ -1,5 +1,6 @@
 import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  blockedWriteOf,
   groupHasPendingApproval,
   groupToolRuns,
   groupTurns,
@@ -25,6 +26,8 @@ import { QuestionCard } from "./QuestionCard";
 import { INVESTIGATION_PREFIX, InvestigationCard, RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
 import { SUBAGENT_REPORT_PREFIX, SubAgentReportCard } from "./SubAgentReportCard";
 import { TaskDraftCard } from "./TaskDraftCard";
+import { BlockedFolderCard } from "./BlockedFolderCard";
+import { type FolderActions, FolderActionsContext } from "./folderActions";
 import { type DraftCards, DraftCardsContext } from "./workflow/draftCards";
 import { PinnedDraftBar, WorkflowDraftCard } from "./workflow/WorkflowDraftCard";
 
@@ -87,6 +90,8 @@ interface ChatLogProps {
   onReviewWorkflowDraft?: (entry: WorkflowDraftEntry) => void;
   /** Workflow draft cards' other buttons, and what they show. */
   draftCards?: Pick<DraftCards, "saved" | "testProgress" | "onTestAgain" | "onContinue" | "onOpenTask">;
+  /** What the card under a refused script write can do. */
+  folderActions?: FolderActions;
   /** A shape clicked in a pptx preview (PptxShapeOverlay) -- threaded up
    * to App.tsx exactly like BrowserPanel's own onSendToChat. */
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
@@ -124,6 +129,7 @@ export function ChatLog({
   onDismissTaskDraft,
   onReviewWorkflowDraft,
   draftCards,
+  folderActions,
   onPptxShapePicked,
   olderItems,
   olderStatus,
@@ -240,6 +246,7 @@ export function ChatLog({
   }
 
   return (
+    <FolderActionsContext.Provider value={folderActions ?? null}>
     <DraftCardsContext.Provider value={cards}>
     <div data-testid="chat-log" className="chat-font flex-1 overflow-y-auto" ref={scrollRef}>
       <div className="mx-auto flex w-full max-w-[880px] flex-col gap-3 px-4 py-4">
@@ -282,6 +289,7 @@ export function ChatLog({
       </div>
     </div>
     </DraftCardsContext.Provider>
+    </FolderActionsContext.Provider>
   );
 }
 
@@ -565,6 +573,10 @@ function ToolRunGroupView({
         <Disclosure open={open} />
       </button>
       {single && <ToolPreview item={single} onPptxShapePicked={onPptxShapePicked} />}
+      {group.items.map((item) => {
+        const blocked = blockedWriteOf(item);
+        return blocked ? <BlockedFolderCard key={item.id} blocked={blocked} /> : null;
+      })}
       {open && (
         <div className="mt-2 overflow-hidden rounded-xl border border-[var(--border)]">
           {single ? (
@@ -842,8 +854,9 @@ function ApprovalDetail({
             {typeof scriptArgs.script === "string" ? scriptArgs.script : JSON.stringify(scriptArgs.script)}
           </pre>
           <div className="text-xs text-[var(--muted)]">
-            This script runs with no sandbox -- it can read/write any file this app can, and reach the network.
-            Review it before approving.
+            This script isn’t sandboxed: it can read any file this app can and use the network. It can write only
+            in the workspace and folders you added -- a safeguard against mistakes, not a security boundary. Review
+            it before approving.
           </div>
         </div>
       ) : (

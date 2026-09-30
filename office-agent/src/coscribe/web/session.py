@@ -1351,6 +1351,15 @@ class ChatSessionLG:
         async with self._turn_lock:
             return await self._apply_folders(paths, websocket)
 
+    async def add_folder(self, path: str, websocket: WebSocket) -> bool:
+        """One more folder for this conversation, keeping the ones it has --
+        the default workspace stays the main one when none were chosen."""
+        folder = Path(path).expanduser()
+        current = [Path(self.workspace_root).resolve(), *self.extra_folders]
+        if folder in current:
+            return True
+        return await self.set_folders([str(p) for p in current] + [str(folder)], websocket)
+
     async def _apply_folders(self, paths: list[str], websocket: WebSocket) -> bool:
         chosen: list[Path] = []
         for raw in paths:

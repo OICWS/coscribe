@@ -6842,14 +6842,19 @@ what protects you (same trust model as Claude Code on native Windows).
 What changes is that "where can this write" has one answer everywhere:
 the workspace plus the folders you added.
 
-- [ ] Script folder guard: `run_node_script` runs with Node's
-      `--permission` limited to those folders (checked: writes and reads
-      outside are refused, so is starting a process); `run_python_script`
-      gets an audit-hook prelude refusing writes outside them and
-      starting processes. A guard rail against a model's mistakes, not a
-      boundary -- Python code calling the system directly gets past it,
-      and the UI says so. A refusal names the folder and offers "Add
-      folder" / "Just this once" in the chat.
+- [x] Script folder guard: writes outside the workspace and the added
+      folders are refused -- `run_node_script` and Python's `run_python_script`
+      (and background scripts). Node uses `--permission` (checked: writes
+      outside are refused; needs Node 22 or so, else the script runs
+      unguarded and the result says so); Python an audit hook in a small
+      wrapper. Reads and launching programs are left open (libraries and
+      input files live everywhere, and a script may legitimately call
+      `soffice`), so it is a guard rail against a model's mistakes, not a
+      boundary -- Python code calling the system directly gets past it, and
+      the approval card says so. A refusal carries `blocked_write` and a
+      suggested folder (never a whole drive or the home folder); the chat
+      shows a card with "Add folder" and "Try again". Verified in the real
+      page: refused, card, one click, retry wrote the file.
 - [ ] Workflow permissions: derived from the steps -- folders read and
       written, sites visited, scripts and other high-risk tools -- shown
       on the review card; saving is the consent. A saved run is held to

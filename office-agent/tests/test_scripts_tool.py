@@ -203,3 +203,45 @@ def test_files_written_gives_up_on_a_workspace_too_big_to_scan(
 
     assert _files_written.snapshot_workspace(tmp_path) is None
     assert _files_written.files_written(None, tmp_path) == []
+
+
+def test_run_python_script_refuses_a_write_outside_the_workspace_and_says_where(
+    tools: ScriptTools, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The temp folder is writable, and pytest's tmp_path lives in it.
+    system_temp = tmp_path / "system-temp"
+    system_temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(system_temp))
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    result = tools.run_python_script(
+        script=f"open({str(outside / 'r.txt')!r}, 'w').write('x')", description="save a report"
+    )
+
+    assert result["exit_code"] != 0
+    assert Path(str(result["blocked_write"])).parent == outside
+    assert "Add folder" in str(result["stderr"])
+    assert not (outside / "r.txt").exists()
+
+
+def test_run_python_script_writes_to_a_folder_the_conversation_added(
+    tmp_path: Path, shared_state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system_temp = tmp_path / "system-temp"
+    system_temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(system_temp))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    added = tmp_path / "reports"
+    added.mkdir()
+    by_name = {
+        tool.__name__: tool
+        for tool in build_script_tools(workspace, shared_state_dir, extra_writable=[added])
+    }
+    result = by_name["run_python_script"](
+        script=f"open({str(added / 'r.txt')!r}, 'w').write('x')", description="save a report"
+    )
+
+    assert result["exit_code"] == 0, result["stderr"]
+    assert "blocked_write" not in result
+    assert (added / "r.txt").read_text() == "x"

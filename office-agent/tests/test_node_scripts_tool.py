@@ -164,3 +164,26 @@ pres.writeFile({ fileName: "deck.pptx" }).then(() => console.log("done"));
 
     presentation = Presentation(str(deck_path))
     assert len(presentation.slides) == 1
+
+
+def test_run_node_script_refuses_a_write_outside_the_workspace_and_says_where(
+    tools: NodeScriptTools, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools.script_guard import node_guard_args
+
+    # The temp folder is writable, and pytest's tmp_path lives in it.
+    system_temp = tmp_path / "system-temp"
+    system_temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(system_temp))
+    if node_guard_args(shutil.which("node") or "node", []) is None:
+        pytest.skip("this Node has no permission model")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    result = tools.run_node_script(
+        script=f"require('fs').writeFileSync({str(outside / 'r.txt')!r}, 'x')",
+        description="save a report",
+    )
+
+    assert result["exit_code"] != 0
+    assert Path(str(result["blocked_write"])).name == "r.txt"
+    assert not (outside / "r.txt").exists()

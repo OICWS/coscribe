@@ -819,9 +819,11 @@ def build_coordinator_agent(
         + build_selfwake_tools(thread_id, settings.state_dir)
         + build_scheduled_task_tools(settings.state_dir, thread_id)
         + build_websearch_tools()
-        + build_script_tools(root, settings.state_dir)
-        + build_node_script_tools(root, settings.state_dir)
-        + build_background_task_tools(thread_id, root, settings.state_dir)
+        + build_script_tools(root, settings.state_dir, extra_writable=extra_writable)
+        + build_node_script_tools(root, settings.state_dir, extra_writable=extra_writable)
+        + build_background_task_tools(
+            thread_id, root, settings.state_dir, extra_writable=extra_writable
+        )
         + build_subagent_task_tools(thread_id, settings.state_dir)
     )
     instructions = f"{INSTRUCTIONS}\n\n{_describe_folders(root, extra_folders)}"

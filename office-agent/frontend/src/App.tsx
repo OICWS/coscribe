@@ -920,6 +920,12 @@ function App() {
               onDismissTaskDraft={onDismissTaskDraft}
               onReviewWorkflowDraft={reviewWorkflowDraft}
               draftCards={draftCards}
+              folderActions={{
+                folders: state.folders,
+                busy: state.turnInFlight,
+                onAddFolder: (folder) => socketRef.current?.send({ type: "add_folder", folder }),
+                onTryAgain: () => sendRaw("I added the folder. Please try again."),
+              }}
               onPptxShapePicked={onPptxShapePicked}
               olderItems={state.olderItems}
               olderStatus={state.olderStatus}
