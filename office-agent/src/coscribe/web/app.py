@@ -64,7 +64,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, get_args
+from typing import TYPE_CHECKING, Annotated, Any, cast, get_args
 
 import uvicorn
 from dotenv import dotenv_values, load_dotenv, set_key
@@ -167,6 +167,7 @@ from ..tools.subagent_tasks import (
 )
 from ..tools.tasks import TaskToolkit
 from ..workflows.catalog import describe_params, tool_description
+from ..workflows.permissions import granted_by, summarize
 from ..workflows.solidify import DraftFailed
 from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflow_error
 from .activity import OPENABLE_EXTENSIONS, open_in_os
@@ -924,6 +925,16 @@ class WorkflowCheck(BaseModel):
     workflow: dict[str, Any]
 
 
+class PermissionsRequest(BaseModel):
+    workflow: dict[str, Any]
+    # An earlier version, to say what this one adds.
+    previous: dict[str, Any] | None = None
+    # A saved task, whose runs may have been allowed more since.
+    trigger_id: str | None = None
+    # With a task: compare against its saved workflow.
+    against_saved: bool = False
+
+
 class WorkflowAnswer(BaseModel):
     approved: bool
     note: str = ""
@@ -997,6 +1008,13 @@ FIXED_COMMANDS = [
         "description": "Save this conversation as a reusable Skill (usage: /saveskill <name>)",
     },
 ]
+
+
+class _NoSocket:
+    """Stands in for a websocket where nobody is listening."""
+
+    async def send_json(self, data: dict[str, Any]) -> None:
+        return None
 
 
 def create_app_lg(settings: Settings | None = None) -> FastAPI:
@@ -1108,6 +1126,21 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         trigger = ScheduledTriggerStore(settings.state_dir).load(parsed[0])
         return trigger.workspace if trigger is not None else None
 
+    def _run_folders(thread_id: str) -> list[str]:
+        """A scheduled run's folders: its task's own, then the existing
+        ones its workflow names or the person allowed while a run waited."""
+        parsed = parse_run_thread_id(thread_id)
+        trigger = ScheduledTriggerStore(settings.state_dir).load(parsed[0]) if parsed else None
+        if trigger is None:
+            return []
+        extra = list(trigger.permissions.get("folders", []))
+        if trigger.workflow is not None:
+            extra = [*granted_by(parse_workflow(trigger.workflow))["folders"], *extra]
+        extra = [folder for folder in dict.fromkeys(extra) if Path(folder).is_dir()]
+        if not extra:
+            return [trigger.workspace] if trigger.workspace else []
+        return [trigger.workspace or str(settings.workspace_root), *extra]
+
     def _resolve_folders(thread_id: str, workspace_param: str | None) -> list[Path]:
         """The ?workspace= query param only counts the first time a thread
         is seen; after that the sidecar (changed through set_folders) wins.
@@ -1115,6 +1148,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         explicit choice of that same folder, which the UI shows as chosen."""
         if _workspace_sidecar_path(thread_id).is_file():
             return [Path(folder) for folder in _read_workspace_sidecar(thread_id)]
+        run_folders = _run_folders(thread_id)
+        if run_folders and workspace_param is None:
+            _write_workspace_sidecar(thread_id, run_folders)
+            return [Path(folder) for folder in run_folders]
         if workspace_param is None:
             workspace_param = _run_workspace(thread_id)
         if not workspace_param:
@@ -1722,6 +1759,50 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"error": workflow_error(exc, body.workflow)}, status_code=400)
         return JSONResponse({"workflow": workflow.model_dump(mode="json")})
 
+    def _tool_risks() -> dict[str, str]:
+        risks: dict[str, str] = {}
+        for connector_tool in _session_extra_tools():
+            metadata = get_tool_metadata(connector_tool)
+            if (metadata.category or "").startswith("mcp:"):
+                risks[connector_tool.name] = metadata.risk_category
+        for tool in build_coordinator_agent(settings, thread_id="__tools_probe__").tools:
+            risks[tool.__name__] = get_tool_metadata(tool).risk_category
+        return risks
+
+    @app.post("/api/workflows/permissions")
+    async def workflow_permissions(body: PermissionsRequest) -> JSONResponse:
+        """What a workflow will touch -- shown where it's reviewed -- and,
+        given an earlier version, what this one adds to it."""
+        try:
+            workflow = parse_workflow(body.workflow)
+            earlier = parse_workflow(body.previous) if body.previous is not None else None
+        except ValidationError as exc:
+            return JSONResponse({"error": workflow_error(exc, body.workflow)}, status_code=400)
+        trigger = (
+            ScheduledTriggerStore(settings.state_dir).load(body.trigger_id)
+            if body.trigger_id
+            else None
+        )
+        granted = trigger.permissions if trigger is not None else None
+        if earlier is None and body.against_saved and trigger is not None and trigger.workflow:
+            earlier = parse_workflow(trigger.workflow)
+        risks = _tool_risks()
+        summary = summarize(workflow, risks, granted)
+        added: dict[str, Any] | None = None
+        if earlier is not None:
+            before = summarize(earlier, risks, granted)
+            added = {
+                "folders": [f for f in summary["folders"] if f not in before["folders"]],
+                "sites": [x for x in summary["sites"] if x not in before["sites"]],
+                "scripts": [t for t in summary["scripts"] if t not in before["scripts"]],
+                "notable": [
+                    n
+                    for n in summary["notable"]
+                    if n["tool"] not in {b["tool"] for b in before["notable"]}
+                ],
+            }
+        return JSONResponse({"permissions": summary, "added": added})
+
     def _thread_file(thread_id: str, path: str) -> Path | None:
         try:
             resolved = _get_session(thread_id).workspace_scope().resolve(path)
@@ -1956,6 +2037,30 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         )
         return JSONResponse({"thread_id": thread_id})
 
+    def _waiting_permission(run: Any) -> dict[str, Any] | None:
+        """What the run's waiting step asks to be allowed, if it is asking."""
+        for record in reversed(run.steps):
+            if record.get("status") == "waiting":
+                asked = record.get("permission")
+                return asked if isinstance(asked, dict) else None
+        return None
+
+    async def _allow_for_run(
+        store: ScheduledTriggerStore, trigger_id: str, thread_id: str, permission: dict[str, Any]
+    ) -> str | None:
+        """Record the answer on the task, so later runs don't ask again, and
+        open the folder to the run's session. A problem, or None."""
+        target = str(permission.get("target") or "")
+        if permission.get("kind") == "folder":
+            session = await _get_session_async(thread_id)
+            if not await session.add_folder(target, cast(Any, _NoSocket())):
+                return f"Couldn't add {target} -- is it still there?"
+            _write_workspace_sidecar(thread_id, [str(f) for f in session.folders])
+            store.grant(trigger_id, "folders", target)
+        elif permission.get("kind") == "site":
+            store.grant(trigger_id, "sites", target)
+        return None
+
     @app.post("/api/scheduled-tasks/{trigger_id}/runs/{run_id}/answer")
     async def answer_workflow_approval(
         trigger_id: str, run_id: str, payload: WorkflowAnswer
@@ -1965,6 +2070,11 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         before = trigger.find_run(run_id) if trigger is not None else None
         if before is not None and before.status != "needs_approval":
             return JSONResponse({"error": "This run isn't waiting for approval"}, status_code=409)
+        permission = _waiting_permission(before) if before is not None else None
+        if payload.approved and permission is not None and before is not None:
+            problem = await _allow_for_run(store, trigger_id, before.thread_id, permission)
+            if problem:
+                return JSONResponse({"error": problem}, status_code=409)
         reopened = _reopen_workflow_run(trigger_id, run_id)
         if isinstance(reopened, JSONResponse):
             return reopened

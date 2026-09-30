@@ -17,7 +17,7 @@ import { Readable } from "node:stream";
 import { type BrowserWindow, type DownloadItem, type WebContents, app, webContents } from "electron";
 import { pageAgent } from "./browserAgentPage";
 import { type AgentFrame, type Download, type PageDialog, type TabCdp, cdpFor, existingCdp } from "./browserCdp";
-import { isAllowed, requestPermission } from "./browserPermissions";
+import { inSites, isAllowed, normalizeSite, requestPermission } from "./browserPermissions";
 import {
   BROWSER_AGENT_EVENT,
   MAX_TABS,
@@ -840,10 +840,16 @@ export function startBrowserAgent(port: number, token: string, getWindow: () => 
     try {
       const site = siteFor(command);
       // A saved workflow's steps were reviewed and saved by the user --
-      // that's consent to its sites -- and a prompt would stall a run no
-      // one is watching.
+      // that's consent to the sites they name -- and a prompt would stall a
+      // run no one is watching. Any other site is refused, and the run
+      // stops to ask the person instead.
       const savedWorkflow = command.args?.saved_workflow === true;
-      if (site && !savedWorkflow && !isAllowed(site, command.thread_id)) {
+      const allowedSites = Array.isArray(command.args?.allowed_sites) ? command.args.allowed_sites.map(String) : null;
+      if (site && savedWorkflow && allowedSites) {
+        if (!inSites(site, allowedSites) && !isAllowed(site, command.thread_id)) {
+          throw new Error(`NEEDS_SITE_PERMISSION:${normalizeSite(site) ?? site}`);
+        }
+      } else if (site && !savedWorkflow && !isAllowed(site, command.thread_id)) {
         await requestPermission(site, command.thread_id, getWindow());
       }
     } catch (err) {

@@ -6255,6 +6255,59 @@ def test_a_workflow_task_runs_waits_for_approval_and_finishes_lg(
     assert again.status_code == 409
 
 
+def test_a_saved_run_waits_for_a_folder_it_hasnt_been_allowed_then_carries_on_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    workflow = {
+        "inputs": [{"name": "dest"}],
+        "steps": [
+            {"id": "save", "kind": "tool", "title": "Save the report", "tool": "write_file",
+             "args": {"path": "{{dest}}", "content": "report"}},
+        ],
+    }  # fmt: skip
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Report", "kind": "manual", "at": "", "workflow": workflow},
+        )
+        task = created.json()
+        target = str(elsewhere / "out.txt")
+        started = client.post(
+            f"/api/scheduled-tasks/{task['trigger_id']}/run", json={"inputs": {"dest": target}}
+        )
+        run = started.json()["run"]
+        parked = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        declined_early = (elsewhere / "out.txt").exists()
+
+        answered = client.post(
+            f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}/answer",
+            json={"approved": True},
+        )
+        finished = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        saved = client.get("/api/scheduled-tasks").json()
+        permissions = client.post(
+            "/api/workflows/permissions",
+            json={"workflow": workflow, "trigger_id": task["trigger_id"]},
+        ).json()
+
+    waiting = parked["steps"][-1]
+    assert parked["status"] == "needs_approval"
+    assert waiting["status"] == "waiting"
+    assert waiting["permission"]["kind"] == "folder"
+    assert waiting["permission"]["target"] == str(elsewhere)
+    assert not declined_early
+    assert answered.status_code == 200
+    assert finished["status"] == "completed", finished
+    assert (elsewhere / "out.txt").read_text(encoding="utf-8") == "report"
+    granted = next(t for t in saved if t["trigger_id"] == task["trigger_id"])
+    assert granted["permissions"] == {"folders": [str(elsewhere)]}
+    assert permissions["permissions"]["folders"] == [str(elsewhere)]
+
+
 def test_a_failed_workflow_step_can_be_retried_from_an_earlier_one_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -6410,8 +6463,12 @@ def test_a_failed_run_of_a_task_set_to_is_looked_into_and_announced_lg(
             time.sleep(0.05)
         failed = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
         with client.websocket_connect(f"/ws/{event['thread_id']}") as ws:
-            ws.receive_json()  # state
-            history = ws.receive_json()["entries"]
+            # The conversation may still be finishing its reply, so live
+            # events can come before the history does.
+            messages = [ws.receive_json() for _ in range(2)]
+            while not any(m.get("type") == "history" for m in messages):
+                messages.append(ws.receive_json())
+            history = next(m for m in messages if m.get("type") == "history")["entries"]
 
     assert patched["auto_investigate"] is True
     assert event["status"] == "failed" and event["title"] == "Word count"

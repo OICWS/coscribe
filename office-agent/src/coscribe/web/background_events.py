@@ -89,7 +89,12 @@ def run_event(
         if trigger.workflow is not None:
             titles = {p.step.id: p.step.title for p in walk(parse_workflow(trigger.workflow).steps)}
         step = str(waiting.get("step_id")) if waiting else ""
-        body = "Waiting for you" + (f" at {titles.get(step, step)}" if step else "")
+        where = f" at {titles.get(step, step)}" if step else ""
+        asked = waiting.get("permission") if waiting else None
+        if isinstance(asked, dict) and asked.get("target"):
+            body = f"Needs your OK to use {asked['target']}{where}"
+        else:
+            body = f"Waiting for you{where}"
     else:
         return None
     return BackgroundEvent(

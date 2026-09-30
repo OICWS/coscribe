@@ -229,6 +229,7 @@ function FailedCard({ step, record, ctx }: RowProps) {
 }
 
 function ApprovalCard({ step, record, ctx }: RowProps) {
+  const permission = record?.permission ?? null;
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -251,23 +252,41 @@ function ApprovalCard({ step, record, ctx }: RowProps) {
           Waiting for you
         </span>
       </div>
-      {typeof record?.output === "string" && (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">{record.output}</p>
+      {permission ? (
+        <div className="flex flex-col gap-1" data-testid="permission-request">
+          <p className="text-sm font-medium">
+            {permission.kind === "folder"
+              ? "It needs to change a folder it hasn’t been allowed"
+              : "It needs to open a website it hasn’t been allowed"}
+          </p>
+          <p className="break-all text-sm">{permission.target}</p>
+          <p className="text-[13px] text-[var(--muted)]">
+            {permission.kind === "folder"
+              ? "Allowing adds it to this workflow for this and later runs. The step then runs again from its start."
+              : "Allowing adds it to this workflow for this and later runs."}
+          </p>
+        </div>
+      ) : (
+        <>
+          {typeof record?.output === "string" && (
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">{record.output}</p>
+          )}
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs text-[var(--muted)]">Note (optional, saved with this run)</span>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-sm outline-none hover:border-[var(--border-hover)] focus:border-[var(--border-hover)]"
+            />
+          </label>
+        </>
       )}
-      <label className="flex flex-col gap-1.5">
-        <span className="text-xs text-[var(--muted)]">Note (optional, saved with this run)</span>
-        <input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-sm outline-none hover:border-[var(--border-hover)] focus:border-[var(--border-hover)]"
-        />
-      </label>
       <div className="flex gap-2">
         <button type="button" disabled={busy} className={primaryButton} onClick={() => answer(true)}>
-          Approve and continue
+          {permission ? "Allow and continue" : "Approve and continue"}
         </button>
         <button type="button" disabled={busy} className={secondaryButton} onClick={() => answer(false)}>
-          Decline
+          {permission ? "Don’t allow" : "Decline"}
         </button>
       </div>
       {error && (
@@ -652,8 +671,9 @@ function RunBanner({
         <div className="flex items-center gap-2.5">
           <ClockIcon className="h-4 w-4 shrink-0 text-[var(--warning)]" />
           <span>
-            Waiting for you at <span className="font-medium">{stepTitle(workflow, waiting?.step_id)}</span> -- answer
-            it below to go on.
+            {waiting?.permission ? "Needs your OK" : "Waiting for you"} at{" "}
+            <span className="font-medium">{stepTitle(workflow, waiting?.step_id)}</span> -- answer it below to go
+            on.
           </span>
         </div>
       </div>
@@ -808,6 +828,11 @@ export function WorkflowRunView({
         </div>
 
         <RunBanner run={run} workflow={workflow} onStop={onStop} onInvestigate={onInvestigate} />
+        {run.sites && run.sites.length > 0 && run.status !== "running" && (
+          <div className="text-[13px] text-[var(--muted)]" data-testid="run-sites">
+            Opened: <span className="text-[var(--fg)]">{run.sites.join(", ")}</span>
+          </div>
+        )}
 
         {crashed && (
           <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] px-4 py-3 text-sm">

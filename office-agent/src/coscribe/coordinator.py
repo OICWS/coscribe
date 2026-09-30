@@ -44,6 +44,8 @@ from .tools import (
 )
 from .tools._workspace import WorkspaceScope
 from .tools.scheduled_tasks import ScheduledTriggerStore, parse_run_thread_id
+from .workflows.permissions import granted_by
+from .workflows.spec import parse_workflow
 
 # The always-bound tool set when Settings.defer_tools is on (see
 # web/session.py's _build_lg_agent and runtime_lg/tool_deferral.py) --
@@ -746,6 +748,17 @@ def _is_saved_workflow_run(settings: Settings, thread_id: str) -> bool:
     return trigger is not None and trigger.workflow is not None
 
 
+def _sites_allowed_to_run(settings: Settings, thread_id: str) -> list[str]:
+    """The sites a task's workflow may open: those its steps name, and any
+    the person allowed while a run waited. Read at each browser step."""
+    parsed = parse_run_thread_id(thread_id)
+    trigger = ScheduledTriggerStore(settings.state_dir).load(parsed[0]) if parsed else None
+    if trigger is None or trigger.workflow is None:
+        return []
+    named = granted_by(parse_workflow(trigger.workflow))["sites"]
+    return list(dict.fromkeys([*named, *trigger.permissions.get("sites", [])]))
+
+
 def build_coordinator_agent(
     settings: Settings,
     thread_id: str,
@@ -834,6 +847,7 @@ def build_coordinator_agent(
                 root, extra_readable=extra_readable, extra_writable=extra_writable
             ),
             saved_workflow=_is_saved_workflow_run(settings, thread_id),
+            allowed_sites=lambda: _sites_allowed_to_run(settings, thread_id),
         )
         instructions = f"{instructions}\n\n{BROWSER_INSTRUCTIONS}"
     extra_dirs_note = _describe_extra_dirs(

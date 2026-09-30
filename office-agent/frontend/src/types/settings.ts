@@ -290,6 +290,8 @@ export interface ScheduledRun {
   files?: { path: string; size: number; rows?: number; columns?: number }[];
   /** The conversation looking into this failed run. */
   investigation?: string | null;
+  /** The sites the run opened. */
+  sites?: string[];
 }
 
 export interface ScheduledTask {
@@ -317,6 +319,8 @@ export interface ScheduledTask {
   source_thread?: string | null;
   /** A failed run starts a conversation that looks into it. */
   auto_investigate?: boolean;
+  /** What its runs were allowed while they waited, beyond what the steps name. */
+  permissions?: { folders?: string[]; sites?: string[] };
 }
 
 export interface CreateScheduledTaskPayload {

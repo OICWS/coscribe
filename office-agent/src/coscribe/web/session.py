@@ -1525,6 +1525,7 @@ class ChatSessionLG:
             workspace_root=Path(self.workspace_root),
             state_dir=Path(self.settings.state_dir),
             make_model=make_model,
+            extra_writable=[*self.settings.extra_writable_dirs, *self.extra_folders],
         )
 
     async def draft_workflow(self, name_hint: str = "") -> WorkflowDraft:

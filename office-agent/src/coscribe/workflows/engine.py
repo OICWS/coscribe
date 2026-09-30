@@ -25,7 +25,7 @@ import inspect
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -33,9 +33,11 @@ from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from ..needs_permission import NeedsPermission
 from .refs import evaluate, render_text, render_value, resolve
 from .spec import (
     ApprovalStep,
@@ -101,6 +103,9 @@ class StepRecord:
     # Which pass of each loop around the step this is, outermost first --
     # empty outside loops. A step's record is one per pass.
     iteration: list[int] = field(default_factory=list)
+    # A waiting step that is asking to be allowed something, not approved:
+    # {"kind": "folder" | "site", "target", "message"}.
+    permission: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -116,6 +121,11 @@ class StepContext:
     # default model for None.
     make_model: Callable[[str | None], Any]
     run_script: Callable[[Path, Path, str, float], dict[str, object]] | None = None
+    # The folders a script may write besides the workspace.
+    extra_writable: Sequence[Path] = ()
+    # A saved run waits for the person when a step needs a folder or site
+    # it hasn't been allowed; anywhere else that is an ordinary failure.
+    ask_permission: bool = False
 
 
 @dataclass
@@ -219,16 +229,37 @@ async def _run_tool(step: ToolStep, values: dict[str, Any], ctx: StepContext) ->
     if isinstance(tool, BaseTool):
         return _connector_value(await tool.ainvoke(args))
     if inspect.iscoroutinefunction(tool):
-        return await tool(**args)
-    return await asyncio.to_thread(tool, **args)
+        result = await tool(**args)
+    else:
+        result = await asyncio.to_thread(tool, **args)
+    _refuse_blocked_write(result)
+    return result
+
+
+def _refuse_blocked_write(result: Any) -> None:
+    """A script the folder guard stopped is a step that needs a folder."""
+    if isinstance(result, dict) and result.get("blocked_write"):
+        path = str(result["blocked_write"])
+        folder = str(result.get("blocked_folder") or "")
+        raise NeedsPermission(
+            "folder",
+            folder or path,
+            f'The script tried to write "{path}", which is outside the workspace and the '
+            "folders this run may use. Allow that folder, or have the script save inside "
+            "the workspace.",
+        )
 
 
 def _default_run_script(
-    workspace_root: Path, state_dir: Path, script: str, timeout: float
+    workspace_root: Path,
+    state_dir: Path,
+    script: str,
+    timeout: float,
+    extra_writable: Sequence[Path] = (),
 ) -> dict[str, object]:
     from ..tools.scripts import _run_python_script
 
-    return _run_python_script(workspace_root, state_dir, script, timeout)
+    return _run_python_script(workspace_root, state_dir, script, timeout, extra_writable)
 
 
 async def _run_script(step: ScriptStep, values: dict[str, Any], ctx: StepContext) -> Any:
@@ -236,10 +267,24 @@ async def _run_script(step: ScriptStep, values: dict[str, Any], ctx: StepContext
     # repr() of the JSON text is a valid Python string literal, so input
     # values can never break out into the script's code.
     prelude = f"inputs = __import__('json').loads({json.dumps(inputs, ensure_ascii=False)!r})\n"
-    run_script = ctx.run_script or _default_run_script
-    result = await asyncio.to_thread(
-        run_script, ctx.workspace_root, ctx.state_dir, prelude + step.code, SCRIPT_TIMEOUT_SECONDS
-    )
+    if ctx.run_script is not None:
+        result = await asyncio.to_thread(
+            ctx.run_script,
+            ctx.workspace_root,
+            ctx.state_dir,
+            prelude + step.code,
+            SCRIPT_TIMEOUT_SECONDS,
+        )
+    else:
+        result = await asyncio.to_thread(
+            _default_run_script,
+            ctx.workspace_root,
+            ctx.state_dir,
+            prelude + step.code,
+            SCRIPT_TIMEOUT_SECONDS,
+            ctx.extra_writable,
+        )
+    _refuse_blocked_write(result)
     stderr = str(result.get("stderr") or "").strip()
     if result.get("timed_out"):
         raise StepFailed(
@@ -495,7 +540,9 @@ def build_graph(workflow: Workflow, ctx: StepContext, on_step: OnStep, checkpoin
             await emit(StepRecord(step.id, "running", started_at=started, iteration=it))
             checks = None
             output: Any = None
-            try:
+
+            async def attempt() -> None:
+                nonlocal checks, output
                 if isinstance(step, ToolStep):
                     output = await _run_tool(step, values, ctx)
                 elif isinstance(step, ScriptStep):
@@ -508,6 +555,18 @@ def build_graph(workflow: Workflow, ctx: StepContext, on_step: OnStep, checkpoin
                     held, left, right = evaluate(step.condition, values)
                     checks = [{"held": held, "left": preview(left), "right": preview(right)}]
                     output = {"arm": "then" if held else "otherwise"}
+
+            try:
+                while True:
+                    try:
+                        await attempt()
+                        break
+                    except NeedsPermission as need:
+                        if not ctx.ask_permission:
+                            raise
+                        await _permission(step, need, started, it)
+            except GraphBubbleUp:
+                raise
             except Exception as exc:  # noqa: BLE001 -- any step error stops the run, recorded
                 failure = await fail(step, it, started, exc)
                 if failure is exc:
@@ -528,6 +587,35 @@ def build_graph(workflow: Workflow, ctx: StepContext, on_step: OnStep, checkpoin
             return {"values": {save_as: output}} if save_as else {"values": {}}
 
         return run
+
+    async def _permission(
+        step: Step, need: NeedsPermission, started: str, it: list[int]
+    ) -> None:
+        """Stop at a step that needs something the person hasn't allowed,
+        and go on once they say yes. The step runs again from its start
+        when the run resumes, so the allowance is recorded before that."""
+        request = need.to_dict()
+        await emit(
+            StepRecord(
+                step.id,
+                "waiting",
+                started,
+                output=need.message,
+                permission=request,
+                iteration=it,
+            )
+        )
+        answer = interrupt(
+            {
+                "step_id": step.id,
+                "title": step.title,
+                "message": need.message,
+                "permission": request,
+            }
+        )
+        if not (isinstance(answer, dict) and answer.get("approved") is True):
+            raise StepFailed(f"Not allowed: {need.message}", step_id=step.id)
+        await emit(StepRecord(step.id, "running", started_at=started, iteration=it))
 
     async def _approval(
         step: ApprovalStep, values: dict[str, Any], started: str, it: list[int]

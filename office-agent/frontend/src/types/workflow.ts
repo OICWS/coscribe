@@ -115,4 +115,6 @@ export interface StepRecord {
   note?: string | null;
   /** Which pass of each loop around the step, outermost first. */
   iteration?: number[];
+  /** A waiting step asking to be allowed a folder or site, not approved. */
+  permission?: { kind: "folder" | "site"; target: string; message: string } | null;
 }

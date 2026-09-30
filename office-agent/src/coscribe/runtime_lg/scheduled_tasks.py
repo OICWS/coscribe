@@ -34,6 +34,7 @@ from ..tools.scheduled_tasks import (
     compute_next_run_at,
 )
 from ..workflows.engine import RunOutcome, StepRecord, WorkflowNotRunnable, WorkflowRun
+from ..workflows.permissions import sites_in
 from ..workflows.spec import parse_workflow, walk
 from ..workflows.testing import output_files, uses_browser
 from .messages import extract_text, strip_mode_note
@@ -197,6 +198,8 @@ async def _run_workflow(
         await socket.send_json({"type": "workflow_step", "run_id": run.run_id, "record": data})
 
     ctx = session.workflow_context(trigger.model)
+    # A run may stop for an answer; a test in a conversation just fails.
+    ctx.ask_permission = True
     workflow_run = WorkflowRun(
         workflow,
         ctx,
@@ -217,16 +220,18 @@ async def _run_workflow(
             return "failed", str(exc)
         finally:
             BROWSER_HOST.set_active(run.thread_id, False)
-    if outcome.status == "completed":
+    if outcome.status in ("completed", "failed"):
         # From the stored run, so steps before a resume count too.
         stored = store.load(trigger.trigger_id)
         done = stored.find_run(run.run_id) if stored is not None else None
         steps = done.steps if done is not None else []
         outputs = [s.get("output") for s in steps if s.get("status") == "done"]
-        since = int(datetime.fromisoformat(run.started_at).timestamp())
-        files = await asyncio.to_thread(output_files, outputs, ctx.workspace_root, since)
-        store.record_evidence(trigger.trigger_id, run.run_id, files=files)
-        return "completed", None
+        store.record_evidence(trigger.trigger_id, run.run_id, sites=sites_in(outputs))
+        if outcome.status == "completed":
+            since = int(datetime.fromisoformat(run.started_at).timestamp())
+            files = await asyncio.to_thread(output_files, outputs, ctx.workspace_root, since)
+            store.record_evidence(trigger.trigger_id, run.run_id, files=files)
+            return "completed", None
     if outcome.status == "waiting":
         return "needs_approval", None
     titles = {placed.step.id: placed.step.title for placed in walk(workflow.steps)}

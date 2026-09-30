@@ -84,6 +84,17 @@ function covers(site: string, host: string): boolean {
   return host === site || host.endsWith(`.${site}`);
 }
 
+/** Whether `host` falls under one of `sites`, each a site as normalizeSite
+ * names it. */
+export function inSites(host: string, sites: string[]): boolean {
+  const site = normalizeSite(host);
+  if (!site) return false;
+  return sites.some((allowed) => {
+    const normalized = normalizeSite(allowed);
+    return normalized !== null && covers(normalized, site);
+  });
+}
+
 export function isAllowed(host: string, threadId: string): boolean {
   const site = normalizeSite(host);
   if (!site) return false;

@@ -25,6 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..needs_permission import SITE_MARK, NeedsPermission
 from ..runtime.types import tool_metadata
 from ._workspace import WorkspaceScope
 
@@ -137,7 +138,16 @@ class BrowserHost:
             self._pending.pop(request_id, None)
             self._threads.pop(request_id, None)
         if not reply.get("ok"):
-            raise ValueError(str(reply.get("error") or f"The browser couldn't {action}."))
+            error = str(reply.get("error") or f"The browser couldn't {action}.")
+            if error.startswith(SITE_MARK):
+                host = error[len(SITE_MARK) :].strip()
+                raise NeedsPermission(
+                    "site",
+                    host,
+                    f"{host} isn't a site this workflow is allowed to use. "
+                    "Allow it for the workflow, or name it in a step.",
+                )
+            raise ValueError(error)
         result = reply.get("result")
         return result if isinstance(result, dict) else {}
 
@@ -243,16 +253,22 @@ def build_browser_tools(
     *,
     scope: WorkspaceScope | None = None,
     saved_workflow: bool = False,
+    allowed_sites: Callable[[], list[str]] | None = None,
 ) -> list[Callable[..., Any]]:
     """`saved_workflow`: these tools run a saved workflow's steps, which
     the user reviewed and saved -- consent to the sites they visit -- so
-    the desktop app doesn't stop an unattended run to ask."""
+    the desktop app doesn't stop an unattended run to ask. `allowed_sites`
+    (read at each call, since a run may be allowed one more while it waits)
+    is what that consent covers: a site outside it is refused with
+    NeedsPermission instead."""
 
     def call(action: str, limit: float = _DEFAULT_TIMEOUT, **args: Any) -> dict[str, Any]:
         if scope is not None:
             args["download_dir"] = str(scope.root / _DOWNLOADS_FOLDER)
         if saved_workflow:
             args["saved_workflow"] = True
+            if allowed_sites is not None:
+                args["allowed_sites"] = allowed_sites()
         result = host.call(action, args, thread_id, limit + _PERMISSION_WAIT)
         if scope is not None:
             # As the file tools take them: relative to the workspace.

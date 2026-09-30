@@ -5,6 +5,7 @@ import type { Workflow } from "../../types/workflow";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { AlertCircleIcon, ArrowLeftIcon } from "../icons";
 import { WorkflowEditor } from "./WorkflowEditor";
+import { WorkflowPermissions } from "./WorkflowPermissions";
 
 type DraftState =
   | { status: "drafting" }
@@ -232,6 +233,12 @@ export function WorkflowDraftPage({
                 </ul>
               </aside>
             )}
+
+            <WorkflowPermissions
+              workflow={draft.workflow}
+              triggerId={revision?.triggerId}
+              againstSaved={revision !== undefined}
+            />
 
             <div className="mt-6 border-t border-[var(--border)]" />
             <div className="mt-6">

@@ -294,6 +294,27 @@ export const draftWorkflowFromThread = (threadId: string, name = "") =>
 export const validateWorkflow = (workflow: Workflow) =>
   sendForResult<{ workflow: Workflow }>("/api/workflows/validate", "POST", { workflow });
 
+/** What a workflow will touch, and -- against a saved task -- what it adds. */
+export interface WorkflowPermissions {
+  folders: string[];
+  sites: string[];
+  scripts: string[];
+  notable: { tool: string; title: string; risk: string }[];
+  sites_at_run_time: string[];
+}
+
+export interface PermissionsResult {
+  permissions: WorkflowPermissions;
+  added: Pick<WorkflowPermissions, "folders" | "sites" | "scripts" | "notable"> | null;
+}
+
+export const getWorkflowPermissions = (workflow: Workflow, triggerId?: string, againstSaved = false) =>
+  sendForResult<PermissionsResult>("/api/workflows/permissions", "POST", {
+    workflow,
+    trigger_id: triggerId ?? null,
+    against_saved: againstSaved,
+  });
+
 export const getTaskNotes = (triggerId: string) =>
   getJson<TaskNotesResult>(`/api/scheduled-tasks/${encodeURIComponent(triggerId)}/notes`);
 export const saveTaskNotes = (triggerId: string, notes: string) =>

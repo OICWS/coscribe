@@ -275,6 +275,8 @@ class ScheduledRun:
     # and the conversation looking into a failed one.
     files: list[dict[str, Any]] = field(default_factory=list)
     investigation: str | None = None
+    # The sites a workflow run opened, as hosts.
+    sites: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -291,6 +293,7 @@ class ScheduledRun:
             "page": self.page,
             "files": self.files,
             "investigation": self.investigation,
+            "sites": self.sites,
         }
 
     @classmethod
@@ -309,6 +312,7 @@ class ScheduledRun:
             page=data.get("page"),
             files=data.get("files") or [],
             investigation=data.get("investigation"),
+            sites=list(data.get("sites") or []),
         )
 
 
@@ -348,6 +352,9 @@ class ScheduledTrigger:
     source_thread: str | None = None
     # After a failed run, open a conversation that looks into it.
     auto_investigate: bool = False
+    # What a run was allowed while it waited, beyond what the workflow's
+    # steps name themselves: {"folders": [...], "sites": [...]}.
+    permissions: dict[str, list[str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -369,6 +376,7 @@ class ScheduledTrigger:
             "drafts": self.drafts,
             "source_thread": self.source_thread,
             "auto_investigate": self.auto_investigate,
+            "permissions": self.permissions,
         }
 
     @classmethod
@@ -407,6 +415,10 @@ class ScheduledTrigger:
             drafts=list(data.get("drafts") or []),
             source_thread=data.get("source_thread"),
             auto_investigate=bool(data.get("auto_investigate", False)),
+            permissions={
+                str(kind): [str(item) for item in items]
+                for kind, items in (data.get("permissions") or {}).items()
+            },
         )
 
     def find_run(self, run_id: str) -> ScheduledRun | None:
@@ -434,6 +446,17 @@ class ScheduledTriggerStore:
         if not path.exists():
             return None
         return ScheduledTrigger.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    def grant(self, trigger_id: str, kind: str, target: str) -> ScheduledTrigger | None:
+        """Allow a task's runs one more folder or site ("folders"/"sites")."""
+        trigger = self.load(trigger_id)
+        if trigger is None:
+            return None
+        allowed = trigger.permissions.setdefault(kind, [])
+        if target not in allowed:
+            allowed.append(target)
+            self.save(trigger)
+        return trigger
 
     def list_all(self) -> list[ScheduledTrigger]:
         if not self.root.is_dir():
@@ -505,13 +528,13 @@ class ScheduledTriggerStore:
         return trigger
 
     def record_evidence(self, trigger_id: str, run_id: str, **fields: Any) -> None:
-        """Set a run's screenshot, page, files or investigation."""
+        """Set a run's screenshot, page, files, sites or investigation."""
         trigger = self.load(trigger_id)
         run = trigger.find_run(run_id) if trigger is not None else None
         if trigger is None or run is None:
             return
         for name, value in fields.items():
-            if name not in {"screenshot", "page", "files", "investigation"}:
+            if name not in {"screenshot", "page", "files", "sites", "investigation"}:
                 raise ValueError(f"{name!r} isn't run evidence")
             setattr(run, name, value)
         self.save(trigger)

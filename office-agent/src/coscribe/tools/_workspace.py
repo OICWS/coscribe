@@ -14,6 +14,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from ..needs_permission import NeedsPermission
+from .script_guard import suggested_folder
+
 
 class WorkspaceScope:
     def __init__(
@@ -42,7 +45,11 @@ class WorkspaceScope:
             if self._under(resolved, extra_root):
                 return resolved
         verb = "written to" if write else "read"
-        raise PermissionError(f"Path cannot be {verb} -- outside any allowed directory: {path}")
+        message = f"Path cannot be {verb} -- outside any allowed directory: {path}"
+        folder = suggested_folder(str(resolved))
+        if folder is None:
+            raise PermissionError(message)
+        raise NeedsPermission("folder", folder, message)
 
     def relative(self, path: Path) -> str:
         for candidate_root in (self.root, *self._extra_readable):

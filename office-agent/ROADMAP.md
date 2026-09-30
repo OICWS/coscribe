@@ -6835,7 +6835,7 @@ doubtful data.
       placeholder results to the request (the saved history is left
       alone), so no path can send the provider an invalid history.
 
-## Phase 8ce -- One folder rule for scripts and workflows (planned)
+## Phase 8ce -- One folder rule for scripts and workflows (shipped)
 
 Decided with you: scripts stay without an OS sandbox, approval is still
 what protects you (same trust model as Claude Code on native Windows).
@@ -6855,14 +6855,26 @@ the workspace plus the folders you added.
       suggested folder (never a whole drive or the home folder); the chat
       shows a card with "Add folder" and "Try again". Verified in the real
       page: refused, card, one click, retry wrote the file.
-- [ ] Workflow permissions: derived from the steps -- folders read and
-      written, sites visited, scripts and other high-risk tools -- shown
-      on the review card; saving is the consent. A saved run is held to
-      that list: a step that needs more stops as "waiting for you"
-      (notification included) instead of asking mid-run or silently
-      going ahead. A revision that widens the list shows what is new.
-- [ ] After a run, the run page lists what it actually touched: files
-      written, sites visited.
+- [x] Workflow permissions: worked out from the steps (`workflows/permissions.py`)
+      -- sites opened, folders named, steps that run scripts, other tools
+      that act outside the computer -- and shown on the draft's review
+      page and the task page, with "New" marks on what a revision adds
+      and a plain line that scripts are checked, not contained. Saving is
+      the consent.
+- [x] A saved run is held to it, and stops to ask instead of failing: a
+      step that needs a folder outside the run's (a file tool's refusal,
+      or a script the guard stopped) or a site its steps don't name waits
+      as "Needs your OK" -- run page card, notification naming what it
+      wants. "Allow and continue" adds it to the task (later runs don't
+      ask again) and the step runs again from its start; a test in a
+      conversation still just fails with what to allow. The desktop app
+      refuses a saved run's site outside the list (your own allowed-sites
+      list still counts). Verified: a run writing outside its folders
+      paused and finished after Allow (web page); a run opening a site
+      from an input paused in Electron, finished after Allow, and the next
+      run didn't ask.
+- [x] The run page lists the sites a run opened, next to the files it
+      wrote.
 - Not in this phase: fewer approval modes, script environment variables
   (API keys are still passed), network limits -- network is still the
   way data would leave, and nothing here closes it.

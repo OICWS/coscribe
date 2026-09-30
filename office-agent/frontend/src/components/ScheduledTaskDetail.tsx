@@ -20,6 +20,7 @@ import { RunStatusIcon } from "./RunStatusIcon";
 import { ToggleSwitch } from "./ToggleSwitch";
 import { RunInputsDialog } from "./workflow/RunInputsDialog";
 import { WorkflowEditor } from "./workflow/WorkflowEditor";
+import { WorkflowPermissions } from "./workflow/WorkflowPermissions";
 
 // Mirrors tools/scheduled_tasks.py's MAX_NOTES_CHARS.
 const MAX_NOTES_CHARS = 4000;
@@ -377,11 +378,16 @@ export function ScheduledTaskDetail({
             <SectionLabel>Permissions</SectionLabel>
             {workflow ? (
               <>
-                <div className="text-sm font-medium">Steps run as saved</div>
                 <div className="text-sm text-[var(--muted)]">
-                  Saving a step is its review: tool and script steps run without asking each time. The run pauses
-                  only at approval steps.
+                  Steps run as saved, without asking each time. The run also pauses at approval steps, and at
+                  anything below it hasn’t been allowed.
                 </div>
+                <WorkflowPermissions
+                  workflow={workflow}
+                  triggerId={task.trigger_id}
+                  version={JSON.stringify(task.permissions ?? {})}
+                  className="mt-3"
+                />
               </>
             ) : (
               <>
