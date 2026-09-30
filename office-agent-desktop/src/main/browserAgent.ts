@@ -59,6 +59,8 @@ const DEFAULT_WAIT_S = 30;
 const MAX_WAIT_S = 3600;
 const REF_PATTERN = /^(f\d+)?e\d+$/;
 const PAGE_STILL_MS = 400;
+// Enough to read a page; a full-resolution capture is several MB.
+const SCREENSHOT_WIDTH = 1280;
 const STEADY_ENOUGH_MS = 3000;
 // Downloads this soon after an AI step are the AI's; the user's own still
 // get Electron's save dialog.
@@ -718,6 +720,13 @@ async function act(
       const element = await upload(wc, cdp, args.ref, files);
       await settle(wc);
       return withTab(tab, { element });
+    }
+    case "screenshot": {
+      await settle(wc);
+      let image = await wc.capturePage();
+      const { width } = image.getSize();
+      if (width > SCREENSHOT_WIDTH) image = image.resize({ width: SCREENSHOT_WIDTH });
+      return withTab(tab, { png: image.toPNG().toString("base64") });
     }
     case "evaluate": {
       const { value, opened } = await cdp.evaluateInPage(String(args.expression ?? ""));

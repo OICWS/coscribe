@@ -100,6 +100,87 @@ export interface WorkflowDraftEntry {
   triggerId: string | null;
   /** What the revision changes, one line each. */
   changes: string[];
+  /** The id test_workflow and revise_workflow know it by. */
+  draftId: string | null;
+}
+
+export interface WorkflowTestStep {
+  id: string;
+  title: string;
+  /** A StepRecord status, or "not reached". */
+  status: string;
+  seconds: number | null;
+  output: string | null;
+  error: string | null;
+}
+
+export interface WorkflowTestFile {
+  path: string;
+  size: number;
+  rows?: number;
+  columns?: number;
+}
+
+/** What test_workflow reported. */
+export interface WorkflowTestResult {
+  status: "passed" | "failed" | "stopped_at_approval";
+  seconds: number;
+  steps: WorkflowTestStep[];
+  files: WorkflowTestFile[];
+  failed_step: string | null;
+  error: string | null;
+  /** A file under GET /api/screenshots/: the page the test ended on. */
+  screenshot?: string | null;
+}
+
+/** A draft's latest test: its result, or running with none yet. */
+export interface DraftTest {
+  result: WorkflowTestResult | null;
+  running: boolean;
+}
+
+function parsedResult(result: unknown): Record<string, unknown> | null {
+  let value = result;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+/** Each draft's latest test_workflow call among `items`, by draft id. */
+export function workflowTests(items: LogItem[]): Map<string, DraftTest> {
+  const tests = new Map<string, DraftTest>();
+  for (const item of items) {
+    if ((item.kind !== "tool" && item.kind !== "approval") || item.toolName !== "test_workflow") continue;
+    const draftId = item.arguments.draft_id;
+    if (typeof draftId !== "string" || !draftId) continue;
+    if (item.result === undefined) {
+      const running = item.kind === "tool" || item.status === "approved";
+      tests.set(draftId, { result: null, running });
+      continue;
+    }
+    const data = parsedResult(item.result);
+    const ran = data !== null && Array.isArray(data.steps) && typeof data.status === "string";
+    tests.set(draftId, {
+      result: ran ? ({ files: [], ...data } as unknown as WorkflowTestResult) : null,
+      running: false,
+    });
+  }
+  return tests;
+}
+
+/** The newest workflow draft among `items`, as its card shows it. */
+export function latestWorkflowDraft(items: LogItem[]): WorkflowDraftEntry | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    const draft = item.kind === "tool" ? workflowDraftOf(item) : null;
+    if (draft) return draft;
+  }
+  return null;
 }
 
 export type TranscriptEntry = Exclude<LogItem, ToolOrApprovalItem> | ToolRunGroup | WorkflowDraftEntry;
@@ -117,16 +198,8 @@ export function latestWorkflowDraftId(items: LogItem[]): string | null {
 function workflowDraftOf(item: ToolOrApprovalItem): WorkflowDraftEntry | null {
   if (item.kind !== "tool" || item.result === undefined) return null;
   if (item.toolName !== "draft_workflow" && item.toolName !== "revise_workflow") return null;
-  let result: unknown = item.result;
-  if (typeof result === "string") {
-    try {
-      result = JSON.parse(result);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof result !== "object" || result === null) return null;
-  const draft = result as Record<string, unknown>;
+  const draft = parsedResult(item.result);
+  if (draft === null) return null;
   if (draft.status !== "drafted" || typeof draft.workflow !== "object" || draft.workflow === null) return null;
   return {
     kind: "workflow_draft",
@@ -137,6 +210,7 @@ function workflowDraftOf(item: ToolOrApprovalItem): WorkflowDraftEntry | null {
     workspace: typeof draft.workspace === "string" ? draft.workspace : null,
     triggerId: typeof draft.trigger_id === "string" ? draft.trigger_id : null,
     changes: Array.isArray(draft.changes) ? draft.changes.map(String) : [],
+    draftId: typeof draft.draft_id === "string" ? draft.draft_id : null,
   };
 }
 
@@ -344,6 +418,7 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   load_skill: (a) => ({ verb: "Loaded skill", object: str(a, "name") ?? null }),
   draft_workflow: () => ({ verb: "Drafted a workflow", object: null }),
   revise_workflow: () => ({ verb: "Revised a workflow", object: null }),
+  test_workflow: () => ({ verb: "Tested a workflow", object: null }),
   edit_scheduled_task: () => ({ verb: "Proposed changes to a task", object: null }),
   search_tools: (a) => ({ verb: "Searched tools", object: str(a, "query") ?? null, glue: ": " }),
   read_web_page: (a) => ({ verb: "Read", object: str(a, "url") ?? "a web page" }),

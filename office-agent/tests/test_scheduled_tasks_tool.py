@@ -269,6 +269,22 @@ def test_patch_keeps_what_another_save_changed_meanwhile(tmp_path: Path) -> None
         patch_trigger(store, created.trigger_id, {"runs": []})
 
 
+def test_saving_a_draft_into_a_task_is_remembered_once(tmp_path: Path) -> None:
+    store = ScheduledTriggerStore(tmp_path)
+    step = {"id": "a", "kind": "tool", "title": "A", "tool": "read_file", "args": {"path": "x"}}
+    created = create_trigger(
+        store, name="Export", kind="daily", at="09:00", prompt="", workflow={"steps": [step]}
+    )
+
+    patch_trigger(store, created.trigger_id, {"workflow": {"steps": [step]}, "from_draft": "d1"})
+    patch_trigger(store, created.trigger_id, {"name": "Export 2", "from_draft": "d1"})
+    patch_trigger(store, created.trigger_id, {"from_draft": "d2"})
+
+    reloaded = store.load(created.trigger_id)
+    assert reloaded is not None and reloaded.drafts == ["d1", "d2"]
+    assert reloaded.to_dict()["drafts"] == ["d1", "d2"]
+
+
 def test_update_trigger_preserves_enabled_state(tmp_path: Path) -> None:
     store = ScheduledTriggerStore(tmp_path)
     created = create_trigger(store, name="x", kind="daily", at="09:00", prompt="p")

@@ -116,7 +116,7 @@ from ..tools import (
 )
 from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
-from ..tools.browser import BROWSER_HOST
+from ..tools.browser import BROWSER_HOST, page_screenshot
 from ..tools.documents import DocumentToolkit
 from ..tools.interaction import PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL, PLAN_CHOICE_REVISE
 from ..tools.presentations import PresentationToolkit
@@ -1013,6 +1013,11 @@ class ChatSessionLG:
                 # conversation downloaded before the test.
                 BROWSER_HOST.set_active(self.thread_id, True)
             result = await run_test(workflow, ctx, inputs, report)
+            if browser:
+                # For the reviewer, not the model: the page the test ended on.
+                result["screenshot"] = await asyncio.to_thread(
+                    page_screenshot, self.thread_id, Path(self.settings.state_dir)
+                )
             if result["status"] == "failed" and browser:
                 result["page"] = await _page_now(ctx)
             result["next"] = {

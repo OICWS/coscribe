@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,29 @@ async def test_a_workflow_that_cant_run_fails_the_test(tmp_path: Path) -> None:
     result = await run_test(workflow, _ctx(tmp_path, {}))
 
     assert result["status"] == "failed" and "read_file" in result["error"]
+
+
+async def test_a_test_lists_the_files_it_wrote_with_their_shape(tmp_path: Path) -> None:
+    (tmp_path / "old.csv").write_text("a,b\n", encoding="utf-8")
+    os.utime(tmp_path / "old.csv", (1, 1))
+
+    def write_file(path: str, content: str) -> dict[str, Any]:
+        (tmp_path / path).write_text(content, encoding="utf-8")
+        return {"path": path, "note": {"files": ["old.csv", "missing.csv"]}}
+
+    step = {
+        "id": "w",
+        "kind": "tool",
+        "title": "Write",
+        "tool": "write_file",
+        "args": {"path": "out.csv", "content": "name,amount\nA,1\nB,2\n"},
+    }
+    result = await run_test(
+        parse_workflow({"steps": [step]}), _ctx(tmp_path, {"write_file": write_file})
+    )
+
+    assert result["status"] == "passed"
+    assert result["files"] == [{"path": "out.csv", "size": 20, "rows": 3, "columns": 2}]
 
 
 def test_uses_browser_looks_inside_nested_steps() -> None:

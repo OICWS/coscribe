@@ -127,6 +127,7 @@ function App() {
     newWorkflow?: Workflow;
     initialName?: string;
     initialWorkspace?: string | null;
+    fromDraft?: string;
   } | null>(null);
   // A workflow being drafted from a conversation, shown in place of the
   // Scheduled page until it's saved, discarded or navigated away from.
@@ -138,6 +139,8 @@ function App() {
     workspace: string | null;
     /** Proposed changes to this saved task's workflow. */
     revision?: { triggerId: string; changes: string[] };
+    /** The conversation draft under review. */
+    draftId?: string;
   } | null>(null);
   // One shared copy for the sidebar, portal, task page and run header --
   // REST mutations don't flow through the websocket, so every mutation
@@ -446,9 +449,27 @@ function App() {
       initial: { name: entry.name, workflow: entry.workflow, notes: entry.notes },
       workspace: entry.workspace ?? threadWorkspace,
       revision: entry.triggerId ? { triggerId: entry.triggerId, changes: entry.changes } : undefined,
+      draftId: entry.draftId ?? undefined,
     });
     setScheduledTaskModal(null);
     setNavMode("run");
+  };
+
+  const savedDrafts = new Map<string, { triggerId: string; name: string }>();
+  for (const task of scheduledTasks) {
+    for (const draftId of task.drafts ?? []) savedDrafts.set(draftId, { triggerId: task.trigger_id, name: task.name });
+  }
+  const draftCards = {
+    saved: savedDrafts,
+    testProgress: state.workflowTest,
+    onTestAgain: state.turnInFlight
+      ? undefined
+      : (entry: WorkflowDraftEntry) => sendRaw(`Test the workflow draft ${entry.draftId} again.`),
+    onContinue: () => document.querySelector<HTMLTextAreaElement>('[data-testid="composer"] textarea')?.focus(),
+    onOpenTask: (triggerId: string) => {
+      const task = scheduledTasks.find((t) => t.trigger_id === triggerId);
+      if (task) showScheduledTaskPage(task);
+    },
   };
 
   const leaveWorkflowDraft = () => {
@@ -504,7 +525,8 @@ function App() {
   const saveWorkflowRevision = async (triggerId: string, workflow: Workflow) => {
     const task = scheduledTasks.find((t) => t.trigger_id === triggerId);
     if (!task) return "That task no longer exists.";
-    const result = await patchScheduledTask(triggerId, { workflow });
+    const fromDraft = workflowDraft?.draftId;
+    const result = await patchScheduledTask(triggerId, { workflow, ...(fromDraft ? { from_draft: fromDraft } : {}) });
     if ("error" in result) return result.error;
     refreshScheduledTasks();
     showScheduledTaskPage(result);
@@ -879,6 +901,7 @@ function App() {
               onReviewTaskDraft={onReviewTaskDraft}
               onDismissTaskDraft={onDismissTaskDraft}
               onReviewWorkflowDraft={reviewWorkflowDraft}
+              draftCards={draftCards}
               onPptxShapePicked={onPptxShapePicked}
               olderItems={state.olderItems}
               olderStatus={state.olderStatus}
@@ -913,6 +936,7 @@ function App() {
                 newWorkflow: workflow,
                 initialName: name,
                 initialWorkspace: workflowDraft.workspace,
+                fromDraft: workflowDraft.draftId,
               })
             }
           />
@@ -937,6 +961,7 @@ function App() {
             newWorkflow={scheduledTaskModal.newWorkflow}
             initialName={scheduledTaskModal.initialName}
             initialWorkspace={scheduledTaskModal.initialWorkspace}
+            fromDraft={scheduledTaskModal.fromDraft}
             onClose={() => setScheduledTaskModal(null)}
             onSaved={onTaskSaved}
           />

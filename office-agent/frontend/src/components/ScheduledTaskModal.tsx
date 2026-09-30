@@ -137,6 +137,8 @@ interface ScheduledTaskModalProps {
   initialName?: string;
   /** The folder runs work in, when the task comes from a conversation. */
   initialWorkspace?: string | null;
+  /** The conversation draft `newWorkflow` came from. */
+  fromDraft?: string;
 }
 
 /** The Create/Edit scheduled task form -- matches
@@ -154,6 +156,7 @@ export function ScheduledTaskModal({
   newWorkflow,
   initialName,
   initialWorkspace,
+  fromDraft,
 }: ScheduledTaskModalProps) {
   const isEdit = task !== null;
   const workflow = task?.workflow ?? newWorkflow ?? null;
@@ -203,6 +206,7 @@ export function ScheduledTaskModal({
       notes_enabled: task?.notes_enabled ?? true,
       workflow,
       workspace: workspace || null,
+      ...(fromDraft ? { from_draft: fromDraft } : {}),
     };
     setSaving(true);
     setError(null);

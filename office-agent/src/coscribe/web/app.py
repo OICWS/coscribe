@@ -110,7 +110,7 @@ from ..tools import (
     save_uploaded_skill,
 )
 from ..tools._workspace import WorkspaceScope
-from ..tools.browser import BROWSER_HOST
+from ..tools.browser import BROWSER_HOST, SCREENSHOT_FOLDER
 from ..tools.connector_permissions import (
     POLICIES,
     ConnectorPermissions,
@@ -132,6 +132,7 @@ from ..tools.scheduled_tasks import (
     create_trigger,
     parse_run_thread_id,
     patch_trigger,
+    record_draft,
     update_trigger,
 )
 from ..tools.script_env import (
@@ -897,6 +898,8 @@ class ScheduledTaskCreate(BaseModel):
     notes_enabled: bool = True
     workflow: dict[str, Any] | None = None
     workspace: str | None = None
+    # The conversation draft this task was saved from, if any.
+    from_draft: str | None = None
 
 
 class RunNowRequest(BaseModel):
@@ -1767,9 +1770,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/scheduled-tasks")
     async def create_scheduled_task_endpoint(payload: ScheduledTaskCreate) -> JSONResponse:
+        store = ScheduledTriggerStore(settings.state_dir)
         try:
             trigger = create_trigger(
-                ScheduledTriggerStore(settings.state_dir),
+                store,
                 name=payload.name,
                 kind=payload.kind,
                 at=payload.at,
@@ -1785,6 +1789,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             )
         except (ValueError, KeyError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        if payload.from_draft:
+            record_draft(store, trigger, payload.from_draft)
         return JSONResponse(trigger.to_dict())
 
     @app.put("/api/scheduled-tasks/{trigger_id}")
@@ -2179,6 +2185,16 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         if not preview_path.is_file():
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(preview_path, media_type="image/png")
+
+    @app.get("/api/screenshots/{name}")
+    async def get_screenshot(name: str) -> Response:
+        # Same shape check as previews: only a page_screenshot file name.
+        if not _PREVIEW_NAME_RE.fullmatch(name):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        path = settings.state_dir / SCREENSHOT_FOLDER / name
+        if not path.is_file():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(path, media_type="image/png")
 
     @app.get("/api/pptx-shapes")
     async def get_pptx_shapes(path: str, slide: int) -> JSONResponse:
