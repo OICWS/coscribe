@@ -6824,6 +6824,17 @@ doubtful data.
       counts as running only while a turn is in flight, and the final
       reply clears the step counter.
 
+## Phase 8cd -- Every tool call answered before the model sees it (shipped)
+
+- [x] A saved conversation with a tool call that never got a result
+      (stopped mid-tool, app closed, an approval never answered) made the
+      next message fail with a 400 "tool_calls must be followed by tool
+      messages". Closing such calls when a turn starts skips threads with
+      a pending approval, so it could miss one. Every model call in the
+      agent graph now goes through a middleware that adds the missing
+      placeholder results to the request (the saved history is left
+      alone), so no path can send the provider an invalid history.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

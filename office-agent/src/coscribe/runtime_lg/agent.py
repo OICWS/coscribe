@@ -26,6 +26,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphBubbleUp
 
 from ..runtime.types import get_tool_metadata
+from .tool_calls import answer_every_tool_call
 from .tool_deferral import DeferredToolMiddleware, build_search_tools_tool
 
 
@@ -126,6 +127,24 @@ class _CatchToolErrorsMiddleware(AgentMiddleware):
 
 
 _catch_tool_errors = _CatchToolErrorsMiddleware()
+
+
+class _AnswerEveryToolCallMiddleware(AgentMiddleware):
+    """Whatever left a tool call without a result (a stop, a killed app, an
+    approval that was never answered), the provider sees every call
+    answered: one unanswered call fails the whole request with a 400, and
+    the conversation can't go on. Only the request is patched; the saved
+    history is left as it is."""
+
+    def _patched(self, request: Any) -> Any:
+        messages, patched = answer_every_tool_call(list(request.messages))
+        return request.override(messages=messages) if patched else request
+
+    def wrap_model_call(self, request: Any, handler: Any) -> Any:
+        return handler(self._patched(request))
+
+    async def awrap_model_call(self, request: Any, handler: Any) -> Any:
+        return await handler(self._patched(request))
 
 
 
@@ -294,6 +313,8 @@ def build_langgraph_agent(
         middleware.append(
             SummarizationMiddleware(model=model, trigger=("tokens", auto_compact_tokens))
         )
+
+    middleware.append(_AnswerEveryToolCallMiddleware())
 
     final_tools = list(tools)
     if defer_tools:

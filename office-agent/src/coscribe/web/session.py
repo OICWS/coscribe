@@ -106,6 +106,7 @@ from ..runtime_lg.messages import (
 from ..runtime_lg.providers import with_prompt_cache_key
 from ..runtime_lg.selfwake import SilentSocket
 from ..runtime_lg.subagents import subagent_report
+from ..runtime_lg.tool_calls import ORPHANED_TOOL_CALL_NOTE, answer_every_tool_call
 from ..runtime_lg.tool_deferral import bound_tool_names, build_search_tools_tool
 from ..tools import (
     QUESTION_TOOL_NAMES,
@@ -183,7 +184,7 @@ def _now_iso_lg() -> str:
     return datetime.now(UTC).isoformat()
 
 
-_ORPHANED_TOOL_CALL_NOTE = "Stopped before this tool finished -- it produced no result."
+_ORPHANED_TOOL_CALL_NOTE = ORPHANED_TOOL_CALL_NOTE
 
 
 async def _close_orphaned_tool_calls(agent: Any, config: dict[str, Any]) -> bool:
@@ -208,32 +209,7 @@ async def _close_orphaned_tool_calls(agent: Any, config: dict[str, Any]) -> bool
     if not state.values or any(task.interrupts for task in state.tasks):
         return False
     messages = list(state.values.get("messages", []))
-    answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
-    rebuilt: list[Any] = []
-    patched = False
-    index = 0
-    while index < len(messages):
-        message = messages[index]
-        rebuilt.append(message)
-        index += 1
-        if not isinstance(message, AIMessage) or not message.tool_calls:
-            continue
-        # Placeholders go after any ToolMessages that did arrive (a
-        # partially finished parallel batch), still before whatever
-        # non-tool message follows.
-        while index < len(messages) and isinstance(messages[index], ToolMessage):
-            rebuilt.append(messages[index])
-            index += 1
-        for call in message.tool_calls:
-            if call["id"] not in answered:
-                patched = True
-                rebuilt.append(
-                    ToolMessage(
-                        content=_ORPHANED_TOOL_CALL_NOTE,
-                        tool_call_id=call["id"],
-                        name=call["name"],
-                    )
-                )
+    rebuilt, patched = answer_every_tool_call(messages)
     if not patched and not state.tasks:
         return False
     await agent.aupdate_state(

@@ -27,7 +27,7 @@ from anthropic.types import TextBlock as AnthropicTextBlock
 from anthropic.types import Usage as AnthropicUsage
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import SecretStr
@@ -255,3 +255,48 @@ def test_non_anthropic_model_is_not_tagged_and_raises_no_warning() -> None:
         result = agent.invoke({"messages": [HumanMessage(content="hi")]}, config=config)
 
     assert result["messages"][-1].content == "ok"
+
+
+class _RecordingModel(_FakeModel):
+    seen: list[list[BaseMessage]] = []
+
+    def _generate(self, messages: list[BaseMessage], *args: Any, **kwargs: Any) -> ChatResult:
+        self.seen.append(list(messages))
+        return super()._generate(messages, *args, **kwargs)
+
+
+def test_a_history_with_an_unanswered_tool_call_reaches_the_model_answered() -> None:
+    """Providers reject a request whose tool call has no result after it
+    with a 400. Whatever left one in a saved thread, the model must still
+    get a valid history -- and the saved history stays as it was."""
+    model = _RecordingModel(responses=[AIMessage(content="ok")], seen=[])
+    agent = build_langgraph_agent(model, [], "be helpful", checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "t1"}}
+    calls = [
+        {"name": "lookup", "args": {}, "id": "done"},
+        {"name": "lookup", "args": {}, "id": "orphan"},
+    ]
+    agent.update_state(
+        config,
+        {
+            "messages": [
+                HumanMessage(content="go"),
+                AIMessage(content="", tool_calls=calls),
+                ToolMessage(content="found", tool_call_id="done", name="lookup"),
+            ]
+        },
+        as_node="tools",
+    )
+    agent.invoke({"messages": [HumanMessage(content="continue")]}, config=config)
+
+    sent = [m for m in model.seen[0] if not isinstance(m, SystemMessage)]
+    assert [type(m).__name__ for m in sent] == [
+        "HumanMessage",
+        "AIMessage",
+        "ToolMessage",
+        "ToolMessage",
+        "HumanMessage",
+    ]
+    assert [m.tool_call_id for m in sent[2:4]] == ["done", "orphan"]
+    saved = agent.get_state(config).values["messages"]
+    assert [m.tool_call_id for m in saved if isinstance(m, ToolMessage)] == ["done"]
