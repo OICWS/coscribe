@@ -1,8 +1,11 @@
 import { useState } from "react";
-import { ChevronRightIcon, ClockIcon } from "./icons";
+import { ChevronRightIcon, ClockIcon, SparkIcon } from "./icons";
 
-// Mirrors runtime_lg/scheduled_tasks.py's build_run_prompt.
+// Mirrors runtime_lg/scheduled_tasks.py's build_run_prompt and
+// build_investigation_prompt.
 export const RUN_PROMPT_PREFIX = "[Scheduled run of ";
+export const INVESTIGATION_PREFIX = "[Look into a failed run of ";
+const INVESTIGATION_HEADER_RE = /^\[Look into a failed run of "(.*?)" ·/;
 const NOTES_MARKER = "\n\n---\nNotes from earlier runs of this task:\n";
 const NOTES_INSTRUCTIONS_START = "\n\nBefore you finish, call update_task_notes";
 const HEADER_RE = /^\[Scheduled run of ".*?" · (started manually|on schedule) · (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\./;
@@ -79,6 +82,34 @@ export function ScheduledRunCard({ text }: { text: string }) {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Stands in for the message that opened a conversation looking into a
+ * failed workflow run -- the app wrote it, not the user. */
+export function InvestigationCard({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const name = INVESTIGATION_HEADER_RE.exec(text)?.[1] ?? "a task";
+  const headerEnd = text.indexOf("]\n\n");
+  const body = headerEnd === -1 ? text : text.slice(headerEnd + 3);
+  return (
+    <div className="rounded-xl border border-[var(--border)]" data-testid="investigation-card">
+      <button
+        type="button"
+        aria-expanded={open}
+        className="flex w-full items-center gap-2.5 rounded-xl px-4 py-2.5 text-left text-sm hover:bg-[var(--card-bg)]"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <SparkIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
+        <span className="min-w-0 flex-1 truncate">Look into the failed run of “{name}”</span>
+        <ChevronRightIcon
+          className={`h-4 w-4 shrink-0 text-[var(--muted)] transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="whitespace-pre-wrap break-words border-t border-[var(--border)] px-4 py-3 text-sm">{body}</div>
       )}
     </div>
   );

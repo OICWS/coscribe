@@ -269,6 +269,14 @@ export const answerWorkflowStep = (triggerId: string, runId: string, approved: b
 export const retryWorkflowRun = (triggerId: string, runId: string, stepId?: string) =>
   errorOf(runUrl(triggerId, runId, "retry"), { step_id: stepId ?? null });
 
+/** Stops a workflow run that's going; it's recorded as stopped. */
+export const stopWorkflowRun = (triggerId: string, runId: string) => errorOf(runUrl(triggerId, runId, "stop"), {});
+
+/** Opens a new conversation where the assistant looks into a failed run;
+ * `model` null is the default model. */
+export const investigateWorkflowRun = (triggerId: string, runId: string, model: string | null) =>
+  sendForResult<{ thread_id: string }>(runUrl(triggerId, runId, "investigate"), "POST", { model });
+
 export interface WorkflowDraftResult {
   name: string;
   workflow: Workflow;

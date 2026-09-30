@@ -59,6 +59,7 @@ import re
 import shutil
 import subprocess
 import sys
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -100,6 +101,8 @@ from ..runtime_lg import (
     poll_due_scheduled_tasks,
     poll_due_wakes,
     reconcile_interrupted_runs,
+    start_investigation,
+    stop_run,
     strip_mode_note,
 )
 from ..tools import (
@@ -898,8 +901,15 @@ class ScheduledTaskCreate(BaseModel):
     notes_enabled: bool = True
     workflow: dict[str, Any] | None = None
     workspace: str | None = None
-    # The conversation draft this task was saved from, if any.
+    # The conversation draft this task was saved from, and that
+    # conversation, if any.
     from_draft: str | None = None
+    from_thread: str | None = None
+
+
+class InvestigateRequest(BaseModel):
+    # None: the default model.
+    model: str | None = None
 
 
 class RunNowRequest(BaseModel):
@@ -1789,6 +1799,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             )
         except (ValueError, KeyError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        if payload.from_thread:
+            trigger.source_thread = payload.from_thread
+            store.save(trigger)
         if payload.from_draft:
             record_draft(store, trigger, payload.from_draft)
         return JSONResponse(trigger.to_dict())
@@ -1877,6 +1890,44 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 )
             )
         )
+
+    @app.post("/api/scheduled-tasks/{trigger_id}/runs/{run_id}/stop")
+    async def stop_workflow_run(trigger_id: str, run_id: str) -> JSONResponse:
+        store = ScheduledTriggerStore(settings.state_dir)
+        trigger = store.load(trigger_id)
+        run = trigger.find_run(run_id) if trigger is not None else None
+        if trigger is None or run is None:
+            return JSONResponse({"error": f"No run {run_id!r}"}, status_code=404)
+        if run.status != "running" or not stop_run(run_id, run.thread_id):
+            return JSONResponse({"error": "This run isn't going"}, status_code=409)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/scheduled-tasks/{trigger_id}/runs/{run_id}/investigate")
+    async def investigate_workflow_run(
+        trigger_id: str, run_id: str, payload: InvestigateRequest | None = None
+    ) -> JSONResponse:
+        store = ScheduledTriggerStore(settings.state_dir)
+        trigger = store.load(trigger_id)
+        run = trigger.find_run(run_id) if trigger is not None else None
+        if trigger is None or trigger.workflow is None or run is None:
+            return JSONResponse({"error": f"No workflow run {run_id!r}"}, status_code=404)
+        if run.status != "failed":
+            return JSONResponse({"error": "Only a failed run can be looked into"}, status_code=409)
+        thread_id = uuid.uuid4().hex[:8]
+        _track_background(
+            asyncio.create_task(
+                start_investigation(
+                    settings.state_dir,
+                    trigger_id,
+                    run_id,
+                    thread_id,
+                    payload.model if payload else None,
+                    _get_session_async,
+                    attended=True,
+                )
+            )
+        )
+        return JSONResponse({"thread_id": thread_id})
 
     @app.post("/api/scheduled-tasks/{trigger_id}/runs/{run_id}/answer")
     async def answer_workflow_approval(
