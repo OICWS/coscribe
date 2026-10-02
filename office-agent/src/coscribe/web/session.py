@@ -138,6 +138,7 @@ from ..workflows.spec import parse_workflow, walk
 from ..workflows.testing import run_test, uses_browser
 from .activity import summarize_activity, summarize_workflow_run
 from .context_usage import build_context_breakdown
+from .thread_meta import ThreadMetaStore
 from .turn_lock import TurnLock
 
 logger = logging.getLogger(__name__)
@@ -632,6 +633,9 @@ class ChatSessionLG:
         # notify_resync's own docstring for why this one specifically
         # needs a place to live outside any single call's stack).
         self._live_websocket: WebSocket | None = None
+        # A reply is being worked on -- unlike the turn lock, not held for the
+        # moments a reconnect or a folder change takes it.
+        self.turn_running = False
         # The prompt of a scheduled run executing on this thread right now
         # (set by runtime_lg/scheduled_tasks.py). A tab that opens the run
         # just after it starts can connect before that prompt is
@@ -3215,10 +3219,23 @@ class ChatSessionLG:
                 {"type": "error", "message": "A workflow run doesn't take messages."}
             )
             return
-        async with self._turn_lock:
-            self._current_turn_task = asyncio.current_task()
-            self._report_turns_in_row = 0
-            await self._handle_user_message_locked(text, websocket, images=images)
+        meta = ThreadMetaStore(self.settings.state_dir)
+        if meta.get(self.thread_id)["archived"]:
+            # Talking to an archived conversation brings it back.
+            meta.update(self.thread_id, archived=False)
+        try:
+            async with self._turn_lock:
+                self._current_turn_task = asyncio.current_task()
+                self._report_turns_in_row = 0
+                self.turn_running = True
+                await self._handle_user_message_locked(text, websocket, images=images)
+        finally:
+            self.turn_running = False
+            # Worth a look in the sidebar unless someone had the
+            # conversation open when it ended (a stop counts as ended).
+            ThreadMetaStore(self.settings.state_dir).mark_finished(
+                self.thread_id, watched=self._live_websocket is not None
+            )
 
     async def _handle_user_message_locked(
         self,

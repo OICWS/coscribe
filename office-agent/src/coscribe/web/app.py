@@ -174,6 +174,7 @@ from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus, run_event
 from .browser_panel import BrowserPanelError, BrowserPanelSession
 from .session import ChatSessionLG
+from .thread_meta import ThreadMetaStore
 
 if TYPE_CHECKING:
     # Real type only needed for a local variable annotation below (never
@@ -889,6 +890,16 @@ class ThreadRename(BaseModel):
     title: str
 
 
+class ThreadMetaPatch(BaseModel):
+    # None leaves it; "" takes the conversation out of its group.
+    group: str | None = None
+    archived: bool | None = None
+
+
+class GroupRename(BaseModel):
+    name: str
+
+
 class ScheduledTaskCreate(BaseModel):
     name: str
     kind: str
@@ -1057,6 +1068,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     sessions: dict[str, ChatSessionLG] = {}
+    meta_store = ThreadMetaStore(settings.state_dir)
     # Set once the lifespan context is entered -- plain mutable holders
     # rather than module/globals, since create_app_lg() may be called more
     # than once (e.g. once per test). checkpointer_holder is always
@@ -1443,6 +1455,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         (settings.state_dir / f"{thread_id}.tasks.json").unlink(missing_ok=True)
         _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
         _title_sidecar_path(thread_id).unlink(missing_ok=True)
+        ThreadMetaStore(settings.state_dir).delete(thread_id)
         sessions.pop(thread_id, None)
         return existed
 
@@ -1669,6 +1682,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         # sidebar's session list, which would otherwise happen the moment
         # a trigger's first turn writes a checkpoint under its thread_id.
         rows = [row for row in rows if not row[0].startswith(SCHEDULED_THREAD_PREFIX)]
+        waiting = await _threads_waiting_for_input()
         # Real per-thread metadata (Phase 2 of ROADMAP.md), not just bare
         # ids -- aget_tuple(thread_id) fetches each thread's *latest*
         # checkpoint directly off the checkpointer, without needing a
@@ -1695,6 +1709,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             title_sidecar = _title_sidecar_path(thread_id)
             if title_sidecar.is_file():
                 preview = title_sidecar.read_text(encoding="utf-8").strip()
+            meta = meta_store.get(thread_id)
             summaries.append(
                 {
                     "thread_id": thread_id,
@@ -1702,10 +1717,87 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "message_count": len(messages),
                     "preview": preview[:200],
                     "workspace_root": workspace_root,
+                    "group": meta["group"],
+                    "archived": meta["archived"],
+                    "status": _thread_status(thread_id, waiting, meta),
                 }
             )
         summaries.sort(key=lambda s: s["updated_at"] or "", reverse=True)
         return summaries
+
+    async def _threads_waiting_for_input() -> set[str]:
+        """Threads whose latest checkpoint holds an unanswered interrupt: an
+        approval, a question or a plan waiting on a person -- also after a
+        restart, when no session is in memory."""
+        checkpointer = checkpointer_holder["checkpointer"]
+        await checkpointer.setup()  # see list_threads' identical comment
+        cursor = await checkpointer.conn.execute(
+            "SELECT DISTINCT w.thread_id FROM writes w JOIN "
+            "(SELECT thread_id, MAX(checkpoint_id) AS cid FROM checkpoints "
+            "WHERE checkpoint_ns = '' GROUP BY thread_id) c "
+            "ON w.thread_id = c.thread_id AND w.checkpoint_id = c.cid "
+            "WHERE w.checkpoint_ns = '' AND w.channel = '__interrupt__'"
+        )
+        return {row[0] for row in await cursor.fetchall()}
+
+    def _thread_status(thread_id: str, waiting: set[str], meta: dict[str, Any]) -> str:
+        """"needs_input" | "working" | "ready" | "idle"."""
+        if thread_id in waiting:
+            return "needs_input"
+        session = sessions.get(thread_id)
+        if session is not None and session.turn_running:
+            return "working"
+        return "ready" if meta["unseen"] else "idle"
+
+    @app.get("/api/threads/status")
+    async def threads_status() -> dict[str, Any]:
+        """Just each conversation's status, cheap enough to poll."""
+        waiting = await _threads_waiting_for_input()
+        known = set(sessions) | waiting
+        known |= {p.name.removesuffix(".meta.json") for p in settings.state_dir.glob("*.meta.json")}
+        return {
+            "statuses": {
+                thread_id: _thread_status(thread_id, waiting, meta_store.get(thread_id))
+                for thread_id in known
+                if not thread_id.startswith(SCHEDULED_THREAD_PREFIX)
+            }
+        }
+
+    @app.get("/api/thread-groups")
+    async def thread_groups() -> dict[str, Any]:
+        return {"groups": meta_store.groups()}
+
+    @app.post("/api/threads/{thread_id}/meta")
+    async def patch_thread_meta(thread_id: str, payload: ThreadMetaPatch) -> JSONResponse:
+        fields: dict[str, Any] = {}
+        if payload.group is not None:
+            try:
+                named = payload.group.strip()
+                fields["group"] = meta_store.add_group(named) if named else None
+            except ValueError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
+        if payload.archived is not None:
+            fields["archived"] = payload.archived
+        meta = meta_store.update(thread_id, **fields)
+        return JSONResponse({"thread_id": thread_id, **meta, "groups": meta_store.groups()})
+
+    @app.post("/api/thread-groups/{name}/rename")
+    async def rename_thread_group(name: str, payload: GroupRename) -> JSONResponse:
+        try:
+            renamed = meta_store.rename_group(name, payload.name)
+        except KeyError:
+            return JSONResponse({"error": f"No group {name!r}"}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return JSONResponse({"name": renamed, "groups": meta_store.groups()})
+
+    @app.delete("/api/thread-groups/{name}")
+    async def delete_thread_group(name: str) -> JSONResponse:
+        try:
+            meta_store.delete_group(name)
+        except KeyError:
+            return JSONResponse({"error": f"No group {name!r}"}, status_code=404)
+        return JSONResponse({"groups": meta_store.groups()})
 
     @app.delete("/api/threads/{thread_id}")
     async def delete_thread(thread_id: str) -> JSONResponse:
@@ -3098,6 +3190,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         # best-effort nudge, not a correctness-critical channel, and the
         # newest tab is the one actually worth nudging.
         session._live_websocket = websocket
+        meta_store.mark_seen(thread_id)
         try:
             await session.send_state(websocket, on_connect=True)
             await session.send_history(websocket)

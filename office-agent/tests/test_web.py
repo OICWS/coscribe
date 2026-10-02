@@ -58,6 +58,7 @@ from coscribe.runtime_lg.audit import AuditLog
 from coscribe.tools.presentations import PresentationToolkit
 from coscribe.tools.subagent_tasks import SubAgentTaskStore
 from coscribe.web.app import ScriptEnvPackageInstall, create_app_lg
+from coscribe.web.thread_meta import ThreadMetaStore
 
 
 class FakeToolCallingChatModel(BaseChatModel):
@@ -676,6 +677,97 @@ def test_write_file_requires_approval_and_executes_when_approved(
     assert entries[0].tool_name == "write_file"
     assert entries[0].decision == "approve"
     assert entries[0].reason == "human"
+
+
+def test_the_sidebar_status_follows_a_conversation_from_waiting_to_ready_to_seen_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/side1") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "write hi to note.txt"})
+            approval = ws.receive_json()
+            assert approval["type"] == "approval_required"
+            waiting = client.get("/api/threads/status").json()["statuses"]["side1"]
+            listed = {t["thread_id"]: t for t in client.get("/api/threads").json()}
+
+            ws.send_json({"type": "approval_response", "id": approval["id"], "approved": True})
+            _receive_until(ws, "tasks_changed")
+            for _ in range(40):  # the turn lock is released just after the event
+                watched = client.get("/api/threads/status").json()["statuses"]["side1"]
+                if watched != "working":
+                    break
+                time.sleep(0.05)
+
+        # The tab closed; a turn that ends now has nobody looking.
+        unseen = ThreadMetaStore(tmp_path / "state")
+        unseen.mark_finished("side1", watched=False)
+        ready = client.get("/api/threads/status").json()["statuses"]["side1"]
+        with client.websocket_connect("/ws/side1") as ws:
+            ws.receive_json()
+            seen = client.get("/api/threads/status").json()["statuses"]["side1"]
+
+    assert waiting == "needs_input"
+    assert listed["side1"]["status"] == "needs_input"
+    assert watched == "idle"
+    assert ready == "ready"
+    assert seen == "idle"
+
+
+def test_threads_can_be_grouped_archived_and_their_groups_renamed_and_deleted_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/g1") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+
+        moved = client.post("/api/threads/g1/meta", json={"group": " Reports "}).json()
+        again = client.post("/api/threads/g1/meta", json={"group": "reports"}).json()
+        archived = client.post("/api/threads/g1/meta", json={"archived": True}).json()
+        with client.websocket_connect("/ws/g1") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            # No more scripted replies: the message only has to reach the turn.
+            ws.send_json({"type": "user_message", "text": "again"})
+            for _ in range(40):
+                if not ThreadMetaStore(tmp_path / "state").get("g1")["archived"]:
+                    break
+                time.sleep(0.05)
+        revived = ThreadMetaStore(tmp_path / "state").get("g1")["archived"]
+        client.post("/api/threads/g1/meta", json={"archived": True})
+        listed = {t["thread_id"]: t for t in client.get("/api/threads").json()}
+        renamed = client.post("/api/thread-groups/Reports/rename", json={"name": "Monthly"}).json()
+        after_rename = client.get("/api/threads").json()[0]
+        client.post("/api/threads/g1/meta", json={"group": "Other"})
+        clash = client.post("/api/thread-groups/Other/rename", json={"name": "monthly"})
+        blank = client.post("/api/threads/g1/meta", json={"group": "   "})
+        client.post("/api/threads/g1/meta", json={"group": "Monthly"})
+        deleted = client.delete("/api/thread-groups/Monthly").json()
+        after_delete = client.get("/api/threads").json()[0]
+        missing = client.delete("/api/thread-groups/Nope")
+        client.delete("/api/threads/g1")
+        leftover = (tmp_path / "state" / "g1.meta.json").exists()
+
+    assert moved["group"] == "Reports" and moved["groups"] == ["Reports"]
+    assert again["group"] == "Reports" and again["groups"] == ["Reports"]
+    assert archived["archived"] is True
+    assert revived is False
+    assert listed["g1"]["group"] == "Reports" and listed["g1"]["archived"] is True
+    assert renamed["groups"] == ["Monthly"] and after_rename["group"] == "Monthly"
+    assert clash.status_code == 400
+    assert blank.status_code == 200 and blank.json()["group"] is None
+    assert deleted["groups"] == ["Other"] and after_delete["group"] is None
+    assert missing.status_code == 404
+    assert not leftover
 
 
 def test_narration_before_a_gated_tool_call_does_not_get_glued_onto_the_final_reply(

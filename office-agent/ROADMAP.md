@@ -6879,6 +6879,27 @@ the workspace plus the folders you added.
   (API keys are still passed), network limits -- network is still the
   way data would leave, and nothing here closes it.
 
+## Phase 8cf -- Sidebar sessions: groups, status, archive (shipped)
+
+- [x] Groups: every session starts ungrouped. Right-click (or the "..."
+      button) -> Move to group lists the existing groups with a check on
+      the current one, Ungrouped, and New group…. Group headers collapse
+      (remembered), and rename or delete a group from their own "..."
+      (deleting only ungroups its sessions). Groups keep their order and
+      survive being empty (`thread_groups.json`; per-session
+      `<thread>.meta.json`).
+- [x] Status icon per session: a plain circle at rest, a spinner while a
+      reply is being worked on, a hand when it waits on you (an approval,
+      question or plan -- read from the checkpoint's unanswered interrupt,
+      so it also holds after a restart), an eye when a reply finished while
+      the conversation wasn't open. Opening it clears the eye. The list
+      asks `/api/threads/status` every 3s while open.
+- [x] Filter (All, Needs input, Ready for review, Working, Completed,
+      Archived) and search. Archive hides a session from every view but
+      Archived; sending it a message brings it back.
+- Not done: dragging sessions between groups, the keyboard shortcuts the
+  reference menu shows, projects.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

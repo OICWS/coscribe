@@ -712,3 +712,47 @@ export function BanIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+export function ArchiveIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="4" width="18" height="4" rx="1" />
+      <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
+      <path d="M10 12h4" />
+    </Icon>
+  );
+}
+
+export function FilterIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M4 7h9" />
+      <path d="M17 7h3" />
+      <circle cx="15" cy="7" r="2" />
+      <path d="M4 17h3" />
+      <path d="M11 17h9" />
+      <circle cx="9" cy="17" r="2" />
+    </Icon>
+  );
+}
+
+export function ListChecksIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="m3 7 2 2 3-3" />
+      <path d="m3 17 2 2 3-3" />
+      <path d="M12 8h9" />
+      <path d="M12 18h9" />
+    </Icon>
+  );
+}
+
+export function FolderPlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+      <path d="M12 11v6" />
+      <path d="M9 14h6" />
+    </Icon>
+  );
+}

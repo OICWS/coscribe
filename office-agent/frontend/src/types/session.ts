@@ -2,12 +2,27 @@
  * uploads. Hand-encoded from a direct read of coscribe/web/app.py, same
  * discipline as wire.ts and settings.ts. */
 
+/** What a conversation is doing for the sidebar: working on a reply,
+ * waiting on a person, finished while nobody was looking, or at rest. */
+export type ThreadStatus = "working" | "needs_input" | "ready" | "idle";
+
 export interface ThreadSummary {
   thread_id: string;
   updated_at: string | null;
   message_count: number;
   preview: string;
   workspace_root: string;
+  /** The sidebar group it sits in; null is ungrouped. */
+  group: string | null;
+  archived: boolean;
+  status: ThreadStatus;
+}
+
+export interface ThreadMetaResult {
+  thread_id: string;
+  group: string | null;
+  archived: boolean;
+  groups: string[];
 }
 
 export type ThreadsResponse = ThreadSummary[];

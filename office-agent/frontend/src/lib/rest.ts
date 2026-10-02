@@ -40,6 +40,8 @@ import type {
   ThreadDeleteResult,
   ThreadRenameResult,
   ThreadActivity,
+  ThreadMetaResult,
+  ThreadStatus,
   ThreadsResponse,
   UploadResult,
 } from "../types/session";
@@ -326,6 +328,20 @@ export const getThreads = () => getJson<ThreadsResponse>("/api/threads");
 export const deleteThread = (id: string) => del<ThreadDeleteResult>(`/api/threads/${encodeURIComponent(id)}`);
 export const renameThread = (id: string, title: string) =>
   postJson<ThreadRenameResult>(`/api/threads/${encodeURIComponent(id)}/rename`, { title });
+
+export const getThreadStatuses = () => getJson<{ statuses: Record<string, ThreadStatus> }>("/api/threads/status");
+export const getThreadGroups = () => getJson<{ groups: string[] }>("/api/thread-groups");
+/** `group`: a name (made if new), or "" to take it out of its group. */
+export const setThreadMeta = (id: string, patch: { group?: string; archived?: boolean }) =>
+  sendForResult<ThreadMetaResult>(`/api/threads/${encodeURIComponent(id)}/meta`, "POST", patch);
+export const renameThreadGroup = (name: string, newName: string) =>
+  sendForResult<{ name: string; groups: string[] }>(
+    `/api/thread-groups/${encodeURIComponent(name)}/rename`,
+    "POST",
+    { name: newName },
+  );
+export const deleteThreadGroup = (name: string) =>
+  del<{ groups: string[] }>(`/api/thread-groups/${encodeURIComponent(name)}`);
 
 // -- Sub Agents (background spawn_agent_background runs) --------------------
 

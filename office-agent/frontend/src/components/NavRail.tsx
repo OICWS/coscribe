@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { deleteScheduledTask, deleteThread, renameThread } from "../lib/rest";
+import { deleteScheduledTask, deleteThread } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
-import { goToThread, startNewThread } from "../lib/nav";
+import { startNewThread } from "../lib/nav";
 import { latestRun, RUN_STATUS_LABEL } from "../lib/runLabels";
 import { scheduleKindLabel } from "../lib/scheduleLabels";
 import type { RunStatus, ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { RunStatusIcon } from "./RunStatusIcon";
+import { ThreadList } from "./ThreadList";
 import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR } from "../lib/titleBar";
 import { AppMenuButton, HistoryButtons } from "./WindowControls";
 import {
@@ -22,119 +23,6 @@ import {
 } from "./icons";
 
 export type NavMode = "create" | "run";
-
-interface ThreadRowProps {
-  thread: ThreadSummary;
-  isCurrent: boolean;
-  onRenamed: (title: string) => void;
-  onDeleteRequest: () => void;
-}
-
-/** One session row: click to switch threads, a "..." menu (Rename/Delete)
- * that only shows on hover or while open -- replaces the old lone hover-
- * to-reveal "x" delete button, which had no rename at all and used the
- * browser's own window.confirm() for delete (see NavRail's removeThread,
- * now superseded by App-level deleteTarget + a real confirm dialog
- * matching this app's modal styling instead of an OS-chrome popup). */
-function ThreadRow({ thread, isCurrent, onRenamed, onDeleteRequest }: ThreadRowProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [value, setValue] = useState(thread.preview);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useClickOutside(menuRef, () => setMenuOpen(false), menuOpen);
-
-  const commitRename = () => {
-    setRenaming(false);
-    const title = value.trim();
-    if (!title || title === thread.preview) {
-      setValue(thread.preview);
-      return;
-    }
-    renameThread(thread.thread_id, title).then((result) => {
-      if ("title" in result) onRenamed(result.title);
-      else setValue(thread.preview);
-    });
-  };
-
-  if (renaming) {
-    return (
-      <input
-        autoFocus
-        className="w-full min-w-0 rounded-md border border-[var(--accent)] bg-[var(--card-bg)] px-2 py-1 text-sm outline-none"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={commitRename}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commitRename();
-          } else if (e.key === "Escape") {
-            setValue(thread.preview);
-            setRenaming(false);
-          }
-        }}
-      />
-    );
-  }
-
-  return (
-    <div
-      className={`group flex min-w-0 items-center justify-between gap-1 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--card-bg)] ${
-        isCurrent ? "font-medium" : "cursor-pointer"
-      }`}
-      onClick={() => !isCurrent && goToThread(thread.thread_id)}
-    >
-      <span className="min-w-0 truncate" title={thread.preview || thread.thread_id}>
-        {thread.preview || thread.thread_id}
-      </span>
-      <div className="relative shrink-0" ref={menuRef}>
-        <button
-          type="button"
-          aria-label={`Options for ${thread.preview || thread.thread_id}`}
-          className={`rounded-md p-1 text-[var(--muted)] hover:bg-[var(--border)] ${
-            menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-          }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen((v) => !v);
-          }}
-        >
-          <MoreIcon className="h-3.5 w-3.5" />
-        </button>
-        {menuOpen && (
-          <div className="absolute right-0 top-full z-10 mt-1 min-w-36 rounded-[10px] border border-[var(--border)] bg-[var(--panel-bg)] py-1 shadow-[var(--shadow)]">
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenuOpen(false);
-                setValue(thread.preview);
-                setRenaming(true);
-              }}
-            >
-              <PencilIcon className="h-3.5 w-3.5" /> Rename
-            </button>
-            {!isCurrent && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-500 hover:bg-[var(--card-bg)]"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setMenuOpen(false);
-                  onDeleteRequest();
-                }}
-              >
-                <TrashIcon className="h-3.5 w-3.5" /> Delete
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 interface ScheduledTaskRowProps {
   task: ScheduledTask;
@@ -413,7 +301,7 @@ export function NavRail({
         {expanded && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2">
             {mode === "create" && (
-              <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+              <div className="flex min-h-0 flex-1 flex-col gap-0.5">
                 <button
                   type="button"
                   className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)]"
@@ -428,17 +316,13 @@ export function NavRail({
                   </span>
                   New session
                 </button>
-                <div className="mb-1 mt-2 px-2 text-xs font-medium tracking-wide text-[var(--muted)]">RECENTS</div>
-                {threads.length === 0 && <div className="px-2 py-1 text-sm text-[var(--muted)]">No sessions yet.</div>}
-                {threads.map((thread) => (
-                  <ThreadRow
-                    key={thread.thread_id}
-                    thread={thread}
-                    isCurrent={thread.thread_id === threadId}
-                    onRenamed={(title) => onThreadRenamed(thread.thread_id, title)}
-                    onDeleteRequest={() => setDeleteTarget(thread)}
-                  />
-                ))}
+                <ThreadList
+                  threads={threads}
+                  currentId={threadId}
+                  onChanged={onThreadsChanged}
+                  onRenamed={onThreadRenamed}
+                  onDeleteRequest={setDeleteTarget}
+                />
               </div>
             )}
   
