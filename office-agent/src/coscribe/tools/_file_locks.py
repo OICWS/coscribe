@@ -33,13 +33,13 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, TypeVar
 
-_locks: dict[Path, threading.Lock] = {}
+_locks: dict[Path, threading.RLock] = {}
 _locks_guard = threading.Lock()
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
-def file_lock(path: Path) -> threading.Lock:
+def file_lock(path: Path) -> threading.RLock:
     """One lock per resolved absolute path, created lazily on first use
     and never removed -- a handful of long-lived Lock objects for the
     files a session actually touches is negligible, and correctness here
@@ -49,7 +49,8 @@ def file_lock(path: Path) -> threading.Lock:
     with _locks_guard:
         lock = _locks.get(path)
         if lock is None:
-            lock = threading.Lock()
+            # Reentrant: a locked method may call another one on the same file.
+            lock = threading.RLock()
             _locks[path] = lock
         return lock
 
@@ -79,7 +80,15 @@ def locked_by_path(method: _F) -> _F:
         bound = sig.bind(self, *args, **kwargs)
         bound.apply_defaults()
         path = bound.arguments["path"]
-        resolved = self._scope.resolve(path, write=True)
+        try:
+            # A readable-only folder is fine for a reader; a path outside
+            # everything is refused by the method itself, with its message.
+            try:
+                resolved = self._scope.resolve(path, write=True)
+            except PermissionError:
+                resolved = self._scope.resolve(path)
+        except (PermissionError, OSError, ValueError):
+            return method(self, *args, **kwargs)
         with file_lock(resolved):
             return method(self, *args, **kwargs)
 

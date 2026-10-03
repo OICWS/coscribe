@@ -480,6 +480,7 @@ class SpreadsheetToolkit:
             raise ValueError(f"Path is not a file: {path}")
         return file_path
 
+    @locked_by_path
     def read_xlsx(self, path: str, sheet: Optional[str] = None) -> str:  # noqa: UP045
         from openpyxl import load_workbook
 
@@ -547,6 +548,7 @@ class SpreadsheetToolkit:
             "formula_error_locations": recalc_result.get("error_locations"),
         }
 
+    @locked_by_path
     def recalc_xlsx(self, path: str, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict[str, object]:
         file_path = self._check_readable(path)
         result = _recalc_xlsx_and_evaluate_lookups(file_path, timeout=timeout)
@@ -559,6 +561,7 @@ class SpreadsheetToolkit:
             "error_locations": result.get("error_locations"),
         }
 
+    @locked_by_path
     def format_xlsx_cells(
         self,
         path: str,
@@ -610,6 +613,7 @@ class SpreadsheetToolkit:
             "cells_formatted": len(cells),
         }
 
+    @locked_by_path
     def add_xlsx_chart(
         self,
         path: str,
@@ -691,6 +695,7 @@ class SpreadsheetToolkit:
             "preview_skipped_reason": preview_skipped_reason,
         }
 
+    @locked_by_path
     def merge_xlsx_cells(self, path: str, sheet_name: str, cell_range: str) -> dict[str, object]:
         from openpyxl import load_workbook
         from openpyxl.worksheet.cell_range import CellRange
@@ -724,6 +729,7 @@ class SpreadsheetToolkit:
             "cell_range": cell_range,
         }
 
+    @locked_by_path
     def unmerge_xlsx_cells(self, path: str, sheet_name: str, cell_range: str) -> dict[str, object]:
         from openpyxl import load_workbook
 
@@ -745,6 +751,7 @@ class SpreadsheetToolkit:
             "cell_range": cell_range,
         }
 
+    @locked_by_path
     def add_xlsx_conditional_format(
         self,
         path: str,
@@ -818,6 +825,7 @@ class SpreadsheetToolkit:
             "rule_type": rule_type,
         }
 
+    @locked_by_path
     def set_xlsx_data_validation(
         self,
         path: str,
@@ -885,6 +893,7 @@ class SpreadsheetToolkit:
             "validation_type": validation_type,
         }
 
+    @locked_by_path
     def freeze_xlsx_panes(self, path: str, sheet_name: str, cell: str = "") -> dict[str, object]:
         from openpyxl import load_workbook
 
@@ -909,6 +918,7 @@ class SpreadsheetToolkit:
             "freeze_panes": sheet.freeze_panes,
         }
 
+    @locked_by_path
     def set_xlsx_column_width(
         self, path: str, sheet_name: str, columns: str, width: float
     ) -> dict[str, object]:

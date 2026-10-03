@@ -963,3 +963,54 @@ def test_extra_readable_dir_rejects_write_xlsx(tmp_path: Path) -> None:
         tools["write_xlsx"](
             path=str(downloads / "report.xlsx"), content=TABLE_CONTENT, sheet_name="Scores"
         )
+
+
+def test_a_read_during_a_write_with_recalc_never_sees_a_half_written_file(
+    tmp_path: Path,
+) -> None:
+    """Real bug, found by a model that wrote the second sheet and read the
+    first back in one batch: the read hit the zip mid-save (BadZipFile)."""
+    import threading
+
+    tools = {t.__name__: t for t in build_spreadsheet_tools(tmp_path, state_dir=tmp_path)}
+    tools["write_xlsx"](path="r.xlsx", sheet_name="S1", content="| a | b |\n| 1 | =A2*2 |")
+    failures: list[str] = []
+    done = threading.Event()
+
+    def reader() -> None:
+        while not done.is_set():
+            try:
+                tools["read_xlsx"](path="r.xlsx", sheet="S1")
+            except Exception as exc:  # noqa: BLE001 -- recording what a reader would see
+                failures.append(f"{type(exc).__name__}: {exc}")
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    for index in range(4):
+        tools["write_xlsx"](
+            path="r.xlsx", sheet_name=f"T{index}", content="| a | b |\n| 1 | =A2*2 |"
+        )
+    done.set()
+    thread.join()
+
+    assert failures == []
+
+
+def test_parallel_cell_formatting_calls_on_one_workbook_all_land(tmp_path: Path) -> None:
+    """Each call loads the workbook and saves it back; unserialized, the
+    last one to save silently undid the others."""
+    tools = {t.__name__: t for t in build_spreadsheet_tools(tmp_path, state_dir=tmp_path)}
+    tools["write_xlsx"](path="p.xlsx", content="| a | b | c | d |\n| 1 | 2 | 3 | 4 |")
+    columns = ["A1", "B1", "C1", "D1"]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        list(
+            pool.map(
+                lambda cell: tools["format_xlsx_cells"](
+                    path="p.xlsx", sheet_name="Sheet1", cell_range=cell, bold=True
+                ),
+                columns,
+            )
+        )
+
+    sheet = load_workbook(tmp_path / "p.xlsx").active
+    assert [sheet[cell].font.bold for cell in columns] == [True] * 4

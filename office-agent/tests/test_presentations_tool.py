@@ -6788,3 +6788,48 @@ def test_reorder_pptx_slide_rejects_out_of_range_new_position(tmp_path: Path) ->
     _three_slide_deck(tmp_path, tools)
     with pytest.raises(ValueError, match="out of range"):
         tools["reorder_pptx_slide"](path="deck.pptx", slide=1, new_position=99)
+
+
+def test_rendered_layout_check_flags_small_body_text_and_sparse_content_slides() -> None:
+    """Measured on the render: a deck whose slides pass every structural
+    check can still have 10pt text and the lower half of each slide empty."""
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    from coscribe.tools.presentations import _check_rendered_layout
+
+    prs = Presentation()
+    for _ in range(3):
+        prs.slides.add_slide(prs.slide_layouts[6])
+
+    def page(title_h: float, body_h: float, body_bottom: float) -> dict[str, object]:
+        # 540pt tall page; a title, then eight body words ending at body_bottom.
+        words = [(50.0, 20.0, 400.0, 20.0 + title_h)]
+        words += [
+            (50.0 + i * 40, body_bottom - body_h, 85.0 + i * 40, body_bottom) for i in range(8)
+        ]
+        return {"width": 960.0, "height": 540.0, "words": words}
+
+    layout = [
+        page(40, 20, 400),  # cover: never "sparse"
+        page(40, 14.4, 150),  # 12pt body, content ends at 28%
+        page(40, 28, 480),  # 23pt body, fills the slide
+    ]
+    small, sparse = _check_rendered_layout(layout, prs)
+
+    assert small == [{"slide": 2, "body_text_pt": 12.0}]
+    assert [s["slide"] for s in sparse] == [2]
+    assert sparse[0]["content_ends_at_pct"] == 28
+
+    # A chart reaching the lower half makes a slide with little text not sparse.
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE
+
+    data = CategoryChartData()
+    data.categories = ["a", "b"]
+    data.add_series("s", (1, 2))
+    prs.slides[1].shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(1), Inches(3), Inches(6), Inches(3.5), data
+    )
+    _, sparse_with_chart = _check_rendered_layout(layout, prs)
+    assert sparse_with_chart == []

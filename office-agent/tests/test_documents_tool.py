@@ -61,6 +61,33 @@ def test_write_docx_then_read_docx_round_trips_structure(tmp_path: Path) -> None
     assert "| Bob | 7 |" in text
 
 
+def test_parse_inline_runs_leaves_file_names_and_identifiers_alone() -> None:
+    """Real bug: a report naming sales_2025.csv and sales_report.xlsx lost
+    both underscores (the text between them became italic)."""
+    for text in (
+        "sales_2025.csv and sales_report.xlsx",
+        "snake_case_name",
+        "2*3*4 = 24",
+        "the file *.txt and *.csv",
+    ):
+        assert parse_inline_runs(text) == [(text, False, False)]
+
+
+def test_parse_inline_runs_still_formats_where_markdown_does_and_honours_escapes() -> None:
+    assert parse_inline_runs("a **b** and _c_ and *d*.") == [
+        ("a ", False, False),
+        ("b", True, False),
+        (" and ", False, False),
+        ("c", False, True),
+        (" and ", False, False),
+        ("d", False, True),
+        (".", False, False),
+    ]
+    assert parse_inline_runs("\\_not italic\\_ and \\*star\\*") == [
+        ("_not italic_ and *star*", False, False)
+    ]
+
+
 def test_parse_inline_runs_splits_bold_and_italic_markers() -> None:
     assert parse_inline_runs("plain text") == [("plain text", False, False)]
     assert parse_inline_runs("**bold**") == [("bold", True, False)]

@@ -1711,9 +1711,12 @@ def test_stop_hard_cancels_a_turn_stuck_inside_the_model_call(
             # for the test's own default timeout and fails loudly rather
             # than hanging for 999s.
             agent_message = ws.receive_json()
+            # The task panel refreshes on this after any turn, a stopped one too.
+            refresh = ws.receive_json()
 
     assert agent_message["type"] == "agent_message"
     assert agent_message["text"] == "[stopped]"
+    assert refresh["type"] == "tasks_changed"
 
 
 def test_stop_mid_tool_closes_the_orphaned_tool_call_instead_of_breaking_the_thread(

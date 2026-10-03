@@ -2585,6 +2585,55 @@ def _check_missing_visual_elements(prs: Any) -> list[int]:
     ]
 
 
+# poppler's word box is about 1.2x the font size tall.
+_WORD_BOX_PER_POINT = 1.2
+# Below this, body text on a slide is hard to read from a screen share or a
+# room; the usual floor for body text is 18pt, 12 the least anyone defends.
+_MIN_BODY_POINTS = 14.0
+# A content slide whose lowest content stops above this share of its height
+# reads as unfinished: the bottom half is empty.
+_SPARSE_BOTTOM_SHARE = 0.55
+
+
+def _check_rendered_layout(
+    layout: list[dict[str, Any]], prs: Any
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """From the rendered pages (poppler word boxes): slides whose body text
+    is under _MIN_BODY_POINTS, and content slides (not the first) whose
+    content ends in their upper half. Measured on the render, so inherited
+    sizes and autofit count. Empty when nothing could be rendered."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    small: list[dict[str, object]] = []
+    sparse: list[dict[str, object]] = []
+    for number, (page, slide) in enumerate(zip(layout, prs.slides, strict=False), start=1):
+        words = [w for w in page["words"] if w[3] > w[1]]
+        if not words or page["height"] <= 0:
+            continue
+        tallest = max(w[3] - w[1] for w in words)
+        # The title is the biggest text; everything else is body.
+        body = [w for w in words if (w[3] - w[1]) < 0.85 * tallest] or words
+        heights = sorted((w[3] - w[1]) / _WORD_BOX_PER_POINT for w in body)
+        median = heights[len(heights) // 2]
+        if len(body) >= 8 and median < _MIN_BODY_POINTS:
+            small.append({"slide": number, "body_text_pt": round(median, 1)})
+        if number == 1:
+            continue
+        bottom = max(w[3] for w in body) / page["height"]
+        for shape in slide.shapes:
+            box = _shape_bbox(shape)
+            if box is None or shape.shape_type not in (
+                MSO_SHAPE_TYPE.CHART,
+                MSO_SHAPE_TYPE.PICTURE,
+                MSO_SHAPE_TYPE.TABLE,
+            ):
+                continue
+            bottom = max(bottom, (box[1] + box[3]) / prs.slide_height)
+        if bottom < _SPARSE_BOTTOM_SHARE:
+            sparse.append({"slide": number, "content_ends_at_pct": round(bottom * 100)})
+    return small, sparse
+
+
 _LOW_CONTRAST_RATIO_SMALL_TEXT = 4.5
 _LOW_CONTRAST_RATIO_LARGE_TEXT = 3.0
 # WCAG 2.1's own definition of "large text" -- https://www.w3.org/TR/WCAG21/#dfn-large-scale
@@ -3869,6 +3918,7 @@ class PresentationToolkit:
             "preview_skipped_reason": preview_skipped_reason,
         }
 
+    @locked_by_path
     def list_pptx_shapes(self, path: str, slide: int) -> dict[str, object]:
         """Structured inventory of every shape on one slide of an
         existing .pptx -- index, type, position/size, rotation, a short
@@ -4970,6 +5020,7 @@ class PresentationToolkit:
             "preview_skipped_reason": preview_skipped_reason,
         }
 
+    @locked_by_path
     def read_pptx_xml(
         self, path: str, slide: int, shape_index: int, part: str = "auto"
     ) -> dict[str, object]:
@@ -5397,6 +5448,7 @@ class PresentationToolkit:
             "text": text,
         }
 
+    @locked_by_path
     def check_pptx_delivery(self, path: str) -> dict[str, object]:
         import zipfile
         from collections import Counter
@@ -5498,6 +5550,7 @@ class PresentationToolkit:
             "advisories": advisories,
         }
 
+    @locked_by_path
     def read_pptx_theme_colors(self, path: str) -> dict[str, object]:
         from lxml import etree
         from pptx import Presentation
@@ -5541,6 +5594,7 @@ class PresentationToolkit:
         prs.save(str(file_path))
         return {"path": self._scope.relative(file_path), "colors": tokens}
 
+    @locked_by_path
     def read_pptx(self, path: str, slide: Optional[int] = None) -> str:  # noqa: UP045
         from pptx import Presentation
 
@@ -5555,15 +5609,18 @@ class PresentationToolkit:
             self._render_slide(s, with_heading=True) for s in prs.slides
         )
 
+    @locked_by_path
     def render_pptx_preview(self, path: str, max_slides: int = 8) -> dict[str, object]:
         from pptx import Presentation
 
         file_path = self._check_readable(path)
         state_dir = Path(self._state_dir) if self._state_dir is not None else None
+        layout: list[dict[str, Any]] = []
         preview_names, skipped_reason = render_all_page_previews(
-            file_path, state_dir, max_pages=max_slides
+            file_path, state_dir, max_pages=max_slides, layout=layout
         )
         prs = Presentation(str(file_path))
+        small_text, sparse = _check_rendered_layout(layout, prs)
         return {
             "preview_paths": preview_names,
             "preview_paths_csv": ",".join(preview_names),
@@ -5571,6 +5628,8 @@ class PresentationToolkit:
             "text_overlap_warnings": _check_text_overlaps(prs),
             "slides_missing_visual_elements": _check_missing_visual_elements(prs),
             "low_contrast_warnings": _check_low_contrast(prs),
+            "small_text_slides": small_text,
+            "sparse_slides": sparse,
         }
 
     @staticmethod
@@ -5666,6 +5725,17 @@ def build_presentation_tools(
         overlapping box, add a shape/icon/image to a flagged slide, darken/
         lighten the text or its background) before calling the deck done,
         the same way you'd react to overflow_warnings.
+
+        Two more are measured on the rendered slides (so they need
+        LibreOffice and pdftotext, and are empty without them):
+        `small_text_slides` lists slides whose body text renders under
+        14pt (`body_text_pt`) -- raise the size, or cut the words, until
+        it reads from across a room -- and `sparse_slides` lists content
+        slides whose text/chart/picture stops in their upper half
+        (`content_ends_at_pct`): the lower half is empty, so enlarge the
+        text, add the chart/table/picture that belongs there, or merge the
+        slide into a neighbour. A title or closing slide may be sparse on
+        purpose; a content slide may not.
 
         Args:
             path: the .pptx file to render, relative to the workspace root

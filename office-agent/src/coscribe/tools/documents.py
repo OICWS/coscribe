@@ -89,6 +89,7 @@ from typing import Any
 from xml.sax.saxutils import escape as _xml_escape
 
 from ..runtime.types import tool_metadata
+from ._file_locks import locked_by_path
 from ._native_docx_tracks import _constants as _tracks_constants
 from ._native_docx_tracks.tracks import TracksMixin, _resolve
 from ._ooxml_validate import assert_wml_valid
@@ -259,7 +260,16 @@ def parse_blocks(content: str) -> list[Block]:
     return blocks
 
 
-_INLINE_MARKUP_RE = re.compile(r"\*\*(?P<bold>.+?)\*\*|\*(?P<italic1>.+?)\*|_(?P<italic2>.+?)_")
+# Markers count as formatting only where Markdown says they do: touching
+# text on the inside and not glued to a word on the outside, so file names
+# and identifiers (sales_2025.csv, snake_case_name, 2*3*4) keep their
+# underscores and asterisks. A backslash makes one literal.
+_INLINE_MARKUP_RE = re.compile(
+    r"\\(?P<escaped>[*_\\])"
+    r"|\*\*(?P<bold>\S(?:.*?\S)?)\*\*"
+    r"|(?<![*\w\\])\*(?P<italic1>[^\s*](?:[^*]*?[^\s*])?)\*(?![*\w])"
+    r"|(?<![_\w\\])_(?P<italic2>[^\s_](?:[^_]*?[^\s_])?)_(?![_\w])"
+)
 
 
 def parse_inline_runs(text: str) -> list[tuple[str, bool, bool]]:
@@ -278,7 +288,9 @@ def parse_inline_runs(text: str) -> list[tuple[str, bool, bool]]:
     for match in _INLINE_MARKUP_RE.finditer(text):
         if match.start() > pos:
             runs.append((text[pos : match.start()], False, False))
-        if match.group("bold") is not None:
+        if match.group("escaped") is not None:
+            runs.append((match.group("escaped"), False, False))
+        elif match.group("bold") is not None:
             runs.append((match.group("bold"), True, False))
         else:
             italic_text = match.group("italic1")
@@ -288,7 +300,13 @@ def parse_inline_runs(text: str) -> list[tuple[str, bool, bool]]:
         pos = match.end()
     if pos < len(text):
         runs.append((text[pos:], False, False))
-    return runs or [(text, False, False)]
+    merged: list[tuple[str, bool, bool]] = []
+    for run in runs:
+        if merged and merged[-1][1:] == run[1:]:
+            merged[-1] = (merged[-1][0] + run[0], run[1], run[2])
+        else:
+            merged.append(run)
+    return merged or [(text, False, False)]
 
 
 def _add_inline_runs(paragraph: Any, text: str) -> None:
@@ -773,6 +791,7 @@ class DocumentToolkit:
             raise ValueError(f"Path is not a file: {path}")
         return file_path
 
+    @locked_by_path
     def read_docx(self, path: str) -> str:
         import mammoth
         from markdownify import markdownify
@@ -784,6 +803,7 @@ class DocumentToolkit:
             html, heading_style="ATX", bullets="-", table_infer_header=True
         ).strip()
 
+    @locked_by_path
     def write_docx(
         self,
         path: str,
@@ -893,6 +913,7 @@ class DocumentToolkit:
             "preview_skipped_reason": preview_skipped_reason,
         }
 
+    @locked_by_path
     def insert_docx_text(
         self,
         path: str,
@@ -924,6 +945,7 @@ class DocumentToolkit:
         result.update(self._save_tracked_edit(file_path, document))
         return result
 
+    @locked_by_path
     def delete_docx_text(
         self,
         path: str,
@@ -950,6 +972,7 @@ class DocumentToolkit:
         result.update(self._save_tracked_edit(file_path, document))
         return result
 
+    @locked_by_path
     def replace_docx_text(
         self,
         path: str,
@@ -978,12 +1001,14 @@ class DocumentToolkit:
         result.update(self._save_tracked_edit(file_path, document))
         return result
 
+    @locked_by_path
     def accept_docx_tracked_changes(self, path: str, author: str = "") -> dict[str, object]:
         file_path, document, host = self._open_for_tracked_edit(path)
         result = host.accept_changes(author=author or None)
         result.update(self._save_tracked_edit(file_path, document))
         return result
 
+    @locked_by_path
     def reject_docx_tracked_changes(self, path: str, author: str = "") -> dict[str, object]:
         file_path, document, host = self._open_for_tracked_edit(path)
         result = host.reject_changes(author=author or None)

@@ -23,11 +23,13 @@ entirely server-generated.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 
 SOFFICE_TIMEOUT = 20.0
 
@@ -103,8 +105,46 @@ def render_thumbnail(file_path: Path, state_dir: Path | None) -> tuple[str | Non
         shutil.rmtree(out_dir, ignore_errors=True)
 
 
+_WORD_BOX = re.compile(
+    r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)"'
+)
+_PAGE_BOX = re.compile(r'<page width="([\d.]+)" height="([\d.]+)"')
+
+
+def measure_page_words(pdf_path: Path, max_pages: int) -> list[dict[str, Any]]:
+    """Per page: {"width", "height", "words": [(x0, y0, x1, y1)]} in points,
+    from poppler's own word boxes -- where the text really landed once
+    rendered, which the file alone can't say (inherited sizes, autofit).
+    Empty on any failure: a measurement is never worth failing a preview."""
+    if shutil.which("pdftotext") is None:
+        return []
+    try:
+        done = subprocess.run(
+            ["pdftotext", "-bbox", "-l", str(max_pages), str(pdf_path), "-"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=SOFFICE_TIMEOUT,
+            check=True,
+        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
+        return []
+    pages: list[dict[str, Any]] = []
+    for chunk in done.stdout.split("<page ")[1:]:
+        size = _PAGE_BOX.match("<page " + chunk)
+        if size is None:
+            continue
+        words = [tuple(float(v) for v in m.groups()) for m in _WORD_BOX.finditer(chunk)]
+        pages.append({"width": float(size[1]), "height": float(size[2]), "words": words})
+    return pages
+
+
 def render_all_page_previews(
-    file_path: Path, state_dir: Path | None, max_pages: int = 8
+    file_path: Path,
+    state_dir: Path | None,
+    max_pages: int = 8,
+    layout: list[dict[str, Any]] | None = None,
 ) -> tuple[list[str], str | None]:
     """Render every page of `file_path` (docx/pdf/xlsx/pptx) to its own PNG
     under `state_dir/previews/`, via soffice-to-PDF (like `render_thumbnail`
@@ -134,6 +174,8 @@ def render_all_page_previews(
         pdf_path = _convert_to_pdf(file_path, out_dir)
         if pdf_path is None:
             return [], "LibreOffice conversion failed"
+        if layout is not None:
+            layout.extend(measure_page_words(pdf_path, max_pages))
         page_prefix = out_dir / "page"
         try:
             subprocess.run(

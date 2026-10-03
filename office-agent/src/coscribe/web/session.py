@@ -3377,6 +3377,8 @@ class ChatSessionLG:
                 # already uses, so the frontend needs no changes to render it.
                 try:
                     await websocket.send_json({"type": "agent_message", "text": "[stopped]"})
+                    # The task panel refreshes on this, as after any other turn.
+                    await websocket.send_json({"type": "tasks_changed"})
                 except Exception:  # noqa: BLE001 -- the client is already gone
                     pass
                 return
