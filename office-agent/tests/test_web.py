@@ -843,14 +843,12 @@ def test_narration_before_an_ungated_tool_call_does_not_get_glued_onto_the_final
     assert agent_message["text"] == "It says hello."
 
 
-def _libreoffice_and_poppler_actually_work() -> bool:
+def _libreoffice_actually_works() -> bool:
     """Same probe technique as test_presentations_tool.py's identical
     helper (not imported from there -- each test file in this project
     stays self-contained): `shutil.which` alone can't tell a genuinely
-    broken soffice/pdftoppm install from a working one, so this actually
-    tries a trivial conversion in a throwaway temp dir."""
-    if shutil.which("pdftoppm") is None:
-        return False
+    broken soffice install from a working one, so this actually tries a
+    trivial conversion in a throwaway temp dir."""
     probe_dir = Path(tempfile.mkdtemp(prefix="coscribe_lo_probe_"))
     try:
         result = PresentationToolkit(probe_dir).write_pptx(
@@ -875,8 +873,8 @@ def _write_test_deck(workspace: Path, name: str = "deck.pptx") -> None:
 
 @pytest.mark.real_libreoffice
 @pytest.mark.skipif(
-    not _libreoffice_and_poppler_actually_work(),
-    reason="LibreOffice or poppler-utils not installed/functional in this environment",
+    not _libreoffice_actually_works(),
+    reason="LibreOffice not installed/functional in this environment",
 )
 def test_approval_required_carries_a_before_after_preview_for_a_pptx_edit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -986,8 +984,8 @@ def test_approval_preview_is_absent_when_the_target_file_does_not_exist_yet(
 
 @pytest.mark.real_libreoffice
 @pytest.mark.skipif(
-    not _libreoffice_and_poppler_actually_work(),
-    reason="LibreOffice or poppler-utils not installed/functional in this environment",
+    not _libreoffice_actually_works(),
+    reason="LibreOffice not installed/functional in this environment",
 )
 def test_approval_preview_covers_write_docx_overwriting_an_existing_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1049,8 +1047,8 @@ def test_approval_preview_covers_write_docx_overwriting_an_existing_file(
 
 @pytest.mark.real_libreoffice
 @pytest.mark.skipif(
-    not _libreoffice_and_poppler_actually_work(),
-    reason="LibreOffice or poppler-utils not installed/functional in this environment",
+    not _libreoffice_actually_works(),
+    reason="LibreOffice not installed/functional in this environment",
 )
 def test_approval_preview_covers_format_xlsx_cells(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1184,8 +1182,8 @@ def test_approval_preview_leaves_the_real_file_untouched_on_denial(
 
 @pytest.mark.real_libreoffice
 @pytest.mark.skipif(
-    not _libreoffice_and_poppler_actually_work(),
-    reason="LibreOffice or poppler-utils not installed/functional in this environment",
+    not _libreoffice_actually_works(),
+    reason="LibreOffice not installed/functional in this environment",
 )
 def test_approval_preview_resolves_a_file_in_an_extra_writable_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -6288,6 +6286,32 @@ def test_thread_activity_leaves_scratch_folders_out_of_the_outputs_lg(
         activity = client.get("/api/threads/t_activity_scratch/activity").json()
 
     assert sorted(o["path"] for o in activity["outputs"]) == ["out/qa.md", "report.md"]
+
+
+def test_thread_activity_leaves_out_files_the_assistant_made_and_removed_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "workspace").mkdir()
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call("c1", "write_file", {"path": "report.md", "content": "# R"}),
+                    _tool_call("c2", "write_file", {"path": "check.png", "content": "x"}),
+                ],
+            ),
+            AIMessage(
+                content="", tool_calls=[_tool_call("c3", "delete_file", {"path": "check.png"})]
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        _run_turn(client, "t_activity_removed", "write")
+        activity = client.get("/api/threads/t_activity_removed/activity").json()
+
+    assert [o["path"] for o in activity["outputs"]] == ["report.md"]
 
 
 def test_opening_a_thread_file_only_hands_documents_to_the_os_lg(

@@ -44,6 +44,7 @@ from ._output_truncation import truncate_script_output
 from .script_env import ensure_script_env, venv_python
 from .script_guard import (
     blocked_write,
+    locked_file_note,
     refusal_note,
     suggested_folder,
     writable_roots,
@@ -121,7 +122,9 @@ def _run_python_script(
         finished: dict[str, object] = {
             "exit_code": result.returncode,
             "stdout": truncate_script_output(result.stdout),
-            "stderr": truncate_script_output(stderr + (refusal_note(blocked) if blocked else "")),
+            "stderr": truncate_script_output(
+                stderr + (refusal_note(blocked) if blocked else "") + locked_file_note(stderr)
+            ),
             "timed_out": False,
         }
         if blocked:

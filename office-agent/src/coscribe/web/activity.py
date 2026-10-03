@@ -164,8 +164,14 @@ def summarize_activity(
             actions[key] = "edited"
     outputs: list[dict[str, Any]] = []
     for key in dict.fromkeys(reversed(last_touched)):  # most recently touched first
-        if actions[key] != "read" and not _is_scratch(key):
-            outputs.append({**entries[key], "action": actions[key]})
+        if actions[key] == "read" or _is_scratch(key):
+            continue
+        # A file this conversation made that is gone again was a working
+        # file the assistant cleaned up (the instructions ask it to), not
+        # something to hand the person.
+        if actions[key] == "created" and not entries[key]["exists"]:
+            continue
+        outputs.append({**entries[key], "action": actions[key]})
     references = [
         {**entries[key], "action": "read"}
         for key in dict.fromkeys(last_touched)  # in the order first read

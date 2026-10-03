@@ -281,52 +281,38 @@ def test_render_pptx_preview_skips_gracefully_without_state_dir(tmp_path: Path) 
     assert result["preview_skipped_reason"] == "no state_dir configured"
 
 
-def test_render_pptx_preview_skips_gracefully_when_pdftoppm_missing(
+@pytest.mark.real_libreoffice
+@pytest.mark.skipif(
+    not _libreoffice_actually_works(),
+    reason="LibreOffice not installed/functional in this environment",
+)
+def test_render_pptx_preview_needs_no_poppler(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Pages are rasterized and measured by PDFium, not poppler: a Windows
+    machine has LibreOffice at best, never pdftoppm."""
     state_dir = tmp_path / "state"
     tools = {
         tool.__name__: tool
         for tool in build_presentation_tools(tmp_path / "workspace", state_dir=state_dir)  # type: ignore[attr-defined]
     }
     tools["write_pptx"](path="deck.pptx", content="# Title\n- body")
-
-    # Fakes soffice as *present* (not just falling through to the real
-    # shutil.which) -- this test's whole point is isolating "only pdftoppm
-    # is missing," and letting soffice's presence depend on whatever
-    # happens to be installed on the machine running the test made this a
-    # real, deterministic CI failure: GitHub Actions' runner has neither
-    # tool installed, so the real shutil.which("soffice") call returned
-    # None too, and render_all_page_previews' own soffice check (which
-    # runs *before* its pdftoppm check) reported "LibreOffice (soffice)
-    # not found" instead of the pdftoppm-specific reason this test
-    # actually asserts on.
     real_which = shutil.which
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name, *a, **k: None if name in ("pdftoppm", "pdftotext") else real_which(name),
+    )
 
-    def fake_which(name: str) -> str | None:
-        if name == "pdftoppm":
-            return None
-        if name == "soffice":
-            return "/usr/bin/soffice"
-        return real_which(name)
-
-    monkeypatch.setattr("shutil.which", fake_which)
     result = tools["render_pptx_preview"](path="deck.pptx")
 
-    assert result["preview_paths"] == []
-    assert result["preview_skipped_reason"] == "poppler-utils (pdftoppm) not found"
-
-
-def _poppler_and_libreoffice_actually_work() -> bool:
-    if shutil.which("pdftoppm") is None:
-        return False
-    return _libreoffice_actually_works()
+    assert result["preview_skipped_reason"] is None
+    assert len(result["preview_paths"]) >= 1
 
 
 @pytest.mark.real_libreoffice
 @pytest.mark.skipif(
-    not _poppler_and_libreoffice_actually_work(),
-    reason="LibreOffice or poppler-utils not installed/functional in this environment",
+    not _libreoffice_actually_works(),
+    reason="LibreOffice not installed/functional in this environment",
 )
 def test_render_pptx_preview_renders_every_slide_via_libreoffice(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"

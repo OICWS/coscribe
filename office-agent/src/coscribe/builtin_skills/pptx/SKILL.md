@@ -353,8 +353,8 @@ declarations, not assumed from a version-agnostic doc page.
 After a `run_node_script` call that writes a `.pptx` file, there's no
 `preview_path` the way `write_pptx` returns one -- call
 `render_pptx_preview(path)` to render every slide to an image (needs
-LibreOffice + poppler-utils; degrades to `preview_skipped_reason` if
-either is missing, same as every other preview in this codebase). Its
+LibreOffice; degrades to `preview_skipped_reason` if
+it is missing, same as every other preview in this codebase). Its
 `preview_paths_csv` can be passed straight through as `review_work`'s
 `preview_name` to have the reviewer look at every slide in one call.
 

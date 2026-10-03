@@ -997,3 +997,22 @@ def test_add_docx_image_rejects_a_file_that_is_not_an_image(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="not a PNG"):
         tools["add_docx_image"](path="r.docx", image_path="notes.png")
+
+
+def test_write_docx_fills_a_large_table_in_reasonable_time(tmp_path: Path) -> None:
+    """python-docx's table.cell() rebuilds the whole grid per call, which
+    made a 400-row table take 36 s; a 1,500-row one never finished."""
+    import time
+
+    rows = "\n".join(f"| r{i} | 部门{i % 7} | {i * 3.14:.2f} |" for i in range(800))
+    content = f"| id | dept | amount |\n| --- | --- | --- |\n{rows}"
+    tools = _tools_by_name(tmp_path)
+
+    started = time.monotonic()
+    tools["write_docx"](path="big.docx", content=content)
+    elapsed = time.monotonic() - started
+
+    table = Document(str(tmp_path / "big.docx")).tables[0]
+    assert len(table.rows) == 801
+    assert [c.text for c in table.rows[800].cells] == ["r799", "部门1", "2508.86"]
+    assert elapsed < 20

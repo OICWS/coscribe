@@ -9,7 +9,9 @@ plan file this Phase came from) for what this is and isn't proving yet.
 
 from __future__ import annotations
 
+import errno
 from collections.abc import Callable, Iterable, Sequence
+from pathlib import Path
 from typing import Any, cast
 
 from langchain.agents import create_agent
@@ -41,10 +43,73 @@ def tool_name(tool: Callable[..., Any] | BaseTool) -> str:
     return str(getattr(tool, "name", None) or getattr(tool, "__name__", ""))
 
 
+_LOCKED_WINERRORS = frozenset({5, 32, 33})  # access denied, sharing/lock violation
+
+
+def _locked_file_message(exc: Exception) -> str | None:
+    """On Windows a file open in Excel/Word/a PDF viewer can't be written or
+    replaced, and the raw error ("[WinError 32] ... used by another
+    process") sends the model off to chmod it or save somewhere else. Only a
+    real OS error counts: the workspace guard's own PermissionError carries
+    no errno and says its own thing."""
+    if not isinstance(exc, OSError):
+        return None
+    locked = getattr(exc, "winerror", None) in _LOCKED_WINERRORS or exc.errno in (
+        errno.EACCES,
+        errno.EBUSY,
+        errno.EPERM,
+    )
+    # os.replace reports the temp file as filename and the real target as
+    # filename2.
+    target = exc.filename2 or exc.filename
+    if not locked or not target:
+        return None
+    name = Path(str(target)).name
+    return (
+        f"{name} can't be changed right now: it is probably open in another program "
+        "(Excel, Word, a PDF viewer) or read-only. Ask the user to close it, then try "
+        "again -- don't save a copy under another name unless they say so. "
+        f"({exc})"
+    )
+
+
+_LEGACY_TARGETS = {".doc": "docx", ".xls": "xlsx", ".ppt": "pptx"}
+
+
+def _unopenable_file_message(request: Any, exc: Exception) -> str | None:
+    """The libraries say "File is not a zip file" or "Package not found" for
+    a legacy .doc/.xls/.ppt, a damaged file and a password-protected one
+    alike; say which it probably is and what to do."""
+    kind = type(exc).__name__
+    path = str((request.tool_call.get("args") or {}).get("path") or "")
+    is_package_error = kind in {"BadZipFile", "PackageNotFoundError", "InvalidFileException"}
+    if kind == "PdfiumError" and "password" in str(exc).lower():
+        return (
+            f"{path or 'This PDF'} is password-protected, so it can't be read. Ask the user "
+            "for an unlocked copy."
+        )
+    if not is_package_error:
+        return None
+    legacy = _LEGACY_TARGETS.get(Path(path).suffix.lower())
+    if legacy is not None:
+        return (
+            f"{path} is an old-format file ({Path(path).suffix}) this tool can't open. Call "
+            f"convert_office_file with to_format='{legacy}' and work on the converted copy."
+        )
+    return (
+        f"{path or 'The file'} isn't a valid Office file: it may be damaged, "
+        "password-protected, or saved under the wrong extension. Tell the user rather than "
+        "guessing at its contents."
+    )
+
+
 def _tool_error_message(request: Any, exc: Exception) -> ToolMessage:
     tool_call = request.tool_call
     return ToolMessage(
-        content=str(exc), tool_call_id=tool_call["id"], name=tool_call["name"], status="error"
+        content=_locked_file_message(exc) or _unopenable_file_message(request, exc) or str(exc),
+        tool_call_id=tool_call["id"],
+        name=tool_call["name"],
+        status="error",
     )
 
 

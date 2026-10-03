@@ -300,3 +300,41 @@ def test_a_history_with_an_unanswered_tool_call_reaches_the_model_answered() -> 
     assert [m.tool_call_id for m in sent[2:4]] == ["done", "orphan"]
     saved = agent.get_state(config).values["messages"]
     assert [m.tool_call_id for m in saved if isinstance(m, ToolMessage)] == ["done"]
+
+
+def test_a_file_open_in_another_program_is_explained_not_dumped_raw() -> None:
+    from types import SimpleNamespace
+
+    from coscribe.runtime_lg.agent import _tool_error_message
+
+    request = SimpleNamespace(tool_call={"id": "c1", "name": "write_xlsx"})
+    locked = PermissionError(13, "Permission denied", "C:\\Users\\a\\report.xlsx")
+    guard = PermissionError("Path is outside the workspace: C:\\other\\x.xlsx")
+    ordinary = ValueError("File does not exist: a.txt")
+
+    assert "report.xlsx" in _tool_error_message(request, locked).content
+    assert "open in another program" in _tool_error_message(request, locked).content
+    # The workspace guard's own PermissionError (no errno) keeps its message.
+    assert _tool_error_message(request, guard).content == str(guard)
+    assert _tool_error_message(request, ordinary).content == str(ordinary)
+
+
+def test_a_file_that_will_not_open_says_what_to_do_instead_of_a_library_error() -> None:
+    import zipfile
+    from types import SimpleNamespace
+
+    from pptx.exc import PackageNotFoundError
+
+    from coscribe.runtime_lg.agent import _tool_error_message
+
+    def message(path: str, exc: Exception) -> str:
+        request = SimpleNamespace(tool_call={"id": "c1", "name": "read_x", "args": {"path": path}})
+        return str(_tool_error_message(request, exc).content)
+
+    legacy = message("old.xls", zipfile.BadZipFile("File is not a zip file"))
+    assert "convert_office_file" in legacy and "xlsx" in legacy
+    assert "pptx" in message("deck.ppt", PackageNotFoundError("Package not found at 'deck.ppt'"))
+    damaged = message("report.docx", zipfile.BadZipFile("File is not a zip file"))
+    assert "damaged" in damaged and "convert_office_file" not in damaged
+    other = ValueError("File does not exist: a.txt")
+    assert message("a.txt", other) == "File does not exist: a.txt"

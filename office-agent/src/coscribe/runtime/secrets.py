@@ -17,7 +17,7 @@ device-flow OAuth bearer token):
    machine), storage falls back to today's plaintext value, still gets
    layer 1's permission hardening, and the write still succeeds. Same
    "optional, gracefully degrading system dependency" shape as the
-   LibreOffice/poppler-utils checks in tools/presentations.py --
+   LibreOffice checks in tools/presentations.py --
    best-effort, never the reason a save fails.
 
 A plain string stored where store_secret's result is expected covers two

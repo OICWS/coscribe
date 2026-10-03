@@ -91,6 +91,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from ..runtime.types import tool_metadata
 from ._chart_data import CHART_TYPES, parse_chart_table
 from ._file_locks import locked_by_path
+from ._office_bins import find_soffice
 from ._ooxml_validate import assert_ooxml_valid
 from ._output_truncation import cap_read_output
 from ._svg_slide import add_svg_slide
@@ -1299,13 +1300,14 @@ def _render_to_pdf(pptx_path: Path) -> Path | None:
     `soffice` isn't installed, times out, or fails: write_pptx has already
     succeeded by the time this runs, this is a best-effort diagnostic on
     top of it, not a requirement for the write to count as successful."""
-    if shutil.which("soffice") is None:
+    soffice = find_soffice()
+    if soffice is None:
         return None
     out_dir = Path(tempfile.mkdtemp(prefix="coscribe_pptx_qa_"))
     try:
         subprocess.run(
             [
-                "soffice",
+                soffice,
                 "--headless",
                 "--convert-to",
                 "pdf",
@@ -1328,7 +1330,7 @@ def _check_overflow(pdf_path: Path) -> list[dict[str, object]]:
     the LibreOffice-rendered PDF's page size mirrors the pptx slide size, so
     this is a genuine "this text overflows its slide" signal. Pure
     vector/text analysis via pdfplumber (already a dependency); no
-    pdftoppm/poppler-utils or pixel rasterization needed."""
+    pixel rasterization needed."""
     import pdfplumber
 
     warnings: list[dict[str, object]] = []
@@ -2405,7 +2407,7 @@ _TEXT_OVERLAP_THRESHOLD = 0.15
 def _check_text_overlaps(prs: Any) -> list[dict[str, object]]:
     """Flag pairs of non-empty text shapes on the same slide whose bounding
     boxes overlap significantly -- a purely geometric check that needs no
-    rendering (no LibreOffice/poppler-utils), so it runs unconditionally.
+    rendering (no LibreOffice), so it runs unconditionally.
     Catches a real, reproduced bug directly: `run_node_script`-generated
     scripts sometimes place a subtitle text box at a fixed y-offset that
     overlaps the body content box on some slides but not others (depending
@@ -2538,7 +2540,7 @@ def _check_missing_visual_elements(prs: Any) -> list[int]:
     ]
 
 
-# poppler's word box is about 1.2x the font size tall.
+# The rendered word box is about 1.2x the font size tall.
 _WORD_BOX_PER_POINT = 1.2
 # Below this, body text on a slide is hard to read from a screen share or a
 # room; the usual floor for body text is 18pt, 12 the least anyone defends.
@@ -2551,7 +2553,7 @@ _SPARSE_BOTTOM_SHARE = 0.55
 def _check_rendered_layout(
     layout: list[dict[str, Any]], prs: Any
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    """From the rendered pages (poppler word boxes): slides whose body text
+    """From the rendered pages (PDFium word boxes): slides whose body text
     is under _MIN_BODY_POINTS, and content slides (not the first) whose
     content ends in their upper half. Measured on the render, so inherited
     sizes and autofit count. Empty when nothing could be rendered."""
@@ -5654,8 +5656,8 @@ def build_presentation_tools(
         undesigned slide, since bullet text reads the same whether or not
         the slide behind it looks good.
 
-        Needs LibreOffice (`soffice`) and poppler-utils (`pdftoppm`)
-        installed -- when either is missing, or conversion fails,
+        Needs LibreOffice (`soffice`)
+        installed -- when it is missing, or conversion fails,
         `preview_paths` comes back empty and `preview_skipped_reason` says
         why; this is never an error.
 
@@ -5664,7 +5666,7 @@ def build_presentation_tools(
         every rendered slide in one call.
 
         Three more fields need no rendering at all, so they're always
-        populated regardless of LibreOffice/poppler-utils: `text_overlap_warnings`
+        populated regardless of LibreOffice: `text_overlap_warnings`
         flags pairs of text boxes on the same slide whose bounding boxes
         significantly overlap (a real, reproduced defect -- a subtitle box
         landing on top of the body text), `slides_missing_visual_elements`
@@ -5683,7 +5685,7 @@ def build_presentation_tools(
         the same way you'd react to overflow_warnings.
 
         Two more are measured on the rendered slides (so they need
-        LibreOffice and pdftotext, and are empty without them):
+        LibreOffice, and are empty without it):
         `small_text_slides` lists slides whose body text renders under
         14pt (`body_text_pt`) -- raise the size, or cut the words, until
         it reads from across a room -- and `sparse_slides` lists content

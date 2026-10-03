@@ -2128,7 +2128,7 @@ class ChatSessionLG:
         which is exactly the case worth previewing.
 
         Never raises and never touches the real file -- any failure
-        (soffice/pdftoppm missing, a bad dry-run, a locked file, an
+        (soffice missing, a bad dry-run, a locked file, an
         unrecognized extension) just means one or both preview images
         come back None, and the approval flow proceeds exactly as it did
         before this existed.

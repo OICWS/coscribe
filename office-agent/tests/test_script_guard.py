@@ -7,6 +7,7 @@ import pytest
 
 from coscribe.tools.script_guard import (
     blocked_write,
+    locked_file_note,
     node_guard_args,
     suggested_folder,
     writable_roots,
@@ -151,3 +152,24 @@ def test_suggested_folder_is_the_nearest_existing_one_but_never_a_drive_or_home(
     assert suggested_folder(str(tmp_path / "reports" / "a.xlsx")) == str(tmp_path / "reports")
     assert suggested_folder(str(Path.home() / "a.xlsx")) is None
     assert suggested_folder(str(Path(tmp_path.anchor) / "a.xlsx")) is None
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "Traceback (most recent call last):\n  File \"x.py\", line 3, in <module>\n"
+        "PermissionError: [Errno 13] Permission denied: 'C:\\\\Users\\\\a\\\\report.xlsx'",
+        "PermissionError: [WinError 32] The process cannot access the file because it is "
+        "being used by another process: 'C:\\\\Users\\\\a\\\\report.xlsx'",
+    ],
+)
+def test_locked_file_note_names_the_file_and_says_to_ask_the_user(stderr: str) -> None:
+    note = locked_file_note(stderr)
+
+    assert "report.xlsx" in note
+    assert "open in another program" in note
+
+
+def test_locked_file_note_stays_quiet_for_other_errors() -> None:
+    assert locked_file_note("ValueError: bad input") == ""
+    assert locked_file_note("") == ""

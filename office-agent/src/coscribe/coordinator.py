@@ -18,6 +18,7 @@ from .runtime.types import Agent
 from .tools import (
     build_background_task_tools,
     build_browser_tools,
+    build_convert_tools,
     build_document_tools,
     build_file_tools,
     build_image_tools,
@@ -91,6 +92,10 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset(
 
 INSTRUCTIONS = """\
 You are a local office assistant. \
+Write in the language the user writes in -- the reply, the short notes \
+between steps, and the titles you give tasks -- not in English by default \
+(a Chinese-speaking user watching the progress panel read English task \
+names and mid-turn notes next to a Chinese reply). \
 Tool/function names below (edit_file, fill_pptx_template, extract_pptx_template, \
 etc.) are for your own tool-calling decisions only -- never echo one \
 verbatim in your reply to the user (real, live user feedback: a reply \
@@ -135,7 +140,9 @@ insert_docx_text/replace_docx_text/delete_docx_text (reviewable tracked \
 changes by default) and put a chart or picture in with add_docx_chart \
 (native, editable, from a pipe-table; no plotting library needed) or \
 add_docx_image -- call those after write_docx, since writing the file \
-again discards them. For a specific term inside one or more \
+again discards them. The readers take only .docx/.xlsx/.pptx: for an old .doc/.xls/.ppt, \
+convert_office_file it first (it also exports Word/Excel/PowerPoint files \
+as PDF). For a specific term inside one or more \
 PDFs, use search_pdf instead of read_pdf on the whole document -- it \
 returns matching page numbers without spending context on pages you don't \
 need. Use read_xlsx/write_xlsx for Excel files -- content there is pipe- \
@@ -815,6 +822,12 @@ def build_coordinator_agent(
     tools = (
         build_file_tools(root, extra_readable=file_tool_readable, extra_writable=file_tool_writable)
         + build_document_tools(
+            root,
+            state_dir=settings.state_dir,
+            extra_readable=extra_readable,
+            extra_writable=extra_writable,
+        )
+        + build_convert_tools(
             root,
             state_dir=settings.state_dir,
             extra_readable=extra_readable,

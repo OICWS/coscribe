@@ -633,6 +633,16 @@ markdown subset:
 - `| cell | cell |` rows for tables
 - any other line is a plain paragraph
 
+Around those: `add_docx_chart` (a native, editable bar/line/pie chart from a
+pipe-table) and `add_docx_image` put a chart or picture into an existing Word
+file after a named paragraph; `convert_office_file` opens a legacy
+`.doc`/`.xls`/`.ppt` (by converting it to the OOXML format the readers take)
+and exports Word/Excel/PowerPoint files as PDF. Conversion, page previews,
+the layout checks and recalculation all use LibreOffice, found on `PATH` or in
+its standard install folder (on Windows `soffice` is not on `PATH` by
+default); pages are rasterized and measured with PDFium, so nothing else needs
+installing.
+
 `read_docx`/`read_pdf` go the other way through `mammoth`+`markdownify`
 and `pdfplumber` respectively -- the same libraries microsoft/markitdown
 itself uses internally for these formats, without pulling in markitdown's
@@ -1176,15 +1186,15 @@ the libraries `docx`/`pdf`/`xlsx` support relies on (see `ARCHITECTURE.md`).
 
 `render_pptx_preview(path)` is the multi-slide counterpart: LibreOffice's own
 `--convert-to png` only ever emits page 1, so `write_pptx`'s automatic
-thumbnail (and this tool, without its second dependency) can only ever show
-the first slide -- not enough to catch a deck where the title slide looks
-fine but the rest don't. With `poppler-utils` also installed (`apt install
-poppler-utils` / `brew install poppler`; provides `pdftoppm`),
-`render_pptx_preview` renders every slide (capped at `max_slides`, default
+thumbnail can only ever show the first slide -- not enough to catch a deck
+where the title slide looks fine but the rest don't. With LibreOffice
+installed, `render_pptx_preview` converts the deck to PDF and rasterizes each
+page with PDFium (nothing else to install; LibreOffice is found on PATH or in
+its standard Windows folder), so it renders every slide (capped at `max_slides`, default
 8) so `review_work` can check the whole deck, not just the first slide --
 this is what a deck built with `run_node_script` needs for any real visual
 QA, since that tool returns no preview of its own. Same graceful-degradation
-contract as everything else here: missing either dependency just means
+contract as everything else here: a missing LibreOffice just means
 `preview_paths` comes back empty with a `preview_skipped_reason`.
 
 ## Running scripts

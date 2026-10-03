@@ -6942,6 +6942,27 @@ The numbers were right; the bugs were in the edges.
       `add_docx_image`. The coordinator's instructions also claimed Word
       files could not be edited in place, steering the model to rewrite
       whole documents; corrected.
+- [x] Windows readiness. LibreOffice's installer doesn't put `soffice` on PATH
+      on Windows, and poppler (`pdftoppm`, `pdftotext`) isn't there at all, so
+      previews, the rendered-layout checks and formula recalculation were
+      quietly off for anyone who installed things the ordinary way. LibreOffice
+      is now found in its standard folders, and pages are rasterized and
+      measured by PDFium (word boxes identical to poppler's on a real deck),
+      so LibreOffice is the only thing to install. The first-launch timeout
+      went from 20s to 60s.
+- [x] `convert_office_file`: legacy `.doc/.xls/.ppt` to OOXML and PDF export,
+      neither of which any tool did. The libraries' "File is not a zip file" /
+      "Package not found" for a legacy, damaged or password-protected file now
+      say which it probably is and what to do; a file open in Excel/Word (a
+      PermissionError / WinError 32) says to ask the user to close it instead
+      of inviting chmod or a copy under another name.
+- [x] Outputs no longer lists working files the assistant made and removed;
+      task titles and between-step notes follow the user's language (they
+      were English next to a Chinese reply); the Default Mode e2e test puts
+      its setting back and waits for the save.
+- [x] `write_docx` was quadratic in table rows (python-docx's `table.cell()`
+      rebuilds the cell grid per call): 100 rows 2.6s, 400 rows 36s, 1,500
+      rows never finished. The grid is built once now; 400 rows take 0.2s.
 - [x] Checked on a 131-page Chinese-named PDF: every figure, page number and
       the 32 formulas of the summary workbook matched.
 

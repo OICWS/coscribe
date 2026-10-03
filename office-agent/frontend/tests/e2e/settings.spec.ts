@@ -42,8 +42,16 @@ test("General tab: Default Mode saves", async ({ page }) => {
   const config = await page.evaluate(() => fetch("/api/config").then((r) => r.json()));
   expect(config.COSCRIBE_DEFAULT_PERMISSION_MODE).toBe("plan");
 
+  // Put the original mode back and wait for that save to land: the status
+  // line still says "Saved" from the click above, so it proves nothing, and
+  // a test that ends first leaves every later run in Plan mode.
+  const restored = page.waitForResponse(
+    (r) => r.url().includes("/api/config") && r.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Auto", exact: true }).click();
-  await expect(page.getByRole("status")).toHaveText(/^Saved/);
+  await restored;
+  const after = await page.evaluate(() => fetch("/api/config").then((r) => r.json()));
+  expect(after.COSCRIBE_DEFAULT_PERMISSION_MODE).toBe("auto");
 });
 
 test("Tools tab: categories start collapsed and open to list their tools", async ({ page }) => {

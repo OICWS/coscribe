@@ -934,10 +934,15 @@ class DocumentToolkit:
                 n_cols = max(len(row) for row in block.rows)
                 table = document.add_table(rows=len(block.rows), cols=n_cols)
                 table.style = "Table Grid"
+                # table.cell(r, c) rebuilds the whole cell grid on every
+                # call, so filling a table that way is quadratic: 400 rows
+                # took 36 s and 1,500 never finished. Build the grid once.
+                cells = table._cells  # noqa: SLF001
                 for row_index, row in enumerate(block.rows):
                     for col_index in range(n_cols):
                         cell_text = row[col_index] if col_index < len(row) else ""
-                        _add_inline_runs(table.cell(row_index, col_index).paragraphs[0], cell_text)
+                        cell = cells[row_index * n_cols + col_index]
+                        _add_inline_runs(cell.paragraphs[0], cell_text)
             else:
                 paragraph = document.add_paragraph()
                 _add_inline_runs(paragraph, block.text)

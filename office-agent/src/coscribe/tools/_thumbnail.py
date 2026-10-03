@@ -23,7 +23,6 @@ entirely server-generated.
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import tempfile
@@ -31,7 +30,14 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-SOFFICE_TIMEOUT = 20.0
+from ._office_bins import find_soffice
+
+# The first launch on a fresh Windows profile builds LibreOffice's user
+# profile and can take half a minute; killing it at 20s left every later
+# call starting from scratch too.
+SOFFICE_TIMEOUT = 60.0
+
+_PREVIEW_DPI = 100
 
 
 def _convert_to_pdf(file_path: Path, out_dir: Path) -> Path | None:
@@ -39,12 +45,13 @@ def _convert_to_pdf(file_path: Path, out_dir: Path) -> Path | None:
     render_single_page_preview below -- factored out once a second caller
     needed the exact same subprocess call. Returns the produced PDF path,
     or None if soffice is missing, times out, or fails; never raises."""
-    if shutil.which("soffice") is None:
+    soffice = find_soffice()
+    if soffice is None:
         return None
     try:
         subprocess.run(
             [
-                "soffice",
+                soffice,
                 "--headless",
                 "--convert-to",
                 "pdf",
@@ -72,14 +79,15 @@ def render_thumbnail(file_path: Path, state_dir: Path | None) -> tuple[str | Non
     """
     if state_dir is None:
         return None, "no state_dir configured"
-    if shutil.which("soffice") is None:
+    soffice = find_soffice()
+    if soffice is None:
         return None, "LibreOffice (soffice) not found"
     out_dir = Path(tempfile.mkdtemp(prefix="coscribe_thumbnail_"))
     try:
         try:
             subprocess.run(
                 [
-                    "soffice",
+                    soffice,
                     "--headless",
                     "--convert-to",
                     "png",
@@ -105,39 +113,72 @@ def render_thumbnail(file_path: Path, state_dir: Path | None) -> tuple[str | Non
         shutil.rmtree(out_dir, ignore_errors=True)
 
 
-_WORD_BOX = re.compile(
-    r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)"'
-)
-_PAGE_BOX = re.compile(r'<page width="([\d.]+)" height="([\d.]+)"')
-
-
 def measure_page_words(pdf_path: Path, max_pages: int) -> list[dict[str, Any]]:
-    """Per page: {"width", "height", "words": [(x0, y0, x1, y1)]} in points,
-    from poppler's own word boxes -- where the text really landed once
-    rendered, which the file alone can't say (inherited sizes, autofit).
+    """Per page: {"width", "height", "words": [(x0, y0, x1, y1)]} in points
+    with y measured down from the top, from PDFium's character boxes -- where
+    the text really landed once rendered, which the file alone can't say
+    (inherited sizes, autofit). The loose box is the font's own ascent to
+    descent, about 1.2x the size, the same box poppler's word boxes gave.
     Empty on any failure: a measurement is never worth failing a preview."""
-    if shutil.which("pdftotext") is None:
-        return []
     try:
-        done = subprocess.run(
-            ["pdftotext", "-bbox", "-l", str(max_pages), str(pdf_path), "-"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=SOFFICE_TIMEOUT,
-            check=True,
-        )
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
+        import pypdfium2 as pdfium
+
+        document = pdfium.PdfDocument(str(pdf_path))
+    except Exception:  # noqa: BLE001 -- see docstring
         return []
     pages: list[dict[str, Any]] = []
-    for chunk in done.stdout.split("<page ")[1:]:
-        size = _PAGE_BOX.match("<page " + chunk)
-        if size is None:
-            continue
-        words = [tuple(float(v) for v in m.groups()) for m in _WORD_BOX.finditer(chunk)]
-        pages.append({"width": float(size[1]), "height": float(size[2]), "words": words})
+    try:
+        for index in range(min(max_pages, len(document))):
+            page = document[index]
+            width, height = page.get_size()
+            textpage = page.get_textpage()
+            text = textpage.get_text_range()
+            words: list[tuple[float, float, float, float]] = []
+            current: list[float] | None = None
+            for position, char in enumerate(text):
+                if char.isspace() or char in "\x02\ufffe":
+                    if current is not None:
+                        words.append((current[0], current[1], current[2], current[3]))
+                        current = None
+                    continue
+                left, bottom, right, top = textpage.get_charbox(position, loose=True)
+                box = [left, height - top, right, height - bottom]
+                if current is None:
+                    current = box
+                else:
+                    current = [
+                        min(current[0], box[0]),
+                        min(current[1], box[1]),
+                        max(current[2], box[2]),
+                        max(current[3], box[3]),
+                    ]
+            if current is not None:
+                words.append((current[0], current[1], current[2], current[3]))
+            pages.append({"width": float(width), "height": float(height), "words": words})
+    except Exception:  # noqa: BLE001 -- see docstring
+        return []
+    finally:
+        document.close()
     return pages
+
+
+def _render_pdf_pages(pdf_path: Path, out_dir: Path, first: int, last: int) -> list[Path]:
+    """PNG files for pages first..last (1-based, clipped to the document).
+    PDFium renders them, so nothing outside Python is needed -- poppler is
+    not something a Windows machine has."""
+    import pypdfium2 as pdfium
+
+    document = pdfium.PdfDocument(str(pdf_path))
+    files: list[Path] = []
+    try:
+        for number in range(max(first, 1), min(last, len(document)) + 1):
+            image = document[number - 1].render(scale=_PREVIEW_DPI / 72).to_pil()
+            target = out_dir / f"page-{number:04d}.png"
+            image.save(target)
+            files.append(target)
+    finally:
+        document.close()
+    return files
 
 
 def render_all_page_previews(
@@ -148,7 +189,7 @@ def render_all_page_previews(
 ) -> tuple[list[str], str | None]:
     """Render every page of `file_path` (docx/pdf/xlsx/pptx) to its own PNG
     under `state_dir/previews/`, via soffice-to-PDF (like `render_thumbnail`
-    above) then `pdftoppm` (poppler-utils) to rasterize each page --
+    above) then PDFium to rasterize each page --
     `render_thumbnail`'s single PNG only ever shows page/slide 1, since
     soffice's own `--convert-to png` CLI path emits one page no matter how
     many the source has. That's not enough to catch a real, reproduced bug:
@@ -160,15 +201,13 @@ def render_all_page_previews(
 
     Returns `(preview_names, None)` on success, capped at `max_pages` (a
     large deck's every slide isn't worth the token cost of reviewing each
-    one). Returns `([], reason)` if skipped for any reason (soffice or
-    pdftoppm missing, conversion failure, timeout); never raises.
+    one). Returns `([], reason)` if skipped for any reason (soffice
+    missing, conversion failure, timeout); never raises.
     """
     if state_dir is None:
         return [], "no state_dir configured"
-    if shutil.which("soffice") is None:
+    if find_soffice() is None:
         return [], "LibreOffice (soffice) not found"
-    if shutil.which("pdftoppm") is None:
-        return [], "poppler-utils (pdftoppm) not found"
     out_dir = Path(tempfile.mkdtemp(prefix="coscribe_thumbnail_"))
     try:
         pdf_path = _convert_to_pdf(file_path, out_dir)
@@ -176,28 +215,12 @@ def render_all_page_previews(
             return [], "LibreOffice conversion failed"
         if layout is not None:
             layout.extend(measure_page_words(pdf_path, max_pages))
-        page_prefix = out_dir / "page"
         try:
-            subprocess.run(
-                [
-                    "pdftoppm",
-                    "-png",
-                    "-r",
-                    "100",
-                    "-l",
-                    str(max_pages),
-                    str(pdf_path),
-                    str(page_prefix),
-                ],
-                capture_output=True,
-                timeout=SOFFICE_TIMEOUT,
-                check=True,
-            )
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
-            return [], "pdftoppm conversion failed"
-        page_files = sorted(out_dir.glob("page-*.png"))
+            page_files = _render_pdf_pages(pdf_path, out_dir, 1, max_pages)
+        except Exception:  # noqa: BLE001 -- a preview is never worth failing the write
+            return [], "page rendering failed"
         if not page_files:
-            return [], "pdftoppm did not produce any pages"
+            return [], "the document has no pages to render"
         previews_dir = state_dir / "previews"
         previews_dir.mkdir(parents=True, exist_ok=True)
         preview_names = []
@@ -225,35 +248,15 @@ def render_single_page_preview(
     of range for this document)."""
     if state_dir is None:
         return None, "no state_dir configured"
-    if shutil.which("pdftoppm") is None:
-        return None, "poppler-utils (pdftoppm) not found"
     out_dir = Path(tempfile.mkdtemp(prefix="coscribe_thumbnail_"))
     try:
         pdf_path = _convert_to_pdf(file_path, out_dir)
         if pdf_path is None:
             return None, "LibreOffice conversion failed"
-        page_prefix = out_dir / "page"
         try:
-            subprocess.run(
-                [
-                    "pdftoppm",
-                    "-png",
-                    "-r",
-                    "100",
-                    "-f",
-                    str(page),
-                    "-l",
-                    str(page),
-                    str(pdf_path),
-                    str(page_prefix),
-                ],
-                capture_output=True,
-                timeout=SOFFICE_TIMEOUT,
-                check=True,
-            )
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
-            return None, "pdftoppm conversion failed"
-        page_files = sorted(out_dir.glob("page-*.png"))
+            page_files = _render_pdf_pages(pdf_path, out_dir, page, page)
+        except Exception:  # noqa: BLE001 -- a preview is never worth failing the write
+            return None, "page rendering failed"
         if not page_files:
             return None, f"page {page} out of range for this document"
         previews_dir = state_dir / "previews"

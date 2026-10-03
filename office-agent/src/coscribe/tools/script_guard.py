@@ -193,3 +193,23 @@ def refusal_note(path: str) -> str:
         "workspace and the folders added to this conversation. Write inside the workspace "
         "instead, or ask the user to add that folder (the chat shows an Add folder button)."
     )
+
+
+_LOCKED_FILE_ERROR = re.compile(
+    r"PermissionError: \[(?:Errno 13|WinError (?:5|32|33))\][^\n]*?['\"]([^'\"\n]+)['\"]"
+)
+
+
+def locked_file_note(stderr: str) -> str:
+    """A script that couldn't write a file because Excel/Word has it open
+    ends in a PermissionError; say what that usually means so the model
+    asks the user instead of chmod-ing or saving somewhere else."""
+    match = _LOCKED_FILE_ERROR.search(stderr)
+    if match is None:
+        return ""
+    name = Path(match.group(1)).name
+    return (
+        f'\n[coscribe] "{name}" could not be written: it is probably open in another '
+        "program (Excel, Word, a PDF viewer) or read-only. Ask the user to close it and "
+        "try again; don't save a copy under another name unless they say so."
+    )

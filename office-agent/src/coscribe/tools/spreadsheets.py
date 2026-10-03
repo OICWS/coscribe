@@ -107,6 +107,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from ..runtime.types import tool_metadata
 from ._file_locks import locked_by_path
+from ._office_bins import find_soffice
 from ._output_truncation import cap_read_output
 from ._thumbnail import render_thumbnail
 from ._workspace import WorkspaceScope
@@ -266,7 +267,8 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
     for a file openpyxl just wrote); only the macro-based
     calculateAll()+store()+close() approach actually does.
     """
-    if shutil.which("soffice") is None:
+    soffice = find_soffice()
+    if soffice is None:
         return {"status": "skipped", "skipped_reason": "LibreOffice (soffice) not found"}
 
     try:
@@ -292,7 +294,7 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
         try:
             subprocess.run(
                 [
-                    "soffice",
+                    soffice,
                     "--headless",
                     "--terminate_after_init",
                     f"-env:UserInstallation={profile_url}",
@@ -318,7 +320,7 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
         try:
             subprocess.run(
                 [
-                    "soffice",
+                    soffice,
                     "--headless",
                     "--norestore",
                     f"-env:UserInstallation={profile_url}",
