@@ -89,13 +89,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from ..runtime.types import tool_metadata
+from ._chart_data import CHART_TYPES, parse_chart_table
 from ._file_locks import locked_by_path
 from ._ooxml_validate import assert_ooxml_valid
 from ._output_truncation import cap_read_output
 from ._svg_slide import add_svg_slide
 from ._thumbnail import render_all_page_previews, render_thumbnail
 from ._workspace import WorkspaceScope
-from .documents import Block, _is_separator_row, _split_table_row, parse_blocks, parse_inline_runs
+from .documents import Block, parse_blocks, parse_inline_runs
 from .pptx_templates import load_builtin_templates as _load_builtin_templates
 from .pptx_templates import load_pptx_templates as _load_pptx_templates
 
@@ -1687,55 +1688,6 @@ def _read_scheme_color(clr_scheme: Any, tag: str) -> str | None:
     return None
 
 
-_CHART_TYPES = frozenset({"bar", "line", "pie"})
-
-
-def _parse_chart_table(content: str) -> tuple[list[str], dict[str, list[float]]]:
-    """Parse a pipe-table (same convention as write_xlsx's content) into
-    categories (first column) and series (remaining columns, keyed by their
-    header cell) -- avoids a list/dict-typed tool parameter entirely, since
-    no tool in this package uses one: aisuite's Gemini schema inference has
-    broken on less exotic type hints than that (see this module's and
-    spreadsheets.py's `Optional[int]` comments), so a plain pipe-table
-    string is the safer, already-proven shape."""
-    rows: list[list[str]] = []
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        cells = _split_table_row(line)
-        if cells is None:
-            raise ValueError(
-                f"add_pptx_chart data must be pipe-table rows only (`| cell | cell |`), "
-                f"got: {line!r}"
-            )
-        if _is_separator_row(cells):
-            continue
-        rows.append(cells)
-
-    if len(rows) < 2:
-        raise ValueError("add_pptx_chart data needs a header row plus at least one data row")
-    header, *data_rows = rows
-    if len(header) < 2:
-        raise ValueError(
-            "add_pptx_chart data needs a category column plus at least one data column"
-        )
-
-    series_names = header[1:]
-    categories = [row[0] for row in data_rows]
-    series: dict[str, list[float]] = {name: [] for name in series_names}
-    for row in data_rows:
-        for index, name in enumerate(series_names, start=1):
-            raw_value = row[index] if index < len(row) else ""
-            try:
-                series[name].append(float(raw_value))
-            except ValueError:
-                raise ValueError(
-                    f"add_pptx_chart data cell {raw_value!r} (column {name!r}) is not numeric"
-                ) from None
-    return categories, series
-
-
 def _spd_for(duration: float) -> str:
     if duration <= 0.5:
         return "fast"
@@ -2174,7 +2126,7 @@ def _stats_from_table(rows: list[list[str]]) -> list[tuple[str, str]]:
     """(stat, label) pairs from a `layout: stat-callout` slide's pipe-table
     -- the *same* table grammar every other table block uses, just read as
     stat/label pairs instead of rendered as a literal grid; the header row
-    is discarded, mirroring `_parse_chart_table`'s header/data split."""
+    is discarded, mirroring `parse_chart_table`'s header/data split."""
     if len(rows) < 2:
         raise ValueError(
             "layout: stat-callout's table needs a header row plus at least one stat row."
@@ -4657,11 +4609,11 @@ class PresentationToolkit:
         from pptx.enum.chart import XL_CHART_TYPE
         from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 
-        if chart_type not in _CHART_TYPES:
+        if chart_type not in CHART_TYPES:
             raise ValueError(
-                f"Unknown chart_type {chart_type!r}. Use one of: {', '.join(sorted(_CHART_TYPES))}"
+                f"Unknown chart_type {chart_type!r}. Use one of: {', '.join(sorted(CHART_TYPES))}"
             )
-        categories, series = _parse_chart_table(data)
+        categories, series = parse_chart_table(data, "add_pptx_chart")
         if chart_type == "pie" and len(series) > 1:
             raise ValueError("pie charts take exactly one data column plus the category column")
 

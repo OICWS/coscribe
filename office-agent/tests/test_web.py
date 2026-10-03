@@ -3049,11 +3049,13 @@ def test_internal_events_endpoint_is_a_registered_sse_stream(
         client.portal.call(_probe)
 
 
-def test_reviewer_tools_are_exactly_the_read_only_documents_tools(
+def test_reviewer_tools_are_exactly_the_read_only_documents_and_file_tools(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """session.py's _build_lg_tools hands review_work's reviewer exactly
-    the tools with category=="documents" and requires_approval==False --
+    the tools with category=="documents" and requires_approval==False,
+    plus the read-only file tools (a reviewer that can't list the folder
+    guesses file names and "reviews" files that don't exist) --
     read_docx/read_pdf/search_pdf/read_xlsx/read_pptx/render_pptx_preview/
     list_pptx_shapes/list_pptx_shape_types/list_pptx_transition_types/
     list_pptx_animation_types/list_pptx_icons/read_pptx_theme_colors/
@@ -3066,7 +3068,6 @@ def test_reviewer_tools_are_exactly_the_read_only_documents_tools(
     against the real, non-mocked coordinator tool list, not a hand-built
     stand-in list."""
     from coscribe.coordinator import build_coordinator_agent
-    from coscribe.runtime.types import get_tool_metadata
 
     settings = Settings(
         _env_file=None,
@@ -3075,21 +3076,21 @@ def test_reviewer_tools_are_exactly_the_read_only_documents_tools(
         default_model="gemini:gemini-flash-latest",
     )
     agent = build_coordinator_agent(settings, "test-thread")
-    reviewer_tools = [
-        t
-        for t in agent.tools
-        if get_tool_metadata(t).category == "documents"
-        and not get_tool_metadata(t).requires_approval
-    ]
+    from coscribe.runtime_lg import select_reviewer_tools
+
+    reviewer_tools = select_reviewer_tools(agent.tools)
     names = sorted(t.__name__ if hasattr(t, "__name__") else t.name for t in reviewer_tools)
     assert names == [
         "check_pptx_delivery",
+        "get_file_info",
+        "list_files",
         "list_pptx_animation_types",
         "list_pptx_icons",
         "list_pptx_shape_types",
         "list_pptx_shapes",
         "list_pptx_transition_types",
         "read_docx",
+        "read_file",
         "read_pdf",
         "read_pptx",
         "read_pptx_theme_colors",

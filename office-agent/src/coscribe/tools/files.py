@@ -114,7 +114,13 @@ class FileToolkit:
             raise ValueError(f"File does not exist: {path}")
         if not file_path.is_file():
             raise ValueError(f"Path is not a file: {path}")
-        content = file_path.read_text(encoding="utf-8")
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise ValueError(
+                f"{path} is not a text file, so read_file can't show it. "
+                "Use read_docx, read_xlsx, read_pptx or read_pdf for an Office/PDF file."
+            ) from None
         if head is not None or start_line > 1:
             lines = content.splitlines(keepends=True)[start_line - 1 :]
             return "".join(lines if head is None else lines[:head])

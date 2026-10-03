@@ -28,6 +28,7 @@ from .subagents import (
     SubAgentHost,
     build_delegation_tools,
     build_review_work_tool,
+    select_reviewer_tools,
 )
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     "SubAgentHost",
     "build_delegation_tools",
     "build_review_work_tool",
+    "select_reviewer_tools",
     "connect_mcp_tools_lg",
     "continue_workflow_run",
     "extract_text",

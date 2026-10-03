@@ -49,6 +49,18 @@ new content gets appended to. Tables in a template are always removed
 outright, tracked changes or not, since table-level tracked deletions
 aren't supported.
 
+## Charts and pictures
+
+`write_docx` has no syntax for them. Write the document first, then call
+`add_docx_chart(path, chart_type, data, title=..., after_text="<heading>")`
+for a bar/line/pie chart from a pipe-table -- it is a native Word chart, so
+the reader can edit its data, and it needs no plotting library. Use
+`add_docx_image` for an existing PNG/JPEG. Both put the item after the
+paragraph named by `after_text` (or at the end) and leave the rest of the
+file alone. Writing the document again with `write_docx` discards them, so
+make text changes with `replace_docx_text`/`insert_docx_text` afterwards.
+Give a caption when the text refers to the figure.
+
 ## Before finishing
 
 For a document with real structure (a TOC, multiple sections, a template

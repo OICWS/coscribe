@@ -746,6 +746,12 @@ def _ensure_para_ids(document_element: Any) -> None:
         paragraph.set(f"{_tracks_constants.W14}paraId", candidate)
 
 
+
+def _text_column_emu(document: Any) -> int:
+    section = document.sections[-1]
+    return int((section.page_width or 0) - (section.left_margin or 0) - (section.right_margin or 0))
+
+
 def _locate_paragraph(
     document_element: Any,
     find: str,
@@ -990,6 +996,115 @@ class DocumentToolkit:
             "preview_path": preview_path,
             "preview_skipped_reason": preview_skipped_reason,
         }
+
+    @locked_by_path
+    def add_docx_chart(
+        self,
+        path: str,
+        chart_type: str,
+        data: str,
+        title: str = "",
+        after_text: str = "",
+        caption: str = "",
+        width: float = 0.0,
+        height: float = 3.2,
+    ) -> dict[str, object]:
+        from docx import Document
+        from docx.shared import Emu, Inches
+
+        from ._chart_data import CHART_TYPES, parse_chart_table
+        from ._docx_chart import add_chart_paragraph
+
+        if chart_type not in CHART_TYPES:
+            raise ValueError(
+                f"Unknown chart_type {chart_type!r}. Use one of: {', '.join(sorted(CHART_TYPES))}"
+            )
+        categories, series = parse_chart_table(data, "add_docx_chart")
+        if chart_type == "pie" and len(series) > 1:
+            raise ValueError("pie charts take exactly one data column plus the category column")
+
+        file_path = self._check_editable(path)
+        document = Document(str(file_path))
+        # Never wider than the text column: a chart sized for a slide runs
+        # off the page edge in a portrait document.
+        column = _text_column_emu(document)
+        width_emu = min(int(Inches(width)), column) if width > 0 else column
+        paragraph = add_chart_paragraph(
+            document,
+            chart_type,
+            categories,
+            series,
+            title,
+            width_emu,
+            int(Emu(int(Inches(height)))),
+        )
+        self._place_after(document, paragraph, after_text, caption)
+        return self._save_tracked_edit(file_path, document)
+
+    @locked_by_path
+    def add_docx_image(
+        self,
+        path: str,
+        image_path: str,
+        after_text: str = "",
+        caption: str = "",
+        width: float = 0.0,
+    ) -> dict[str, object]:
+        from docx import Document
+        from docx.shared import Emu, Inches
+
+        image_file = self._check_readable(image_path)
+        file_path = self._check_editable(path)
+        document = Document(str(file_path))
+        column = _text_column_emu(document)
+        paragraph = document.add_paragraph()
+        run = paragraph.add_run()
+        try:
+            picture = run.add_picture(str(image_file))
+        except Exception as error:  # python-docx raises UnrecognizedImageError
+            raise ValueError(f"{image_path} is not a PNG, JPEG, GIF or BMP image") from error
+        target = min(int(Inches(width)), column) if width > 0 else min(picture.width, column)
+        picture.height = Emu(int(picture.height * target / picture.width))
+        picture.width = Emu(target)
+        self._place_after(document, paragraph, after_text, caption)
+        return self._save_tracked_edit(file_path, document)
+
+    @staticmethod
+    def _place_after(document: Any, paragraph: Any, after_text: str, caption: str) -> None:
+        """Centre `paragraph`, add its caption, and move both after the
+        paragraph named by `after_text` (default: leave at the end)."""
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.text.paragraph import Paragraph
+
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        last = paragraph
+        if caption:
+            caption_paragraph = document.add_paragraph()
+            run = caption_paragraph.add_run(caption)
+            run.italic = True
+            caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            last = caption_paragraph
+        if not after_text:
+            return
+        # The new paragraphs are still the last two in the body; find the
+        # anchor among the others.
+        moving = {id(paragraph._p), id(last._p)}  # noqa: SLF001
+        others = [p for p in document.paragraphs if id(p._p) not in moving]  # noqa: SLF001
+        wanted = after_text.strip()
+        exact = [p for p in others if p.text.strip() == wanted]
+        matches = exact or [p for p in others if wanted in p.text]
+        if not matches:
+            raise ValueError(f"No paragraph contains {after_text!r}; the chart was not added.")
+        if len(matches) > 1:
+            raise ValueError(
+                f"{len(matches)} paragraphs contain {after_text!r}; give more of the "
+                "text so it names one."
+            )
+        anchor: Any = matches[0]._p  # noqa: SLF001
+        anchor.addnext(paragraph._p)  # noqa: SLF001
+        if last is not paragraph:
+            paragraph._p.addnext(last._p)  # noqa: SLF001
+        del Paragraph
 
     @locked_by_path
     def insert_docx_text(
@@ -1330,6 +1445,81 @@ def build_document_tools(
             comment_author=comment_author,
         )
 
+    def add_docx_chart(
+        path: str,
+        chart_type: str,
+        data: str,
+        title: str = "",
+        after_text: str = "",
+        caption: str = "",
+        width: float = 0.0,
+        height: float = 3.2,
+    ) -> dict[str, object]:
+        """Add a native, editable chart to an existing Word (.docx) file.
+
+        `data` is a pipe-table: the first column is the category axis and
+        every other column is its own series named by its header cell, e.g.
+
+            | Month | Revenue |
+            | --- | --- |
+            | Jan | 120 |
+            | Feb | 135 |
+
+        `chart_type` is "bar", "line" or "pie" (pie takes exactly one data
+        column). The chart lands at the end of the document unless
+        `after_text` names a paragraph (a heading's text works) to put it
+        after. Everything else in the document is left as it is, so call
+        this after `write_docx` -- writing the document again discards the
+        chart. The result's `preview_path` shows the first page.
+
+        Args:
+            path: .docx file to edit, relative to the workspace root
+            chart_type: "bar", "line" or "pie"
+            data: pipe-table rows as described above
+            title: chart title; empty for none
+            after_text: text of the paragraph to place the chart after; it
+                must match one paragraph. Empty puts the chart at the end.
+            caption: optional italic line under the chart
+            width: inches; 0 (default) fills the page's text width
+            height: inches
+        """
+        return toolkit.add_docx_chart(
+            path=path,
+            chart_type=chart_type,
+            data=data,
+            title=title,
+            after_text=after_text,
+            caption=caption,
+            width=width,
+            height=height,
+        )
+
+    def add_docx_image(
+        path: str,
+        image_path: str,
+        after_text: str = "",
+        caption: str = "",
+        width: float = 0.0,
+    ) -> dict[str, object]:
+        """Add a picture (PNG, JPEG, GIF or BMP) to an existing Word (.docx)
+        file. It lands at the end of the document unless `after_text` names
+        a paragraph to put it after; everything else is left as it is, so
+        call this after `write_docx`. Use `add_docx_chart` for a chart from
+        numbers -- it stays editable in Word.
+
+        Args:
+            path: .docx file to edit, relative to the workspace root
+            image_path: image file, relative to the workspace root
+            after_text: text of the paragraph to place the picture after; it
+                must match one paragraph. Empty puts it at the end.
+            caption: optional italic line under the picture
+            width: inches; 0 (default) keeps the image's size, shrunk to the
+                page's text width if larger
+        """
+        return toolkit.add_docx_image(
+            path=path, image_path=image_path, after_text=after_text, caption=caption, width=width
+        )
+
     def insert_docx_text(
         path: str,
         text: str,
@@ -1560,6 +1750,8 @@ def build_document_tools(
     return [
         tool_metadata(read_docx, risk_category="READ", category="documents"),
         tool_metadata(write_docx, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(add_docx_chart, risk_category="WRITE_LOCAL", category="documents"),
+        tool_metadata(add_docx_image, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(insert_docx_text, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(delete_docx_text, risk_category="WRITE_LOCAL", category="documents"),
         tool_metadata(replace_docx_text, risk_category="WRITE_LOCAL", category="documents"),

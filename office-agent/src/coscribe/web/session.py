@@ -85,6 +85,7 @@ from ..runtime_lg import (
     build_review_work_tool,
     propose_skill_save_lg,
     resolve_chat_model,
+    select_reviewer_tools,
     serialize_history_for_ws_lg,
     tool_name,
     write_skill_lg,
@@ -662,19 +663,12 @@ class ChatSessionLG:
         # own available_tools=agent.tools call).
         combined_tools = [*self._base_tools, *self._extra_tools]
         delegation_tools = build_delegation_tools(self._subagent_host(model), combined_tools)
-        # The reviewer only ever gets read-only "documents" tools (read_docx/
-        # read_pdf/search_pdf/read_xlsx/read_pptx today) -- independent
-        # verification of a generated file's real content, never a way for
-        # it to change anything itself. requires_approval is False for all
-        # five, which is exactly why build_review_work_tool's own docstring
-        # can promise its sub-agent never pauses on HumanInTheLoopMiddleware.
-        reviewer_tools = [
-            t
-            for t in combined_tools
-            if (metadata := get_tool_metadata(cast("Callable[..., Any]", t))).category
-            == "documents"
-            and not metadata.requires_approval
-        ]
+        # The reviewer only ever gets read-only tools (document readers and
+        # file listing/reading) -- independent verification of a generated
+        # file's real content, never a way for it to change anything. See
+        # select_reviewer_tools for why that also keeps it from pausing on
+        # an approval.
+        reviewer_tools = select_reviewer_tools(combined_tools)
         review_work_tool = build_review_work_tool(model, reviewer_tools, self.settings.state_dir)
         return [
             *combined_tools,

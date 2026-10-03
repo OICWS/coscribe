@@ -634,3 +634,11 @@ def test_read_file_leaves_an_ordinary_file_alone(tmp_path: Path) -> None:
     tools = {t.__name__: t for t in build_file_tools(tmp_path)}
 
     assert tools["read_file"](path="small.txt") == "a\nb\n"
+
+
+def test_read_file_on_an_office_file_points_to_the_right_reader(tmp_path: Path) -> None:
+    (tmp_path / "report.docx").write_bytes(b"PK\x03\x04\x91\x92 not utf-8")
+    tools = _tools_by_name(tmp_path)
+
+    with pytest.raises(ValueError, match="read_docx"):
+        tools["read_file"](path="report.docx", tail=60)

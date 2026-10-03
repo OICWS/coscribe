@@ -1,5 +1,6 @@
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -889,3 +890,110 @@ def test_pdf_column_widths_give_a_short_label_column_room_beside_a_long_one() ->
 
     assert abs(sum(widths) - 450) < 0.01
     assert widths[0] >= 450 * 6 / (6 + 60) - 0.01
+
+
+_CHART_DATA = "| Month | Revenue |\n| --- | --- |\n| Jan | 120 |\n| Feb | 135 |"
+
+
+def _body_texts(path: Path) -> list[str]:
+    """Document order of the body: paragraph text, with a chart or picture
+    shown as a marker."""
+    out: list[str] = []
+    for paragraph in Document(str(path)).paragraphs:
+        xml = paragraph._p.xml
+        if "drawingml/2006/chart" in xml:
+            out.append("[chart]")
+        elif "<pic:pic" in xml:
+            out.append("[picture]")
+        else:
+            out.append(paragraph.text)
+    return out
+
+
+def test_add_docx_chart_lands_after_the_named_paragraph_and_keeps_the_rest(
+    tmp_path: Path,
+) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](
+        path="r.docx", content="# Report\n\nIntro.\n\n## Trend\n\nBody.\n\n## End\n"
+    )
+
+    result = tools["add_docx_chart"](
+        path="r.docx",
+        chart_type="bar",
+        data=_CHART_DATA,
+        title="Revenue",
+        after_text="Trend",
+        caption="Figure 1",
+    )
+
+    assert result["path"] == "r.docx"
+    assert _body_texts(tmp_path / "r.docx") == [
+        "Report", "Intro.", "Trend", "[chart]", "Figure 1", "Body.", "End"
+    ]
+    names = zipfile.ZipFile(tmp_path / "r.docx").namelist()
+    assert "word/charts/chart1.xml" in names
+    assert "word/embeddings/Microsoft_Excel_Sheet1.xlsx" in names
+
+
+def test_add_docx_chart_twice_makes_two_distinct_charts(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="r.docx", content="Intro.")
+
+    tools["add_docx_chart"](path="r.docx", chart_type="line", data=_CHART_DATA)
+    tools["add_docx_chart"](path="r.docx", chart_type="pie", data=_CHART_DATA)
+
+    names = zipfile.ZipFile(tmp_path / "r.docx").namelist()
+    assert "word/charts/chart1.xml" in names
+    assert "word/charts/chart2.xml" in names
+    assert _body_texts(tmp_path / "r.docx") == ["Intro.", "[chart]", "[chart]"]
+
+
+def test_add_docx_chart_refuses_an_ambiguous_or_missing_anchor(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="r.docx", content="Sales one.\n\nSales two.\n")
+
+    with pytest.raises(ValueError, match="2 paragraphs"):
+        tools["add_docx_chart"](
+            path="r.docx", chart_type="bar", data=_CHART_DATA, after_text="Sales"
+        )
+    with pytest.raises(ValueError, match="No paragraph"):
+        tools["add_docx_chart"](
+            path="r.docx", chart_type="bar", data=_CHART_DATA, after_text="Nowhere"
+        )
+    assert _body_texts(tmp_path / "r.docx") == ["Sales one.", "Sales two."]
+
+
+def test_add_docx_chart_accepts_thousands_separators(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="r.docx", content="Intro.")
+
+    tools["add_docx_chart"](
+        path="r.docx", chart_type="bar", data="| M | V |\n|--|--|\n| a | 1,200 |\n| b | 3,400 |"
+    )
+
+    assert "1200" in zipfile.ZipFile(tmp_path / "r.docx").read("word/charts/chart1.xml").decode()
+
+
+def test_add_docx_image_puts_a_picture_after_the_named_paragraph(tmp_path: Path) -> None:
+    from PIL import Image
+
+    Image.new("RGB", (400, 200), "red").save(tmp_path / "logo.png")
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="r.docx", content="Top.\n\nBottom.\n")
+
+    tools["add_docx_image"](path="r.docx", image_path="logo.png", after_text="Top.", width=3.0)
+
+    assert _body_texts(tmp_path / "r.docx") == ["Top.", "[picture]", "Bottom."]
+    shape = Document(str(tmp_path / "r.docx")).inline_shapes[0]
+    assert shape.width == 3 * 914400
+    assert shape.height == int(1.5 * 914400)
+
+
+def test_add_docx_image_rejects_a_file_that_is_not_an_image(tmp_path: Path) -> None:
+    (tmp_path / "notes.png").write_text("not an image")
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="r.docx", content="Top.")
+
+    with pytest.raises(ValueError, match="not a PNG"):
+        tools["add_docx_image"](path="r.docx", image_path="notes.png")

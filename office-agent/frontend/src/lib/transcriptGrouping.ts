@@ -409,6 +409,8 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   add_pptx_chart: () => ({ verb: "Added a chart", object: null }),
   add_pptx_image: () => ({ verb: "Added an image", object: null }),
   add_xlsx_chart: () => ({ verb: "Added a chart", object: null }),
+  add_docx_chart: () => ({ verb: "Added a chart", object: null }),
+  add_docx_image: () => ({ verb: "Added an image", object: null }),
   format_xlsx_cells: () => ({ verb: "Formatted cells", object: null }),
   recalc_xlsx: (a) => ({ verb: "Recalculated", object: fileArg(a) ?? "a spreadsheet" }),
   task_create: (a) => ({ verb: "Added a task", object: str(a, "content") ?? null, glue: ": " }),

@@ -211,6 +211,11 @@ AI 只在运行之外工作：
 - **`add_xlsx_chart`/`add_pptx_chart`**：只用 openpyxl/python-pptx 高层
   图表 API，不手写 XML；范围收窄到单组柱状/折线/饼图，规避"schema 合法
   但 Office 判定文件损坏"这类坑。
+- **`add_docx_chart`/`add_docx_image`**：python-docx 没有图表 API，所以复用
+  python-pptx 的图表 XML 与内嵌工作簿生成器，自己把 chart part 和内嵌
+  xlsx 挂进 docx 包，再用一个 inline drawing 指向它。结果是 Word 里可
+  编辑的原生图表，不依赖绘图库（打包版排除了 matplotlib）。图表宽度不
+  超过页面文字栏宽，`after_text` 必须唯一命中一个段落。
 - **xlsx 公式支持**：写公式前硬拒绝 LibreOffice 算不出来的
   `XLOOKUP`/`XMATCH`/`SORT`/`FILTER`/`UNIQUE`/`SEQUENCE`；`_xlfn.`
   前缀自动补给 2007 后新函数；用 headless LibreOffice + StarBasic 宏

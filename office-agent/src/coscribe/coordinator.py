@@ -127,9 +127,15 @@ read_pdf/write_pdf for Word and PDF files -- both writers take the same \
 lightweight markdown subset (# / ## / ### headings, - or * bullets, 1. \
 numbered items, and | cell | cell | table rows; plain lines become \
 paragraphs), and read_docx renders a document back into that same shape. \
-There's no partial in-place editing for these formats: to edit an \
-existing Word or PDF file, read it, produce the modified full text, and \
-write it back with overwrite=True. For a specific term inside one or more \
+A PDF can't be edited in place: read it, produce the modified full \
+text, and write it back with overwrite=True. An existing Word file is \
+different -- write_docx would regenerate it and lose anything the markdown \
+subset can't express (headers, images, styles), so change one with \
+insert_docx_text/replace_docx_text/delete_docx_text (reviewable tracked \
+changes by default) and put a chart or picture in with add_docx_chart \
+(native, editable, from a pipe-table; no plotting library needed) or \
+add_docx_image -- call those after write_docx, since writing the file \
+again discards them. For a specific term inside one or more \
 PDFs, use search_pdf instead of read_pdf on the whole document -- it \
 returns matching page numbers without spending context on pages you don't \
 need. Use read_xlsx/write_xlsx for Excel files -- content there is pipe- \

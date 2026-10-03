@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -477,7 +477,12 @@ was done, check: does it actually satisfy the request? Is anything missing, \
 wrong, or riskier than necessary? If you were given a file path, read it \
 yourself with your own tools rather than trusting the summary alone -- the \
 summary is what the acting agent believes it did, not independent \
-confirmation. If an image is attached, it's a rendered preview of the \
+confirmation. Paths are relative to the workspace root; if one doesn't \
+open, call list_files to find the real name instead of guessing, and if \
+the file truly isn't there say so as your first finding -- never review \
+a file you could not read. You have a handful of tool calls: read the file \
+once, look at any image, then answer -- don't keep digging for more. \
+If an image is attached, it's a rendered preview of the \
 actual output -- look at it critically, the way a human design reviewer \
 would, not just for structural correctness: is text legible against \
 whatever is behind it, does the layout look generic or like every \
@@ -488,6 +493,34 @@ direct assessment: either confirm it looks correct, or list specific, \
 concrete problems to fix (not vague "could be better" -- name what's \
 actually wrong and where). Do not redo the work yourself.
 """
+
+
+# The file tools a reviewer may use on top of the documents tools. Without
+# a way to look at the folder it guessed names from the summary and then
+# "reviewed" files that were never written.
+# search_files stays out: on an office file it matches nothing, and the
+# reviewer burned a dozen calls grepping a docx.
+_REVIEWER_FILE_TOOLS = frozenset({"list_files", "read_file", "get_file_info"})
+
+
+def select_reviewer_tools(
+    tools: Sequence[Callable[..., Any] | BaseTool],
+) -> list[Callable[..., Any] | BaseTool]:
+    """The tools review_work's reviewer gets: read-only document readers
+    plus the read-only file tools. requires_approval is the guard, so a
+    reviewer can never pause on an approval or change anything."""
+    chosen: list[Callable[..., Any] | BaseTool] = []
+    for tool in tools:
+        metadata = get_tool_metadata(cast("Callable[..., Any]", tool))
+        name = _tool_name(tool)
+        if metadata.requires_approval:
+            continue
+        if metadata.category == "documents" or name in _REVIEWER_FILE_TOOLS:
+            chosen.append(tool)
+    return chosen
+
+
+_REVIEWER_MAX_MODEL_CALLS = 8
 
 
 # LibreOffice's own PNG export (render_pptx_preview et al) has no
@@ -602,7 +635,12 @@ def build_review_work_tool(
                 looks at slide 1 can miss real problems on the rest of a
                 deck.
         """
-        reviewer = build_langgraph_agent(model, reviewer_tools, REVIEWER_INSTRUCTIONS)
+        # A reviewer that keeps digging turns a one-minute check into a
+        # five-minute one; its verdict is only as good as what it read in
+        # the first few calls.
+        reviewer = build_langgraph_agent(
+            model, reviewer_tools, REVIEWER_INSTRUCTIONS, max_turns=_REVIEWER_MAX_MODEL_CALLS
+        )
         prompt_text = (
             f"Original request:\n{original_request}\n\nWork summary:\n{summary_of_work}\n\n"
         )

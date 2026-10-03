@@ -254,3 +254,23 @@ def test_review_work_reports_no_reply_gracefully(tmp_path: Path) -> None:
     result = review_work(original_request="req", summary_of_work="summary")
 
     assert result == "(reviewer produced no text reply)"
+
+
+def test_a_reviewer_that_keeps_digging_is_stopped_after_a_few_model_calls(tmp_path: Path) -> None:
+    def look(path: str) -> str:
+        """A fake read-only tool."""
+        return "nothing here"
+
+    digging = [
+        AIMessage(
+            content="",
+            tool_calls=[{"name": "look", "args": {"path": f"{i}.docx"}, "id": f"c{i}"}],
+        )
+        for i in range(40)
+    ]
+    model = _FakeModel(responses=digging)
+    review_work = build_review_work_tool(model, [look], tmp_path)
+
+    review_work(original_request="write a report", summary_of_work="wrote it")
+
+    assert len(model.calls) <= 8
