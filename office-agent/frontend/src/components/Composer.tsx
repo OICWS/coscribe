@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useComposerAction } from "../lib/menuCommands";
 import { uploadFile } from "../lib/rest";
+import { ThreadIdContext } from "./threadContext";
 import type { CommandInfo } from "../types/session";
 import type { BrowserCapture } from "./BrowserPanel";
 import { ImageLightbox } from "./ImageLightbox";
@@ -125,6 +126,7 @@ export function Composer({
   externalText,
   onExternalTextConsumed,
 }: ComposerProps) {
+  const threadId = useContext(ThreadIdContext);
   const [value, setValue] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -409,7 +411,7 @@ export function Composer({
       setPendingImages((prev) => [...prev, { name: file.name, dataUrl }]);
       return;
     }
-    const result = await uploadFile(file);
+    const result = await uploadFile(file, threadId);
     if ("error" in result) {
       onLocalError(`couldn't attach ${file.name} -- ${result.error}`);
       return;

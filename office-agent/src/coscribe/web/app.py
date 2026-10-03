@@ -68,7 +68,7 @@ from typing import TYPE_CHECKING, Annotated, Any, cast, get_args
 
 import uvicorn
 from dotenv import dotenv_values, load_dotenv, set_key
-from fastapi import Body, FastAPI, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -2433,7 +2433,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.post("/api/upload")
-    async def upload_file(file: UploadFile) -> JSONResponse:
+    async def upload_file(
+        file: UploadFile, thread_id: Annotated[str, Form()] = ""
+    ) -> JSONResponse:
         # Direct port of web/app.py's identical endpoint -- pure file I/O
         # against settings.workspace_root, nothing runtime-specific about
         # it (unlike /api/config, /api/mcp/*, /api/providers/*, this one
@@ -2443,7 +2445,13 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         content = await file.read()
         if len(content) > MAX_UPLOAD_BYTES:
             return JSONResponse({"error": "file too large (max 25MB)"}, status_code=413)
-        scope = WorkspaceScope(settings.workspace_root)
+        # Into the conversation's own folder when it has one: the model
+        # reads the path relative to that, not to the app's default.
+        scope = (
+            _get_session(thread_id).workspace_scope()
+            if thread_id
+            else WorkspaceScope(settings.workspace_root)
+        )
         path = _unique_upload_path(scope, file.filename or "upload")
         path.write_bytes(content)
         return JSONResponse({"path": scope.relative(path), "bytes_written": len(content)})
@@ -2476,7 +2484,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         return FileResponse(path, media_type="image/png")
 
     @app.get("/api/pptx-shapes")
-    async def get_pptx_shapes(path: str, slide: int) -> JSONResponse:
+    async def get_pptx_shapes(path: str, slide: int, thread_id: str = "") -> JSONResponse:
         # Backs the click-a-shape-in-the-preview-to-target-it feature
         # (ChatLog.tsx's PptxShapeOverlay): the frontend already has
         # `path` from the tool call's own `arguments.path` and picks
@@ -2491,7 +2499,16 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         # model, never touches the audit log a real tool call would).
         from ..tools.presentations import PresentationToolkit
 
-        toolkit = PresentationToolkit(settings.workspace_root, state_dir=settings.state_dir)
+        if thread_id:
+            scope = _get_session(thread_id).workspace_scope()
+            toolkit = PresentationToolkit(
+                scope.root,
+                state_dir=settings.state_dir,
+                extra_readable=scope.extra_readable,
+                extra_writable=scope.extra_writable,
+            )
+        else:
+            toolkit = PresentationToolkit(settings.workspace_root, state_dir=settings.state_dir)
         try:
             result = await asyncio.to_thread(toolkit.list_pptx_shapes, path=path, slide=slide)
         except Exception as exc:

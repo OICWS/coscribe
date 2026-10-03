@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { ThreadIdContext } from "./threadContext";
 
 /** Same shape as BrowserPanel.tsx's BrowserCapture (Composer.tsx's
  * pendingImages list takes either interchangeably) -- `source: "pptx"`
@@ -68,6 +69,7 @@ export function PptxShapeOverlay({
   slide: number;
   onPick: (capture: PptxShapeCapture) => void;
 }) {
+  const threadId = useContext(ThreadIdContext);
   const [shapes, setShapes] = useState<PptxShapesResponse | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -75,7 +77,7 @@ export function PptxShapeOverlay({
   useEffect(() => {
     let cancelled = false;
     setShapes(null);
-    const params = new URLSearchParams({ path, slide: String(slide) });
+    const params = new URLSearchParams({ path, slide: String(slide), thread_id: threadId });
     fetch(`/api/pptx-shapes?${params}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: PptxShapesResponse | null) => {
@@ -87,7 +89,7 @@ export function PptxShapeOverlay({
     return () => {
       cancelled = true;
     };
-  }, [path, slide]);
+  }, [path, slide, threadId]);
 
   const pick = (shape: PptxShapeInfo) => {
     const img = imgRef.current;

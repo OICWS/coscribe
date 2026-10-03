@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { ThreadIdContext } from "./components/threadContext";
 import { HomeGreeting } from "./components/EmptyState";
 import { ChatLog } from "./components/ChatLog";
 import { Composer, type ComposerSendPayload } from "./components/Composer";
@@ -769,6 +770,7 @@ function App() {
   );
 
   return (
+    <ThreadIdContext.Provider value={threadId}>
     <div className="relative flex h-full flex-col">
       {DRAWS_TITLE_BAR && (
         // The window's title bar: the sidebar's top row covers its left
@@ -1022,6 +1024,7 @@ function App() {
         onNewScheduledTask={createTaskWithCoscribe}
       />
     </div>
+    </ThreadIdContext.Provider>
   );
 }
 

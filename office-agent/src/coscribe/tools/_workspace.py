@@ -33,6 +33,14 @@ class WorkspaceScope:
             Path(p).expanduser().resolve() for p in extra_readable
         ] + self._extra_writable
 
+    @property
+    def extra_readable(self) -> list[Path]:
+        return list(self._extra_readable)
+
+    @property
+    def extra_writable(self) -> list[Path]:
+        return list(self._extra_writable)
+
     def resolve(self, path: str, *, write: bool = False) -> Path:
         candidate = Path(path).expanduser()
         resolved = (

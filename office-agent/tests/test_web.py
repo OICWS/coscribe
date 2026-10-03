@@ -3117,6 +3117,45 @@ def test_upload_writes_file_to_workspace_and_returns_relative_path(
     assert (tmp_path / "workspace" / "report.pdf").read_bytes() == b"%PDF-1.4 fake content"
 
 
+def test_an_upload_and_a_slide_overlay_use_the_conversations_own_folder_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real bug: with a folder chosen for a conversation, an attached file
+    landed in the app's default workspace -- the path the model was given
+    pointed nowhere in its folder -- and the click-a-shape overlay couldn't
+    find a deck that lived there."""
+    from pptx import Presentation
+
+    chosen = tmp_path / "project-folder"
+    chosen.mkdir()
+    prs = Presentation()
+    prs.slides.add_slide(prs.slide_layouts[5])
+    prs.save(str(chosen / "deck.pptx"))
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect(f"/ws/t_own_folder?workspace={chosen}") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            uploaded = client.post(
+                "/api/upload",
+                data={"thread_id": "t_own_folder"},
+                files={"file": ("brief.txt", b"hello", "text/plain")},
+            ).json()
+            shapes = client.get(
+                "/api/pptx-shapes",
+                params={"path": "deck.pptx", "slide": 1, "thread_id": "t_own_folder"},
+            )
+            without_thread = client.get(
+                "/api/pptx-shapes", params={"path": "deck.pptx", "slide": 1}
+            )
+
+    assert uploaded["path"] == "brief.txt"
+    assert (chosen / "brief.txt").read_bytes() == b"hello"
+    assert not (tmp_path / "workspace" / "brief.txt").exists()
+    assert shapes.status_code == 200 and shapes.json()["slide_width_in"] > 0
+    assert without_thread.status_code == 400
+
+
 def test_upload_auto_renames_on_name_collision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -6221,6 +6260,33 @@ def test_thread_activity_marks_files_created_edited_and_read_lg(
         "plan.md": "edited",
     }
     assert [(r["path"], r["action"]) for r in activity["references"]] == [("notes.txt", "read")]
+
+
+def test_thread_activity_leaves_scratch_folders_out_of_the_outputs_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run that checks its work leaves renders and test files behind;
+    those aren't what the person asked for."""
+    (tmp_path / "workspace").mkdir()
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call("c1", "write_file", {"path": "report.md", "content": "# R"}),
+                    _tool_call("c2", "write_file", {"path": "qa/page-1.md", "content": "x"}),
+                    _tool_call("c3", "write_file", {"path": ".cache/x.md", "content": "x"}),
+                    _tool_call("c4", "write_file", {"path": "out/qa.md", "content": "x"}),
+                ],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        _run_turn(client, "t_activity_scratch", "write")
+        activity = client.get("/api/threads/t_activity_scratch/activity").json()
+
+    assert sorted(o["path"] for o in activity["outputs"]) == ["out/qa.md", "report.md"]
 
 
 def test_opening_a_thread_file_only_hands_documents_to_the_os_lg(

@@ -74,6 +74,16 @@ def _script_files(result: Any) -> list[str]:
     return [p for p in written if isinstance(p, str)] if isinstance(written, list) else []
 
 
+# Folders a working process leaves its checks in: not something the person
+# asked for, so not listed among what the conversation produced.
+_SCRATCH_FOLDERS = frozenset({"qa", "tmp", "temp", "scratch", "__pycache__", "node_modules"})
+
+
+def _is_scratch(relative: str) -> bool:
+    parts = Path(relative.replace("\\", "/")).parts[:-1]
+    return any(part.lower() in _SCRATCH_FOLDERS or part.startswith(".") for part in parts)
+
+
 def _file_entry(scope: WorkspaceScope, path: str) -> dict[str, Any] | None:
     try:
         resolved = scope.resolve(path)
@@ -154,7 +164,7 @@ def summarize_activity(
             actions[key] = "edited"
     outputs: list[dict[str, Any]] = []
     for key in dict.fromkeys(reversed(last_touched)):  # most recently touched first
-        if actions[key] != "read":
+        if actions[key] != "read" and not _is_scratch(key):
             outputs.append({**entries[key], "action": actions[key]})
     references = [
         {**entries[key], "action": "read"}
