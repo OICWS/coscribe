@@ -35,3 +35,24 @@ def truncate_script_output(text: str) -> str:
     head = text[:_TRUNCATED_HEAD_CHARS]
     tail = text[-_TRUNCATED_TAIL_CHARS:]
     return f"{head}\n\n...[{omitted:,} characters truncated]...\n\n{tail}"
+
+
+# What one read may hand the model: about 20-30k tokens. A whole 5 MB CSV
+# (over a million) used to go straight into the context, and the next model
+# call failed on its length.
+MAX_READ_CHARS = 80_000
+
+
+def cap_read_output(text: str, how_to_continue: str) -> str:
+    """`text` unchanged if it fits; else its first lines up to
+    MAX_READ_CHARS, then a note saying how much was left and
+    `how_to_continue` -- never a silent cut."""
+    if len(text) <= MAX_READ_CHARS:
+        return text
+    cut = text.rfind("\n", 0, MAX_READ_CHARS)
+    shown = text[: cut if cut > MAX_READ_CHARS // 2 else MAX_READ_CHARS]
+    lines_shown = shown.count("\n") + 1
+    return (
+        f"{shown}\n\n[Showing the first {len(shown):,} of {len(text):,} characters "
+        f"({lines_shown:,} lines); {how_to_continue}]"
+    )

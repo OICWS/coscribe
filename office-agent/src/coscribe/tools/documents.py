@@ -93,6 +93,7 @@ from ._file_locks import locked_by_path
 from ._native_docx_tracks import _constants as _tracks_constants
 from ._native_docx_tracks.tracks import TracksMixin, _resolve
 from ._ooxml_validate import assert_wml_valid
+from ._output_truncation import cap_read_output
 from ._thumbnail import render_thumbnail
 from ._workspace import WorkspaceScope
 from .files import DEFAULT_IGNORES
@@ -258,6 +259,83 @@ def parse_blocks(content: str) -> list[Block]:
     flush_paragraph()
     flush_table()
     return blocks
+
+
+_CJK_RE = re.compile("[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
+
+# Where a font with Chinese glyphs usually lives, best looking first. A
+# TrueType file or collection: reportlab can't use PostScript-outline
+# (CFF) fonts such as Noto Sans CJK, which are skipped when they fail.
+_CJK_FONT_FILES = (
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/msyh.ttf",
+    "C:/Windows/Fonts/msjh.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/simsun.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/Library/Fonts/Arial Unicode.ttf",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+)
+_pdf_cjk_font_name: str | None = None
+
+
+def _pdf_column_widths(rows: list[list[str]], total: float) -> list[float]:
+    """Column widths in proportion to their longest cell (a CJK character
+    counts double), none thinner than a few characters, so a short label
+    column doesn't wrap letter by letter beside a long text column."""
+    columns = max(len(row) for row in rows)
+    weights = []
+    for index in range(columns):
+        lengths = [
+            sum(2 if _CJK_RE.match(ch) else 1 for ch in str(row[index]))
+            for row in rows
+            if index < len(row)
+        ]
+        longest = max(lengths, default=1)
+        weights.append(min(max(longest, 6), 60))
+    return [total * weight / sum(weights) for weight in weights]
+
+
+def _pdf_cjk_font() -> str | None:
+    """A registered reportlab font with Chinese glyphs: a system TrueType
+    font, embedded, or failing that the built-in STSong-Light CID font
+    (not embedded; the viewer supplies the glyphs). Cached."""
+    global _pdf_cjk_font_name
+    if _pdf_cjk_font_name is not None:
+        return _pdf_cjk_font_name
+    from reportlab.lib.fonts import addMapping
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    name = "CoscribeCJK"
+    for candidate in _CJK_FONT_FILES:
+        if not Path(candidate).is_file():
+            continue
+        try:
+            font = TTFont(name, candidate, subfontIndex=0)
+        except Exception:  # noqa: BLE001 -- an unusable file: try the next
+            continue
+        if ord("国") not in font.face.charToGlyph:
+            continue
+        pdfmetrics.registerFont(font)
+        break
+    else:
+        name = "STSong-Light"
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont(name))
+        except Exception:  # noqa: BLE001 -- no CJK support at all: leave the default
+            return None
+    # <b>/<i> inside a paragraph look the font up as a family.
+    pdfmetrics.registerFontFamily(name, normal=name, bold=name, italic=name, boldItalic=name)
+    for bold in (0, 1):
+        for italic in (0, 1):
+            addMapping(name, bold, italic, name)
+    _pdf_cjk_font_name = name
+    return name
 
 
 # Markers count as formatting only where Markdown says they do: touching
@@ -1076,35 +1154,56 @@ class DocumentToolkit:
 
         file_path = self._check_writable(path, overwrite)
         styles = getSampleStyleSheet()
-        bullet_style = ParagraphStyle("CoscribeBullet", parent=styles["Normal"], leftIndent=18)
+        # reportlab's built-in fonts have no Chinese/Japanese/Korean glyphs:
+        # such text came out as black boxes with no error.
+        cjk_font = _pdf_cjk_font() if _CJK_RE.search(content) else None
+        normal = ParagraphStyle(
+            "CoscribeNormal", parent=styles["Normal"], fontName=cjk_font or "Helvetica"
+        )
+        bullet_style = ParagraphStyle("CoscribeBullet", parent=normal, leftIndent=18)
+        cell_style = ParagraphStyle("CoscribeCell", parent=normal, fontSize=9, leading=11)
+
+        def rich(text: str) -> str:
+            """`text` with its **bold**/*italic* markers as reportlab tags."""
+            out = []
+            for run_text, bold, italic in parse_inline_runs(text):
+                piece = _xml_escape(run_text)
+                if bold:
+                    piece = f"<b>{piece}</b>"
+                if italic:
+                    piece = f"<i>{piece}</i>"
+                out.append(piece)
+            return "".join(out)
 
         flowables: list[Any] = []
         for block in parse_blocks(content):
             if block.kind == "heading":
-                heading_style = styles[f"Heading{block.level}"]
-                flowables.append(Paragraph(_xml_escape(block.text), heading_style))
+                parent = styles[f"Heading{block.level}"]
+                heading_style = ParagraphStyle(
+                    f"CoscribeHeading{block.level}",
+                    parent=parent,
+                    fontName=cjk_font or parent.fontName,
+                )
+                flowables.append(Paragraph(rich(block.text), heading_style))
             elif block.kind == "bullet":
                 # Plain ASCII, not "•" -- reportlab's default font maps
                 # the unicode bullet glyph in a way pdfplumber/pypdf both
                 # mis-render on read-back (a stray "(cid:127)" or a dropped
                 # character), confirmed while testing the write/read round trip.
-                flowables.append(Paragraph(f"- {_xml_escape(block.text)}", bullet_style))
+                flowables.append(Paragraph(f"- {rich(block.text)}", bullet_style))
             elif block.kind == "number":
-                numbered_text = f"{block.ordinal}. {_xml_escape(block.text)}"
+                numbered_text = f"{block.ordinal}. {rich(block.text)}"
                 flowables.append(Paragraph(numbered_text, bullet_style))
             elif block.kind == "table" and block.rows:
-                table = Table(block.rows)
-                table.setStyle(
-                    TableStyle(
-                        [
-                            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                            ("FONTSIZE", (0, 0), (-1, -1), 9),
-                        ]
-                    )
+                # Paragraph cells wrap; a plain string cell runs off the page.
+                table = Table(
+                    [[Paragraph(rich(str(c)), cell_style) for c in row] for row in block.rows],
+                    colWidths=_pdf_column_widths(block.rows, 451),
                 )
+                table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
                 flowables.append(table)
             else:
-                flowables.append(Paragraph(_xml_escape(block.text), styles["Normal"]))
+                flowables.append(Paragraph(rich(block.text), normal))
             flowables.append(Spacer(1, 6))
 
         SimpleDocTemplate(str(file_path)).build(flowables)
@@ -1139,7 +1238,10 @@ def build_document_tools(
         Args:
             path: file to read, relative to the workspace root
         """
-        return toolkit.read_docx(path=path)
+        return cap_read_output(
+            toolkit.read_docx(path=path),
+            "search_files or a script (python-docx) reaches the rest without reading it all",
+        )
 
     def write_docx(
         path: str,
@@ -1416,7 +1518,10 @@ def build_document_tools(
             start_page: first page to read (1-based)
             end_page: last page to read, inclusive; 0 means through the last page
         """
-        return toolkit.read_pdf(path=path, start_page=start_page, end_page=end_page)
+        return cap_read_output(
+            toolkit.read_pdf(path=path, start_page=start_page, end_page=end_page),
+            "read fewer pages at a time with start_page and end_page, or use search_pdf",
+        )
 
     def write_pdf(path: str, content: str, overwrite: bool = True) -> dict[str, object]:
         """Create a PDF file under the workspace from structured text.

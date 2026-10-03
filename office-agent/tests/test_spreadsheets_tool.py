@@ -1014,3 +1014,30 @@ def test_parallel_cell_formatting_calls_on_one_workbook_all_land(tmp_path: Path)
 
     sheet = load_workbook(tmp_path / "p.xlsx").active
     assert [sheet[cell].font.bold for cell in columns] == [True] * 4
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("00123", "00123"),
+        ("6222021234567890123", "6222021234567890123"),
+        ("1e5", "1e5"),
+        ("1_000", "1_000"),
+        ("NaN", "NaN"),
+        ("inf", "inf"),
+        ("１２３", "１２３"),
+        ("42", 42),
+        ("  42  ", 42),
+        ("-7", -7),
+        ("3.10", 3.1),
+        ("0.5", 0.5),
+        ("123456789012345", 123456789012345),
+    ],
+)
+def test_cells_only_become_numbers_when_they_are_plain_numbers(text: str, expected: object) -> None:
+    """Real data loss: an ID like 00123 became 123 and a 19-digit card
+    number a rounded float."""
+    from coscribe.tools.spreadsheets import _coerce_cell
+
+    assert _coerce_cell(text) == expected
+    assert type(_coerce_cell(text)) is type(expected)

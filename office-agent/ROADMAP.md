@@ -6900,6 +6900,37 @@ the workspace plus the folders you added.
 - Not done: dragging sessions between groups, the keyboard shortcuts the
   reference menu shows, projects.
 
+## Phase 8cg -- Production-scenario bug hunt (shipped)
+
+Ran realistic multi-step jobs end to end (sales CSV -> xlsx + docx report,
+12 PDF invoices -> xlsx, 5 contracts -> fields, a 120k-row log, tracked
+changes in a docx, a data-driven deck, a browser workflow saved and run on a
+schedule) and checked each result against independently computed numbers.
+The numbers were right; the bugs were in the edges.
+
+- [x] `read_xlsx` racing a `write_xlsx` recalc raised BadZipFile; every
+      path-taking document/spreadsheet method now holds the per-file lock.
+- [x] `write_docx` ate underscores in file names (`a_b_c` -> italic `b`);
+      inline markup now follows Markdown flanking rules and `\*` / `\_`
+      escape.
+- [x] `write_pdf` printed black boxes for Chinese: it now finds a CJK font
+      (Windows, Linux, macOS), wraps table cells instead of overflowing, and
+      renders inline bold/italic.
+- [x] `write_xlsx` turned `00123` into 123 and long IDs into floats; cells
+      are coerced to numbers only when Excel would keep them exact.
+- [x] Reading a 4.6 MB file returned all of it (over a million tokens);
+      `read_file`, `read_xlsx`, `read_docx`, `read_pdf`, `read_pptx` now cut
+      at 80,000 characters with a note on how to continue (`start_line` for
+      files).
+- [x] The deck preview measures real rendered size: body text under 14 pt
+      and slides left more than half empty are reported so the model fixes
+      them before delivering.
+- [x] Scratch folders the model made to check its work no longer show up as
+      outputs; attachments and slide overlays use the conversation's own
+      folder; a hard Stop refreshes the sidebar status.
+- Not done: the reviewer sub-agent sometimes reads files that were never
+  written, and review loops can make a long report take 10+ minutes.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

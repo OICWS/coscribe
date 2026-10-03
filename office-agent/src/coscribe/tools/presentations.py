@@ -91,6 +91,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from ..runtime.types import tool_metadata
 from ._file_locks import locked_by_path
 from ._ooxml_validate import assert_ooxml_valid
+from ._output_truncation import cap_read_output
 from ._svg_slide import add_svg_slide
 from ._thumbnail import render_all_page_previews, render_thumbnail
 from ._workspace import WorkspaceScope
@@ -5687,7 +5688,10 @@ def build_presentation_tools(
             path: file to read, relative to the workspace root
             slide: 1-based slide number to read; omit to read every slide
         """
-        return toolkit.read_pptx(path=path, slide=slide)
+        return cap_read_output(
+            toolkit.read_pptx(path=path, slide=slide),
+            "read one slide at a time with the slide argument",
+        )
 
     def render_pptx_preview(path: str, max_slides: int = 8) -> dict[str, object]:
         """Render every slide of a PowerPoint file to an image so you (or

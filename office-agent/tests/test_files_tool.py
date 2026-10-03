@@ -608,3 +608,29 @@ def test_path_outside_extra_dirs_still_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(PermissionError):
         tools["read_file"](path=str(elsewhere / "secret.txt"))
+
+
+def test_read_file_cuts_a_huge_file_with_a_note_and_pages_with_start_line(tmp_path: Path) -> None:
+    """Real risk: a 5 MB CSV came back whole, over a million tokens, and the
+    conversation's next model call failed on its length."""
+    from coscribe.tools._output_truncation import MAX_READ_CHARS
+
+    lines = [f"row {i},{'x' * 40}" for i in range(5000)]
+    (tmp_path / "big.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tools = {t.__name__: t for t in build_file_tools(tmp_path)}
+
+    text = tools["read_file"](path="big.csv")
+    assert len(text) < MAX_READ_CHARS + 400
+    assert "Showing the first" in text and "start_line" in text
+    assert text.startswith("row 0,")
+
+    page = tools["read_file"](path="big.csv", start_line=4001, head=3)
+    assert page == "".join(f"{line}\n" for line in lines[4000:4003])
+    assert tools["read_file"](path="big.csv", tail=2) == "".join(f"{line}\n" for line in lines[-2:])
+
+
+def test_read_file_leaves_an_ordinary_file_alone(tmp_path: Path) -> None:
+    (tmp_path / "small.txt").write_text("a\nb\n", encoding="utf-8")
+    tools = {t.__name__: t for t in build_file_tools(tmp_path)}
+
+    assert tools["read_file"](path="small.txt") == "a\nb\n"

@@ -107,6 +107,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from ..runtime.types import tool_metadata
 from ._file_locks import locked_by_path
+from ._output_truncation import cap_read_output
 from ._thumbnail import render_thumbnail
 from ._workspace import WorkspaceScope
 from .documents import _is_separator_row, _split_table_row
@@ -221,17 +222,21 @@ def _validate_and_normalize_formula(formula: str) -> str:
     return formula
 
 
+# Excel keeps 15 significant digits; a longer number is an identifier.
+_EXCEL_DIGITS = 15
+_PLAIN_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
+
+
 def _coerce_cell(value: str) -> Any:
     if value.startswith("="):
         return _validate_and_normalize_formula(value)
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        pass
+    text = value.strip()
+    # Only what a person would type as a plain number. Python's int()/float()
+    # also take "00123" (an ID, becomes 123), "1_000", "1e5", "inf"/"NaN"
+    # (became empty cells) and full-width digits, and a 19-digit card number
+    # became a rounded float -- silent data loss.
+    if _PLAIN_NUMBER.fullmatch(text) and len(text.lstrip("-").replace(".", "")) <= _EXCEL_DIGITS:
+        return float(text) if "." in text else int(text)
     return value
 
 
@@ -1041,7 +1046,11 @@ def build_spreadsheet_tools(
             path: file to read, relative to the workspace root
             sheet: sheet name to read; omit to read every sheet
         """
-        return toolkit.read_xlsx(path=path, sheet=sheet)
+        return cap_read_output(
+            toolkit.read_xlsx(path=path, sheet=sheet),
+            "read one sheet with the sheet argument; to count, filter or total a large "
+            "sheet, use a script with pandas instead of reading it",
+        )
 
     def write_xlsx(
         path: str, content: str, sheet_name: str = "Sheet1", overwrite: bool = True

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..runtime.types import tool_metadata
+from ._output_truncation import cap_read_output
 from ._workspace import WorkspaceScope
 
 DEFAULT_IGNORES = {".git", "__pycache__", ".venv", "node_modules"}
@@ -93,20 +94,30 @@ class FileToolkit:
         }
 
     def read_file(
-        self, path: str, head: Optional[int] = None, tail: Optional[int] = None  # noqa: UP045
+        self,
+        path: str,
+        head: Optional[int] = None,  # noqa: UP045
+        tail: Optional[int] = None,  # noqa: UP045
+        start_line: int = 1,
     ) -> str:
         """Read the UTF-8 text contents of a file under the workspace, in
-        full or (via head/tail) just its first/last N lines."""
+        full or (via head/tail) just its first/last N lines; `start_line`
+        (1-based) moves where `head` begins."""
         if head is not None and tail is not None:
             raise ValueError("head and tail cannot both be given -- pick one.")
+        if start_line < 1:
+            raise ValueError("start_line counts from 1.")
+        if tail is not None and start_line > 1:
+            raise ValueError("start_line goes with head, not tail.")
         file_path = self._resolve(path)
         if not file_path.exists():
             raise ValueError(f"File does not exist: {path}")
         if not file_path.is_file():
             raise ValueError(f"Path is not a file: {path}")
         content = file_path.read_text(encoding="utf-8")
-        if head is not None:
-            return "".join(content.splitlines(keepends=True)[:head])
+        if head is not None or start_line > 1:
+            lines = content.splitlines(keepends=True)[start_line - 1 :]
+            return "".join(lines if head is None else lines[:head])
         if tail is not None:
             return "".join(content.splitlines(keepends=True)[-tail:] if tail > 0 else [])
         return content
@@ -413,26 +424,36 @@ def build_file_tools(
         return toolkit.list_files(path=path, pattern=pattern, recursive=recursive)
 
     def read_file(
-        path: str, head: Optional[int] = None, tail: Optional[int] = None  # noqa: UP045
+        path: str,
+        head: Optional[int] = None,  # noqa: UP045
+        tail: Optional[int] = None,  # noqa: UP045
+        start_line: int = 1,
     ) -> str:
         """Read the text contents of a file under the workspace. An
         absolute path outside the workspace root is also allowed if it
         falls under a configured extra-readable/extra-writable directory.
 
-        With neither `head` nor `tail`, returns the whole file (as before).
-        Pass one (not both) to read only that many lines from the start or
-        end -- for a quick look at a large file without spending the
-        context a full read would, or before deciding whether to read the
-        whole thing.
+        A long file comes back cut at about 80,000 characters, with a note
+        saying how to read on. Pass `head` (a number of lines, from line
+        `start_line`) or `tail` (the last lines) to read just a part -- for
+        a quick look at a large file, to page through it, or before
+        deciding whether to read it all. For counting, filtering or
+        summarising a big file, a script is the right tool, not reading it.
 
         Args:
             path: file to read, relative to the workspace root (or an
                 allowed absolute path)
-            head: if given, only the first this-many lines
+            head: if given, only this many lines, from start_line
             tail: if given, only the last this-many lines (mutually
                 exclusive with head)
+            start_line: the first line to read, counting from 1 (with head)
         """
-        return toolkit.read_file(path=path, head=head, tail=tail)
+        text = toolkit.read_file(path=path, head=head, tail=tail, start_line=start_line)
+        if head is None and tail is None and start_line == 1:
+            hint = "read the next part with read_file(path, start_line=<line>, head=<lines>)"
+        else:
+            hint = "ask for fewer lines with head"
+        return cap_read_output(text, hint)
 
     def get_file_info(path: str) -> dict[str, object]:
         """Metadata for one file or directory under the workspace (or a

@@ -844,3 +844,48 @@ def test_extra_readable_dir_rejects_write_docx(tmp_path: Path) -> None:
 
     with pytest.raises(PermissionError):
         tools["write_docx"](path=str(downloads / "report.docx"), content=DOCUMENT_CONTENT)
+
+
+def _fonts_in(pdf_path: Path) -> set[str]:
+    import re
+
+    names = re.findall(rb"/BaseFont\s*/(?:[A-Z]{6}\+)?([A-Za-z0-9_-]+)", pdf_path.read_bytes())
+    return {name.decode() for name in names}
+
+
+def test_write_pdf_renders_chinese_text_instead_of_black_boxes(tmp_path: Path) -> None:
+    """Real bug: reportlab's built-in fonts have no Chinese glyphs, so a
+    Chinese report came out as rows of black boxes -- with no error."""
+    from coscribe.tools import documents
+
+    if documents._pdf_cjk_font() is None:  # no Chinese-capable font on this machine
+        pytest.skip("no CJK font available")
+    tools = {t.__name__: t for t in build_document_tools(tmp_path)}
+    tools["write_pdf"](
+        path="季度 报告.pdf",
+        content=(
+            "# 季度分析\n\n本季度**销售额**增长。\n\n"
+            "| 地区 | 说明 |\n| --- | --- |\n| 华东 | 领先 |\n"
+        ),
+    )
+
+    fonts = _fonts_in(tmp_path / "季度 报告.pdf")
+    assert fonts - {"Helvetica", "Helvetica-Bold", "ZapfDingbats"}, fonts
+    text = tools["read_pdf"](path="季度 报告.pdf")
+    assert "季度分析" in text and "销售额" in text and "华东" in text
+
+
+def test_write_pdf_keeps_helvetica_for_text_without_chinese(tmp_path: Path) -> None:
+    tools = {t.__name__: t for t in build_document_tools(tmp_path)}
+    tools["write_pdf"](path="plain.pdf", content="# Title\n\nSome **bold** text.\n")
+
+    assert _fonts_in(tmp_path / "plain.pdf") <= {"Helvetica", "Helvetica-Bold", "ZapfDingbats"}
+
+
+def test_pdf_column_widths_give_a_short_label_column_room_beside_a_long_one() -> None:
+    from coscribe.tools.documents import _pdf_column_widths
+
+    widths = _pdf_column_widths([["地区", "这是一个很长很长很长的说明文字" * 3]], 450)
+
+    assert abs(sum(widths) - 450) < 0.01
+    assert widths[0] >= 450 * 6 / (6 + 60) - 0.01
