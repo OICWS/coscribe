@@ -6928,8 +6928,22 @@ The numbers were right; the bugs were in the edges.
 - [x] Scratch folders the model made to check its work no longer show up as
       outputs; attachments and slide overlays use the conversation's own
       folder; a hard Stop refreshes the sidebar status.
-- Not done: the reviewer sub-agent sometimes reads files that were never
-  written, and review loops can make a long report take 10+ minutes.
+- [x] The reviewer sub-agent read files that were never written: it had no
+      way to look at the folder, so it guessed names from the summary. It
+      now has list_files/read_file/get_file_info, is told never to review a
+      file it couldn't read, and stops after 8 model calls (it was grepping
+      a docx a dozen times). `read_file` on an Office file now says which
+      reader to use instead of a UTF-8 decode error. The same report task
+      went from over 10 minutes to about 4.
+- [x] No way to put a chart in a Word document (the model hand-drew one with
+      Pillow, since the packaged app ships no plotting library):
+      `add_docx_chart` (native, editable bar/line/pie from a pipe-table,
+      placed after a named paragraph, never wider than the text column) and
+      `add_docx_image`. The coordinator's instructions also claimed Word
+      files could not be edited in place, steering the model to rewrite
+      whole documents; corrected.
+- [x] Checked on a 131-page Chinese-named PDF: every figure, page number and
+      the 32 formulas of the summary workbook matched.
 
 ## Later -- real intentions, not actively scheduled
 
