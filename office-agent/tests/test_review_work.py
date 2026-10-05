@@ -274,3 +274,80 @@ def test_a_reviewer_that_keeps_digging_is_stopped_after_a_few_model_calls(tmp_pa
     review_work(original_request="write a report", summary_of_work="wrote it")
 
     assert len(model.calls) <= 8
+
+
+def test_the_reviewer_sees_what_the_work_actually_observed(tmp_path: Path) -> None:
+    """A data-problems sheet listed trailing spaces in a customer file that
+    no script had found; reading only the request, the summary and the file,
+    the reviewer had nothing to tell an invented finding from a real one."""
+    from langchain_core.messages import ToolMessage
+
+    from coscribe.runtime_lg.agent import build_langgraph_agent
+
+    def run_python_script(description: str, script: str) -> str:
+        """A fake script runner."""
+        return "{'exit_code': 0, 'stdout': 'orders with a padded region: 10'}"
+
+    reviewer_model = _FakeModel(responses=[AIMessage(content="ok")])
+    review_work = build_review_work_tool(reviewer_model, [], tmp_path)
+    worker = _FakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "run_python_script",
+                        "args": {"description": "find data problems", "script": "..."},
+                        "id": "s1",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "review_work",
+                        "args": {"original_request": "clean it", "summary_of_work": "done"},
+                        "id": "r1",
+                    }
+                ],
+            ),
+            AIMessage(content="finished"),
+        ]
+    )
+    agent = build_langgraph_agent(worker, [run_python_script, review_work], "work")
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": "go"}]},
+        config={"configurable": {"thread_id": "t"}},
+    )
+
+    prompt = _last_human_message(reviewer_model.calls[0]).content
+    assert "run_python_script(find data problems)" in prompt
+    assert "orders with a padded region: 10" in prompt
+    tool_results = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert tool_results[-1].content == "ok"
+
+
+def test_evidence_log_leaves_out_bookkeeping_and_fits_its_budget() -> None:
+    from langchain_core.messages import ToolMessage
+
+    from coscribe.runtime_lg.subagents import _EVIDENCE_CHARS, evidence_log
+
+    calls = [
+        {"name": name, "args": {"path": f"f{i}"}, "id": f"c{i}"}
+        for i, name in enumerate(["task_create", "search_tools", "read_xlsx", "read_xlsx"])
+    ]
+    messages = [
+        AIMessage(content="", tool_calls=calls),
+        *(
+            ToolMessage(content="x" * 50_000, name=call["name"], tool_call_id=call["id"])
+            for call in calls
+        ),
+    ]
+
+    log = evidence_log(messages)
+
+    assert "task_create" not in log and "search_tools" not in log
+    assert "[1] read_xlsx(f2)" in log and "[2] read_xlsx(f3)" in log
+    assert len(log) < _EVIDENCE_CHARS + 200
+    assert evidence_log([]) == ""

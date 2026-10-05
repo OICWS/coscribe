@@ -7058,11 +7058,28 @@ the tools around the numbers.
       the first run's by a few cents (华北 -0.04, total -0.06): it rounded
       every line to cents with pandas `.round(2)` before summing -- a
       defensible method, used consistently in all three files.
-- Seen, not changed: the model's 数据问题 sheet claimed the customer list's
-  region field had trailing spaces (it had none; no script of its own had
-  found any) -- a fabricated detail its own review pass didn't catch. It
-  rewrote the whole report three times to fit two pages, re-adding the
-  chart each time. Turn 1 took 14 min, the corrections 6, the rerun 28 (the
+- [x] The model's 数据问题 sheet claimed the customer list's region field
+      had trailing spaces (it had none). In the script that wrote the sheet,
+      the real rows were filled from computed variables (`{region_space}`,
+      `{datefmt_bad}`); the invented one was a typed literal (`"60 行"`),
+      then hand-copied into the report four times. Its own review pass
+      couldn't tell: the reviewer saw the request, the agent's summary and
+      the file, nothing of what the work had actually observed. Two
+      layers now: the coordinator is told that a figure or finding about the
+      user's data comes from something a script printed or a tool returned,
+      written from the script's computed values, never a retyped literal;
+      and `review_work` gets the conversation's state injected and hands
+      the reviewer an evidence log -- the outputs of the scripts, readers
+      and searches that ran, labelled and clipped to 24k characters -- with
+      the rule that a claim about the source data nothing in the log backs
+      is a problem to report. Replayed on the real turn-1 workbook and
+      conversation with deepseek-flash: without the log 0 of 3 reviews
+      caught it (one called the sources "supported"); with it 3 of 3
+      flagged that row, two naming the invented spaces exactly. They also
+      flagged a true but never-printed count ("7 orders split across two
+      labels") -- the price of the rule, and the right ask.
+- Seen, not changed: the model rewrote the whole report three times to fit
+  two pages, re-adding the chart each time. Turn 1 took 14 min, the corrections 6, the rerun 28 (the
   test suite was running beside it).
 
 ## Later -- real intentions, not actively scheduled

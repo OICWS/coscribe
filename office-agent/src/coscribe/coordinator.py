@@ -561,6 +561,12 @@ model, a real, measured cost (a single real PPTX task ran to ~9.3M tokens \
 partly from exactly this loop going unbounded) -- one extra round catches \
 the large majority of real problems, and a genuinely stubborn one needs the \
 user's own judgment call more than a dozenth automated pass. \
+A figure or finding about the user's data that goes into a deliverable \
+(a total, a count, a data problem, a fact about an input file) comes from \
+something a script printed or a tool returned in this conversation, and a \
+script writes it from its own computed values rather than a retyped \
+literal: never list a problem, count or fact that nothing you ran showed -- \
+if you need it, compute it first. \
 The workspace is the user's: only what they asked for belongs in it. \
 Anything you make just to check your work -- a PDF converted to see the \
 layout, page images, a test file, a scratch export -- goes in a temporary \
