@@ -3769,8 +3769,7 @@ def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
     the exact mechanism a live mid-conversation connector-add already
     uses (see test_post_mcp_server_splices_tools_into_both_new_and_
     already_open_sessions right below). Proves both halves: a session
-    opened before the slow connect finishes works immediately with no
-    wait (timed, not just "eventually passed"), and that same session
+    opens while the slow connect is still unfinished, and that same session
     picks up the tool once the background connect completes, with no
     reconnect needed."""
     from coscribe.runtime.types import tool_metadata
@@ -3786,8 +3785,15 @@ def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
         async def close(self) -> None:
             pass
 
+    # The connect finishes only when the test releases it, so "the session
+    # opened before the connect finished" is a fact to check, not a race
+    # against how fast this machine opens a session.
+    release = threading.Event()
+    finished = threading.Event()
+
     async def _slow_connect_mcp_tools_lg(config_path: Path) -> tuple[list[Any], dict[str, Any]]:
-        await asyncio.sleep(2.0)
+        await asyncio.to_thread(release.wait, 10)
+        finished.set()
         return [_fake_tool_fn], {"fetch": _FakeConnection()}
 
     monkeypatch.setattr("coscribe.web.app.MCP_STARTUP_TIMEOUT_SECONDS", 0.05)
@@ -3803,25 +3809,15 @@ def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
     )
     with _client_lg(tmp_path, monkeypatch, fake_model, mcp_config_path=config_path) as client:
-        # Opening the *first* session must not block on the still-
-        # connecting "fetch" server -- a pre-fix lifespan() would have
-        # hung inside `with _client_lg(...)`'s own context-manager entry
-        # above (TestClient runs the ASGI lifespan synchronously) for the
-        # full 2s fake-connect duration before this line was ever reached
-        # at all. Timed, not just "it eventually passed" -- comfortably
-        # under the 2s the fake connect takes (with real margin above
-        # this harness's own baseline per-session overhead -- opening a
-        # brand-new thread's WebSocket genuinely compiles a fresh
-        # LangGraph graph, not instant even with no MCP involved at all)
-        # proves startup itself wasn't the thing waiting on it.
-        started = time.monotonic()
         with client.websocket_connect("/ws/t_startup_bg") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
-        assert time.monotonic() - started < 1.0
+        assert not finished.is_set()
 
-        # Give the background connect (2s) time to actually finish.
-        time.sleep(2.5)
+        release.set()
+        assert finished.wait(10)
+        # Splicing the tools into open sessions follows right after.
+        time.sleep(0.5)
 
         with client.websocket_connect("/ws/t_startup_bg") as ws:
             ws.receive_json()  # state
