@@ -89,17 +89,72 @@ def test_max_turns_ends_the_run_after_the_configured_number_of_model_calls() -> 
         """A tool that does nothing."""
         return "done"
 
-    tool_call_response = AIMessage(
-        content="", tool_calls=[{"name": "noop_tool", "args": {}, "id": "call_1"}]
+    # Two objects: one reused would get the same message id and replace
+    # itself in the history the cap counts.
+    model = _FakeModel(
+        responses=[
+            AIMessage(content="", tool_calls=[{"name": "noop_tool", "args": {}, "id": f"c{i}"}])
+            for i in range(2)
+        ]
     )
-    model = _FakeModel(responses=[tool_call_response, tool_call_response])
     agent = build_langgraph_agent(
         model, [noop_tool], "be helpful", checkpointer=InMemorySaver(), max_turns=2
     )
     config = {"configurable": {"thread_id": "t1"}}
     result = agent.invoke({"messages": [HumanMessage(content="loop forever")]}, config=config)
     assert model.i == 2
-    assert result["messages"][-1].content == "Model call limits exceeded: run limit (2/2)"
+    assert result["messages"][-1].content == "Model call limits exceeded: turn limit (2/2)"
+
+
+def test_max_turns_holds_across_approvals() -> None:
+    """LangChain's own run limit starts again at 0 on every resume after an
+    approval, so a turn that paused on each step ran 61 model calls under a
+    cap of 20; the count now comes from the history."""
+    from langgraph.types import Command
+
+    def noop_tool() -> str:
+        """A tool that does nothing."""
+        return "done"
+
+    model = _FakeModel(
+        responses=[
+            AIMessage(content="", tool_calls=[{"name": "noop_tool", "args": {}, "id": f"c{i}"}])
+            for i in range(3)
+        ]
+    )
+    agent = build_langgraph_agent(
+        model,
+        [noop_tool],
+        "be helpful",
+        checkpointer=InMemorySaver(),
+        extra_interrupt_tool_names=["noop_tool"],
+        max_turns=2,
+    )
+    config = {"configurable": {"thread_id": "t1"}}
+    agent.invoke({"messages": [HumanMessage(content="loop forever")]}, config=config)
+    for _ in range(3):
+        tasks = agent.get_state(config).tasks
+        if not tasks or not tasks[0].interrupts:
+            break
+        interrupt = tasks[0].interrupts[0]
+        decisions = [{"type": "approve"} for _ in interrupt.value.get("action_requests", [])]
+        result = agent.invoke(
+            Command(resume={interrupt.id: {"decisions": decisions}}), config=config
+        )
+
+    assert model.i == 2
+    assert result["messages"][-1].content == "Model call limits exceeded: turn limit (2/2)"
+
+
+def test_a_turn_starts_at_the_users_message_not_at_a_compact_summary() -> None:
+    from coscribe.runtime_lg.agent import model_calls_this_turn
+
+    summary = HumanMessage("summary", additional_kwargs={"lc_source": "summarization"})
+    history = [HumanMessage("first"), AIMessage("a"), HumanMessage("second"), AIMessage("b")]
+
+    assert model_calls_this_turn(history) == 1
+    assert model_calls_this_turn([*history, summary, AIMessage("c")]) == 2
+    assert model_calls_this_turn([*history, HumanMessage("third")]) == 0
 
 
 def test_auto_compact_tokens_collapses_a_long_thread_once_past_the_keep_floor() -> None:
@@ -134,9 +189,7 @@ def test_auto_compact_tokens_collapses_a_long_thread_once_past_the_keep_floor() 
     messages = state.values["messages"]
     # 22 user + 22 assistant = 44 without summarization ever kicking in.
     assert len(messages) < 44
-    assert any(
-        msg.additional_kwargs.get("lc_source") == "summarization" for msg in messages
-    )
+    assert any(msg.additional_kwargs.get("lc_source") == "summarization" for msg in messages)
 
 
 def test_auto_compact_tokens_none_means_no_summarization_middleware() -> None:

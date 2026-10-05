@@ -367,6 +367,77 @@ async def test_the_reviewer_streams_nothing_into_the_parents_chat(tmp_path: Path
     assert [m.content for m in streamed if m.content] == ["finished"]
 
 
+def _review_call(call_id: str, file_path: str) -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "review_work",
+                "args": {"original_request": "r", "summary_of_work": "s", "file_path": file_path},
+                "id": call_id,
+            }
+        ],
+    )
+
+
+def test_a_file_gets_a_review_and_one_recheck_per_turn(tmp_path: Path) -> None:
+    """Fixing and re-reviewing had no end but the prompt's say-so; the main
+    loop's call cap restarts at every approval, so in Auto mode nothing
+    else stopped it."""
+    from langchain_core.messages import ToolMessage
+
+    from coscribe.runtime_lg.agent import build_langgraph_agent
+
+    reviewer_model = _FakeModel(responses=[AIMessage(content="fix the legend")] * 3)
+    review_work = build_review_work_tool(reviewer_model, [], tmp_path)
+    worker = _FakeModel(
+        responses=[
+            _review_call("r1", "输出/deck.pptx"),
+            _review_call("r2", "./输出/deck.pptx"),
+            _review_call("r3", "输出\\deck.pptx"),
+            AIMessage(content="finished"),
+        ]
+    )
+    agent = build_langgraph_agent(worker, [review_work], "work")
+
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": "go"}]},
+        config={"configurable": {"thread_id": "t"}},
+    )
+
+    replies = [m.content for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert reviewer_model.i == 2
+    assert replies[:2] == ["fix the legend", "fix the legend"]
+    assert replies[2].startswith("Not reviewed: this turn has used its reviews")
+
+
+def test_reviews_are_capped_per_turn_and_counted_from_the_users_last_message(
+    tmp_path: Path,
+) -> None:
+    from langchain_core.messages import ToolMessage
+
+    from coscribe.runtime_lg.subagents import reviews_this_turn
+
+    reviewer_model = _FakeModel(responses=[AIMessage(content="ok")] * 2)
+    review_work = build_review_work_tool(reviewer_model, [], tmp_path)
+    earlier = [HumanMessage("first"), _review_call("old", "a.docx")]
+    earlier.append(ToolMessage("ok", name="review_work", tool_call_id="old"))
+    this_turn: list[BaseMessage] = [HumanMessage("again")]
+    for i in range(6):
+        this_turn += [
+            _review_call(f"c{i}", f"f{i}.docx"),
+            ToolMessage("ok", name="review_work", tool_call_id=f"c{i}"),
+        ]
+
+    assert reviews_this_turn([*earlier, HumanMessage("again")]) == []
+    assert reviews_this_turn(earlier) == ["a.docx"]
+    refused = review_work("r", "s", file_path="g.docx", state={"messages": earlier + this_turn})
+    assert refused.startswith("Not reviewed: this turn has used its reviews")
+    assert reviewer_model.i == 0
+    assert review_work("r", "s", file_path="a.docx", state={"messages": earlier}) == "ok"
+    assert reviewer_model.i == 1
+
+
 def test_evidence_log_leaves_out_bookkeeping_and_fits_its_budget() -> None:
     from langchain_core.messages import ToolMessage
 

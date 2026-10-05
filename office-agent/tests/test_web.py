@@ -607,9 +607,12 @@ def test_max_turns_ends_the_run_gracefully_instead_of_looping_forever(
     AIMessageChunk/ToolMessage, so this text was silently dropped and the
     turn ended with a blank "[no reply -- ...]" instead of telling the user
     why it stopped. Fixed by adding an AIMessage branch to _stream_turn."""
-    call = _tool_call("call_1", "list_files", {})
-    tool_call_response = AIMessage(content="", tool_calls=[call])
-    fake_model = FakeToolCallingChatModel(responses=[tool_call_response, tool_call_response])
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_tool_call(f"call_{i}", "list_files", {})])
+            for i in range(2)
+        ]
+    )
     with _client_lg(tmp_path, monkeypatch, fake_model, max_turns=2) as client:
         with client.websocket_connect("/ws/t_max_turns") as ws:
             ws.receive_json()  # state
@@ -619,7 +622,7 @@ def test_max_turns_ends_the_run_gracefully_instead_of_looping_forever(
 
     assert not any(m["type"] == "error" for m in messages)
     agent_message = next(m for m in messages if m["type"] == "agent_message")
-    assert agent_message["text"] == "Model call limits exceeded: run limit (2/2)"
+    assert agent_message["text"] == "Model call limits exceeded: turn limit (2/2)"
 
 
 def test_agent_delta_events_stream_before_the_final_agent_message(
