@@ -7619,14 +7619,228 @@ a concrete reason to prioritize a new surface.
   means owning an indefinite rebase burden against a fast-moving OpenAI
   project for no benefit if the CLI surface alone is enough.
 
-  **Next step, not yet done**: a real spike -- install `codex`, run
-  `codex exec` against a genuine multi-step coding task, and see what the
-  adapter boundary actually needs to carry (how it reports progress, how
-  approval/sandbox policy maps onto coscribe's own `ToolMetadata`/
-  `risk_level` model, whether its session/rollout format is something
-  coscribe's own thread model can wrap cleanly) -- before committing to
-  an implementation shape. Scope this as its own dedicated pass, not
-  something to start alongside unrelated work.
+  **Spike done (2026-10-05), Codex 0.160.0, Linux container only.**
+  Driven the way an adapter would: a ~150-line Python client speaking
+  `codex app-server`'s JSON-RPC over stdio (not `codex exec` -- the
+  app-server is the surface that hands approvals and host-side tools
+  back to the caller), model `deepseek-flash` (id checked against
+  DeepSeek's `/models`). Findings:
+
+  - **The boundary carries what coscribe needs.** Approvals arrive as
+    server->client requests (`item/commandExecution/requestApproval`,
+    `item/fileChange/requestApproval`) that the host answers
+    (`accept`/`decline`/...); a host-side tool registered through
+    `thread/start`'s `dynamicTools` was called by the model and answered
+    by the host via `item/tool/call` -- so coscribe's own docx/xlsx/pptx
+    tools can be handed to Codex. The streamed notifications
+    (`item/agentMessage/delta`, `item/started`/`item/completed`,
+    `thread/tokenUsage/updated` with `cachedInputTokens`, `turn/completed`)
+    map onto the existing `agent_delta`/`tool_call`/`tool_result`/
+    `approval_required`/`usage` WebSocket events. Both `dynamicTools` and
+    the app-server itself are labelled experimental (`--experimental`
+    schema, `[experimental]` in `codex app-server --help`): pin the
+    version, upgrade deliberately.
+  - **Files Codex writes are invisible to the protocol.** It wrote every
+    file with `cat > f <<EOF` through the shell, so there was no
+    `fileChange` item and no `turn/diff/updated` -- "files written" has
+    to come from coscribe's own before/after look at the folder.
+  - **Responses API only.** `wire_api = "chat"` is a hard config error in
+    this build ("no longer supported ... set `wire_api = \"responses\"`");
+    coscribe talks Chat Completions (`ChatOpenAI`), which is what most
+    "OpenAI-compatible" vendors implement. DeepSeek works because it added
+    a separate `/v1/responses` for Codex: both `deepseek-flash` and
+    `deepseek-v4-pro` answered live, although DeepSeek's own guide still
+    listed only flash. GLM reportedly has no `/responses` (third-party
+    source, not checked against Zhipu's docs). Anthropic/Gemini native and
+    Chat-Completions-only vendors would need a local Responses->provider
+    bridge. Captured what Codex actually sends to size one: ~17k chars of
+    instructions, 8 tools (plain functions, one `namespace` group, the
+    hosted `web_search`), `include: ["reasoning.encrypted_content"]`,
+    `stream: true`, plus `client_metadata` carrying the workspace path and
+    an installation id. Every run also warned "Model metadata for
+    `deepseek-flash` not found. Defaulting to fallback metadata".
+  - **Same task, both runtimes, same model** (clean a 205-row order
+    workbook -- duplicates, two date styles, trailing-space regions,
+    cancelled rows -- into a reusable script plus tests, run both):
+    Codex 54 s, 13 model calls, 20 pytest tests (it `pip install`ed
+    pytest after an approved network escalation); coscribe 192 s, 33
+    model calls, 31 unittest tests (no pytest in the script env, and
+    `run_python_script` can't install). Region totals identical to the
+    cent in both. So on office data work the gap is speed and round
+    trips, not capability; n=1.
+  - **No OS sandbox, by decision** (Phase 7 reasoning stands). With
+    `sandbox: "danger-full-access"` and `approvalPolicy: "untrusted"`
+    every command, `ls` included, came back for approval and the result
+    was still correct. Without a sandbox Codex has no counterpart to
+    `script_guard`: its commands can write anywhere, so approval is the
+    only guard in this module, and the UI has to say so.
+  - **Size.** The Windows wheel (`openai-codex-cli-bin`, win_amd64) is
+    149 MB / 432 MB unpacked: `codex.exe` 327 MB (109 MB zipped),
+    `codex-code-mode-host.exe` 75 MB, two sandbox exes 26 MB, `rg.exe`
+    4 MB. Main binary + `rg` alone ran fine on Linux with `code_mode_host`
+    disabled (not yet checked on Windows): ~331 MB on disk, ~111 MB to
+    download. Against coscribe's ~190 MB portable build, bundling would
+    make it ~2.7x -- not acceptable. The `openai-codex` Python SDK pins
+    the CLI wheel exactly (and `pydantic>=2.12`, `packaging>=26.2`,
+    compatible today), so using it would freeze 330 MB into the
+    PyInstaller sidecar; a hand-written client keeps the binary separate
+    and adds no Python dependency.
+  - **Runtime cost.** app-server ready in 0.3 s, ~100 MB RSS idle with a
+    thread open, 141 MB peak during a turn (children excluded), idle CPU
+    negligible; coscribe's own runtime peaked at 177 MB on a similar task
+    (CLI, Electron excluded).
+  - **Overlap and state.** Codex ships its own browser use, computer use,
+    image generation, plugins/apps, multi-agent, goals, skills and
+    memories; 21 such features were turned off with `--disable` and the
+    task still ran. `[analytics] enabled = false` is an accepted key;
+    whether that stops all reporting is not verified. It keeps its own
+    sqlite state (threads, memories, logs; 6.4 MB after one turn) under
+    `CODEX_HOME`.
+
+  **Shape agreed after the spike: a third, independent module, not a
+  second engine inside chat.** coscribe becomes three modules -- chat,
+  workflows, code -- with code reachable two ways:
+
+  1. its own entry in the nav rail (a full conversation with Codex);
+  2. from chat, as a sub-agent: a tool that hands over a task and a
+     folder and gets back a summary plus the files written.
+
+  **Workflows don't use it, at run time or when drafting.** A workflow
+  runs fixed steps with no model deciding anything at run time
+  (ARCHITECTURE.md §6; `workflows/spec.py`): a Codex step would put a
+  fully autonomous agent inside a fixed run. Its script steps are
+  written by the chat agent when the workflow is drafted, and run through
+  `_run_python_script` with the folder guard. Adding Codex to drafting
+  would only add uncertainty there without filling a gap. A prompt-type
+  scheduled task is the chat agent running, so it can call the tool like
+  any conversation, under the task's approval tier.
+
+  **Chat calls it through the existing sub-agent machinery** --
+  `runtime_lg/subagents.py`, `tools/subagent_tasks.py`,
+  `SubAgentsPanel.tsx`/`SubAgentReportCard.tsx`. A Codex run is a
+  `SubAgentTask` with a different driver in place of `_drive`: the task
+  record, the panel, stop, background runs and the report back to the
+  parent stay as they are. Its approvals go through `host.decide()` into
+  `ChatSession._decide_action_request` like any sub-agent's, so hooks,
+  plan mode, accept-edits, Auto and its reviewer, a scheduled task's
+  approval tier, the audit log and the approval card all apply unchanged.
+  A Codex command approval becomes a call to a synthetic EXEC-risk tool,
+  a file-change approval a WRITE_LOCAL one; `exec_policy`'s regex rules
+  work on a command string as they do on script source. Plan mode
+  rejects every request. Unlike today's sub-agents, whose transcript is
+  only in memory, a Codex run survives a restart (Codex keeps it).
+
+  Three places where the existing code assumes a LangGraph sub-agent or
+  a real tool, and the Codex driver must not slip through:
+
+  - **The synthetic tools must be registered as gated.**
+    `_decide_action_request` approves outright any name missing from
+    `_gated_tool_risks`, which `_risks_of_gated_tools` builds from the
+    session's real tool list. A Codex request under an unregistered name
+    would be approved silently with no card -- so the delegation tool
+    brings its two synthetic tools (command: EXEC, file change:
+    WRITE_LOCAL) with `requires_approval` metadata, and a test pins that
+    one reaches the card.
+  - **The registry and transcript are graph-shaped.**
+    `register_subagent_run` keeps `(sub_agent, child_config)` and
+    `get_subagent_transcript` reads the graph's state; `_record_progress`
+    folds LangGraph updates. The Codex driver registers a transcript
+    reader of its own (Codex's `thread/read`), and folds `item/started`
+    and `thread/tokenUsage/updated` into `tool_uses`/`last_tool`/`tokens`.
+    Stop cancels the runner as today; the driver's `CancelledError` path
+    has to send `turn/interrupt`, or Codex keeps running after the panel
+    says stopped.
+  - **The approval card only shows code for three tool names.**
+    `ChatLog.tsx`'s `ApprovalDetail` (and `transcriptGrouping.ts`'s
+    `COMMAND_TOOL_NAMES`/verb table) special-case `run_python_script`,
+    `run_node_script` and `run_background_script`; any other name gets
+    the generic arguments dump. The synthetic command tool takes the same
+    `description` + command shape and joins those lists, so a Codex
+    command is reviewed the way a script is.
+
+  With the module not enabled, the tool doesn't exist. Concretely:
+
+  - **Binary on demand**, like `ensure_node_env`: downloaded from PyPI
+    (`openai-codex-cli-bin`, so a corporate pip mirror works) into
+    `state_dir` the first time the module is switched on; only `codex`
+    and `rg` kept. The installer grows only by the adapter's own code.
+    files.pythonhosted.org answers range requests (206), so the wheel's
+    zip index and just those two members can be fetched: 110.7 MB of the
+    149.4 MB win_amd64 wheel (checked by pulling `rg.exe` alone, ~2 MB
+    fetched, valid PE, CRC ok). A mirror without range support falls back
+    to the whole wheel. Version pinned, the download checked against
+    PyPI's published sha256; upgrades are manual only (app-server and
+    `dynamicTools` are experimental), each one ~111 MB again.
+  - **One process, started on first use, stopped when idle**; several
+    threads share it (the protocol supports many threads per process).
+    Started in its own process group and killed as a group, as
+    `run_soffice` does. Self-update (`in_app_updates`) off.
+  - **`CODEX_HOME` under `state_dir/codex`**, so a user's own
+    `~/.codex` config, auth and `AGENTS.md` never leak in.
+  - **Codex's commands use the script env.** They run whatever `python`
+    is on PATH, and an office PC often has none. The app-server starts
+    with `tools/script_env.py`'s venv first on PATH, so scripts get the
+    same openpyxl/python-docx/python-pptx/pandas/pdfplumber, and anything
+    it installs lands where the Environment tab shows it. (The spike's
+    "no pandas, pip install pytest" detour is this.)
+  - **Approvals as above; Codex's own model-based auto-reviewer off**,
+    `approvalPolicy: "untrusted"`. In the spike that sent back every
+    command, `ls -la` included -- Codex's own safe-command list didn't
+    pass it (not yet known why; every command is wrapped in
+    `bash -lc`). A card per command is too many for an office user, and
+    under Auto each one also costs an auto-review call. **Open decision**:
+    passing read-only commands without a card means something decides
+    a command is read-only. `exec_policy.py` deliberately never decides
+    that itself (its rules are human-authored; coscribe inferring safety
+    is what its docstring rejects), so shipping default "allow" rules
+    there would reverse that stance. The options are: user-authored
+    rules only, as today; a short built-in allow-list of read-only
+    commands, written down as a new, explicit exception; or classing
+    Codex's command approvals by risk some other way. Settle before the
+    sub-agent tool ships.
+  - **Usage stays with the run.** A Codex run's tokens go on its
+    `SubAgentTask.tokens` only, never out as the parent conversation's
+    `usage` WebSocket event, and none of its text reaches the parent
+    chat as `agent_delta` -- the same leak review_work had (the reviewer's
+    reply showing as the assistant's words, its tokens added to the
+    parent's counter). A test pins that the parent's socket gets neither
+    from a run.
+  - **Measure the cache before claiming savings.** The spike compared
+    time and call counts, not caching. DeepSeek caches the prefix
+    instructions -> tools -> messages (Phase 8ck, `runtime_lg/README.md`'s
+    "Prompt-cache audit"). Two things could break it on this path: Codex
+    sends `client_metadata` with the workspace path (if that reaches the
+    prefix, every folder change misses), and `include:
+    ["reasoning.encrypted_content"]`, which DeepSeek's `/v1/responses`
+    documents as stateless -- if reasoning isn't carried back, each turn
+    rereads the conversation. The adapter records `cachedInputTokens`
+    from `thread/tokenUsage/updated`; measure several turns in one
+    folder and a folder change before drawing conclusions.
+  - **The code entry needs its own session and thread index.**
+    `app.py`'s `_get_session` builds only `ChatSessionLG`; a
+    `CodeSession` serves the same WebSocket messages (`user_message`,
+    `approval_response`, `stop`, history, `load_older_messages`; no
+    `edit_message`/`rewind_message` at first). `/api/threads` lists
+    threads straight from the LangGraph checkpoint database, so code
+    threads are recorded in `ThreadMetaStore` (kind + Codex thread id)
+    and merged into the list. `NavRail`'s `NavMode` gains `"code"`.
+  - **Models**: providers that speak Responses connect directly
+    (OpenAI, DeepSeek); the rest need the bridge above -- a separate
+    decision after the first PR.
+  - **Frontend stays office-simple**: no "Codex", "runtime", terminal or
+    diff on the surface; command rows collapse to one plain line, results
+    are the existing file cards, approvals in plain language.
+
+  **Open, needs real hardware or a decision**: Windows behaviour with no
+  sandbox (no sandbox-setup prompt, PowerShell, Chinese paths/GBK),
+  corporate CA certificates, whether telemetry fully stops, the
+  Responses bridge, and model metadata for non-OpenAI models.
+
+  **Next**: first PR = on-demand download + the backend adapter behind
+  a setting that is off by default, tested against a fake app-server
+  that replays recorded events (`scripts/stub_llm.py` can't serve this:
+  Chat Completions only); then the Windows check; then chat's sub-agent
+  tool (most reuse, least new UI); then the code entry.
 
 ---
 
