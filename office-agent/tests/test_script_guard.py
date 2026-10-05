@@ -10,6 +10,7 @@ from coscribe.tools.script_guard import (
     locked_file_note,
     node_guard_args,
     suggested_folder,
+    without_guard_warnings,
     writable_roots,
     write_python_wrapper,
 )
@@ -115,6 +116,20 @@ def test_blocked_write_reads_a_node_permission_error() -> None:
     path, kept = blocked_write(stderr)
     assert path == "C:\\Users\\me\\out.txt"
     assert kept == stderr
+
+
+def test_guard_warnings_are_dropped_from_node_stderr() -> None:
+    # Node 20 spells the switch --experimental-permission and warns about it
+    # on every run; newer Nodes warn once per --allow-* flag instead.
+    stderr = (
+        "(node:2695) ExperimentalWarning: Permission is an experimental feature"
+        " and might change at any time\n"
+        "(node:2695) SecurityWarning: The flag --allow-child-process must be used"
+        " with extreme caution.\n"
+        "(Use `node --trace-warnings ...` to show where the warning was created)\n"
+        "real error\n"
+    )
+    assert without_guard_warnings(stderr) == "real error\n"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

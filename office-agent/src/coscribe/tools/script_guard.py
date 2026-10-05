@@ -163,13 +163,16 @@ def blocked_write(stderr: str) -> tuple[str | None, str]:
 
 
 _NODE_GUARD_WARNING = re.compile(
-    r"^\(node:\d+\) SecurityWarning: The flag --allow-.*\n|^\(Use `node --trace-warnings.*\n",
+    r"^\(node:\d+\) SecurityWarning: The flag --allow-.*\n"
+    r"|^\(node:\d+\) ExperimentalWarning: Permission is an experimental feature.*\n"
+    r"|^\(Use `node --trace-warnings.*\n",
     re.MULTILINE,
 )
 
 
 def without_guard_warnings(stderr: str) -> str:
-    """Node prints a warning for each `--allow-*` flag it was given; they
+    """Node prints a warning for each `--allow-*` flag it was given, and
+    Nodes before 22 one more for the experimental permission switch; they
     say nothing about the script."""
     return _NODE_GUARD_WARNING.sub("", stderr)
 
