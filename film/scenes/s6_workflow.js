@@ -1,5 +1,5 @@
 // Sentence 5 · the fixed workflow (100.0–113.6), the film's climax.
-//  S6-01 100.0–103.2  the light surface, four deliverables in the box, the fifth sentence typed (and spoken).
+//  S6-01 100.0–103.2  the light surface, four deliverables in the box, the fifth sentence typed.
 //  S6-02 103.2–106.0  not a dive but a pull-back: the surface tilts back like a sheet of paper over the
 //                     three depth worlds (sheet green / slides orange / code); the blue line runs through
 //                     them, is pulled taut and crystallises into the workflow's vertical step list.

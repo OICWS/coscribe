@@ -118,13 +118,15 @@ class Score:
                 s = s + filt(rm, highpass(150))
             self.put(s, t0, level, 0.45)
 
-    def pulse(self, t0, t1, step, roots, vel=0.5, accents=(1, .45, .7, .45, .85, .45, .7, .45), gain=0.33):
-        """Eighth-note sub pulse from t0 to t1. roots: [(t, note)] (changes at t)."""
+    def pulse(self, t0, t1, step, roots, vel=0.5, accents=(1, .45, .7, .45, .85, .45, .7, .45), gain=0.33, soft=()):
+        """Eighth-note sub pulse from t0 to t1. roots: [(t, note)] (changes at t). soft: [(a, b, factor)] --
+        the pulse keeps going through a drop, but further away."""
         k = 0
         t = t0
         while t < t1 - 1e-6:
             root = [nt for (tt, nt) in roots if tt <= t + 1e-6][-1]
-            self.sub(t, root, vel * accents[k % len(accents)], gain)
+            f = next((g for a, b, g in soft if a - 1e-6 <= t < b), 1.0)
+            self.sub(t, root, vel * f * accents[k % len(accents)], gain)
             k += 1
             t = t0 + k * step
 
@@ -190,7 +192,8 @@ def compose(events=None, lines=None):
     S.piano(13.0, "D1", 0.45, ring=4.0, human=False)
     S.tom(13.0, 58, 0.45, decay=0.9, gain=0.35)
     # ---------------- M1-c 13.0–21.0: sub pulse, low strings D–Bb, piano hint at 17 ----------------
-    S.pulse(13.0, 28.5, BEAT / 2, [(13.0, "D2"), (17.0, "Bb1"), (21.0, "D2"), (25.0, "D2"), (26.75, "Bb1")], vel=0.55)
+    S.pulse(13.0, 28.5, BEAT / 2, [(13.0, "D2"), (17.0, "Bb1"), (21.0, "D2"), (25.0, "D2"), (26.75, "Bb1")], vel=0.55,
+            soft=[(21.0, 24.0, 0.55), (24.0, 25.0, 0.75)])
     S.bow(13.0, 17.1, "D2", 0.13, kind="cb", fi=1.2, fo=0.5)
     S.bow(13.0, 17.1, "D3", 0.10, kind="vc", fi=1.5, fo=0.5)
     S.bow(17.0, 21.0, "Bb1", 0.13, kind="cb", fi=0.6, fo=0.2)
@@ -240,7 +243,7 @@ def compose(events=None, lines=None):
     S.bow(34.5, 42.0, "G1", 0.08, kind="cb", fi=1.0, fo=0.2)
     # ---------------- M2-d 42.0–46.0: drop; 44.0 pad back ----------------
     drop_note(S, 42.0, "E5", "A4")
-    S.pulse(42.0, 46.0, BEAT / 2, [(42.0, "A1")], vel=0.42)
+    S.pulse(42.0, 46.0, BEAT / 2, [(42.0, "A1")], vel=0.30, soft=[(44.0, 46.0, 1.3)])
     S.pad(44.0, 46.3, ["A2", "E3", "G3", "C#4"], level=0.11, fi=0.9, fo=0.5)
     # ---------------- M2-e 46.0–52.0: motif #2, piano + viola; 49.5 hit ----------------
     b2 = 3.5 / 4
@@ -347,7 +350,7 @@ def compose(events=None, lines=None):
     S.bow(ts[2], ts[3] + 0.05, "A5", 0.035, kind="vn", fi=0.4, fo=0.3, bright=0.75, vib=0.9, auto=None, send=0.6)
     S.bow(ts[3], 92.5, "G5", 0.038, kind="vn", env=[(0, 0), (0.3, 0.8), (92.5 - ts[3], 1.0), (92.5 - ts[3] + 1.5, 0)],
           fo=1.5, bright=0.75, vib=0.9, auto=None, send=0.6)
-    hit(S, 92.5, ["D1", "D2"], tomf=58, vel=0.68)
+    hit(S, 92.5, ["D1", "D2"], tomf=58, vel=0.76)
     for kind, nt, lv in zip(("cb", "vc", "va", "vn"), ("D2", "A2", "F3", "D4"), (0.1, 0.1, 0.08, 0.05)):
         S.bow(92.5, 94.0, nt, lv, kind=kind, fi=0.06, fo=0.6)
 

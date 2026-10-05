@@ -247,6 +247,7 @@
   }
   rowPass.forEach((t, r) => F.event(t, 'tick', { kind: 'cell', row: r }));
   F.event(ALIGN[1] - 0.03, 'snap', { what: 'columns align' });
+  F.event(14.65, 'whoosh', { soft: true, dur: 1.1, what: 'camera swings round the hero to look down the file' });
   for (let i = HERO + 1; i < 48; i++) F.event(casStart(i), 'tick', { kind: 'cell', soft: true, sheet: i });
 
   // =====================================================================
