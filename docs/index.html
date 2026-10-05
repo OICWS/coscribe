@@ -44,13 +44,25 @@
   --paper-muted: #5c5c5c;
   --paper-line: #d9d9d9;
   --chart: #4f81bd;
-  --deck-a: #1f6f5c;
+  --deck-a: #0f6b5c;
+  /* Template looks for the slide specimen (accents from builtin_templates/pptx). */
+  --tpl-block: #1e2761;
+  --tpl-bold: #c2410c;
+  --tpl-pitch-bg: #0b0f14;
+  --tpl-pitch-ink: #f1f5f9;
+  --tpl-pitch-accent: #22d3ee;
+  --scrim: rgba(20, 19, 18, .72);
   --deck-b: #8fc1b3;
   --deck-card: #e8efec;
   --shadow: 0 1px 2px rgba(32, 30, 29, .04), 0 12px 32px rgba(32, 30, 29, .07);
   --code-bg: #1b1a19;
   --code-fg: #ebe8e4;
   --code-muted: #8f8a86;
+  --st-ask: #93600f;
+  --st-auto: #2f7d4a;
+  --st-review: #1d5fb0;
+  --st-block: #b3261e;
+  --st-wait: #7d7979;
 
   --display: "Source Serif 4", "Noto Serif SC", "Songti SC", Georgia, serif;
   --sans: "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -69,6 +81,8 @@
     --paper: #f3f2f0; --paper-line: #cfcdca;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 16px 40px rgba(0, 0, 0, .35);
     --code-bg: #181716;
+    --st-ask: #e8b85c; --st-auto: #8fd19f; --st-review: #9cc3f3; --st-block: #f09a9a; --st-wait: #a19d9b;
+    --scrim: rgba(0, 0, 0, .78);
   }
 }
 :root[data-theme="dark"] {
@@ -83,6 +97,8 @@
   --paper: #f3f2f0; --paper-line: #cfcdca;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 16px 40px rgba(0, 0, 0, .35);
   --code-bg: #181716;
+  --st-ask: #e8b85c; --st-auto: #8fd19f; --st-review: #9cc3f3; --st-block: #f09a9a; --st-wait: #a19d9b;
+  --scrim: rgba(0, 0, 0, .78);
 }
 
 * { box-sizing: border-box; }
@@ -191,10 +207,7 @@ html[lang="zh-CN"] .hero h1 em { font-style: normal; }
 .deck-head { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--fg-2); margin-bottom: 14px; }
 .deck-head .badge { width: 34px; height: 22px; }
 .deck { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
-.deck .slide { border-radius: 6px; box-shadow: var(--shadow); animation: rise .5s both; }
-.deck .slide:nth-child(2) { animation-delay: .08s; } .deck .slide:nth-child(3) { animation-delay: .16s; }
-.deck .slide:nth-child(4) { animation-delay: .24s; } .deck .slide:nth-child(5) { animation-delay: .32s; }
-.deck .slide:nth-child(6) { animation-delay: .4s; }
+.deck .slide { border-radius: 6px; box-shadow: var(--shadow); }
 @media (max-width: 980px) { .deck { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } }
 @keyframes rise { from { transform: translateY(6px); opacity: .35; } to { transform: none; opacity: 1; } }
@@ -258,6 +271,9 @@ html[lang="zh-CN"] .hero h1 em { font-style: normal; }
 .s-r { position: absolute; left: 6%; top: 21%; width: 11%; height: .7cqw; background: linear-gradient(90deg, var(--deck-a), var(--deck-b)); }
 .s-b { position: absolute; left: 7%; top: 26%; right: 6%; font-size: 2cqw; line-height: 1.55; color: var(--paper-muted); }
 .s-b div::before { content: "•  "; }
+.s-b4 { font-size: 1.75cqw; line-height: 1.5; }
+.s-c.s-c4 { top: 60%; bottom: 12%; }
+.s-c.s-c4 .cap { top: -24%; }
 .s-c { position: absolute; left: 10%; right: 7%; top: 50%; bottom: 13%; }
 .s-c .cap { position: absolute; left: 0; right: 0; top: -14%; text-align: center; font-size: 2.2cqw; color: var(--paper-ink); }
 .bars { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 6%; padding: 0 4%; border-bottom: 1px solid var(--paper-line);
@@ -364,7 +380,7 @@ html[lang="zh-CN"] .h2 { line-height: 1.3; letter-spacing: 0; }
 .q-opt span { width: 20px; height: 20px; border: 1px solid var(--line-strong); border-radius: 5px; display: grid; place-items: center; font: 500 11px/1 var(--mono); color: var(--muted); }
 .q-opt.pick { background: var(--accent-soft); }
 .q-opt.pick span { border-color: var(--accent); color: var(--accent-ink); }
-.q-opt.other { color: var(--muted); border-bottom: 0; }
+.q-opt.other { color: var(--muted); border-bottom: 0 !important; }
 .r-head { padding: 11px 16px; border-bottom: 1px solid var(--line); font: 500 12px/1.4 var(--mono); color: var(--muted); }
 .r-list { list-style: none; margin: 0; padding: 4px 0; }
 .r-list li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding: 9px 16px; color: var(--fg-2); line-height: 1.55; }
@@ -390,8 +406,15 @@ html[lang="zh-CN"] .h2 { line-height: 1.3; letter-spacing: 0; }
 .approve .tname svg { width: 16px; height: 16px; color: var(--warning); }
 .approve pre { margin: 10px 0 12px; background: var(--chip); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.6; color: var(--fg-2); white-space: pre-wrap; word-break: break-all; }
 .approve .acts { display: flex; gap: 8px; }
-.approve .acts span { border-radius: 6px; padding: 4px 12px; font-size: 13px; border: 1px solid var(--line-strong); }
+.approve .acts button { border-radius: 6px; padding: 0 12px; height: 28px; font: 500 13px/1 var(--sans); border: 1px solid var(--line-strong); background: transparent; color: var(--fg); cursor: pointer; }
+.approve .acts button:hover { background: var(--chip); }
+.approve .acts button:disabled { opacity: .45; cursor: default; }
+.approve .acts .reset { margin-left: auto; border: 0; color: var(--muted); }
+.approve .acts .reset[hidden] { display: none; }
+.approve-msg { margin-top: 10px; font-size: 13px; color: var(--fg-2); display: flex; gap: 8px; align-items: baseline; }
+.approve-msg i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c); transform: translateY(-1px); }
 .approve .acts .yes { background: var(--accent); border-color: var(--accent); color: #fff; }
+.approve .acts .yes:hover { background: var(--accent); filter: brightness(1.08); }
 .guard { margin-top: 14px; background: var(--surface); border: 1px dashed var(--line-strong); border-radius: 12px; padding: 14px 16px; font-size: 13.5px; color: var(--fg-2); display: grid; grid-template-columns: 18px 1fr; gap: 10px; }
 .guard svg { width: 18px; height: 18px; color: var(--danger); margin-top: 2px; }
 .guard b { color: var(--fg); font-weight: 600; }
@@ -460,6 +483,233 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: cent
 footer nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 20px; }
 footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
 
+
+/* ---------- shared controls ---------- */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 10px; background: var(--chip); }
+.seg button { border: 0; background: transparent; color: var(--fg-2); font: 500 13px/1 var(--sans); height: 30px; padding: 0 12px; border-radius: 7px; cursor: pointer; }
+.seg button:hover { color: var(--fg); }
+.seg button[aria-selected="true"], .seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: 100%; transform-origin: 0 50%; transform: scaleX(0); background: var(--accent); }
+.nav-links a.active { color: var(--fg); }
+.nav-links a { position: relative; }
+.nav-links a.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -20px; height: 2px; background: var(--fg); }
+
+/* hero panel: collapsible like the app */
+.panel .ph { all: unset; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; margin-bottom: 8px; }
+.panel .ph:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.panel .ph small { font-weight: 400; color: var(--muted); }
+.panel .ph .chev { width: 12px; height: 12px; color: var(--muted); transition: transform .2s; }
+.panel .ph[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.panel .ph[aria-expanded="false"] { margin-bottom: 0; }
+
+/* deck: buttons that open the viewer */
+.slide-btn { all: unset; display: block; cursor: zoom-in; border-radius: 6px; transition: transform .18s; }
+.slide-btn:hover { transform: translateY(-3px); }
+.slide-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.deck .slide-btn { animation: rise .5s both; }
+.deck .slide-btn:nth-child(2) { animation-delay: .08s; } .deck .slide-btn:nth-child(3) { animation-delay: .16s; }
+.deck .slide-btn:nth-child(4) { animation-delay: .24s; } .deck .slide-btn:nth-child(5) { animation-delay: .32s; }
+.deck .slide-btn:nth-child(6) { animation-delay: .4s; }
+.lightbox { position: fixed; inset: 0; z-index: 50; background: var(--scrim); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 24px 16px; }
+.lb-inner { width: min(980px, 100%); display: grid; gap: 14px; }
+.lb-inner .slide { width: 100%; border-radius: 8px; box-shadow: 0 30px 80px rgba(0, 0, 0, .4); }
+.lb-bar { display: flex; align-items: center; gap: 10px; color: #f2f0ee; font-size: 14px; }
+.lb-bar .count { font-family: var(--mono); font-size: 13px; opacity: .8; }
+.lb-bar .sp { flex: 1; }
+.lb-bar button { border: 1px solid rgba(255, 255, 255, .3); background: transparent; color: #f2f0ee; height: 34px; min-width: 34px; padding: 0 12px; border-radius: 8px; cursor: pointer; font: 500 13px/1 var(--sans); }
+.lb-bar button:hover { background: rgba(255, 255, 255, .12); }
+
+/* slide templates (illustrative) */
+.slide { --s-bg: var(--paper); --s-ink: var(--paper-ink); --s-muted: var(--paper-muted); --s-line: var(--paper-line); --s-bar: var(--chart); --s-rule-a: var(--deck-a); --s-rule-b: var(--deck-b);
+  background: var(--s-bg); color: var(--s-ink); transition: background .25s, color .25s; }
+.slide .s-b, .slide .ticks { color: var(--s-muted); }
+.slide .s-c .cap { color: var(--s-ink); }
+.slide .bars { border-bottom-color: var(--s-line); background: repeating-linear-gradient(to top, transparent 0 calc(25% - 1px), var(--s-line) calc(25% - 1px) 25%); }
+.slide .bars i, .slide .div i { background: var(--s-bar); transition: background .25s, height .35s; }
+.slide .s-r { background: linear-gradient(90deg, var(--s-rule-a), var(--s-rule-b)); }
+.s-band, .s-spine { position: absolute; display: none; }
+.slide[data-tpl="block"] { --s-bar: var(--tpl-block); }
+.slide[data-tpl="block"] .s-band { display: block; left: 0; top: 0; right: 0; height: 22%; background: var(--tpl-block); }
+.slide[data-tpl="block"] .s-t { color: #ffffff; top: 7%; z-index: 1; }
+.slide[data-tpl="block"] .s-r { display: none; }
+.slide[data-tpl="bold"] { --s-bar: var(--tpl-bold); }
+.slide[data-tpl="bold"] .s-spine { display: block; left: 0; top: 0; bottom: 0; width: 2.4%; background: var(--tpl-bold); }
+.slide[data-tpl="bold"] .s-t { font-weight: 800; letter-spacing: -.01em; }
+.slide[data-tpl="bold"] .s-r { display: none; }
+.slide[data-tpl="pitch"] { --s-bg: var(--tpl-pitch-bg); --s-ink: var(--tpl-pitch-ink); --s-muted: #94a3b8; --s-line: #263241; --s-bar: var(--tpl-pitch-accent); --s-rule-a: var(--tpl-pitch-accent); --s-rule-b: var(--tpl-pitch-accent); border-color: #263241; }
+.tpl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.tpl-row .lab { font-size: 12.5px; color: var(--muted); }
+
+/* word toggle */
+.spec-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.spec-bar .lab { font-size: 12.5px; color: var(--muted); }
+.page del, .page ins { transition: opacity .2s; }
+.page.accepted del { display: none; }
+.page.accepted ins { color: inherit; text-decoration: none; }
+.page.accepted .cmt.rev { opacity: .45; }
+.page .cmt.rev .ok { display: none; color: var(--paper-muted); }
+.page.accepted .cmt.rev .ok { display: inline; }
+
+/* excel interactivity */
+.sheet td[data-c] { cursor: cell; }
+.sheet td[data-c]:hover { background: #f2f8f4; }
+.sheet td.sel { outline: 2px solid #217346; outline-offset: -2px; background: #f2f8f4; }
+.fx .val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx .val.is-f { color: #217346; }
+
+/* question card options are clickable */
+button.q-opt { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+button.q-opt:hover { background: var(--chip); }
+button.q-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+button.q-opt[aria-pressed="true"] { background: var(--accent-soft); }
+button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var(--accent-ink); }
+
+/* demo slots: reserved stages for coded animations */
+.demo { margin: 0; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); overflow: hidden; }
+.demo-stage { position: relative; aspect-ratio: var(--ar, 16 / 7); max-width: 100%; background:
+  radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--fg) 10%, transparent) 1px, transparent 1.5px) 0 0 / 18px 18px, var(--bg-2);
+  display: grid; align-items: center; padding: 22px; }
+.board { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 14px; }
+.frame { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 8px; align-content: start; min-height: 120px; font-size: 11.5px; color: var(--fg-2); position: relative; }
+.frame .fn { font: 500 10.5px/1 var(--mono); color: var(--muted); }
+.frame .ln { height: 6px; border-radius: 3px; background: var(--chip); }
+.frame .ln.s { width: 60%; } .frame .ln.m { width: 80%; }
+.frame .bub { align-self: end; justify-self: end; background: var(--chip); border-radius: 8px; padding: 4px 8px; }
+.frame .pill { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 1px 7px; font-size: 10.5px; width: max-content; max-width: 100%; }
+.frame .pill i { width: 6px; height: 6px; border-radius: 2px; background: var(--c, var(--muted)); }
+.frame .row { display: flex; gap: 6px; align-items: center; }
+.frame .x { color: var(--danger); } .frame .v { color: var(--success); }
+.frame .mini-browser { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.frame .mini-browser .url { font: 400 9.5px/1 var(--mono); color: var(--muted); padding: 5px 6px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+.frame .mini-browser .pg { padding: 6px; display: grid; gap: 5px; }
+.frame .hot { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+.demo-cap { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 18px; border-top: 1px solid var(--line); }
+.demo-tag { font: 500 11.5px/1 var(--mono); color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px; padding: 5px 9px; }
+.demo-cap b { font-weight: 600; font-size: 14.5px; }
+.demo-cap span.d { color: var(--muted); font-size: 13.5px; }
+.demo-cap .play { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line-strong); background: transparent; color: var(--muted); border-radius: 999px; height: 32px; padding: 0 14px 0 10px; font: 500 13px/1 var(--sans); cursor: not-allowed; }
+.demo-cap .play svg { width: 14px; height: 14px; }
+.demo[data-ready] .demo-cap .play { cursor: pointer; color: var(--fg); }
+@media (max-width: 760px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } .demo-stage { aspect-ratio: auto; } }
+
+/* workflows: big section */
+.wf-intro { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 56px; align-items: start; }
+.vs { border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden; background: var(--surface); font-size: 14px; }
+.vs-row { display: grid; grid-template-columns: 116px minmax(0, 1fr) minmax(0, 1fr); border-top: 1px solid var(--line); transition: background .15s; }
+.vs-row:first-child { border-top: 0; }
+.vs-row > * { padding: 12px 14px; line-height: 1.55; }
+.vs-row > :first-child { color: var(--muted); font-size: 13px; }
+.vs-row > :last-child { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--fg); }
+.vs-row > :nth-child(2) { color: var(--fg-2); }
+.vs-row:hover { background: var(--bg-2); }
+.vs-head > * { font-weight: 600; font-size: 13px; color: var(--fg) !important; }
+@media (max-width: 960px) { .wf-intro { grid-template-columns: 1fr; gap: 32px; } }
+@media (max-width: 560px) { .vs-row { grid-template-columns: 1fr 1fr; } .vs-row > :first-child { grid-column: 1 / -1; padding-bottom: 0; font-weight: 600; } }
+.wf-block { margin-top: 72px; }
+.wf-block > h3 { font: 600 24px/1.3 var(--display); letter-spacing: -.01em; }
+.wf-block > p.lead2 { color: var(--fg-2); margin-top: 8px; max-width: 46em; }
+.life { margin-top: 28px; display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: start; }
+.life-tabs { display: grid; gap: 4px; counter-reset: lt; }
+.life-tabs button { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start; padding: 12px 14px; border-radius: 10px; color: var(--fg-2); }
+.life-tabs button::before { counter-increment: lt; content: counter(lt); width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; font: 500 12px/1 var(--mono); }
+.life-tabs button b { display: block; font-weight: 600; color: var(--fg); font-size: 15px; }
+.life-tabs button small { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+.life-tabs button:hover { background: var(--surface); }
+.life-tabs button[aria-selected="true"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.life-tabs button[aria-selected="true"]::before { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.life-tabs button:focus-visible { outline: 2px solid var(--accent); }
+.life-panel { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: var(--shadow); min-height: 360px; overflow: hidden; font-size: 13.5px; }
+.lp-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.lp-head b { font-weight: 600; }
+.lp-head .tag2 { margin-left: auto; font: 400 11.5px/1 var(--mono); color: var(--muted); }
+.lp-body { padding: 16px; display: grid; gap: 12px; }
+.lp-note { color: var(--fg-2); font-size: 14px; border-top: 1px solid var(--line); padding: 12px 16px; background: var(--bg-2); }
+.act { color: var(--muted); font-size: 13px; }
+.act code { font-size: 11.5px; background: var(--chip); color: var(--fg-2); padding: 1px 5px; border-radius: 4px; }
+.kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 12px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; }
+.kv code, .lp-body code { font-size: 12px; background: var(--chip); padding: 1px 5px; border-radius: 4px; }
+.round { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.round .r { font: 500 12px/1.6 var(--mono); }
+.round.bad .r { color: var(--danger); } .round.good .r { color: var(--success); }
+.round .fix { color: var(--fg-2); margin-top: 4px; }
+.perm { display: grid; gap: 8px; }
+.perm div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; }
+.perm div span:first-child { color: var(--muted); }
+.history { list-style: none; margin: 0; padding: 0; display: grid; }
+.history li { display: grid; grid-template-columns: 18px 92px minmax(0, 1fr); gap: 10px; align-items: start; padding: 9px 0; border-top: 1px solid var(--line); }
+.history li:first-child { border-top: 0; }
+.history .d { font: 400 12.5px/1.6 var(--mono); color: var(--muted); }
+.history svg { width: 16px; height: 16px; margin-top: 2px; }
+.history .ok svg { color: var(--success); } .history .no svg { color: var(--danger); }
+@media (max-width: 900px) {
+  .life { grid-template-columns: 1fr; }
+  .life-tabs { grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); overflow-x: auto; padding-bottom: 4px; }
+  .life-tabs button small { display: none; }
+}
+
+[hidden] { display: none !important; }
+
+/* the graph + inspector */
+.graph-wrap { margin-top: 28px; display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: 24px; align-items: start; }
+.graph { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 18px 16px; }
+.g-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); padding: 0 4px 12px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.g-meta code { font-size: 11.5px; background: var(--chip); padding: 1px 5px; border-radius: 4px; color: var(--fg-2); }
+.g-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; position: relative; }
+.g-list::before { content: ""; position: absolute; left: 35.5px; top: 14px; bottom: 14px; width: 1px; background: var(--line-strong); }
+.g-node { all: unset; box-sizing: border-box; position: relative; display: grid; grid-template-columns: 56px 70px minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; padding: 7px 8px; border-radius: 9px; cursor: pointer; }
+.g-node .dot { justify-self: center; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--c); position: relative; z-index: 1; }
+.g-node .t { font-size: 14px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-node .t small { color: var(--muted); font-family: var(--mono); font-size: 11.5px; margin-left: 6px; }
+.g-node:hover { background: var(--bg-2); }
+.g-node[aria-pressed="true"] { background: var(--accent-soft); }
+.g-node[aria-pressed="true"] .dot { background: var(--c); }
+.g-node:focus-visible { outline: 2px solid var(--accent); }
+.g-node.nested { padding-left: 34px; grid-template-columns: 30px 70px minmax(0, 1fr); }
+.g-node.nested .dot { width: 9px; height: 9px; }
+.g-branch { font: 400 11.5px/1 var(--mono); color: var(--muted); padding: 4px 0 4px 72px; }
+.inspector { position: sticky; top: 90px; background: var(--code-bg); color: var(--code-fg); border-radius: 14px; overflow: hidden; }
+.ins-head { padding: 14px 16px; border-bottom: 1px solid rgba(255, 255, 255, .08); display: grid; gap: 6px; }
+.ins-head .k { font: 500 11px/1 var(--mono); color: var(--c); }
+.ins-head b { font: 600 17px/1.35 var(--sans); color: #fff; }
+.inspector pre { margin: 0; padding: 14px 16px; font-size: 12.5px; line-height: 1.7; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--code-fg); }
+.inspector pre .key { color: #8ab8f0; } .inspector pre .str { color: #c9e3b0; } .inspector pre .ref { color: #f0c27a; }
+.ins-why { padding: 14px 16px; border-top: 1px solid rgba(255, 255, 255, .08); color: #cfcac6; font-size: 13.5px; line-height: 1.65; }
+.ins-why b { color: #fff; font-weight: 600; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 16px; font-size: 12.5px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.lg-notes { margin-top: 56px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 32px; align-items: start; }
+.lg-list { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 14px; }
+.lg-list li { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 14px; font-size: 14.5px; color: var(--fg-2); }
+.lg-list li code { font-size: 12.5px; color: var(--fg); background: var(--chip); padding: 2px 6px; border-radius: 4px; height: max-content; width: max-content; }
+@media (max-width: 960px) { .graph-wrap, .lg-notes { grid-template-columns: 1fr; } .inspector { position: static; } }
+@media (max-width: 520px) { .g-node { grid-template-columns: 40px 62px minmax(0, 1fr); } .g-list::before { left: 27.5px; } .g-node.nested { padding-left: 20px; } .g-branch { padding-left: 56px; } .lg-list li { grid-template-columns: 1fr; gap: 4px; } }
+
+/* control: mode matrix */
+.matrix { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; overflow: hidden; }
+.mx-top { padding: 14px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+.mx-desc { color: var(--fg-2); font-size: 14px; min-height: 3em; }
+.mx-rows { list-style: none; margin: 0; padding: 0; }
+.mx-rows li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); font-size: 14px; }
+.mx-rows li:first-child { border-top: 0; }
+.st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; padding: 4px 10px; border-radius: 999px; color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); white-space: nowrap; }
+.st::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+@media (max-width: 520px) { .mx-rows li { grid-template-columns: 1fr; gap: 6px; } .st { width: max-content; } }
+
+/* quick start OS tabs */
+.term-bar .seg { background: rgba(255, 255, 255, .06); }
+.term-bar .seg button { color: var(--code-muted); height: 26px; font-size: 12px; }
+.term-bar .seg button[aria-selected="true"] { background: rgba(255, 255, 255, .12); color: var(--code-fg); box-shadow: none; }
+.term-bar .right { display: flex; gap: 10px; align-items: center; }
+.term-bar { gap: 10px; flex-wrap: wrap; }
+.mx-rows li > span:first-child { min-width: 0; }
+.mx-rows .st { transition: color .2s, background-color .2s; }
+.mx-foot { padding: 12px 16px; border-top: 1px solid var(--line); background: var(--bg-2); color: var(--muted); font-size: 13px; }
+.lb-stage { min-width: 0; }
+.lb-bar .lb-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   html { scroll-behavior: auto; }
@@ -482,8 +732,8 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
     <nav class="nav-links" aria-label="Sections">
       <a href="#files"><span class="zh">文件</span><span class="en">Files</span></a>
       <a href="#how"><span class="zh">工作方式</span><span class="en">How it works</span></a>
+      <a href="#workflows"><span class="zh">固定工作流</span><span class="en">Workflows</span></a>
       <a href="#control"><span class="zh">权限</span><span class="en">Control</span></a>
-      <a href="#workflows"><span class="zh">工作流</span><span class="en">Workflows</span></a>
       <a href="#start"><span class="zh">快速开始</span><span class="en">Get started</span></a>
       <a href="#faq">FAQ</a>
     </nav>
@@ -498,6 +748,7 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
       </a>
     </div>
   </div>
+  <div class="progress" id="progress"></div>
 </header>
 
 <main id="top">
@@ -531,7 +782,7 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
     </div>
 
     <figure class="stage" style="margin-inline:0;margin-bottom:0">
-      <div class="app" role="img" aria-label="coscribe app window: a finished run that turned Q3 sales data into a six-slide deck">
+      <div class="app" aria-label="coscribe app window: a finished run that turned Q3 sales data into a six-slide deck">
         <div class="app-bar">
           <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9 4.5v15"/></svg></span>
           <span class="t">Q3销售汇报PPT</span>
@@ -570,7 +821,8 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
           <aside class="panel">
             <div><h4>Q3销售汇报PPT</h4></div>
             <div>
-              <h4>Progress <small>⌄</small></h4>
+              <button class="ph" type="button" aria-expanded="true" aria-controls="p-progress">Progress <svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>
+              <div id="p-progress">
               <div class="dots"><i></i><i></i><i></i><i></i></div>
               <div class="muted" style="font-size:12px">4 of 4 done</div>
               <ul class="tasks">
@@ -579,13 +831,15 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
                 <li>在对比页插入各区域销售额柱状图并调整版面</li>
                 <li>渲染预览并请审阅，修正问题</li>
               </ul>
+              </div>
             </div>
             <div>
-              <h4>Outputs <small>1</small></h4>
-              <div class="file-row"><span class="badge pptx">PPTX</span><span>Q3销售汇报.pptx<small>Edited today at 4:10</small></span></div>
+              <button class="ph" type="button" aria-expanded="true" aria-controls="p-outputs">Outputs <small>1</small> <svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>
+              <div id="p-outputs"><div class="file-row"><span class="badge pptx">PPTX</span><span>Q3销售汇报.pptx<small>Edited today at 4:10</small></span></div></div>
             </div>
             <div>
-              <h4>Context</h4>
+              <button class="ph" type="button" aria-expanded="true" aria-controls="p-context">Context <svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>
+              <div id="p-context">
               <div class="lbl">Files read</div>
               <div class="file-row"><span class="badge xlsx">XLSX</span><span>Q3销售数据.xlsx<small>Read</small></span></div>
               <div class="lbl">Skills</div>
@@ -597,6 +851,7 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
                 <span class="chip">Add PowerPoint chart<i>×9</i></span>
                 <span class="chip">Render PowerPoint preview<i>×5</i></span>
                 <span class="chip">Review work<i>×3</i></span>
+              </div>
               </div>
             </div>
             <div class="save">
@@ -614,33 +869,37 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
       </figcaption>
     </figure>
     <div class="deck-wrap">
-      <div class="deck-head"><span class="badge pptx">PPTX</span><span><span class="zh">这次运行生成的 6 页，按原稿还原</span><span class="en">The six slides this run produced, redrawn from the file</span></span></div>
-              <div class="deck" aria-label="The six slides from Q3销售汇报.pptx">
-                <div class="slide cover"><div class="s-r"></div><div class="s-t">Q3 销售汇报</div><div class="s-sub">第三季度 · 区域销售表现回顾</div></div>
-                <div class="slide">
+      <div class="deck-head"><span class="badge pptx">PPTX</span><span><span class="zh">这次运行生成的 6 页，按原稿还原。点开可以逐页看。</span><span class="en">The six slides this run produced, redrawn from the file. Click to page through.</span></span></div>
+              <div class="deck" aria-label="The six slides from Q3销售汇报.pptx" id="deck">
+                
+        <button class="slide-btn" type="button" data-i="0" aria-label="Slide 1: 封面"><div class="slide cover"><div class="s-r"></div><div class="s-t">Q3 销售汇报</div><div class="s-sub">第三季度 · 区域销售表现回顾</div></div></button>
+        <button class="slide-btn" type="button" data-i="1" aria-label="Slide 2: 整体概览"><div class="slide">
                   <div class="s-t">整体概览：达成率 101.3%</div><div class="s-r"></div>
-                  <div class="s-b"><div>全季销售额 4,102 万元，超目标 52 万元</div><div>9 月环比增长 13.4%</div></div>
-                  <div class="s-c"><div class="bars" style="padding:0 12%;gap:14%"><i style="--h:62%"></i><i style="--h:67%"></i><i style="--h:76%"></i></div></div>
-                </div>
-                <div class="slide">
+                  <div class="s-b s-b4"><div>全季销售额 4,102 万元，超目标 52 万元</div><div>五个区域中三个达标</div><div>月度连续爬坡：7 月 1,245 → 9 月 1,518 万元</div><div>9 月环比增长 13.4%，创季度单月新高</div></div>
+                  <div class="s-c s-c4"><div class="cap">月度销售额（万元）</div><div class="bars" style="padding:0 12%;gap:14%"><i style="--h:62%"></i><i style="--h:67%"></i><i style="--h:76%"></i></div><div class="ticks" style="padding:0 12%;gap:14%"><span>7 月</span><span>8 月</span><span>9 月</span></div></div>
+                </div></button>
+        <button class="slide-btn" type="button" data-i="2" aria-label="Slide 3: 区域达成"><div class="slide">
                   <div class="s-t">区域达成：华东领跑，华南承压</div><div class="s-r"></div>
-                  <div class="s-c"><div class="div"><div class="zero"></div>
+                  <div class="s-b s-b4"><div>华东 +51 万元，达成 103.9%</div><div>海外 +24 万元，达成 107.3% 为最高</div><div>西南 +5 万元，达成 101.0%</div><div>华南 −25 万元、华北 −3 万元未达标</div></div>
+                  <div class="s-c s-c4"><div class="cap">目标差额（万元）</div><div class="div"><div class="zero"></div>
                     <i style="left:6%;bottom:40%;height:51%"></i><i style="left:25%;top:60%;height:25%"></i><i style="left:44%;top:60%;height:3%"></i><i style="left:63%;bottom:40%;height:5%"></i><i style="left:82%;bottom:40%;height:24%"></i>
-                  </div></div>
-                </div>
-                <div class="slide">
+                  </div><div class="ticks" style="padding:0 1.5%;gap:0"><span>华东</span><span>华南</span><span>华北</span><span>西南</span><span>海外</span></div></div>
+                </div></button>
+        <button class="slide-btn" type="button" data-i="3" aria-label="Slide 4: 各区域销售额"><div class="slide">
                   <div class="s-t">各区域销售额：华东领跑</div><div class="s-r"></div>
-                  <div class="s-c"><div class="bars"><i style="--h:84%"></i><i style="--h:61%"></i><i style="--h:56%"></i><i style="--h:33%"></i><i style="--h:22%"></i></div></div>
-                </div>
-                <div class="slide">
+                  <div class="s-b"><div>华东 1,351 万元居首，占全季 32.9%</div><div>华南 975、华北 897 万元分列二、三位</div></div>
+                  <div class="s-c" style="top:47%"><div class="cap">各区域 Q3 销售额（万元）</div><div class="bars"><i style="--h:84.4%"></i><i style="--h:60.9%"></i><i style="--h:56.1%"></i><i style="--h:32.8%"></i><i style="--h:22.1%"></i></div><div class="ticks"><span>华东</span><span>华南</span><span>华北</span><span>西南</span><span>海外</span></div></div>
+                </div></button>
+        <button class="slide-btn" type="button" data-i="4" aria-label="Slide 5: 增长动能"><div class="slide">
                   <div class="s-t">增长动能：全区域连续三月环比上升</div><div class="s-r"></div>
-                  <div class="s-c"><div class="bars"><i style="--h:85%"></i><i style="--h:40%"></i><i style="--h:36%"></i><i style="--h:33%"></i><i style="--h:24%"></i></div></div>
-                </div>
-                <div class="slide">
+                  <div class="s-b s-b4"><div>海外 +51.1%（94 → 142 万元），增速第一</div><div>西南 +24.1%，华东 +21.6%</div><div>华北 +19.9%，华南 +14.1%</div><div>9 月五个区域同步上行，无一下滑</div></div>
+                  <div class="s-c s-c4"><div class="cap">7 月 → 9 月增速（%）</div><div class="bars"><i style="--h:85.2%"></i><i style="--h:40.2%"></i><i style="--h:36%"></i><i style="--h:33.2%"></i><i style="--h:23.5%"></i></div><div class="ticks"><span>海外</span><span>西南</span><span>华东</span><span>华北</span><span>华南</span></div></div>
+                </div></button>
+        <button class="slide-btn" type="button" data-i="5" aria-label="Slide 6: 下季度建议"><div class="slide">
                   <div class="s-t">下季度建议</div><div class="s-r"></div>
-                  <div class="s-cards"><div><b>01</b>华南：补回 25 万元缺口</div><div><b>02</b>华东：维持节奏，追加投放</div><div><b>03</b>海外、西南：复制增长打法</div><div><b>04</b>华北：10 月内完成目标重排</div></div>
-                </div>
-              </div>
+                  <div class="s-cards"><div><b>01</b>华南：补回 −25 万元缺口，聚焦大客户攻坚</div><div><b>02</b>华东：维持节奏，追加投放巩固头部优势</div><div><b>03</b>海外、西南：复制增长打法，加大资源投入</div><div><b>04</b>华北：按当前节奏推进，10 月内完成目标重排</div></div>
+                </div></button>
+      </div>
     </div>
   </div>
 </section>
@@ -667,7 +926,17 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
           </ul>
         </div>
         <div class="specimen">
-          <div class="slide">
+          <div class="tpl-row">
+            <span class="lab"><span class="zh">换个内置模板看看</span><span class="en">Try another built-in template</span></span>
+            <div class="seg" role="group" aria-label="Template" id="tpl">
+              <button type="button" data-tpl="" aria-pressed="true">Minimal Light</button>
+              <button type="button" data-tpl="block" aria-pressed="false">Modern Block</button>
+              <button type="button" data-tpl="bold" aria-pressed="false">Bold Statement</button>
+              <button type="button" data-tpl="pitch" aria-pressed="false">Investor Pitch</button>
+            </div>
+          </div>
+          <div class="slide" id="tpl-slide">
+            <div class="s-band"></div><div class="s-spine"></div>
             <div class="s-t">各区域销售额：华东领跑</div><div class="s-r"></div>
             <div class="s-b"><div>华东 1,351 万元居首，占全季 32.9%</div><div>华南 975、华北 897 万元分列二、三位</div></div>
             <div class="s-c" style="top:47%">
@@ -676,8 +945,8 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
               <div class="ticks"><span>华东</span><span>华南</span><span>华北</span><span>西南</span><span>海外</span></div>
             </div>
           </div>
-          <div class="flag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span class="zh">无文字溢出</span><span class="en">No text overflow</span></div>
-          <p class="note"><span class="zh">上面那次运行生成的第 4 页，按原稿还原</span><span class="en">Slide 4 from the run above, redrawn from the file</span></p>
+          <div class="flag" style="top:62px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span class="zh">无文字溢出</span><span class="en">No text overflow</span></div>
+          <p class="note" id="tpl-note"><span class="zh">上面那次运行生成的第 4 页，用的就是 Minimal Light。其他模板为示意。</span><span class="en">Slide 4 from the run above, which used Minimal Light. Other templates are illustrative.</span></p>
         </div>
       </article>
 
@@ -693,7 +962,14 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
           </ul>
         </div>
         <div class="specimen">
-          <div class="page">
+          <div class="spec-bar">
+            <span class="lab"><span class="zh">在 Word 里审阅</span><span class="en">Review in Word</span></span>
+            <div class="seg" role="group" aria-label="Tracked changes" id="track">
+              <button type="button" data-v="show" aria-pressed="true"><span class="zh">显示修订</span><span class="en">Show changes</span></button>
+              <button type="button" data-v="accept" aria-pressed="false"><span class="zh">全部接受</span><span class="en">Accept all</span></button>
+            </div>
+          </div>
+          <div class="page" id="page">
             <div class="body">
               <h5>第三季度销售总结</h5>
               <div class="meta">销售运营部 · 草稿 v2</div>
@@ -705,7 +981,7 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
               </div>
             </div>
             <div class="margin">
-              <div class="cmt rev"><b>coscribe · 修订</b>“基本完成”改为“未完成”：975 万元低于目标 1,000 万元。</div>
+              <div class="cmt rev"><b>coscribe · 修订 <span class="ok">· 已接受</span></b>“基本完成”改为“未完成”：975 万元低于目标 1,000 万元。</div>
               <div class="cmt"><b>coscribe · 批注</b>华北的补齐时间来自哪份计划？建议注明出处。</div>
             </div>
           </div>
@@ -726,23 +1002,23 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
         </div>
         <div class="specimen">
           <div class="sheet">
-            <div class="fx"><span class="ref">G7</span><span class="fn">fx</span><span>=E7/F7</span></div>
+            <div class="fx"><span class="ref" id="fx-ref">G7</span><span class="fn">fx</span><span class="val is-f" id="fx-val">=E7/F7</span></div>
             <div class="grid-x">
-              <table>
+              <table id="sheet">
                 <thead><tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th></tr></thead>
                 <tbody>
                   <tr class="hdr"><th>1</th><td>区域</td><td>7月</td><td>8月</td><td>9月</td><td>合计</td><td>目标</td><td>达成率</td></tr>
-                  <tr><th>2</th><td class="l">华东</td><td>412</td><td>438</td><td>501</td><td>1,351</td><td>1,300</td><td class="up">103.9%</td></tr>
-                  <tr><th>3</th><td class="l">华南</td><td>305</td><td>322</td><td>348</td><td>975</td><td>1,000</td><td class="down">97.5%</td></tr>
-                  <tr><th>4</th><td class="l">华北</td><td>276</td><td>290</td><td>331</td><td>897</td><td>900</td><td class="down">99.7%</td></tr>
-                  <tr><th>5</th><td class="l">西南</td><td>158</td><td>171</td><td>196</td><td>525</td><td>520</td><td class="up">101.0%</td></tr>
-                  <tr><th>6</th><td class="l">海外</td><td>94</td><td>118</td><td>142</td><td>354</td><td>330</td><td class="up">107.3%</td></tr>
-                  <tr class="tot"><th>7</th><td class="l">合计</td><td>1,245</td><td>1,339</td><td>1,518</td><td>4,102</td><td>4,050</td><td class="sel up">101.3%</td></tr>
+                  <tr><th>2</th><td class="l" data-c="A2" tabindex="0">华东</td><td data-c="B2" tabindex="0">412</td><td data-c="C2" tabindex="0">438</td><td data-c="D2" tabindex="0">501</td><td data-c="E2" data-f="=SUM(B2:D2)" tabindex="0">1,351</td><td data-c="F2" tabindex="0">1,300</td><td class="up" data-c="G2" data-f="=E2/F2" tabindex="0">103.9%</td></tr>
+                  <tr><th>3</th><td class="l" data-c="A3" tabindex="0">华南</td><td data-c="B3" tabindex="0">305</td><td data-c="C3" tabindex="0">322</td><td data-c="D3" tabindex="0">348</td><td data-c="E3" data-f="=SUM(B3:D3)" tabindex="0">975</td><td data-c="F3" tabindex="0">1,000</td><td class="down" data-c="G3" data-f="=E3/F3" tabindex="0">97.5%</td></tr>
+                  <tr><th>4</th><td class="l" data-c="A4" tabindex="0">华北</td><td data-c="B4" tabindex="0">276</td><td data-c="C4" tabindex="0">290</td><td data-c="D4" tabindex="0">331</td><td data-c="E4" data-f="=SUM(B4:D4)" tabindex="0">897</td><td data-c="F4" tabindex="0">900</td><td class="down" data-c="G4" data-f="=E4/F4" tabindex="0">99.7%</td></tr>
+                  <tr><th>5</th><td class="l" data-c="A5" tabindex="0">西南</td><td data-c="B5" tabindex="0">158</td><td data-c="C5" tabindex="0">171</td><td data-c="D5" tabindex="0">196</td><td data-c="E5" data-f="=SUM(B5:D5)" tabindex="0">525</td><td data-c="F5" tabindex="0">520</td><td class="up" data-c="G5" data-f="=E5/F5" tabindex="0">101.0%</td></tr>
+                  <tr><th>6</th><td class="l" data-c="A6" tabindex="0">海外</td><td data-c="B6" tabindex="0">94</td><td data-c="C6" tabindex="0">118</td><td data-c="D6" tabindex="0">142</td><td data-c="E6" data-f="=SUM(B6:D6)" tabindex="0">354</td><td data-c="F6" tabindex="0">330</td><td class="up" data-c="G6" data-f="=E6/F6" tabindex="0">107.3%</td></tr>
+                  <tr class="tot"><th>7</th><td class="l" data-c="A7" tabindex="0">合计</td><td data-c="B7" data-f="=SUM(B2:B6)" tabindex="0">1,245</td><td data-c="C7" data-f="=SUM(C2:C6)" tabindex="0">1,339</td><td data-c="D7" data-f="=SUM(D2:D6)" tabindex="0">1,518</td><td data-c="E7" data-f="=SUM(E2:E6)" tabindex="0">4,102</td><td data-c="F7" data-f="=SUM(F2:F6)" tabindex="0">4,050</td><td class="sel up" data-c="G7" data-f="=E7/F7" tabindex="0">101.3%</td></tr>
                 </tbody>
               </table>
             </div>
           </div>
-          <p class="note"><span class="zh">示例表格，数据与上面的 PPT 一致</span><span class="en">Example sheet, same data as the deck above</span></p>
+          <p class="note"><span class="zh">示例表格，数据与上面的 PPT 一致。点任意单元格，看它背后的公式。</span><span class="en">Example sheet with the same data as the deck. Click any cell to see its formula.</span></p>
         </div>
       </article>
     </div>
@@ -756,6 +1032,21 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
       <div class="eyebrow"><span class="zh">工作方式</span><span class="en">How it works</span></div>
       <h2 class="h2"><span class="zh">像一位细心的同事那样做事</span><span class="en">It works like a careful colleague</span></h2>
       <p class="sub"><span class="zh">每一步都来自上面那次运行。它先列计划，拿不准的地方问你，做完再请另一个模型挑错。</span><span class="en">Every step here comes from the run above. It plans first, asks when unsure, and has a second model look for mistakes when it's done.</span></p>
+      <figure class="demo" data-demo="run-timelapse" style="margin-top:32px">
+        <div class="demo-stage" style="--ar:auto">
+          <div class="board" style="--n:2">
+            <div class="frame"><span class="fn">00:00</span><span class="bub">做成 6 页 PPT…</span><div class="ln m"></div><div class="ln s"></div></div>
+            <div class="frame"><span class="fn">00:20</span><span class="pill"><i style="--c:var(--success)"></i>4 tasks</span><div class="ln"></div><div class="ln m"></div><div class="ln s"></div></div>
+            <div class="frame"><span class="fn">05:40</span><span class="pill"><i style="--c:var(--k-llm)"></i>Review work</span><div class="row"><span class="x">✕</span><div class="ln m" style="flex:1"></div></div><div class="row"><span class="x">✕</span><div class="ln s" style="flex:1"></div></div></div>
+            <div class="frame"><span class="fn">08:10</span><span class="pill"><i style="--c:var(--slides)"></i>Q3销售汇报.pptx</span><div class="row"><span class="v">✓</span><div class="ln m" style="flex:1"></div></div></div>
+          </div>
+        </div>
+        <figcaption class="demo-cap">
+          <span class="demo-tag"><span class="zh">动画演示位</span><span class="en">Animation slot</span></span>
+          <span class="d"><span class="zh">8 分钟的运行压缩成 30 秒</span><span class="en">The 8-minute run in 30 seconds</span></span>
+          <button class="play" type="button" disabled><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg><span class="play-l"><span class="zh">动画制作中</span><span class="en">Animation coming</span></span></button>
+        </figcaption>
+      </figure>
     </div>
     <div class="steps">
       <div class="step">
@@ -776,13 +1067,13 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
         <div>
           <h3><span class="zh">拿不准就问</span><span class="en">Ask when unsure</span></h3>
           <p><span class="zh">需求里没说清楚的地方，它会给出几个具体选项让你挑，而不是自己猜一个。</span><span class="en">When the request leaves something open, it offers a few concrete options to pick from instead of guessing.</span></p>
-          <div class="frag" aria-hidden="true">
+          <div class="frag" id="question">
             <div class="q-head"><small>PPT 风格</small><b>这份 Q3 销售汇报想用哪种视觉风格？</b></div>
-            <div class="q-opt"><span>1</span>稳重通用（色块排版，藏青主色）</div>
-            <div class="q-opt pick"><span>2</span>简洁编辑风（白底细线，适合内部汇报）</div>
-            <div class="q-opt"><span>3</span>强烈对比（深色封面 + 左侧色条，适合高管速览）</div>
-            <div class="q-opt"><span>4</span>数字最突出（近黑底 + 青色点缀，适合业绩发布）</div>
-            <div class="q-opt other"><span>✎</span>Something else</div>
+            <button class="q-opt" type="button" aria-pressed="false"><span>1</span>稳重通用（色块排版，藏青主色）</button>
+            <button class="q-opt" type="button" aria-pressed="true"><span>2</span>简洁编辑风（白底细线，适合内部汇报）</button>
+            <button class="q-opt" type="button" aria-pressed="false"><span>3</span>强烈对比（深色封面 + 左侧色条，适合高管速览）</button>
+            <button class="q-opt" type="button" aria-pressed="false"><span>4</span>数字最突出（近黑底 + 青色点缀，适合业绩发布）</button>
+            <button class="q-opt other" type="button" aria-pressed="false"><span>✎</span>Something else</button>
           </div>
         </div>
       </div>
@@ -830,8 +1121,174 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
   </div>
 </section>
 
+<!-- ======================= WORKFLOWS ======================= -->
+<section id="workflows">
+  <div class="wrap">
+    <div class="wf-intro">
+      <div class="head">
+        <div class="eyebrow"><span class="zh">固定工作流</span><span class="en">Fixed workflows</span></div>
+        <h2 class="h2"><span class="zh">跑通一次，<br>以后每次都照这样跑</span><span class="en">Get it right once.<br>Then it runs the same way every time.</span></h2>
+        <p class="sub"><span class="zh">常见的 AI 自动化，每次运行都让模型把你的描述重新理解一遍、临场决定怎么做。coscribe 换了个做法：先在对话里把事情真的做成一次，再由 AI 把这次走通的步骤配置成一张 LangGraph 工作流。之后运行的时候，步骤、参数和检查条件都是定好的。</span><span class="en">Most AI automation has the model re-read your description on every run and decide what to do on the spot. coscribe works differently. You get the task done once in a conversation, then AI configures the steps that worked into a LangGraph workflow. From then on, the steps, arguments and checks are fixed.</span></p>
+      </div>
+      <div class="vs" role="table" aria-label="Comparison">
+        <div class="vs-row vs-head" role="row"><span role="columnheader"></span><span role="columnheader"><span class="zh">纯自然语言驱动</span><span class="en">Prompt-driven</span></span><span role="columnheader"><span class="zh">coscribe 固定工作流</span><span class="en">coscribe workflow</span></span></div>
+        <div class="vs-row" role="row"><span role="rowheader"><span class="zh">每次运行</span><span class="en">Each run</span></span><span role="cell"><span class="zh">模型重读描述，临场决定每一步</span><span class="en">The model re-reads the prompt and improvises each step</span></span><span role="cell"><span class="zh">按保存好的步骤执行</span><span class="en">Runs the saved steps</span></span></div>
+        <div class="vs-row" role="row"><span role="rowheader"><span class="zh">调用模型</span><span class="en">Model calls</span></span><span role="cell"><span class="zh">每一步都要</span><span class="en">On every step</span></span><span role="cell"><span class="zh">只在标明的模型步骤</span><span class="en">Only in marked model steps</span></span></div>
+        <div class="vs-row" role="row"><span role="rowheader"><span class="zh">两次之间</span><span class="en">Run to run</span></span><span role="cell"><span class="zh">可能走不同的路</span><span class="en">May take a different path</span></span><span role="cell"><span class="zh">同样的输入，同样的步骤</span><span class="en">Same inputs, same steps</span></span></div>
+        <div class="vs-row" role="row"><span role="rowheader"><span class="zh">出错时</span><span class="en">On failure</span></span><span role="cell"><span class="zh">可能绕过去继续，问题不容易发现</span><span class="en">May work around it, so problems hide</span></span><span role="cell"><span class="zh">停在出错的那一步，不产出可疑数据</span><span class="en">Stops at the failing step, no doubtful output</span></span></div>
+        <div class="vs-row" role="row"><span role="rowheader"><span class="zh">底层</span><span class="en">Underneath</span></span><span role="cell"><span class="zh">一段提示词</span><span class="en">A prompt</span></span><span role="cell"><span class="zh">LangGraph StateGraph，带检查点</span><span class="en">A LangGraph StateGraph with checkpoints</span></span></div>
+      </div>
+    </div>
+
+    <figure class="demo" data-demo="solidify" style="margin-top:56px">
+      <div class="demo-stage" style="--ar:16 / 4.6">
+        <div class="board" style="--n:4">
+          <div class="frame"><span class="fn"><span class="zh">① 对话里跑通</span><span class="en">① Done in chat</span></span><span class="bub"><span class="zh">导出昨天的订单…</span><span class="en">Export yesterday's orders…</span></span><span class="pill"><i style="--c:var(--k-tool)"></i>browser_click</span><span class="pill"><i style="--c:var(--k-tool)"></i>browser_wait_for</span><span class="pill"><i style="--c:var(--k-tool)"></i>read_xlsx</span></div>
+          <div class="frame"><span class="fn"><span class="zh">② AI 起草步骤</span><span class="en">② AI drafts steps</span></span><span class="pill"><i style="--c:var(--k-tool)"></i>1 tool</span><span class="pill"><i style="--c:var(--k-check)"></i>6 check</span><span class="pill"><i style="--c:var(--k-llm)"></i>9 llm</span><span class="pill"><i style="--c:var(--k-approval)"></i>10 approval</span></div>
+          <div class="frame"><span class="fn"><span class="zh">③ 真实测试</span><span class="en">③ Real test runs</span></span><div class="row"><span class="x">✕</span><span class="zh">第 1 轮：下载超时</span><span class="en">Round 1: download timed out</span></div><div class="row"><span class="v">✓</span><span class="zh">第 2 轮：11 步全部通过</span><span class="en">Round 2: all 11 steps pass</span></div></div>
+          <div class="frame"><span class="fn"><span class="zh">④ 定时运行</span><span class="en">④ On a schedule</span></span><span class="pill"><i style="--c:var(--accent)"></i><span class="zh">工作日 08:30</span><span class="en">Weekdays 08:30</span></span><div class="row"><span class="v">✓</span><div class="ln m" style="flex:1"></div></div><div class="row"><span class="v">✓</span><div class="ln m" style="flex:1"></div></div><div class="row"><span class="v">✓</span><div class="ln m" style="flex:1"></div></div></div>
+        </div>
+      </div>
+      <figcaption class="demo-cap">
+        <span class="demo-tag"><span class="zh">动画演示位</span><span class="en">Animation slot</span></span>
+        <b><span class="zh">一次对话，怎样变成一张工作流</span><span class="en">How one conversation becomes a workflow</span></b>
+        <button class="play" type="button" disabled><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg><span class="play-l"><span class="zh">动画制作中</span><span class="en">Animation coming</span></span></button>
+      </figcaption>
+    </figure>
+
+    <div class="wf-block">
+      <h3><span class="zh">从一次对话到每天自动运行</span><span class="en">From one conversation to a daily run</span></h3>
+      <p class="lead2"><span class="zh">以“每天从供应商后台导出订单、汇总成日报”为例。点任一阶段，看这一步发生了什么。</span><span class="en">Take “export orders from a supplier portal every day and summarize them”. Click a stage to see what happens.</span></p>
+      <div class="life">
+        <div class="life-tabs" role="tablist" aria-label="Stages" id="life-tabs">
+          <button role="tab" type="button" aria-selected="true" aria-controls="lp-1" id="lt-1"><span><b><span class="zh">在对话里跑通</span><span class="en">Do it once in chat</span></b><small><span class="zh">用浏览器面板和文件工具，把事情真的做成一次</span><span class="en">Really do the task once with the browser panel and file tools</span></small></span></button>
+          <button role="tab" type="button" aria-selected="false" aria-controls="lp-2" id="lt-2" tabindex="-1"><span><b><span class="zh">AI 起草工作流</span><span class="en">AI drafts the workflow</span></b><small><span class="zh">成功的调用变成步骤，会变的值变成输入</span><span class="en">Calls that worked become steps; changing values become inputs</span></small></span></button>
+          <button role="tab" type="button" aria-selected="false" aria-controls="lp-3" id="lt-3" tabindex="-1"><span><b><span class="zh">真实测试</span><span class="en">Test it for real</span></b><small><span class="zh">真跑一遍，按失败原因修改，最多三轮</span><span class="en">Runs it, fixes what failed, up to three rounds</span></small></span></button>
+          <button role="tab" type="button" aria-selected="false" aria-controls="lp-4" id="lt-4" tabindex="-1"><span><b><span class="zh">你审核并保存</span><span class="en">You review and save</span></b><small><span class="zh">看清它会打开哪些网站、写哪些文件夹</span><span class="en">See which sites it opens and folders it writes</span></small></span></button>
+          <button role="tab" type="button" aria-selected="false" aria-controls="lp-5" id="lt-5" tabindex="-1"><span><b><span class="zh">定时运行，出错就停</span><span class="en">Runs on schedule, stops on errors</span></b><small><span class="zh">出错时 AI 复现原因、起草修改</span><span class="en">On failure AI reproduces it and drafts a fix</span></small></span></button>
+        </div>
+        <div>
+          <div class="life-panel" role="tabpanel" id="lp-1" aria-labelledby="lt-1">
+            <div class="lp-head"><b><span class="zh">供应商订单</span><span class="en">Supplier orders</span></b><span class="tag2"><span class="zh">示例对话</span><span class="en">Example chat</span></span></div>
+            <div class="lp-body">
+              <div class="u-msg"><span class="zh">每天早上从供应商后台导出昨天的订单，按供应商汇总成日报，有异常订单先告诉我。</span><span class="en">Every morning, export yesterday's orders from the supplier portal, summarize them by supplier, and tell me first if anything looks off.</span></div>
+              <div class="act">Navigated to <code>portal.example.com/reports</code>, clicked <code>link "订单报表"</code>, selected <code>昨天</code>, clicked <code>button "导出 Excel"</code> ›</div>
+              <div class="act">Downloaded <code>订单_2026-10-04.xlsx</code>, read Excel, wrote <code>订单日报.xlsx</code> ›</div>
+              <div><span class="zh">做好了：昨天 312 笔订单，按 14 家供应商汇总；有 3 笔缺少收货地址，已在表里标红。</span><span class="en">Done: 312 orders from yesterday across 14 suppliers; 3 are missing a delivery address and are marked red.</span></div>
+            </div>
+            <div class="lp-note"><span class="zh">网页操作发生在桌面版的浏览器面板里，用的是你自己的登录状态，你能看着它点。</span><span class="en">Browser steps happen in the desktop app's browser panel, using your own sign-ins, while you watch.</span></div>
+          </div>
+          <div class="life-panel" role="tabpanel" id="lp-2" aria-labelledby="lt-2" hidden>
+            <div class="lp-head"><b><span class="zh">工作流草稿</span><span class="en">Workflow draft</span></b><span class="tag2">Save as workflow</span></div>
+            <div class="lp-body">
+              <dl class="kv">
+                <dt><span class="zh">名称</span><span class="en">Name</span></dt><dd><span class="zh">供应商订单日报</span><span class="en">Supplier orders daily</span></dd>
+                <dt><span class="zh">输入</span><span class="en">Inputs</span></dt><dd><code>download_folder</code> = downloads/订单<br><code>report_folder</code> = 报表</dd>
+                <dt><span class="zh">步骤</span><span class="en">Steps</span></dt><dd><span class="zh">11 步：7 个工具、2 个检查、1 个模型步骤、1 个审批</span><span class="en">11 steps: 7 tools, 2 checks, 1 model step, 1 approval</span></dd>
+              </dl>
+              <div class="chips"><span class="chip">browser_navigate</span><span class="chip">browser_click<i>×2</i></span><span class="chip">browser_select_option</span><span class="chip">browser_wait_for</span><span class="chip">read_xlsx</span><span class="chip">write_xlsx</span></div>
+            </div>
+            <div class="lp-note"><span class="zh">起草的模型拿到的是这次对话里每个成功的工具调用、真实参数和返回结果。成功的调用原样变成步骤，每次会变的值（日期、文件夹）变成输入，靠判断的地方才变成模型步骤。</span><span class="en">The drafting model sees every tool call that worked in this conversation, with its real arguments and results. Those calls become steps as-is, values that change between runs (dates, folders) become inputs, and only the places that took judgement become model steps.</span></div>
+          </div>
+          <div class="life-panel" role="tabpanel" id="lp-3" aria-labelledby="lt-3" hidden>
+            <div class="lp-head"><b>test_workflow</b><span class="tag2"><span class="zh">最多 3 轮</span><span class="en">Up to 3 rounds</span></span></div>
+            <div class="lp-body">
+              <div class="round bad"><span class="r"><span class="zh">第 1 轮</span><span class="en">Round 1</span> ✕</span><div><span class="zh">第 5 步“等下载完成”：30 秒内没有等到下载。</span><span class="en">Step 5, “Wait for the download”: no download within 30 seconds.</span><div class="fix">revise_workflow: <code>timeout: 30 → 600</code></div></div></div>
+              <div class="round good"><span class="r"><span class="zh">第 2 轮</span><span class="en">Round 2</span> ✓</span><div><span class="zh">11 步全部通过，产出 订单日报.xlsx。</span><span class="en">All 11 steps passed and produced 订单日报.xlsx.</span></div></div>
+            </div>
+            <div class="lp-note"><span class="zh">测试用真实的步骤跑一遍，但用临时的检查点，不进运行记录；遇到审批步骤就停下，因为测试时没人可问。测试结果和产出放在审核卡最前面。</span><span class="en">Tests run the real steps once on a throwaway checkpointer that stays out of the run history, and stop before any approval step since nobody is there to ask. The results and outputs come first on the review card.</span></div>
+          </div>
+          <div class="life-panel" role="tabpanel" id="lp-4" aria-labelledby="lt-4" hidden>
+            <div class="lp-head"><b><span class="zh">审核卡</span><span class="en">Review card</span></b><span class="tag2"><span class="zh">保存即授权</span><span class="en">Saving is consent</span></span></div>
+            <div class="lp-body">
+              <div class="perm">
+                <div><span><span class="zh">会打开的网站</span><span class="en">Sites it opens</span></span><span>portal.example.com</span></div>
+                <div><span><span class="zh">会写入的文件夹</span><span class="en">Folders it writes</span></span><span>downloads/订单 · 报表</span></div>
+                <div><span><span class="zh">会运行的脚本</span><span class="en">Scripts it runs</span></span><span><span class="zh">无</span><span class="en">None</span></span></div>
+                <div><span><span class="zh">需要你确认</span><span class="en">Asks you</span></span><span><span class="zh">第 10 步，有异常订单时</span><span class="en">Step 10, when orders look off</span></span></div>
+              </div>
+              <div class="cta"><span class="btn btn-primary" style="height:38px;font-size:14px"><span class="zh">保存工作流</span><span class="en">Save workflow</span></span><span class="btn btn-quiet" style="height:38px;font-size:14px"><span class="zh">在编辑器里修改</span><span class="en">Edit steps</span></span></div>
+            </div>
+            <div class="lp-note"><span class="zh">这些清单是从步骤里直接算出来的。运行时如果要碰清单之外的网站或文件夹，这次运行会停下来等你回答。</span><span class="en">These lists are worked out from the steps themselves. If a run needs a site or folder outside them, it stops and waits for your answer.</span></div>
+          </div>
+          <div class="life-panel" role="tabpanel" id="lp-5" aria-labelledby="lt-5" hidden>
+            <div class="lp-head"><b><span class="zh">运行记录</span><span class="en">Run history</span></b><span class="tag2"><span class="zh">工作日 08:30 · 示例</span><span class="en">Weekdays 08:30 · example</span></span></div>
+            <div class="lp-body">
+              <ul class="history">
+                <li class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span class="d">10-01 08:30</span><span><span class="zh">11 步完成，312 笔订单</span><span class="en">11 steps, 312 orders</span></span></li>
+                <li class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span class="d">10-02 08:30</span><span><span class="zh">11 步完成，等你确认了 2 笔异常</span><span class="en">11 steps, you confirmed 2 odd orders</span></span></li>
+                <li class="no"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg><span class="d">10-03 08:30</span><span><span class="zh">停在第 3 步：找不到 combobox “日期范围”。网站改版了，没有产出任何数据。</span><span class="en">Stopped at step 3: combobox “日期范围” not found. The site was redesigned; nothing was produced.</span></span></li>
+                <li class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span class="d">10-04 08:30</span><span><span class="zh">修改后恢复正常</span><span class="en">Back to normal after the fix</span></span></li>
+              </ul>
+            </div>
+            <div class="lp-note"><span class="zh">失败时会记下报错和当时的页面。AI 在一个新对话里复现问题、找到原因、改好步骤再测试，起草一张修改卡，仍然由你保存。之后的运行又回到纯固定步骤。</span><span class="en">A failure records the error and the page at that moment. In a new conversation, AI reproduces it, finds the cause, fixes and tests the steps, and drafts a change card for you to save. Later runs are fixed steps again.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wf-block">
+      <h3><span class="zh">这张工作流长什么样</span><span class="en">What the workflow looks like</span></h3>
+      <p class="lead2"><span class="zh">每一步只做一件事，自主性被刻意压低。点任意一步，看它保存下来的配置。</span><span class="en">Each step does one thing, with deliberately little autonomy. Click any step to see its saved definition.</span></p>
+      <div class="graph-wrap">
+        <div class="graph">
+          <div class="g-meta"><span><span class="zh">输入</span><span class="en">Inputs</span></span><code>download_folder</code><code>report_folder</code><span>· <span class="zh">11 步</span><span class="en">11 steps</span></span></div>
+          <ol class="g-list" id="graph">
+            <li><button class="g-node" type="button" data-i="0" aria-pressed="false" style="--c:var(--k-tool)"><span class="dot"></span><span class="kind" style="--c:var(--k-tool)">tool</span><span class="t"><span class="zh">打开供应商后台的报表页</span><span class="en">Open the supplier portal&#x27;s reports page</span><small>browser_navigate</small></span></button></li><li><button class="g-node" type="button" data-i="1" aria-pressed="false" style="--c:var(--k-tool)"><span class="dot"></span><span class="kind" style="--c:var(--k-tool)">tool</span><span class="t"><span class="zh">点开“订单报表”</span><span class="en">Click “订单报表” (Orders report)</span><small>browser_click</small></span></button></li><li><button class="g-node" type="button" data-i="2" aria-pressed="false" style="--c:var(--k-tool)"><span class="dot"></span><span class="kind" style="--c:var(--k-tool)">tool</span><span class="t"><span class="zh">日期范围选“昨天”</span><span class="en">Set the date range to “昨天” (yesterday)</span><small>browser_select_option</small></span></button></li><li><button class="g-node" type="button" data-i="3" aria-pressed="false" style="--c:var(--k-tool)"><span class="dot"></span><span class="kind" style="--c:var(--k-tool)">tool</span><span class="t"><span class="zh">点击“导出 Excel”</span><span class="en">Click “导出 Excel” (Export)</span><small>browser_click</small></span></button></li><li><button class="g-node" type="button" data-i="4" aria-pressed="true" style="--c:var(--k-tool)"><span class="dot"></span><span class="kind" style="--c:var(--k-tool)">tool</span><span class="t"><span class="zh">等下载完成，存进下载文件夹</span><span class="en">Wait for the download and save it</span><small>browser_wait_for</small></span></button></li><li><button class="g-node" type="button" data-i="5" aria-pressed="false" style="--c:var(--k-check)"><span class="dot"></span><span class="kind" style="--c:var(--k-check)">check</span><span class="t"><span class="zh">确认拿到了文件</span><span class="en">Check that a file arrived</span></span></button></li><li><button class="g-node" type="button" data-i="6" aria-pressed="false" style="--c:var(--k-tool)"><span class="dot"></span><span class="kind" style="--c:var(--k-tool)">tool</span><span class="t"><span class="zh">读取导出的订单表</span><span class="en">Read the exported orders</span><small>read_xlsx</small></span></button></li><li><button class="g-node" type="button" data-i="7" aria-pressed="false" style="--c:var(--k-check)"><span class="dot"></span><span class="kind" style="--c:var(--k-check)">check</span><span class="t"><span class="zh">确认表里有订单</span><span class="en">Check the sheet has orders</span></span></button></li><li><button class="g-node" type="button" data-i="8" aria-pressed="false" style="--c:var(--k-llm)"><span class="dot"></span><span class="kind" style="--c:var(--k-llm)">llm</span><span class="t"><span class="zh">按供应商汇总，标出异常订单</span><span class="en">Summarize by supplier, flag odd orders</span></span></button></li><li class="g-branch"><span class="zh">当 review.issue_count &gt; 0</span><span class="en">when review.issue_count &gt; 0</span></li><li><button class="g-node nested" type="button" data-i="9" aria-pressed="false" style="--c:var(--k-approval)"><span class="dot"></span><span class="kind" style="--c:var(--k-approval)">approval</span><span class="t"><span class="zh">有异常时，先让你确认</span><span class="en">Ask you first when something looks off</span></span></button></li><li><button class="g-node" type="button" data-i="10" aria-pressed="false" style="--c:var(--k-tool)"><span class="dot"></span><span class="kind" style="--c:var(--k-tool)">tool</span><span class="t"><span class="zh">写入订单日报.xlsx</span><span class="en">Write the daily report</span><small>write_xlsx</small></span></button></li>
+          </ol>
+          <div class="legend"><span style="--c:var(--k-tool)"><i></i>tool</span><span style="--c:var(--k-check)"><i></i>check</span><span style="--c:var(--k-llm)"><i></i>llm</span><span style="--c:var(--k-approval)"><i></i>approval</span><span style="--c:var(--kind-script, #2d62b8)"><i></i>script</span><span style="--c:#6a4db3"><i></i>branch</span><span style="--c:#17767c"><i></i>loop</span></div>
+        </div>
+        <div class="inspector" id="inspector" aria-live="polite">
+            <div class="ins-head" style="--c:var(--k-tool)"><span class="k" id="ins-k">tool · step 5</span><b id="ins-t"><span class="zh">等下载完成，存进下载文件夹</span><span class="en">Wait for the download and save it</span></b></div>
+            <pre class="ins" id="ins-json">{
+  <span class="key">&quot;kind&quot;</span>: <span class="str">&quot;tool&quot;</span>,
+  <span class="key">&quot;tool&quot;</span>: <span class="str">&quot;browser_wait_for&quot;</span>,
+  <span class="key">&quot;args&quot;</span>: {
+    <span class="key">&quot;download&quot;</span>: true,
+    <span class="key">&quot;save_to&quot;</span>: <span class="str">&quot;<span class="ref">{{download_folder}}</span>&quot;</span>,
+    <span class="key">&quot;timeout&quot;</span>: 600
+  },
+  <span class="key">&quot;save_as&quot;</span>: <span class="str">&quot;export_file&quot;</span>
+}</pre>
+            <div class="ins-why" id="ins-why"><b><span class="zh">为什么这样配置</span><span class="en">Why it's set up this way</span></b><br><span class="zh">导出要等好几分钟。第一轮测试时默认 30 秒超时失败了，AI 把等待改成 600 秒，第二轮通过。下载的文件名每次不同，后面的步骤用 {{export_file.file}} 读它。</span><span class="en">The export takes minutes. The first test round failed on the default 30-second timeout, so AI raised it to 600 and the second round passed. The file name changes every run, so later steps read it as {{export_file.file}}.</span></div>
+          </div>
+      </div>
+      <script type="application/json" id="steps-data">[{"id": "open_portal", "kind": "tool", "zh": "打开供应商后台的报表页", "en": "Open the supplier portal's reports page", "tool": "browser_navigate", "spec": {"kind": "tool", "tool": "browser_navigate", "args": {"url": "https://portal.example.com/reports"}}, "why_zh": "网址写在步骤里，保存时会列进“会打开的网站”。运行中如果要去清单之外的网站，会停下来问你。", "why_en": "The address is part of the step, so saving lists it under the sites this workflow opens. If a run needs any other site, it stops and asks you."}, {"id": "open_orders", "kind": "tool", "zh": "点开“订单报表”", "en": "Click “订单报表” (Orders report)", "tool": "browser_click", "spec": {"kind": "tool", "tool": "browser_click", "args": {"ref": "link \"订单报表\""}}, "why_zh": "按元素的描述找目标，而不是只在那一次有效的编号；等页面稳定、元素出现后才点击。", "why_en": "It finds the target by its description, not by a ref that only worked once, and clicks after the page settles and the element appears."}, {"id": "pick_date", "kind": "tool", "zh": "日期范围选“昨天”", "en": "Set the date range to “昨天” (yesterday)", "tool": "browser_select_option", "spec": {"kind": "tool", "tool": "browser_select_option", "args": {"ref": "combobox \"日期范围\"", "values": ["昨天"]}}, "why_zh": "对话里你选的是“昨天”，于是它成了固定参数，每次运行都导出前一天的订单。", "why_en": "You picked “yesterday” in the conversation, so it became a fixed argument: every run exports the previous day."}, {"id": "export", "kind": "tool", "zh": "点击“导出 Excel”", "en": "Click “导出 Excel” (Export)", "tool": "browser_click", "spec": {"kind": "tool", "tool": "browser_click", "args": {"ref": "button \"导出 Excel\""}}, "why_zh": "参数照抄对话里成功的那次调用，只有每次会变的值才换成输入。", "why_en": "The arguments are copied from the call that worked in the conversation; only values that change between runs became inputs."}, {"id": "wait_download", "kind": "tool", "zh": "等下载完成，存进下载文件夹", "en": "Wait for the download and save it", "tool": "browser_wait_for", "spec": {"kind": "tool", "tool": "browser_wait_for", "args": {"download": true, "save_to": "{{download_folder}}", "timeout": 600}, "save_as": "export_file"}, "why_zh": "导出要等好几分钟。第一轮测试时默认 30 秒超时失败了，AI 把等待改成 600 秒，第二轮通过。下载的文件名每次不同，后面的步骤用 {{export_file.file}} 读它。", "why_en": "The export takes minutes. The first test round failed on the default 30-second timeout, so AI raised it to 600 and the second round passed. The file name changes every run, so later steps read it as {{export_file.file}}."}, {"id": "has_file", "kind": "check", "zh": "确认拿到了文件", "en": "Check that a file arrived", "tool": "", "spec": {"kind": "check", "conditions": [{"left": {"ref": "export_file.file"}, "op": "not_empty"}]}, "why_zh": "没下载到文件，运行就停在这一步，不会拿空数据接着往下做。", "why_en": "If no file arrived, the run stops here instead of carrying on with nothing."}, {"id": "read_orders", "kind": "tool", "zh": "读取导出的订单表", "en": "Read the exported orders", "tool": "read_xlsx", "spec": {"kind": "tool", "tool": "read_xlsx", "args": {"path": "{{export_file.file}}"}, "save_as": "orders"}, "why_zh": "读取上一步刚下载的那个文件。引用在保存时就检查过，写错名字或步骤顺序不对，保存不了。", "why_en": "Reads the file the previous step downloaded. References are checked when you save, so a typo or a step in the wrong order can't be saved."}, {"id": "has_rows", "kind": "check", "zh": "确认表里有订单", "en": "Check the sheet has orders", "tool": "", "spec": {"kind": "check", "conditions": [{"left": {"count": "orders"}, "op": "gt", "right": {"value": 0}}]}, "why_zh": "表是空的就停下并记录原因，而不是生成一份空日报。", "why_en": "An empty sheet stops the run with the reason recorded, rather than producing an empty report."}, {"id": "review", "kind": "llm", "zh": "按供应商汇总，标出异常订单", "en": "Summarize by supplier, flag odd orders", "tool": "", "spec": {"kind": "llm", "prompt": "把 {{orders}} 按供应商汇总成表格，并找出金额异常或缺少收货地址的订单。", "fields": [{"name": "table", "type": "text"}, {"name": "issue_count", "type": "number"}, {"name": "issues", "type": "list"}], "save_as": "review"}, "why_zh": "整条工作流里只有这一步会调用模型。对话里这一步靠的是判断，所以它被配置成模型步骤，并且必须返回这三个字段。", "why_en": "This is the only step that calls a model. In the conversation this part took judgement, so it became a model step that must return exactly these three fields."}, {"id": "confirm", "kind": "approval", "zh": "有异常时，先让你确认", "en": "Ask you first when something looks off", "tool": "", "spec": {"kind": "approval", "message": "发现 {{review.issue_count}} 个异常订单，确认后再写入日报。", "when": {"left": {"ref": "review.issue_count"}, "op": "gt", "right": {"value": 0}}}, "why_zh": "没有异常就直接跳过。有异常时，LangGraph 用 interrupt() 暂停这次运行，你确认后从这里接着跑。", "why_en": "With nothing odd it's skipped. Otherwise LangGraph pauses the run with interrupt(), and it carries on from here once you confirm."}, {"id": "write_report", "kind": "tool", "zh": "写入订单日报.xlsx", "en": "Write the daily report", "tool": "write_xlsx", "spec": {"kind": "tool", "tool": "write_xlsx", "args": {"path": "{{report_folder}}/订单日报.xlsx", "content": "{{review.table}}"}}, "why_zh": "写进你保存时同意过的文件夹，是一份能在 Excel 里接着编辑的真表格。", "why_en": "Written into the folder you agreed to when saving, as a real spreadsheet you can keep editing in Excel."}]</script>
+    </div>
+
+    <div class="lg-notes">
+      <div>
+        <h3 style="font:600 24px/1.3 var(--display)"><span class="zh">底下是一张 LangGraph 图</span><span class="en">Underneath, a LangGraph graph</span></h3>
+        <p class="lead2" style="color:var(--fg-2);margin-top:8px"><span class="zh">没有另写一套图引擎。每个工作流编译成一张 StateGraph，和对话共用同一个检查点存储。</span><span class="en">There's no homemade graph engine. Each workflow compiles to a StateGraph that shares its checkpointer with conversations.</span></p>
+        <ul class="lg-list">
+          <li><code><span class="zh">一步</span><span class="en">a step</span></code><span><span class="zh">一个节点</span><span class="en">One node</span></span></li>
+          <li><code>branch</code><span><span class="zh">一条条件边，按条件走 then 或 otherwise</span><span class="en">A conditional edge to then or otherwise</span></span></li>
+          <li><code>loop</code><span><span class="zh">开始、下一项、收集三个节点，循环体在中间转圈</span><span class="en">Start, next-item and collect nodes the body cycles through</span></span></li>
+          <li><code>approval</code><span><span class="zh">interrupt() 暂停，等你回答后继续</span><span class="en">interrupt() pauses until you answer</span></span></li>
+          <li><code><span class="zh">失败后</span><span class="en">on failure</span></code><span><span class="zh">只重跑失败的那一步，前面的结果都在检查点里</span><span class="en">Only the failed step re-runs; earlier results are in the checkpoint</span></span></li>
+        </ul>
+      </div>
+      <figure class="demo" data-demo="browser-run">
+        <div class="demo-stage" style="--ar:16 / 10">
+          <div class="board" style="--n:2">
+            <div class="frame"><span class="fn">2 · browser_click</span><div class="mini-browser"><div class="url">portal.example.com/reports</div><div class="pg"><span class="pill hot">订单报表</span><div class="ln m"></div><div class="ln s"></div></div></div></div>
+            <div class="frame"><span class="fn">3 · browser_select_option</span><div class="mini-browser"><div class="url">portal.example.com/reports/orders</div><div class="pg"><span class="pill hot">日期范围：昨天 ⌄</span><div class="ln m"></div></div></div></div>
+            <div class="frame"><span class="fn">4 · browser_click</span><div class="mini-browser"><div class="url">portal.example.com/reports/orders</div><div class="pg"><div class="ln"></div><span class="pill hot">导出 Excel</span></div></div></div>
+            <div class="frame"><span class="fn">5 · browser_wait_for</span><span class="pill"><i style="--c:var(--sheet)"></i>订单_2026-10-04.xlsx</span><div class="row"><span class="v">✓</span><span class="zh">已存入 downloads/订单</span><span class="en">Saved to downloads/订单</span></div></div>
+          </div>
+        </div>
+        <figcaption class="demo-cap">
+          <span class="demo-tag"><span class="zh">动画演示位</span><span class="en">Animation slot</span></span>
+          <b><span class="zh">工作流在浏览器面板里自动导出报表</span><span class="en">The workflow exporting a report in the browser panel</span></b>
+          <button class="play" type="button" disabled><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg><span class="play-l"><span class="zh">动画制作中</span><span class="en">Animation coming</span></span></button>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
 <!-- ======================= CONTROL ======================= -->
-<section id="control">
+<section id="control" class="band">
   <div class="wrap">
     <div class="head">
       <div class="eyebrow"><span class="zh">权限</span><span class="en">Control</span></div>
@@ -840,11 +1297,23 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
     </div>
     <div class="control">
       <div>
-        <div class="modes">
-          <div class="mode"><b>Manual</b><span><span class="zh">每一次修改、运行脚本或对外操作之前都先问你。</span><span class="en">Asks before every change, script or outside action.</span></span></div>
-          <div class="mode"><b>Accept Edits</b><span><span class="zh">你文件夹里的编辑直接进行；运行代码和对外操作仍然先问。</span><span class="en">Edits files in your folders without asking; still asks before running code or outside actions.</span></span></div>
-          <div class="mode"><b>Plan</b><span><span class="zh">只做调研、写方案，你批准之前不改任何东西。</span><span class="en">Researches and writes a plan for you to approve before any change.</span></span></div>
-          <div class="mode"><b>Auto</b><span><span class="zh">由一个审查模型批准常规操作、拦下有风险的操作，不再逐条问你。</span><span class="en">A reviewer model approves routine actions and blocks risky ones instead of asking you.</span></span></div>
+        <div class="matrix">
+          <div class="mx-top">
+            <div class="seg" role="tablist" aria-label="Mode" id="modes">
+              <button role="tab" type="button" data-m="manual" aria-selected="true" aria-controls="mx-rows">Manual</button>
+              <button role="tab" type="button" data-m="edits" aria-selected="false" aria-controls="mx-rows" tabindex="-1">Accept Edits</button>
+              <button role="tab" type="button" data-m="plan" aria-selected="false" aria-controls="mx-rows" tabindex="-1">Plan</button>
+              <button role="tab" type="button" data-m="auto" aria-selected="false" aria-controls="mx-rows" tabindex="-1">Auto</button>
+            </div>
+            <p class="mx-desc" id="mx-desc"><span class="zh">每一次修改、运行脚本或对外操作之前都先问你。</span><span class="en">Asks before every change, script or outside action.</span></p>
+          </div>
+          <ul class="mx-rows" id="mx-rows" role="tabpanel" aria-live="polite">
+            <li><span><span class="zh">修改工作区里的 Excel</span><span class="en">Edit an Excel file in the workspace</span></span><span class="st" style="--c:var(--st-ask)"><span class="zh">先问你</span><span class="en">Asks you</span></span></li>
+            <li><span><span class="zh">运行一段 Python 脚本</span><span class="en">Run a Python script</span></span><span class="st" style="--c:var(--st-ask)"><span class="zh">先问你</span><span class="en">Asks you</span></span></li>
+            <li><span><span class="zh">通过 Microsoft 365 发一封邮件</span><span class="en">Send an email through Microsoft 365</span></span><span class="st" style="--c:var(--st-ask)"><span class="zh">先问你</span><span class="en">Asks you</span></span></li>
+            <li><span><span class="zh">写进一个没添加过的文件夹</span><span class="en">Write to a folder you haven't added</span></span><span class="st" style="--c:var(--st-block)"><span class="zh">拦下，提示你添加文件夹</span><span class="en">Blocked, offers Add folder</span></span></li>
+          </ul>
+          <div class="mx-foot"><span class="zh">点上面的模式切换。对话进行到一半也能换，下一次操作就按新模式处理。</span><span class="en">Click a mode above. You can switch mid-conversation; the next action follows the new mode.</span></div>
         </div>
         <div class="facts-2">
           <div>
@@ -858,47 +1327,20 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
         </div>
       </div>
       <div>
-        <div class="approve" aria-hidden="true">
+        <div class="approve" id="approve">
           <div class="tname"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4.5M12 17.4v.1"/></svg>Run Python script</div>
           <pre>{
   "path": "清洗订单明细.py",
   "args": ["订单明细_2026Q3.xlsx"]
 }</pre>
-          <div class="acts"><span class="yes">Approve</span><span>Deny</span></div>
+          <div class="acts"><button type="button" class="yes" data-a="ok">Approve</button><button type="button" data-a="no">Deny</button><button type="button" class="reset" hidden><span class="zh">重来</span><span class="en">Reset</span></button></div>
+          <p class="approve-msg" id="approve-msg"><i style="--c:var(--st-ask)"></i><span><span class="zh">这是 Manual 模式下的审批卡片，点一下试试。</span><span class="en">This is the approval card you get in Manual mode. Try it.</span></span></p>
         </div>
         <div class="guard">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5M12 15.8v.1"/></svg>
           <div><b><span class="zh">批准脚本前，请看一眼它要做什么。</span><span class="en">Look before you approve a script.</span></b> <span class="zh">文件夹限制用来防止模型失误，脚本本身仍然可以读取任意文件、访问网络。</span><span class="en">The folder limit guards against model mistakes. A script can still read any file and reach the network.</span></div>
         </div>
       </div>
-    </div>
-  </div>
-</section>
-
-<!-- ======================= WORKFLOWS ======================= -->
-<section id="workflows" class="band">
-  <div class="wrap wf">
-    <div class="head">
-      <div class="eyebrow"><span class="zh">工作流与定时任务</span><span class="en">Workflows and schedules</span></div>
-      <h2 class="h2"><span class="zh">做顺了的事，存成固定步骤</span><span class="en">Save what worked as fixed steps</span></h2>
-      <p class="sub"><span class="zh">一次对话做成功了，点“Save as workflow”，它会把用过的工具调用整理成固定步骤，真实跑一遍测试，再交给你保存。之后按时间表自动运行，每次结果都一样。</span><span class="en">When a conversation got it right, click "Save as workflow". It turns the tool calls into fixed steps, test-runs them for real, and hands them to you to save. Then it runs on a schedule and does the same thing every time.</span></p>
-      <ul class="list">
-        <li><span class="zh">运行时不让模型临场决定，只有标明的“模型步骤”才会调用模型，又快又省</span><span class="en">At run time the model makes no decisions; only steps marked as model steps call it, so runs are fast and cheap</span></li>
-        <li><span class="zh">出错就停在出错的那一步，不产出可疑的数据；AI 在新对话里复现原因、起草修改，仍由你保存</span><span class="en">A failure stops at the failing step instead of producing doubtful data; AI reproduces the cause in a new conversation and drafts a fix for you to save</span></li>
-        <li><span class="zh">也可以只写一段指令，做成每次由模型重新执行的提示词任务</span><span class="en">Or write a plain instruction as a prompt task that the model carries out fresh each time</span></li>
-      </ul>
-    </div>
-    <div class="wf-card" aria-hidden="true">
-      <div class="wf-top"><b>周一销售周报</b><span class="sched"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span class="zh">每周一 09:00</span><span class="en">Mon 09:00</span></span></div>
-      <ol class="wf-steps">
-        <li><span class="n">1</span><span class="kind" style="--c:var(--k-tool)">tool</span><span><span class="zh">读取 销售明细.xlsx</span><span class="en">Read 销售明细.xlsx</span></span><svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></li>
-        <li><span class="n">2</span><span class="kind" style="--c:var(--k-check)">check</span><span><span class="zh">本周行数大于 0</span><span class="en">This week has rows</span></span><svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></li>
-        <li><span class="n">3</span><span class="kind" style="--c:var(--k-tool)">tool</span><span><span class="zh">按区域汇总，写入 周报.xlsx</span><span class="en">Sum by region into 周报.xlsx</span></span><svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></li>
-        <li><span class="n">4</span><span class="kind" style="--c:var(--k-llm)">llm</span><span><span class="zh">写三句本周要点</span><span class="en">Write three highlights</span></span><svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></li>
-        <li><span class="n">5</span><span class="kind" style="--c:var(--k-tool)">tool</span><span><span class="zh">生成 销售周报.pptx</span><span class="en">Build 销售周报.pptx</span></span><svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></li>
-        <li><span class="n">6</span><span class="kind" style="--c:var(--k-approval)">approval</span><span><span class="zh">发出前由你确认</span><span class="en">You confirm before sending</span></span><span class="muted" style="font-size:12px"><span class="zh">等待中</span><span class="en">Waiting</span></span></li>
-      </ol>
-      <div class="wf-foot"><span class="zh">示例工作流</span><span class="en">Example workflow</span><span class="zh">5 / 6 步完成</span><span class="en">5 of 6 steps done</span></div>
     </div>
   </div>
 </section>
@@ -954,22 +1396,44 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
         <li><div><h3><span class="zh">启动</span><span class="en">Launch</span></h3><p><span class="zh">首次构建一次前端，然后运行 <code>coscribe-web</code> 打开网页界面，或者用 <code>coscribe</code> 在终端里对话。</span><span class="en">Build the frontend once, then run <code>coscribe-web</code> for the web UI, or <code>coscribe</code> to chat in the terminal.</span></p></div></li>
       </ol>
       <div class="term">
-        <div class="term-bar"><span>bash</span><button class="copy" id="copy" type="button"><span class="zh">复制命令</span><span class="en">Copy</span></button></div>
-<pre id="cmds"><span class="c"># 1. install</span>
-<span class="p">$ </span>git clone https://github.com/OICWS/coscribe.git
-<span class="p">$ </span>cd coscribe/office-agent
-<span class="p">$ </span>python3 -m venv .venv &amp;&amp; source .venv/bin/activate
-<span class="p">$ </span>pip install -e ".[dev,web]"
-<span class="p">$ </span>pip install -U "google-genai&gt;=2.13.0,&lt;2.14.0"
+        <div class="term-bar">
+          <div class="seg" role="tablist" aria-label="Operating system" id="os">
+            <button role="tab" type="button" data-os="unix" aria-selected="true" aria-controls="cmds-unix">macOS / Linux</button>
+            <button role="tab" type="button" data-os="win" aria-selected="false" aria-controls="cmds-win" tabindex="-1">Windows</button>
+          </div>
+          <div class="right"><span id="shell">bash</span><button class="copy" id="copy" type="button"><span class="zh">复制命令</span><span class="en">Copy</span></button></div>
+        </div>
+<pre id="cmds-unix" class="cmds" role="tabpanel"><span class="c"># 1. install</span>
+<span class="p">$ </span><span class="cmd">git clone https://github.com/OICWS/coscribe.git</span>
+<span class="p">$ </span><span class="cmd">cd coscribe/office-agent</span>
+<span class="p">$ </span><span class="cmd">python3 -m venv .venv &amp;&amp; source .venv/bin/activate</span>
+<span class="p">$ </span><span class="cmd">pip install -e ".[dev,web]"</span>
+<span class="p">$ </span><span class="cmd">pip install -U "google-genai&gt;=2.13.0,&lt;2.14.0"</span>
 
 <span class="c"># 2. pick a model: edit .env after copying</span>
-<span class="p">$ </span>cp .env.example .env
+<span class="p">$ </span><span class="cmd">cp .env.example .env</span>
 <span class="c">#   ANTHROPIC_API_KEY=...   (or OPENAI_ / GEMINI_)</span>
 <span class="c">#   COSCRIBE_DEFAULT_MODEL=gemini:gemini-2.5-flash</span>
 
 <span class="c"># 3. build the UI once, then launch</span>
-<span class="p">$ </span>(cd frontend &amp;&amp; npm install &amp;&amp; npm run build)
-<span class="p">$ </span>coscribe-web</pre>
+<span class="p">$ </span><span class="cmd">(cd frontend &amp;&amp; npm install &amp;&amp; npm run build)</span>
+<span class="p">$ </span><span class="cmd">coscribe-web</span></pre>
+<pre id="cmds-win" class="cmds" role="tabpanel" hidden><span class="c"># 1. install</span>
+<span class="p">&gt; </span><span class="cmd">git clone https://github.com/OICWS/coscribe.git</span>
+<span class="p">&gt; </span><span class="cmd">cd coscribe\office-agent</span>
+<span class="p">&gt; </span><span class="cmd">python -m venv .venv</span>
+<span class="p">&gt; </span><span class="cmd">.\.venv\Scripts\Activate.ps1</span>
+<span class="p">&gt; </span><span class="cmd">pip install -e ".[dev,web]"</span>
+<span class="p">&gt; </span><span class="cmd">pip install -U "google-genai&gt;=2.13.0,&lt;2.14.0"</span>
+
+<span class="c"># 2. pick a model: edit .env after copying</span>
+<span class="p">&gt; </span><span class="cmd">copy .env.example .env</span>
+<span class="c">#   ANTHROPIC_API_KEY=...   (or OPENAI_ / GEMINI_)</span>
+<span class="c">#   COSCRIBE_DEFAULT_MODEL=gemini:gemini-2.5-flash</span>
+
+<span class="c"># 3. build the UI once, then launch</span>
+<span class="p">&gt; </span><span class="cmd">cd frontend; npm install; npm run build; cd ..</span>
+<span class="p">&gt; </span><span class="cmd">coscribe-web</span></pre>
       </div>
     </div>
     <p class="note-line"><span class="zh">在 Windows 上也可以用 Electron 桌面版，它带内置浏览器面板，安装包由仓库的 GitHub Actions 构建。详见</span><span class="en">On Windows there is also an Electron desktop app with the built-in browser panel; the installer is built by the repo's GitHub Actions. See</span> <a href="https://github.com/OICWS/coscribe/tree/main/office-agent-desktop">office-agent-desktop</a><span class="zh">。</span><span class="en">.</span></p>
@@ -1036,23 +1500,54 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
   </div>
 </footer>
 
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Slide preview" hidden>
+  <div class="lb-inner">
+    <div class="lb-stage" id="lb-stage"></div>
+    <div class="lb-bar">
+      <span class="count" id="lb-count">1 / 6</span>
+      <span class="lb-title" id="lb-title"></span>
+      <span class="sp"></span>
+      <button type="button" id="lb-prev" aria-label="Previous slide">&larr;</button>
+      <button type="button" id="lb-next" aria-label="Next slide">&rarr;</button>
+      <button type="button" id="lb-close"><span class="zh">关闭</span><span class="en">Close</span></button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   var root = document.documentElement;
+  function $(id) { return document.getElementById(id); }
+  function all(sel, el) { return Array.prototype.slice.call((el || document).querySelectorAll(sel)); }
   function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  // A zh/en pair, the same shape the static markup uses.
+  function bi(zh, en) {
+    var f = document.createDocumentFragment();
+    f.appendChild(el("span", "zh", zh));
+    f.appendChild(el("span", "en", en));
+    return f;
+  }
+  function fill(node, zh, en) { node.textContent = ""; node.appendChild(bi(zh, en)); }
 
+  /* ---------- language and theme ---------- */
   var lang = get("coscribe-lang");
   if (!lang) lang = /^zh/i.test(navigator.language || "") ? "zh-CN" : "en";
   root.lang = lang;
-  document.getElementById("lang").addEventListener("click", function () {
+  $("lang").addEventListener("click", function () {
     root.lang = root.lang === "en" ? "zh-CN" : "en";
     set("coscribe-lang", root.lang);
   });
 
   var theme = get("coscribe-theme");
   if (theme) root.setAttribute("data-theme", theme);
-  document.getElementById("theme").addEventListener("click", function () {
+  $("theme").addEventListener("click", function () {
     var cur = root.getAttribute("data-theme");
     var dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     var next = dark ? "light" : "dark";
@@ -1060,26 +1555,337 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
     set("coscribe-theme", next);
   });
 
-  var nav = document.getElementById("nav");
-  function onScroll() { nav.classList.toggle("scrolled", window.scrollY > 8); }
-  window.addEventListener("scroll", onScroll, { passive: true });
+  /* ---------- nav: shadow, reading progress, current section ---------- */
+  var nav = $("nav"), bar = $("progress");
+  var ticking = false;
+  function onScroll() {
+    ticking = false;
+    nav.classList.toggle("scrolled", window.scrollY > 8);
+    var max = document.documentElement.scrollHeight - window.innerHeight;
+    bar.style.transform = "scaleX(" + (max > 0 ? Math.min(1, window.scrollY / max) : 0) + ")";
+  }
+  window.addEventListener("scroll", function () {
+    if (!ticking) { ticking = true; requestAnimationFrame(onScroll); }
+  }, { passive: true });
   onScroll();
 
-  var btn = document.getElementById("copy");
-  btn.addEventListener("click", function () {
-    var text = document.getElementById("cmds").innerText.split("\n")
-      .filter(function (l) { return l.indexOf("$ ") === 0; })
-      .map(function (l) { return l.slice(2); }).join("\n");
-    var label = btn.innerHTML;
-    function done(ok) { btn.textContent = ok ? "✓" : "⌘C"; setTimeout(function () { btn.innerHTML = label; }, 1400); }
+  var links = all('.nav-links a[href^="#"]');
+  if ("IntersectionObserver" in window && links.length) {
+    var byId = {};
+    links.forEach(function (a) { byId[a.getAttribute("href").slice(1)] = a; });
+    var visible = {};
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting; });
+      var current = null;
+      links.forEach(function (a) { var id = a.getAttribute("href").slice(1); if (visible[id] && !current) current = id; });
+      links.forEach(function (a) { a.classList.toggle("active", a.getAttribute("href").slice(1) === current); });
+    }, { rootMargin: "-45% 0px -50% 0px" });
+    Object.keys(byId).forEach(function (id) { var s = $(id); if (s) io.observe(s); });
+  }
+
+  /* ---------- generic tabs (roving tabindex, arrow keys) ---------- */
+  function tabs(list, onSelect) {
+    if (!list) return;
+    var btns = all('[role="tab"]', list);
+    function select(b, focus) {
+      btns.forEach(function (x) {
+        var on = x === b;
+        x.setAttribute("aria-selected", on ? "true" : "false");
+        x.tabIndex = on ? 0 : -1;
+      });
+      if (focus) b.focus();
+      onSelect(b, btns.indexOf(b));
+    }
+    btns.forEach(function (b) {
+      b.addEventListener("click", function () { select(b, false); });
+      b.addEventListener("keydown", function (e) {
+        var i = btns.indexOf(b), n = btns.length, j = null;
+        if (e.key === "ArrowRight" || e.key === "ArrowDown") j = (i + 1) % n;
+        else if (e.key === "ArrowLeft" || e.key === "ArrowUp") j = (i - 1 + n) % n;
+        else if (e.key === "Home") j = 0;
+        else if (e.key === "End") j = n - 1;
+        if (j !== null) { e.preventDefault(); select(btns[j], true); }
+      });
+    });
+  }
+  // A row of toggle buttons where exactly one is pressed.
+  function pressGroup(group, onPick) {
+    if (!group) return;
+    var btns = all("button", group);
+    btns.forEach(function (b) {
+      b.addEventListener("click", function () {
+        btns.forEach(function (x) { x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+        onPick(b);
+      });
+    });
+  }
+
+  /* ---------- hero: collapsible side panel sections ---------- */
+  all(".panel .ph").forEach(function (b) {
+    var body = $(b.getAttribute("aria-controls"));
+    b.addEventListener("click", function () {
+      var open = b.getAttribute("aria-expanded") !== "true";
+      b.setAttribute("aria-expanded", open ? "true" : "false");
+      if (body) body.hidden = !open;
+    });
+  });
+
+  /* ---------- hero: slide lightbox ---------- */
+  var slides = all("#deck .slide-btn");
+  var lb = $("lightbox"), lbStage = $("lb-stage"), lbIndex = 0, lbReturn = null;
+  function showSlide(i) {
+    lbIndex = (i + slides.length) % slides.length;
+    var src = slides[lbIndex];
+    lbStage.textContent = "";
+    lbStage.appendChild(src.querySelector(".slide").cloneNode(true));
+    $("lb-count").textContent = (lbIndex + 1) + " / " + slides.length;
+    $("lb-title").textContent = (src.getAttribute("aria-label") || "").replace(/^Slide \d+:\s*/, "");
+  }
+  function openLb(i) {
+    lbReturn = document.activeElement;
+    showSlide(i);
+    lb.hidden = false;
+    document.body.style.overflow = "hidden";
+    $("lb-close").focus();
+  }
+  function closeLb() {
+    lb.hidden = true;
+    document.body.style.overflow = "";
+    if (lbReturn && lbReturn.focus) lbReturn.focus();
+  }
+  slides.forEach(function (b, i) { b.addEventListener("click", function () { openLb(i); }); });
+  if (lb) {
+    $("lb-prev").addEventListener("click", function () { showSlide(lbIndex - 1); });
+    $("lb-next").addEventListener("click", function () { showSlide(lbIndex + 1); });
+    $("lb-close").addEventListener("click", closeLb);
+    lb.addEventListener("click", function (e) { if (e.target === lb) closeLb(); });
+    document.addEventListener("keydown", function (e) {
+      if (lb.hidden) return;
+      if (e.key === "Escape") closeLb();
+      else if (e.key === "ArrowLeft") showSlide(lbIndex - 1);
+      else if (e.key === "ArrowRight") showSlide(lbIndex + 1);
+      else if (e.key === "Tab") {
+        // keep focus inside the dialog
+        var f = all("button", lb), first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
+  }
+
+  /* ---------- files: template switcher, tracked changes, sheet ---------- */
+  var tplSlide = $("tpl-slide");
+  pressGroup($("tpl"), function (b) {
+    var t = b.getAttribute("data-tpl");
+    if (t) tplSlide.setAttribute("data-tpl", t); else tplSlide.removeAttribute("data-tpl");
+  });
+  pressGroup($("track"), function (b) {
+    $("page").classList.toggle("accepted", b.getAttribute("data-v") === "accept");
+  });
+
+  var cells = all("#sheet td[data-c]");
+  var fxRef = $("fx-ref"), fxVal = $("fx-val");
+  function pick(td) {
+    cells.forEach(function (c) { c.classList.toggle("sel", c === td); });
+    var f = td.getAttribute("data-f");
+    fxRef.textContent = td.getAttribute("data-c");
+    fxVal.textContent = f || td.textContent;
+    fxVal.classList.toggle("is-f", !!f);
+  }
+  var cellAt = {};
+  cells.forEach(function (td) {
+    cellAt[td.getAttribute("data-c")] = td;
+    td.addEventListener("click", function () { pick(td); });
+    td.addEventListener("focus", function () { pick(td); });
+    td.addEventListener("keydown", function (e) {
+      var m = /^([A-Z])(\d+)$/.exec(td.getAttribute("data-c"));
+      var col = m[1].charCodeAt(0), row = +m[2];
+      if (e.key === "ArrowRight") col++;
+      else if (e.key === "ArrowLeft") col--;
+      else if (e.key === "ArrowDown") row++;
+      else if (e.key === "ArrowUp") row--;
+      else return;
+      var next = cellAt[String.fromCharCode(col) + row];
+      if (next) { e.preventDefault(); next.focus(); }
+    });
+  });
+
+  /* ---------- how it works: the question card ---------- */
+  pressGroup($("question"), function () {});
+
+  /* ---------- workflows: lifecycle tabs ---------- */
+  tabs($("life-tabs"), function (b) {
+    all("#life-tabs [role=tab]").forEach(function (x) {
+      var p = $(x.getAttribute("aria-controls"));
+      if (p) p.hidden = x !== b;
+    });
+  });
+
+  /* ---------- workflows: step graph + inspector ---------- */
+  var steps = [];
+  try { steps = JSON.parse($("steps-data").textContent); } catch (e) {}
+  var kindColor = { tool: "--k-tool", check: "--k-check", llm: "--k-llm", approval: "--k-approval" };
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function highlight(obj) {
+    var json = JSON.stringify(obj, null, 2);
+    var out = "", last = 0, re = /"(?:\\.|[^"\\])*"(\s*:)?/g, m;
+    while ((m = re.exec(json))) {
+      out += esc(json.slice(last, m.index));
+      if (m[1]) {
+        var key = m[0].slice(0, m[0].length - m[1].length);
+        out += '<span class="key">' + esc(key) + "</span>" + m[1];
+      } else {
+        out += '<span class="str">' + esc(m[0]).replace(/\{\{[^}]+\}\}/g, function (r) { return '<span class="ref">' + r + "</span>"; }) + "</span>";
+      }
+      last = re.lastIndex;
+    }
+    return out + esc(json.slice(last));
+  }
+  var nodes = all("#graph .g-node");
+  var insHead = document.querySelector("#inspector .ins-head");
+  function inspect(i) {
+    var s = steps[i];
+    if (!s) return;
+    nodes.forEach(function (n) { n.setAttribute("aria-pressed", +n.getAttribute("data-i") === i ? "true" : "false"); });
+    insHead.style.setProperty("--c", "var(" + (kindColor[s.kind] || "--k-tool") + ")");
+    $("ins-k").textContent = s.kind + " · step " + (i + 1) + (s.tool ? " · " + s.tool : "");
+    fill($("ins-t"), s.zh, s.en);
+    $("ins-json").innerHTML = highlight(s.spec);
+    var why = $("ins-why");
+    why.textContent = "";
+    var head = el("b"); head.appendChild(bi("为什么这样配置", "Why it's set up this way"));
+    why.appendChild(head);
+    why.appendChild(el("br"));
+    why.appendChild(bi(s.why_zh, s.why_en));
+  }
+  nodes.forEach(function (n, k) {
+    n.addEventListener("click", function () { inspect(+n.getAttribute("data-i")); });
+    n.addEventListener("keydown", function (e) {
+      var j = e.key === "ArrowDown" ? k + 1 : e.key === "ArrowUp" ? k - 1 : null;
+      if (j === null || !nodes[j]) return;
+      e.preventDefault();
+      nodes[j].focus();
+      inspect(+nodes[j].getAttribute("data-i"));
+    });
+  });
+  if (steps.length) inspect(4);
+
+  /* ---------- control: mode matrix ---------- */
+  var ST = {
+    ask: ["--st-ask", "先问你", "Asks you"],
+    go: ["--st-auto", "直接修改", "Goes ahead"],
+    plan: ["--st-wait", "方案批准后才做", "After you approve the plan"],
+    review: ["--st-review", "审查模型判断", "Reviewer decides"],
+    block: ["--st-block", "拦下，提示你添加文件夹", "Blocked, offers Add folder"]
+  };
+  var MODES = {
+    manual: { zh: "每一次修改、运行脚本或对外操作之前都先问你。", en: "Asks before every change, script or outside action.", rows: ["ask", "ask", "ask", "block"] },
+    edits: { zh: "你文件夹里的编辑直接进行；运行代码和对外操作仍然先问。", en: "Edits files in your folders without asking; still asks before running code or outside actions.", rows: ["go", "ask", "ask", "block"] },
+    plan: { zh: "只用只读工具调研、写方案。你批准方案之前，什么都不改。", en: "Researches with read-only tools and writes a plan. Nothing changes until you approve it.", rows: ["plan", "plan", "plan", "block"] },
+    auto: { zh: "有风险的操作交给审查模型，它放行或拦下并说明理由；连续拦下三次，就停下来问你。", en: "A reviewer model approves or blocks each risky action and says why; after three blocks in a row it stops and asks you.", rows: ["review", "review", "review", "block"] }
+  };
+  var mxRows = all("#mx-rows .st");
+  tabs($("modes"), function (b) {
+    var m = MODES[b.getAttribute("data-m")];
+    fill($("mx-desc"), m.zh, m.en);
+    m.rows.forEach(function (k, i) {
+      var st = ST[k];
+      mxRows[i].style.setProperty("--c", "var(" + st[0] + ")");
+      fill(mxRows[i], st[1], st[2]);
+    });
+  });
+
+  /* ---------- control: approval card ---------- */
+  var approve = $("approve");
+  if (approve) {
+    var msg = $("approve-msg"), reset = approve.querySelector(".reset");
+    var acts = all(".acts [data-a]", approve);
+    var MSG = {
+      start: ["--st-ask", "这是 Manual 模式下的审批卡片，点一下试试。", "This is the approval card you get in Manual mode. Try it."],
+      ok: ["--st-auto", "已批准，脚本开始运行。写入仍然只能落在你允许的文件夹里。", "Approved, the script runs. Its writes still land only in folders you allowed."],
+      no: ["--st-block", "已拒绝。coscribe 收到拒绝后会换个办法，或者问你该怎么做。", "Denied. coscribe hears the refusal and tries another way, or asks you how to proceed."]
+    };
+    function say(k) {
+      var m = MSG[k];
+      msg.querySelector("i").style.setProperty("--c", "var(" + m[0] + ")");
+      fill(msg.querySelector("span"), m[1], m[2]);
+    }
+    acts.forEach(function (b) {
+      b.addEventListener("click", function () {
+        say(b.getAttribute("data-a"));
+        acts.forEach(function (x) { x.disabled = true; });
+        reset.hidden = false;
+        reset.focus();
+      });
+    });
+    reset.addEventListener("click", function () {
+      say("start");
+      acts.forEach(function (x) { x.disabled = false; });
+      reset.hidden = true;
+      acts[0].focus();
+    });
+  }
+
+  /* ---------- quick start: OS tabs and copy ---------- */
+  var os = get("coscribe-os") || (/Win/i.test(navigator.platform || navigator.userAgent || "") ? "win" : "unix");
+  function showOs(key) {
+    $("cmds-unix").hidden = key !== "unix";
+    $("cmds-win").hidden = key !== "win";
+    $("shell").textContent = key === "win" ? "PowerShell" : "bash";
+  }
+  tabs($("os"), function (b) {
+    var key = b.getAttribute("data-os");
+    showOs(key);
+    set("coscribe-os", key);
+  });
+  var osBtn = document.querySelector('#os [data-os="' + os + '"]');
+  if (osBtn && os !== "unix") osBtn.click();
+
+  var copy = $("copy");
+  function activeCmds() { return $("cmds-win").hidden ? $("cmds-unix") : $("cmds-win"); }
+  function selectCmds() {
+    var r = document.createRange(); r.selectNodeContents(activeCmds());
+    var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  }
+  copy.addEventListener("click", function () {
+    var text = all(".cmd", activeCmds()).map(function (c) { return c.textContent; }).join("\n");
+    var label = copy.innerHTML;
+    function done(ok) {
+      copy.textContent = "";
+      copy.appendChild(ok ? bi("已复制", "Copied") : bi("已选中，按 Ctrl+C", "Selected, press Ctrl+C"));
+      setTimeout(function () { copy.innerHTML = label; }, 1600);
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function () { done(true); }, function () { selectCmds(); done(false); });
     } else { selectCmds(); done(false); }
   });
-  function selectCmds() {
-    var r = document.createRange(); r.selectNodeContents(document.getElementById("cmds"));
-    var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-  }
+
+  /* ---------- animation slots ----------
+     Each <figure class="demo" data-demo="name"> shows a static storyboard
+     until an animation registers for it:
+       coscribeDemos.register("solidify", function (stage, figure) {
+         // draw into stage (an SVG, canvas, DOM...), return { play: fn }
+       });
+     Registering marks the figure data-ready and enables its play button. */
+  var registry = {};
+  window.coscribeDemos = {
+    register: function (name, mount) {
+      var fig = document.querySelector('.demo[data-demo="' + name + '"]');
+      if (!fig) return false;
+      var stage = fig.querySelector(".demo-stage"), btn = fig.querySelector(".play");
+      var api = mount(stage, fig) || {};
+      registry[name] = api;
+      fig.setAttribute("data-ready", "");
+      if (btn) {
+        btn.disabled = false;
+        fill(btn.querySelector(".play-l") || btn, "播放演示", "Play");
+        btn.addEventListener("click", function () { if (api.play) api.play(); });
+      }
+      return true;
+    },
+    list: function () { return all(".demo[data-demo]").map(function (f) { return f.getAttribute("data-demo"); }); },
+    get: function (name) { return registry[name]; }
+  };
 })();
 </script>
 </body>
