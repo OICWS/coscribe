@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>coscribe · 一句话的背后</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="engine/film.css">
+<style>
+  #player { position: fixed; inset: 0; display: grid; place-items: center; }
+  #frame { position: relative; overflow: hidden; box-shadow: 0 0 0 1px rgba(255,255,255,.06); }
+  #controls { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 14px; align-items: center;
+    padding: 14px 20px; font: 13px/1 "IBM Plex Sans", system-ui, sans-serif; color: #cfcac6;
+    background: linear-gradient(transparent, rgba(0,0,0,.55)); opacity: 0; transition: opacity .25s; }
+  body:hover #controls, body.paused #controls { opacity: 1; }
+  #controls button { all: unset; cursor: pointer; padding: 6px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; }
+  #controls input[type=range] { flex: 1; accent-color: #4b8fe3; }
+  #tc { font-variant-numeric: tabular-nums; min-width: 92px; }
+  #big { position: fixed; inset: 0; display: grid; place-items: center; cursor: pointer; }
+  #big span { width: 84px; height: 84px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); display: grid; place-items: center; color: #fff; font-size: 26px; background: rgba(0,0,0,.25); }
+  body.render #controls, body.render #big { display: none; }
+  body.render #player { display: block; }
+  body.render #frame { width: 1920px; height: 1080px; }
+</style>
+</head>
+<body class="paused">
+<div id="player"><div id="frame"><div id="stage"></div></div></div>
+<div id="big"><span>▶</span></div>
+<div id="controls">
+  <button id="play">播放</button>
+  <span id="tc">0:00.0</span>
+  <input id="scrub" type="range" min="0" max="120" step="0.01" value="0">
+  <button id="lang">EN</button>
+</div>
+<audio id="audio" preload="auto"></audio>
+
+<script src="engine/core.js"></script>
+<script src="engine/kit.js"></script>
+<script src="content/copy.js"></script>
+<!-- scenes, in z order -->
+<script src="scenes/s0_open.js"></script>
+<script src="scenes/s1_excel.js"></script>
+<script src="scenes/s2_ppt.js"></script>
+<script src="scenes/s3_word.js"></script>
+<script src="scenes/s4_code.js"></script>
+<script src="scenes/s5_montage.js"></script>
+<script src="scenes/s6_workflow.js"></script>
+<script src="scenes/s7_close.js"></script>
+<script src="scenes/subtitles.js"></script>
+<script>
+(function () {
+  const q = new URLSearchParams(location.search);
+  const render = q.has('render');
+  let lang = q.get('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');
+  if (render) document.body.classList.add('render');
+  const stage = document.getElementById('stage'), frame = document.getElementById('frame');
+  F.build(stage, { lang, subtitles: q.get('subs') !== '0' });
+  const dur = F.duration();
+
+  function fit() {
+    if (render) return;
+    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+    stage.style.transform = `scale(${s})`;
+    frame.style.width = 1920 * s + 'px'; frame.style.height = 1080 * s + 'px';
+  }
+  addEventListener('resize', fit); fit();
+
+  // renderer entry point: seek and report when the frame is painted
+  window.renderFrame = (t) => { F.seek(t); return new Promise((r) => requestAnimationFrame(() => r(true))); };
+  window.filmDuration = dur;
+  if (render) { F.seek(+q.get('t') || 0); return; }
+
+  // browser player: the audio track is the clock
+  const audio = document.getElementById('audio'), scrub = document.getElementById('scrub'),
+        tc = document.getElementById('tc'), btn = document.getElementById('play'), langBtn = document.getElementById('lang');
+  scrub.max = dur;
+  const setLang = (l) => {
+    lang = l; audio.src = `audio/out/mix_${l}.m4a`;
+    btn.textContent = l === 'zh' ? '播放' : 'Play'; langBtn.textContent = l === 'zh' ? 'EN' : '中文';
+  };
+  setLang(lang);
+  let playing = false, t0 = 0, wall = 0, hasAudio = true;
+  audio.addEventListener('error', () => { hasAudio = false; });
+  const now = () => hasAudio && !audio.paused ? audio.currentTime : (playing ? t0 + (performance.now() - wall) / 1000 : t0);
+  function toggle() {
+    playing = !playing; document.body.classList.toggle('paused', !playing);
+    document.getElementById('big').style.display = playing ? 'none' : '';
+    btn.textContent = playing ? (lang === 'zh' ? '暂停' : 'Pause') : (lang === 'zh' ? '播放' : 'Play');
+    if (playing) { if (t0 >= dur) t0 = 0; audio.currentTime = t0; wall = performance.now(); audio.play().catch(() => { hasAudio = false; }); }
+    else { t0 = now(); audio.pause(); }
+  }
+  btn.onclick = toggle; document.getElementById('big').onclick = toggle;
+  addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); toggle(); } });
+  scrub.oninput = () => { t0 = +scrub.value; audio.currentTime = t0; wall = performance.now(); };
+  langBtn.onclick = () => { // rebuild in the other language at the same time
+    const t = now(); location.search = `?lang=${lang === 'zh' ? 'en' : 'zh'}&t=${t.toFixed(2)}`;
+  };
+  if (q.get('t')) t0 = +q.get('t');
+  (function loop() {
+    let t = now();
+    if (playing && t >= dur) { toggle(); t0 = dur; t = dur; }
+    F.seek(Math.min(t, dur - 1e-3)); scrub.value = t;
+    tc.textContent = `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+    requestAnimationFrame(loop);
+  })();
+})();
+</script>
+</body>
+</html>
