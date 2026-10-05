@@ -2068,6 +2068,7 @@ def test_plan_mode_toggle_updates_state(tmp_path: Path, monkeypatch: pytest.Monk
                 "workspace_root": str(tmp_path / "workspace"),
                 "workspace_explicit": False,
                 "folders": [],
+                "connector_tools": [],
                 "auto_mode": False,
             }
             ws.send_json({"type": "user_message", "text": "/plan"})
@@ -3820,7 +3821,7 @@ def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
         time.sleep(0.5)
 
         with client.websocket_connect("/ws/t_startup_bg") as ws:
-            ws.receive_json()  # state
+            state = ws.receive_json()
             ws.receive_json()  # history
             ws.send_json({"type": "user_message", "text": "fetch hi"})
             messages = _receive_until(ws, "tasks_changed")
@@ -3828,6 +3829,8 @@ def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
     tool_result = next(m for m in messages if m["type"] == "tool_result")
     assert tool_result["tool_name"] == "fetch__fetch_url"
     assert tool_result["result"] == "fetched:hi"
+    # The page counts a connector's calls as "used N tools" by this list.
+    assert state["connector_tools"] == ["fetch__fetch_url"]
 
 
 def test_post_mcp_server_splices_tools_into_both_new_and_already_open_sessions(

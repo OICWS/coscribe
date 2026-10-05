@@ -323,7 +323,7 @@ export interface SummaryParts {
   failedCount?: number;
   /** Still running: the verb is in the present tense ("Reading"). */
   running?: boolean;
-  /** The latest running call -- the one the UI animates. */
+  /** Still running: the UI animates it. */
   shimmer?: boolean;
 }
 
@@ -538,7 +538,9 @@ export function isRunning(item: ToolOrApprovalItem, live: boolean): boolean {
 function partsFor(item: ToolOrApprovalItem, running = false): SummaryParts {
   const summarized =
     TOOL_SUMMARIES[item.toolName]?.(item.arguments) ?? summarizeToolNameParts(item.toolName, item.arguments);
-  const base = running ? { ...summarized, verb: presentTense(summarized.verb), running: true } : summarized;
+  const base = running
+    ? { ...summarized, verb: presentTense(summarized.verb), running: true, shimmer: true }
+    : summarized;
   const diffStat = diffStatOf(item.result);
   let parts = diffStat ? { ...base, diffStat } : base;
   if (isFailure(item)) {
@@ -577,63 +579,120 @@ export function summarizeItem(item: ToolOrApprovalItem): string {
 
 const SUMMARY_CAP = 3;
 
+type Category = "command" | "write" | "edit" | "read" | "search" | "fetch" | "subagent" | "connector" | "other";
+
+const SUBAGENT_TOOL_NAMES = new Set(["spawn_agent", "review_work", "run_code_task"]);
+const FETCH_TOOL_NAMES = new Set(["read_web_page", "download_image", "browser_navigate"]);
+// The office-document tools that change a file; their reading, listing
+// and checking siblings share the _docx/_pptx/_xlsx infix.
+const OFFICE_FILE = /_(docx|pptx|xlsx)(_|$)/;
+const NOT_AN_EDIT = /^(read|write|list|check|render|extract)_/;
+
+function categoryOf(toolName: string, connectorTools: ReadonlySet<string>): Category {
+  if (connectorTools.has(toolName)) return "connector";
+  if (COMMAND_TOOL_NAMES.has(toolName) || toolName === "run_background_script") return "command";
+  if (SUBAGENT_TOOL_NAMES.has(toolName)) return "subagent";
+  if (FETCH_TOOL_NAMES.has(toolName)) return "fetch";
+  if (toolName === "web_search" || (toolName.startsWith("search_") && toolName !== "search_tools")) return "search";
+  if (toolName.startsWith("write_") || toolName === "convert_office_file") return "write";
+  if (toolName === "edit_file" || toolName === "edit_file_batch" || toolName === "apply_code_change") return "edit";
+  if (OFFICE_FILE.test(toolName) && !NOT_AN_EDIT.test(toolName)) return "edit";
+  if (toolName === "list_files" || toolName === "get_file_info") return "read";
+  if (toolName.startsWith("read_") && toolName !== "read_skill_file") return "read";
+  return "other";
+}
+
+/** Past and present verb, and the noun counted, for each category's
+ * clause ("Ran 3 commands" / "Running 3 commands"). */
+const CATEGORY_WORDS: Record<Exclude<Category, "other">, [past: string, present: string, noun: string]> = {
+  command: ["Ran", "Running", "command"],
+  write: ["Wrote", "Writing", "file"],
+  edit: ["Edited", "Editing", "file"],
+  read: ["Read", "Reading", "file"],
+  search: ["Searched", "Searching", "time"],
+  fetch: ["Fetched", "Fetching", "page"],
+  subagent: ["Finished", "Running", "sub-agent task"],
+  connector: ["Used", "Using", "tool"],
+};
+const FILE_CATEGORIES = new Set<Category>(["write", "edit", "read"]);
+
+function fullPathArg(args: ArgRecord): string | undefined {
+  return str(args, "path") ?? str(args, "file_path");
+}
+
+function categoryClause(category: Exclude<Category, "other">, items: ToolOrApprovalItem[], live: boolean): SummaryParts {
+  if (items.length === 1) return partsFor(items[0], isRunning(items[0], live));
+  const [past, present, noun] = CATEGORY_WORDS[category];
+  const running = items.some((item) => isRunning(item, live));
+  const failedCount = items.filter(isFailure).length;
+  const stats = items.map((item) => diffStatOf(item.result)).filter((stat) => stat !== null);
+  const diffStat =
+    stats.length > 0
+      ? { added: stats.reduce((sum, s) => sum + s.added, 0), removed: stats.reduce((sum, s) => sum + s.removed, 0) }
+      : undefined;
+  // A file category counts files, not calls: five edits to one deck are
+  // one edited file. A call without a path counts on its own.
+  let count = items.length;
+  let onlyFile: string | undefined;
+  if (FILE_CATEGORIES.has(category)) {
+    const paths = new Set(items.map((item, index) => fullPathArg(item.arguments) ?? `#${index}`));
+    count = paths.size;
+    if (count === 1) onlyFile = fileArg(items[0].arguments);
+  }
+  const verb = running ? present : past;
+  const counted = `${verb} ${count} ${count === 1 ? noun : `${noun}s`}`;
+  return {
+    verb: onlyFile ? verb : counted,
+    object: onlyFile ?? null,
+    ...(diffStat && { diffStat }),
+    ...(failedCount > 0 && { failedCount }),
+    ...(running && { running: true, shimmer: true }),
+  };
+}
+
 export interface GroupHeaderParts {
-  /** Each shown item's parts, capped at SUMMARY_CAP -- render joined by
-   * ", " with each object emphasized, same as a single row's own label. */
+  /** The clauses to show, at most SUMMARY_CAP -- render joined by ", "
+   * with each object emphasized, same as a single row's own label. */
   shown: SummaryParts[];
-  /** Count of additional items past the cap, 0 if none ("and 2 more"). */
+  /** Calls not covered by `shown` ("and 9 more actions"), 0 if none. */
   more: number;
   /** The latest call, while it's still running -- always shown, after the
    * capped clauses, whatever the cap hides. */
   active: SummaryParts | null;
 }
 
-/** Structured headline for a ToolRunGroup's collapsed header -- the same
- * per-item verb/object split ToolCallRow uses, so the header can also
- * emphasize each object inline ("Wrote `deck.pptx`, searched `images`"),
- * each with its own diff-stat/failure styling, capped past a few clauses
- * ("and 2 more"). A run of two or more consecutive command calls
- * (run_python_script/run_node_script -- see COMMAND_TOOL_NAMES) collapses
- * into one "Ran N commands" clause with a "(M failed)" suffix if any of
- * them errored, matching the reference UI's own "Ran 3 commands (1
- * failed)" convention -- a single command among non-command items still
- * gets its own normal "Ran a command"/"Failed to run" clause, same as
- * before. The *expanded* per-step list (ToolRunGroupView) is unaffected
- * -- it always renders every individual item, never this aggregation. */
-export function summarizeGroupParts(items: ToolOrApprovalItem[], live = false): GroupHeaderParts {
+/** Structured headline for a ToolRunGroup's collapsed header: one clause
+ * per kind of work, in the order each first happened -- "Ran 117 commands
+ * (2 failed), wrote 4 files, read 5 files, and 9 more actions". A kind
+ * done once keeps the call's own wording ("Wrote `deck.pptx`"). Calls that
+ * fit no kind, and kinds past the cap, are counted in `more`; a run made
+ * only of such calls is listed call by call instead. The expanded list
+ * (ToolRunGroupView) still shows every call. */
+export function summarizeGroupParts(
+  items: ToolOrApprovalItem[],
+  live = false,
+  connectorTools: ReadonlySet<string> = new Set(),
+): GroupHeaderParts {
   const last = items[items.length - 1];
-  const active = last && isRunning(last, live) ? { ...partsFor(last, true), shimmer: true } : null;
+  const active = last && isRunning(last, live) ? partsFor(last, true) : null;
   if (active) items = items.slice(0, -1);
-  const clauses: SummaryParts[] = [];
-  let run: ToolOrApprovalItem[] = [];
 
-  const flushRun = () => {
-    if (run.length === 0) return;
-    if (run.length === 1) {
-      clauses.push(partsFor(run[0], isRunning(run[0], live)));
-    } else {
-      const failedCount = run.filter(isFailure).length;
-      const running = run.some((item) => isRunning(item, live));
-      clauses.push({
-        verb: `${running ? "Running" : "Ran"} ${run.length} commands`,
-        object: null,
-        failedCount: failedCount > 0 ? failedCount : undefined,
-        running,
-      });
-    }
-    run = [];
-  };
-
+  const byCategory = new Map<Category, ToolOrApprovalItem[]>();
   for (const item of items) {
-    if (COMMAND_TOOL_NAMES.has(item.toolName)) {
-      run.push(item);
-    } else {
-      flushRun();
-      clauses.push(partsFor(item, isRunning(item, live)));
-    }
+    const category = categoryOf(item.toolName, connectorTools);
+    const bucket = byCategory.get(category);
+    if (bucket) bucket.push(item);
+    else byCategory.set(category, [item]);
   }
-  flushRun();
+  const others = byCategory.get("other") ?? [];
+  byCategory.delete("other");
 
-  if (clauses.length <= SUMMARY_CAP) return { shown: clauses, more: 0, active };
-  return { shown: clauses.slice(0, SUMMARY_CAP), more: clauses.length - SUMMARY_CAP, active };
+  if (byCategory.size === 0) {
+    const clauses = others.map((item) => partsFor(item, isRunning(item, live)));
+    return { shown: clauses.slice(0, SUMMARY_CAP), more: Math.max(clauses.length - SUMMARY_CAP, 0), active };
+  }
+  const categories = [...byCategory.entries()] as [Exclude<Category, "other">, ToolOrApprovalItem[]][];
+  const shown = categories.slice(0, SUMMARY_CAP).map(([category, its]) => categoryClause(category, its, live));
+  const hidden = categories.slice(SUMMARY_CAP).reduce((sum, [, its]) => sum + its.length, 0);
+  return { shown, more: others.length + hidden, active };
 }

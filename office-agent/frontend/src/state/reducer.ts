@@ -86,6 +86,8 @@ export interface ChatState {
   contextWindow: number;
   /** Skills offered in this thread's instructions (see StateEvent.enabled_skills). */
   enabledSkills: string[];
+  /** See StateEvent.connector_tools. */
+  connectorTools: ReadonlySet<string>;
   /** This thread's file-tool root -- see wire.ts's StateEvent.workspace_root.
    * Empty string only until the first real "state" event lands (mirrors
    * model's own empty-string-until-hydrated convention below), never null
@@ -154,6 +156,7 @@ export const initialChatState: ChatState = {
   model: "",
   contextWindow: 0,
   enabledSkills: [],
+  connectorTools: new Set(),
   workspaceRoot: "",
   workspaceExplicit: false,
   folders: [],
@@ -285,6 +288,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         model: state.model,
         contextWindow: state.contextWindow,
         enabledSkills: state.enabledSkills,
+        connectorTools: state.connectorTools,
         workspaceRoot: state.workspaceRoot,
         workspaceExplicit: state.workspaceExplicit,
         folders: state.folders,
@@ -401,6 +405,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         model: action.model,
         contextWindow: action.context_window,
         enabledSkills: action.enabled_skills,
+        connectorTools: new Set(action.connector_tools ?? []),
         workspaceRoot: action.workspace_root,
         workspaceExplicit: action.workspace_explicit,
         folders: action.folders,

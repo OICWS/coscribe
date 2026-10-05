@@ -1525,6 +1525,11 @@ class ChatSessionLG:
             "workspace_root": str(self.workspace_root),
             "workspace_explicit": self._workspace_explicit,
             "folders": [str(folder) for folder in self.folders],
+            "connector_tools": sorted(
+                tool_name(t)
+                for t in self._extra_tools
+                if (get_tool_metadata(cast(Any, t)).category or "").startswith("mcp:")
+            ),
         }
         if on_connect:
             # A tab opening mid-turn (most often: a scheduled run executing
