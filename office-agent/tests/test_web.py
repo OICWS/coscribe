@@ -6674,13 +6674,20 @@ def test_a_failed_run_of_a_task_set_to_is_looked_into_and_announced_lg(
         while len(fake_model.received) < 3 and time.time() < deadline:
             time.sleep(0.05)
         failed = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
-        with client.websocket_connect(f"/ws/{event['thread_id']}") as ws:
-            # The conversation may still be finishing its reply, so live
-            # events can come before the history does.
-            messages = [ws.receive_json() for _ in range(2)]
-            while not any(m.get("type") == "history" for m in messages):
-                messages.append(ws.receive_json())
-            history = next(m for m in messages if m.get("type") == "history")["entries"]
+        # The model's third call starting doesn't mean its reply is saved
+        # yet: read the history again until it is.
+        history: list[dict[str, Any]] = []
+        while time.time() < deadline + 5:
+            with client.websocket_connect(f"/ws/{event['thread_id']}") as ws:
+                # The conversation may still be finishing its reply, so live
+                # events can come before the history does.
+                messages = [ws.receive_json() for _ in range(2)]
+                while not any(m.get("type") == "history" for m in messages):
+                    messages.append(ws.receive_json())
+                history = next(m for m in messages if m.get("type") == "history")["entries"]
+            if any(e.get("text") == "The file was empty." for e in history):
+                break
+            time.sleep(0.1)
 
     assert patched["auto_investigate"] is True
     assert event["status"] == "failed" and event["title"] == "Word count"

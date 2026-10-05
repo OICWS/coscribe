@@ -3528,6 +3528,24 @@ tool search Anthropic and OpenAI offer. The proxy touches approvals,
 hooks, audit and every place a tool call is shown by name, so it is its
 own decision.
 
+**Follow-up (2026-10-05): on DeepSeek, nothing is discovered any more.**
+Appending found tools at the end kept the tool list's own prefix, but the
+whole conversation still comes after it, so in a long task each discovery
+re-read almost all of it: one request missed 178,704 of 204,560 input
+tokens. Measured over four real runs, 22-56% of what each cost (at
+DeepSeek's prices) was cache misses right after a `search_tools`.
+`providers.keeps_tool_list_fixed` now answers yes for DeepSeek's own host,
+and `ChatSessionLG._tool_binding` then binds every built-in tool (~35k
+tokens of schemas, 115 tools) from the first request; only connector tools
+stay behind `search_tools`, and with none connected `search_tools` and its
+instruction note are left out. That pays only where a hit is nearly free
+and the window is large: deepseek-flash charges ¥0.02 per 1M for a hit and
+¥1 for a miss, with a 1M window. Other providers keep deferral until their
+prices are checked the same way; a 32k local model couldn't take 35k of
+schemas at all. Same brief re-run: 0 `search_tools` calls, cache-miss input
+per request 10.1k -> 3.7k, ¥1.55 -> ¥0.62 at off-peak prices (89 model calls
+before, 41 after -- run-to-run variance accounts for part of that).
+
 Found along the way: every tool call after the first model response of
 a turn reached the frontend with empty arguments ("Read a file" instead
 of the file name) -- `_stream_turn` kept adding streamed chunks across

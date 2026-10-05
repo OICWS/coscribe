@@ -120,6 +120,10 @@ class SubAgentHost:
     changed: Callable[[SubAgentTask], Awaitable[None]]
     defer_tools: bool = False
     core_tool_names: frozenset[str] = frozenset()
+    # Bound as well, from the first request, for a child whose model
+    # keeps_tool_list_fixed says so (see providers.keeps_tool_list_fixed).
+    fixed_tool_names: frozenset[str] = frozenset()
+    keeps_tool_list_fixed: Callable[[str], bool] = lambda _model: False
     # Route every call through decide(), not only gated ones (a PreToolUse
     # hook needs to see them all).
     interrupt_all: bool = False
@@ -353,6 +357,9 @@ def build_delegation_tools(
         system_prompt = instructions.strip() or DEFAULT_SUBAGENT_INSTRUCTIONS
         if host.max_turns is not None:
             system_prompt += _BUDGET_NOTE.format(max_turns=host.max_turns)
+        core_names = host.core_tool_names
+        if host.keeps_tool_list_fixed(model_string):
+            core_names = core_names | host.fixed_tool_names
         sub_agent = build_langgraph_agent(
             chat_model,
             selected,
@@ -364,8 +371,10 @@ def build_delegation_tools(
             max_turns=host.max_turns,
             # Only a child given the full set searches for tools; a hand-picked
             # set is small enough to bind as is.
-            defer_tools=host.defer_tools and not requested,
-            core_tool_names=host.core_tool_names,
+            defer_tools=host.defer_tools
+            and not requested
+            and any(_tool_name(t) not in core_names for t in selected),
+            core_tool_names=core_names,
         )
         task = SubAgentTask(
             task_id=uuid.uuid4().hex[:12],

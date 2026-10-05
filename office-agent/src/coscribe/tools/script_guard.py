@@ -108,6 +108,15 @@ _NODE_FLAG_SETS = (
     # know fewer of the allowances.
     ("--permission", "--allow-addons"),
     ("--permission",),
+    # Node 20 prints an ExperimentalWarning and two SecurityWarnings on every
+    # run under these flags, which would land in every script's stderr.
+    # --disable-warning arrived in 20.11; earlier Nodes reject it and fall
+    # through to the next set.
+    (
+        "--experimental-permission",
+        "--disable-warning=ExperimentalWarning",
+        "--disable-warning=SecurityWarning",
+    ),
     ("--experimental-permission",),
 )
 _NODE_ALLOWANCES = ("--allow-fs-read=*", "--allow-child-process", "--allow-worker")
@@ -163,13 +172,16 @@ def blocked_write(stderr: str) -> tuple[str | None, str]:
 
 
 _NODE_GUARD_WARNING = re.compile(
-    r"^\(node:\d+\) SecurityWarning: The flag --allow-.*\n|^\(Use `node --trace-warnings.*\n",
+    r"^\(node:\d+\) SecurityWarning: The flag --allow-.*\n"
+    r"|^\(node:\d+\) ExperimentalWarning: Permission is an experimental feature.*\n"
+    r"|^\(Use `node --trace-warnings.*\n",
     re.MULTILINE,
 )
 
 
 def without_guard_warnings(stderr: str) -> str:
-    """Node prints a warning for each `--allow-*` flag it was given; they
+    """Node prints a warning for each `--allow-*` flag it was given, and
+    Nodes before 22 one more for the experimental permission switch; they
     say nothing about the script."""
     return _NODE_GUARD_WARNING.sub("", stderr)
 

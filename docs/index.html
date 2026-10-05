@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>coscribe</title>
-<meta name="description" content="coscribe 是一个运行在你电脑上的开源办公助理：读取表格和文档，做出可编辑的 PPT、Word 和 Excel，重要操作先问你。">
+<meta name="description" content="coscribe is an open-source office assistant that runs on your computer. It reads your spreadsheets and documents, builds editable PowerPoint, Word and Excel files, and asks before anything important.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23201e1d'/%3E%3Cpath d='M7.5 5h6l3.5 3.5V19h-9.5z' fill='none' stroke='%23fcfcfb' stroke-width='1.4' stroke-linejoin='round'/%3E%3Cpath d='M10 12h4.5M10 15h2.5' stroke='%23fcfcfb' stroke-width='1.4' stroke-linecap='round'/%3E%3Crect x='13.6' y='13.6' width='1.4' height='2.8' fill='%234b8fe3'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -44,17 +44,10 @@
   --paper-muted: #5c5c5c;
   --paper-line: #d9d9d9;
   --chart: #4f81bd;
-  --deck-a: #0f6b5c;
-  /* Template looks for the slide specimen (accents from builtin_templates/pptx). */
-  --tpl-block: #1e2761;
-  --tpl-bold: #c2410c;
-  --tpl-pitch-bg: #0b0f14;
-  --tpl-pitch-ink: #f1f5f9;
-  --tpl-pitch-accent: #22d3ee;
   --scrim: rgba(20, 19, 18, .72);
-  --deck-b: #8fc1b3;
-  --deck-card: #e8efec;
   --shadow: 0 1px 2px rgba(32, 30, 29, .04), 0 12px 32px rgba(32, 30, 29, .07);
+  --shadow-lg: 0 2px 4px rgba(32, 30, 29, .04), 0 30px 70px rgba(32, 30, 29, .13);
+  --app-canvas: #fcfcfb;
   --code-bg: #1b1a19;
   --code-fg: #ebe8e4;
   --code-muted: #8f8a86;
@@ -80,6 +73,7 @@
     --k-tool: #cbc5c2; --k-llm: #ef92ab; --k-check: #8fd19f; --k-approval: #e8b85c;
     --paper: #f3f2f0; --paper-line: #cfcdca;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 16px 40px rgba(0, 0, 0, .35);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, .3), 0 30px 80px rgba(0, 0, 0, .5);
     --code-bg: #181716;
     --st-ask: #e8b85c; --st-auto: #8fd19f; --st-review: #9cc3f3; --st-block: #f09a9a; --st-wait: #a19d9b;
     --scrim: rgba(0, 0, 0, .78);
@@ -96,6 +90,7 @@
   --k-tool: #cbc5c2; --k-llm: #ef92ab; --k-check: #8fd19f; --k-approval: #e8b85c;
   --paper: #f3f2f0; --paper-line: #cfcdca;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 16px 40px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, .3), 0 30px 80px rgba(0, 0, 0, .5);
   --code-bg: #181716;
   --st-ask: #e8b85c; --st-auto: #8fd19f; --st-review: #9cc3f3; --st-block: #f09a9a; --st-wait: #a19d9b;
   --scrim: rgba(0, 0, 0, .78);
@@ -161,8 +156,9 @@ p { margin: 0; }
 .btn-quiet:hover { background: var(--chip); }
 
 /* ---------- hero ---------- */
-.hero { padding-block: 72px 0; }
-.hero-top { display: grid; grid-template-columns: minmax(0, 7.5fr) minmax(0, 4fr); gap: 48px; align-items: end; }
+.hero { padding-block: 64px 0; }
+.hero-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 22px 64px; margin-top: 28px; align-items: start; }
+.hero-act { display: grid; gap: 18px; justify-items: start; }
 .hero h1 {
   font: 600 clamp(40px, 5.8vw, 74px)/1.05 var(--display);
   letter-spacing: -.025em; font-optical-sizing: auto;
@@ -170,126 +166,90 @@ p { margin: 0; }
 html[lang="zh-CN"] .hero h1 { font-size: clamp(36px, 5.2vw, 64px); line-height: 1.16; letter-spacing: -.01em; }
 .hero h1 em { font-style: italic; font-weight: 500; color: var(--accent-ink); }
 html[lang="zh-CN"] .hero h1 em { font-style: normal; }
-.hero-side { display: grid; gap: 24px; padding-bottom: 6px; }
 .lede { font-size: 17px; color: var(--fg-2); max-width: 34em; }
 .cta { display: flex; flex-wrap: wrap; gap: 10px; }
 .facts { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 400 12.5px/1.5 var(--mono); color: var(--muted); }
 .facts > span { display: inline-flex; align-items: center; gap: 6px; }
 .facts > span::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
 @media (max-width: 960px) {
-  .hero { padding-block: 48px 0; }
-  .hero-top { grid-template-columns: 1fr; gap: 26px; }
+  .hero { padding-block: 44px 0; }
+  .hero-row { grid-template-columns: 1fr; }
 }
 
+/* ---------- product tour (real screenshots of coscribe-web) ---------- */
+.tour { margin: 52px 0 0; }
+.tour-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 14px; }
+.tour-hint { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 8px; }
+.tour-hint i { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 2px var(--accent); flex: none; }
+.shot { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--line-strong); box-shadow: var(--shadow-lg); background: var(--app-canvas); aspect-ratio: 1440 / 900; max-width: 100%; }
+.shot img { display: block; width: 100%; height: 100%; object-fit: cover; transition: opacity .2s; cursor: zoom-in; }
+.shot.loading img { opacity: .6; }
+.hs { position: absolute; border: 0; padding: 0; margin: 0; background: transparent; border-radius: 7px; cursor: pointer; }
+.hs::after { content: ""; position: absolute; inset: -3px; border-radius: 9px; box-shadow: 0 0 0 2px var(--accent); opacity: 0; transition: opacity .15s; pointer-events: none; }
+.hs:hover::after, .hs:focus-visible::after { opacity: 1; }
+.hs:focus-visible { outline: none; }
+.hs::before { position: absolute; top: calc(100% + 8px); right: 0; z-index: 2; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .15s;
+  font: 500 12px/1 var(--sans); color: var(--bg); background: var(--fg); padding: 6px 8px; border-radius: 6px; }
+html[lang="en"] .hs::before { content: attr(data-en); }
+html:not([lang="en"]) .hs::before { content: attr(data-zh); }
+.hs:hover::before, .hs:focus-visible::before { opacity: 1; }
+.hs.left::before { right: auto; left: 0; }
+.hs.wide::before { display: none; }
+.shot.hint .hs.icon::after { animation: ring 1.5s ease-out 3; }
+@keyframes ring { 0% { opacity: .95; transform: scale(.85); } 100% { opacity: 0; transform: scale(1.7); } }
+.hs.up::before { top: auto; bottom: calc(100% + 8px); }
+.hs.cta::after { opacity: .9; }
+.shot.hint .hs.cta::after { animation: ring2 1.5s ease-out 3; }
+@keyframes ring2 { 0% { opacity: .95; transform: scale(1); } 100% { opacity: 0; transform: scale(1.12, 1.4); } }
+.tour-cap { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px 24px; align-items: baseline; justify-content: space-between; }
+.tour-cap p { margin: 0; font-size: 15.5px; color: var(--fg-2); max-width: 72ch; }
+.tour-cap p b { color: var(--fg); font-weight: 600; }
+.tour-cap small { font: 400 12px/1.6 var(--mono); color: var(--muted); }
+@media (max-width: 760px) { .tour-hint { display: none; } .shot { border-radius: 10px; } }
+/* ---------- files: PPT slide player (real renders) ---------- */
+.player { display: grid; gap: 12px; }
+.player-big { border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); background: #fff; aspect-ratio: 16 / 9; max-width: 100%; }
+.player-big img { display: block; width: 100%; height: 100%; object-fit: contain; cursor: zoom-in; }
+.player-nav { display: flex; align-items: center; gap: 8px; }
+.player-dots { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; }
+.player-dots button { all: unset; cursor: pointer; border-radius: 4px; overflow: hidden; aspect-ratio: 16 / 9; background: #fff; box-shadow: 0 0 0 1px var(--line); opacity: .62; transition: opacity .15s, box-shadow .15s; }
+.player-dots button:hover { opacity: 1; }
+.player-dots button[aria-pressed="true"] { opacity: 1; box-shadow: 0 0 0 2px var(--accent); }
+.player-dots button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.player-dots img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.player-prev, .player-next { all: unset; flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; color: var(--fg-2); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.player-prev:hover, .player-next:hover { color: var(--fg); background: var(--surface); }
+.player-prev:focus-visible, .player-next:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.player-prev svg, .player-next svg { width: 16px; height: 16px; }
+.player-count { flex: none; min-width: 3.4em; text-align: right; font: 400 12px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .player-dots { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.wf-real .tour { margin-top: 22px; }
+.lb-inner img { display: block; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 30px 80px rgba(0, 0, 0, .4); background: #fff; }
+
 /* ---------- product window (mirrors the real app) ---------- */
-.stage { margin-top: 56px; }
-.app {
-  background: var(--bg); border: 1px solid var(--line-strong); border-radius: 14px;
-  box-shadow: var(--shadow); overflow: hidden; font-size: 14px; line-height: 1.6;
-}
-.app-bar { display: flex; align-items: center; gap: 12px; height: 46px; padding: 0 14px; border-bottom: 1px solid var(--line); }
-.app-bar .t { font-weight: 600; font-size: 14px; }
-.app-bar .icons { margin-left: auto; display: flex; gap: 4px; }
-.ico { width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: var(--fg-2); }
-.ico.on { background: var(--chip); color: var(--fg); }
-.ico svg { width: 17px; height: 17px; }
-.app-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 560px; }
 .chat { display: flex; flex-direction: column; min-width: 0; }
-.chat-scroll { flex: 1; padding: 26px 40px 8px; display: flex; flex-direction: column; gap: 14px; max-width: 760px; width: 100%; margin: 0 auto; }
 .u-msg { align-self: flex-end; background: var(--chip); border-radius: 18px; padding: 9px 16px; max-width: 88%; }
-.activity { color: var(--muted); font-size: 13.5px; }
-.activity code { font-size: 12px; background: var(--chip); color: var(--fg-2); padding: 1px 5px; border-radius: 4px; }
-.done-line strong { font-weight: 600; }
-.reply b { font-weight: 600; }
-.reply ol { margin: 6px 0 0; padding-left: 1.4em; display: grid; gap: 3px; color: var(--fg); }
-.reply ol li::marker { color: var(--muted); }
-.deck-wrap { margin-top: 40px; }
-.deck-head { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--fg-2); margin-bottom: 14px; }
-.deck-head .badge { width: 34px; height: 22px; }
-.deck { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
-.deck .slide { border-radius: 6px; box-shadow: var(--shadow); }
-@media (max-width: 980px) { .deck { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } }
-@keyframes rise { from { transform: translateY(6px); opacity: .35; } to { transform: none; opacity: 1; } }
-.fix-note { color: var(--fg-2); position: relative; max-height: 4.8em; overflow: hidden; }
-.fix-note::after { content: ""; position: absolute; inset: auto 0 0 0; height: 2.2em; background: linear-gradient(transparent, var(--bg)); }
-.fix-note b { color: var(--fg); font-weight: 600; }
-.composer { padding: 10px 40px 16px; max-width: 760px; width: 100%; margin: 0 auto; }
-.composer .box { border: 1px solid var(--line-strong); border-radius: 14px; height: 50px; padding: 0 12px 0 16px; display: flex; align-items: center; color: var(--muted); background: var(--surface); }
-.composer .box .send { margin-left: auto; width: 26px; height: 26px; display: grid; place-items: center; color: var(--muted); }
-.composer .row { display: flex; align-items: center; gap: 16px; padding: 8px 6px 0; font-size: 13px; color: var(--muted); }
-.composer .row .grow { margin-left: auto; }
-.panel { border-left: 1px solid var(--line); display: flex; flex-direction: column; font-size: 13px; background: var(--bg); }
-.panel > div { padding: 14px 18px; border-bottom: 1px solid var(--line); }
-.panel h4 { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
-.panel h4 small { font-weight: 400; color: var(--muted); }
-.dots { display: flex; gap: 4px; margin-bottom: 4px; }
-.dots i { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line-strong); display: grid; place-items: center; animation: tick .3s both; }
-.dots i::after { content: ""; width: 7px; height: 4px; border-left: 1.5px solid var(--fg-2); border-bottom: 1.5px solid var(--fg-2); transform: rotate(-45deg) translate(1px, -1px); }
-.dots i:nth-child(2) { animation-delay: .25s; } .dots i:nth-child(3) { animation-delay: .5s; } .dots i:nth-child(4) { animation-delay: .75s; }
-@keyframes tick { from { transform: scale(.7); } to { transform: none; } }
 .tasks { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; color: var(--fg-2); }
 .tasks li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; align-items: start; line-height: 1.45; }
 .tasks li::before { content: ""; width: 14px; height: 14px; margin-top: 2px; background: var(--muted);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.3'%3E%3Ccircle cx='8' cy='8' r='6.6'/%3E%3Cpath d='M5.2 8.2l1.9 1.9 3.7-3.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
           mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.3'%3E%3Ccircle cx='8' cy='8' r='6.6'/%3E%3Cpath d='M5.2 8.2l1.9 1.9 3.7-3.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
-.muted { color: var(--muted); }
 .file-row { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; }
 .badge { height: 30px; border-radius: 5px; display: grid; place-items: center; font: 600 8.5px/1 var(--mono); letter-spacing: .02em; }
 .badge.pptx { color: var(--slides); background: color-mix(in srgb, var(--slides) 13%, transparent); }
 .badge.xlsx { color: var(--sheet); background: color-mix(in srgb, var(--sheet) 13%, transparent); }
 .badge.docx { color: var(--doc); background: color-mix(in srgb, var(--doc) 13%, transparent); }
 .file-row small { display: block; color: var(--muted); font-size: 11.5px; }
-.lbl { font: 500 10.5px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 10px 0 7px; }
-.lbl:first-of-type { margin-top: 2px; }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 1px 8px; font-size: 11.5px; white-space: nowrap; }
 .chip i { font-style: normal; color: var(--muted); margin-left: 3px; }
-.panel .save { margin-top: auto; border-bottom: 0; }
-.save-btn { border: 1px solid var(--line-strong); border-radius: 8px; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; }
-.save-btn svg { width: 15px; height: 15px; }
-.stage-cap { margin-top: 14px; font: 400 12.5px/1.6 var(--mono); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; }
-.stage-cap > span + span::before { content: "·"; margin-right: 14px; }
-@media (max-width: 980px) {
-  .app-body { grid-template-columns: 1fr; min-height: 0; }
-  .panel { display: none; }
-}
-@media (max-width: 640px) {
-  .app-bar .icons .ico:not(.on) { display: none; }
-  .chat-scroll { padding: 18px 16px 4px; }
-  .composer { padding: 8px 16px 14px; }
-  .stage-cap > span + span::before { content: none; }
-}
 
 /* ---------- slides (recreated from the real deck) ---------- */
-.slide {
-  aspect-ratio: 16 / 9; max-width: 100%; position: relative; overflow: hidden;
-  background: var(--paper); color: var(--paper-ink); border: 1px solid var(--paper-line);
-  container-type: inline-size; font-family: var(--sans);
-}
-.s-t { position: absolute; left: 6%; top: 8.5%; right: 6%; font-weight: 700; font-size: 4.6cqw; line-height: 1.2; }
-.s-r { position: absolute; left: 6%; top: 21%; width: 11%; height: .7cqw; background: linear-gradient(90deg, var(--deck-a), var(--deck-b)); }
-.s-b { position: absolute; left: 7%; top: 26%; right: 6%; font-size: 2cqw; line-height: 1.55; color: var(--paper-muted); }
-.s-b div::before { content: "•  "; }
-.s-b4 { font-size: 1.75cqw; line-height: 1.5; }
-.s-c.s-c4 { top: 60%; bottom: 12%; }
-.s-c.s-c4 .cap { top: -24%; }
-.s-c { position: absolute; left: 10%; right: 7%; top: 50%; bottom: 13%; }
-.s-c .cap { position: absolute; left: 0; right: 0; top: -14%; text-align: center; font-size: 2.2cqw; color: var(--paper-ink); }
 .bars { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 6%; padding: 0 4%; border-bottom: 1px solid var(--paper-line);
   background: repeating-linear-gradient(to top, transparent 0 calc(25% - 1px), var(--paper-line) calc(25% - 1px) 25%); }
 .bars i { flex: 1; height: var(--h); background: var(--chart); }
 .ticks { position: absolute; left: 0; right: 0; top: 100%; display: flex; gap: 6%; padding: 0 4%; font-size: 1.9cqw; color: var(--paper-muted); text-align: center; margin-top: 1.2%; }
 .ticks span { flex: 1; }
-.cover .s-r { top: 38%; width: 12%; }
-.cover .s-t { top: 44%; font-size: 7cqw; }
-.cover .s-sub { position: absolute; left: 6%; top: 63%; font-size: 2.4cqw; color: var(--deck-a); font-weight: 500; }
-.div { position: absolute; inset: 0; border-bottom: 1px solid var(--paper-line); }
-.div .zero { position: absolute; left: 0; right: 0; bottom: 40%; border-top: 1px solid var(--paper-muted); }
-.div i { position: absolute; width: 11%; background: var(--chart); }
-.s-cards { position: absolute; left: 6%; right: 6%; top: 27%; bottom: 8%; display: grid; gap: 3.2%; grid-template-rows: repeat(4, 1fr); }
-.s-cards div { background: var(--deck-card); border-radius: .6cqw; display: flex; align-items: center; gap: 3%; padding: 0 3%; font-size: 2.2cqw; box-shadow: 0 .3cqw .6cqw rgba(0, 0, 0, .08); }
-.s-cards b { font-weight: 600; color: var(--deck-a); }
 
 /* ---------- sections ---------- */
 section { padding-block: 112px; }
@@ -316,12 +276,8 @@ html[lang="zh-CN"] .h2 { line-height: 1.3; letter-spacing: 0; }
 .list li::before { content: ""; width: 10px; height: 6px; margin-top: 7px; border-left: 1.6px solid var(--fg); border-bottom: 1.6px solid var(--fg); transform: rotate(-45deg); }
 .specimen { position: relative; min-width: 0; }
 .specimen .note { margin-top: 12px; font: 400 12px/1.5 var(--mono); color: var(--muted); }
-.specimen .slide { border-radius: 6px; box-shadow: var(--shadow); }
-.flag { position: absolute; right: -10px; top: 18px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 7px; }
-.flag svg { width: 14px; height: 14px; color: var(--success); }
 @media (max-width: 900px) {
   .fmt { grid-template-columns: 1fr; gap: 28px; padding-block: 40px; }
-  .flag { right: 8px; top: 8px; }
 }
 
 /* word page */
@@ -378,8 +334,6 @@ html[lang="zh-CN"] .h2 { line-height: 1.3; letter-spacing: 0; }
 .q-head b { font-weight: 600; }
 .q-opt { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--line); }
 .q-opt span { width: 20px; height: 20px; border: 1px solid var(--line-strong); border-radius: 5px; display: grid; place-items: center; font: 500 11px/1 var(--mono); color: var(--muted); }
-.q-opt.pick { background: var(--accent-soft); }
-.q-opt.pick span { border-color: var(--accent); color: var(--accent-ink); }
 .q-opt.other { color: var(--muted); border-bottom: 0 !important; }
 .r-head { padding: 11px 16px; border-bottom: 1px solid var(--line); font: 500 12px/1.4 var(--mono); color: var(--muted); }
 .r-list { list-style: none; margin: 0; padding: 4px 0; }
@@ -395,9 +349,6 @@ html[lang="zh-CN"] .h2 { line-height: 1.3; letter-spacing: 0; }
 /* control */
 .control { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: 64px; margin-top: 56px; align-items: start; }
 .modes { display: grid; border-top: 1px solid var(--line); }
-.mode { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); }
-.mode b { font-weight: 600; font-size: 15px; }
-.mode span { color: var(--fg-2); font-size: 15px; }
 .facts-2 { display: grid; gap: 22px; margin-top: 36px; }
 .facts-2 div h3 { font: 600 17px/1.4 var(--sans); }
 .facts-2 div p { color: var(--fg-2); margin-top: 4px; font-size: 15px; }
@@ -419,23 +370,9 @@ html[lang="zh-CN"] .h2 { line-height: 1.3; letter-spacing: 0; }
 .guard svg { width: 18px; height: 18px; color: var(--danger); margin-top: 2px; }
 .guard b { color: var(--fg); font-weight: 600; }
 @media (max-width: 900px) { .control { grid-template-columns: 1fr; gap: 40px; } }
-@media (max-width: 520px) { .mode { grid-template-columns: 1fr; gap: 2px; } }
 
 /* workflows */
-.wf { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 64px; align-items: center; }
-.wf-card { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; font-size: 13.5px; }
-.wf-top { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
-.wf-top b { font-weight: 600; }
-.wf-top .sched { margin-left: auto; font: 400 12px/1 var(--mono); color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
-.wf-top .sched svg { width: 14px; height: 14px; }
-.wf-steps { list-style: none; margin: 0; padding: 8px 0; }
-.wf-steps li { display: grid; grid-template-columns: 22px 64px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 16px; }
-.wf-steps .n { font: 400 12px/1 var(--mono); color: var(--muted); }
 .kind { font: 500 11px/1 var(--mono); padding: 4px 0; text-align: center; border-radius: 4px; color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); }
-.wf-steps .ok { width: 16px; height: 16px; color: var(--success); }
-.wf-foot { border-top: 1px solid var(--line); padding: 12px 16px; color: var(--muted); font-size: 12.5px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-@media (max-width: 900px) { .wf { grid-template-columns: 1fr; gap: 40px; } }
-@media (max-width: 460px) { .wf-steps li { grid-template-columns: 18px 58px minmax(0, 1fr); } .wf-steps .ok { display: none; } }
 
 /* models & connections */
 .spec { margin-top: 56px; display: grid; border-top: 1px solid var(--line); }
@@ -483,7 +420,6 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: cent
 footer nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 20px; }
 footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
 
-
 /* ---------- shared controls ---------- */
 .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 10px; background: var(--chip); }
 .seg button { border: 0; background: transparent; color: var(--fg-2); font: 500 13px/1 var(--sans); height: 30px; padding: 0 12px; border-radius: 7px; cursor: pointer; }
@@ -495,24 +431,10 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
 .nav-links a.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -20px; height: 2px; background: var(--fg); }
 
 /* hero panel: collapsible like the app */
-.panel .ph { all: unset; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; margin-bottom: 8px; }
-.panel .ph:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.panel .ph small { font-weight: 400; color: var(--muted); }
-.panel .ph .chev { width: 12px; height: 12px; color: var(--muted); transition: transform .2s; }
-.panel .ph[aria-expanded="false"] .chev { transform: rotate(-90deg); }
-.panel .ph[aria-expanded="false"] { margin-bottom: 0; }
 
 /* deck: buttons that open the viewer */
-.slide-btn { all: unset; display: block; cursor: zoom-in; border-radius: 6px; transition: transform .18s; }
-.slide-btn:hover { transform: translateY(-3px); }
-.slide-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.deck .slide-btn { animation: rise .5s both; }
-.deck .slide-btn:nth-child(2) { animation-delay: .08s; } .deck .slide-btn:nth-child(3) { animation-delay: .16s; }
-.deck .slide-btn:nth-child(4) { animation-delay: .24s; } .deck .slide-btn:nth-child(5) { animation-delay: .32s; }
-.deck .slide-btn:nth-child(6) { animation-delay: .4s; }
 .lightbox { position: fixed; inset: 0; z-index: 50; background: var(--scrim); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 24px 16px; }
 .lb-inner { width: min(980px, 100%); display: grid; gap: 14px; }
-.lb-inner .slide { width: 100%; border-radius: 8px; box-shadow: 0 30px 80px rgba(0, 0, 0, .4); }
 .lb-bar { display: flex; align-items: center; gap: 10px; color: #f2f0ee; font-size: 14px; }
 .lb-bar .count { font-family: var(--mono); font-size: 13px; opacity: .8; }
 .lb-bar .sp { flex: 1; }
@@ -520,25 +442,6 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
 .lb-bar button:hover { background: rgba(255, 255, 255, .12); }
 
 /* slide templates (illustrative) */
-.slide { --s-bg: var(--paper); --s-ink: var(--paper-ink); --s-muted: var(--paper-muted); --s-line: var(--paper-line); --s-bar: var(--chart); --s-rule-a: var(--deck-a); --s-rule-b: var(--deck-b);
-  background: var(--s-bg); color: var(--s-ink); transition: background .25s, color .25s; }
-.slide .s-b, .slide .ticks { color: var(--s-muted); }
-.slide .s-c .cap { color: var(--s-ink); }
-.slide .bars { border-bottom-color: var(--s-line); background: repeating-linear-gradient(to top, transparent 0 calc(25% - 1px), var(--s-line) calc(25% - 1px) 25%); }
-.slide .bars i, .slide .div i { background: var(--s-bar); transition: background .25s, height .35s; }
-.slide .s-r { background: linear-gradient(90deg, var(--s-rule-a), var(--s-rule-b)); }
-.s-band, .s-spine { position: absolute; display: none; }
-.slide[data-tpl="block"] { --s-bar: var(--tpl-block); }
-.slide[data-tpl="block"] .s-band { display: block; left: 0; top: 0; right: 0; height: 22%; background: var(--tpl-block); }
-.slide[data-tpl="block"] .s-t { color: #ffffff; top: 7%; z-index: 1; }
-.slide[data-tpl="block"] .s-r { display: none; }
-.slide[data-tpl="bold"] { --s-bar: var(--tpl-bold); }
-.slide[data-tpl="bold"] .s-spine { display: block; left: 0; top: 0; bottom: 0; width: 2.4%; background: var(--tpl-bold); }
-.slide[data-tpl="bold"] .s-t { font-weight: 800; letter-spacing: -.01em; }
-.slide[data-tpl="bold"] .s-r { display: none; }
-.slide[data-tpl="pitch"] { --s-bg: var(--tpl-pitch-bg); --s-ink: var(--tpl-pitch-ink); --s-muted: #94a3b8; --s-line: #263241; --s-bar: var(--tpl-pitch-accent); --s-rule-a: var(--tpl-pitch-accent); --s-rule-b: var(--tpl-pitch-accent); border-color: #263241; }
-.tpl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
-.tpl-row .lab { font-size: 12.5px; color: var(--muted); }
 
 /* word toggle */
 .spec-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -559,6 +462,7 @@ footer a { text-decoration: none; } footer a:hover { color: var(--fg); }
 
 /* question card options are clickable */
 button.q-opt { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+button.q-opt i { font-style: normal; }
 button.q-opt:hover { background: var(--chip); }
 button.q-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 button.q-opt[aria-pressed="true"] { background: var(--accent-soft); }
@@ -756,16 +660,16 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
 <!-- ======================= HERO ======================= -->
 <section class="hero">
   <div class="wrap">
-    <div class="hero-top">
-      <h1>
-        <span class="zh">说清楚要什么，<br><em>拿回能直接交的文件。</em></span>
-        <span class="en">Say what you need.<br><em>Get back a file you can hand in.</em></span>
-      </h1>
-      <div class="hero-side">
-        <p class="lede">
-          <span class="zh">coscribe 是一个运行在你电脑上的开源办公助理。它读取你的表格和文档，规划步骤，做出可编辑的 PPT、Word 和 Excel，再请另一个模型对着渲染出来的页面复核一遍。重要操作之前，它会先问你。</span>
-          <span class="en">coscribe is an open-source office assistant that runs on your own computer. It reads your spreadsheets and documents, plans the steps, builds editable PowerPoint, Word and Excel files, then has a second model check the rendered pages. It asks before anything important.</span>
-        </p>
+    <h1>
+      <span class="zh">说清楚要什么，<br><em>拿回能直接交的文件。</em></span>
+      <span class="en">Say what you need.<br><em>Get back a file you can hand in.</em></span>
+    </h1>
+    <div class="hero-row">
+      <p class="lede">
+        <span class="zh">coscribe 是一个运行在你电脑上的开源办公助理。它读取你的表格和文档，规划步骤，做出可编辑的 PPT、Word 和 Excel，再对着渲染出来的页面复核一遍。跑通的流程能存成固定工作流，按时自动运行。</span>
+        <span class="en">coscribe is an open-source office assistant that runs on your own computer. It reads your spreadsheets and documents, plans the steps, builds editable PowerPoint, Word and Excel files, then checks the rendered pages before handing them over. A run that worked can be saved as a fixed workflow and scheduled.</span>
+      </p>
+      <div class="hero-act">
         <div class="cta">
           <a class="btn btn-primary" href="#start">
             <span class="zh">开始使用</span><span class="en">Get started</span>
@@ -775,132 +679,35 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
         </div>
         <div class="facts">
           <span><span class="zh">MIT 开源</span><span class="en">MIT licensed</span></span>
-          <span><span class="zh">自带模型 Key</span><span class="en">Bring your own model</span></span>
+          <span><span class="zh">兼容 OpenAI API</span><span class="en">OpenAI-compatible API</span></span>
+          <span><span class="zh">支持各大模型</span><span class="en">Works with the major models</span></span>
           <span><span class="zh">文件留在本机</span><span class="en">Files stay local</span></span>
         </div>
       </div>
     </div>
 
-    <figure class="stage" style="margin-inline:0;margin-bottom:0">
-      <div class="app" aria-label="coscribe app window: a finished run that turned Q3 sales data into a six-slide deck">
-        <div class="app-bar">
-          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9 4.5v15"/></svg></span>
-          <span class="t">Q3销售汇报PPT</span>
-          <span class="icons">
-            <span class="ico on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M15 4.5v15"/></svg></span>
-            <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/></svg></span>
-            <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="5.5" r="2"/><circle cx="7" cy="18.5" r="2"/><circle cx="17" cy="7.5" r="2"/><path d="M7 7.5v9M17 9.5c0 4-10 2.5-10 7"/></svg></span>
-            <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.4M12 16.8v.1"/></svg></span>
-          </span>
+    <figure class="tour" id="tour">
+      <div class="tour-bar">
+        <div class="seg tour-tabs" role="tablist" aria-label="App views">
+          <button role="tab" type="button" data-view="home" aria-selected="false" tabindex="-1"><span class="zh">首页</span><span class="en">Home</span></button>
+          <button role="tab" type="button" data-view="chat" aria-selected="true"><span class="zh">对话</span><span class="en">Conversation</span></button>
+          <button role="tab" type="button" data-view="browser" aria-selected="false" tabindex="-1"><span class="zh">浏览器</span><span class="en">Browser</span></button>
+          <button role="tab" type="button" data-view="agents" aria-selected="false" tabindex="-1"><span class="zh">子代理</span><span class="en">Sub-agents</span></button>
+          <button role="tab" type="button" data-view="scheduled" aria-selected="false" tabindex="-1"><span class="zh">定时任务</span><span class="en">Scheduled</span></button>
+          <button role="tab" type="button" data-view="settings" aria-selected="false" tabindex="-1"><span class="zh">模型</span><span class="en">Models</span></button>
         </div>
-        <div class="app-body">
-          <div class="chat">
-            <div class="chat-scroll">
-              <div class="u-msg">把 Q3销售数据.xlsx 做成一份 6 页的季度销售汇报 PPT，风格用简洁编辑风（白底细线），包含一张各区域销售额的柱状图，结论页给出下季度建议。</div>
-              <div class="activity">Listed files, read <code>Q3销售数据.xlsx</code>, loaded skill <code>PPTX Slides</code>, and 41 more ›</div>
-              <div class="activity">Asked a reviewer to check the work ›</div>
-              <div class="done-line">做好了：<strong>Q3销售汇报.pptx</strong>（6 页，工作区里和源数据放在一起）。</div>
-              <div class="reply">
-                <b>每页内容</b>
-                <ol>
-                  <li>封面：Q3 销售汇报 / 第三季度 · 区域销售表现回顾</li>
-                  <li>整体概览：全季 4,102 万元，目标 4,050 万元，达成 101.3%，配月度销售额柱状图（7 月 1,245 → 8 月 1,339 → 9 月 1,518）</li>
-                  <li>区域达成：配「目标差额」柱状图，华东 +51、海外 +24、西南 +5 万元超额；华南 −25、华北 −3 万元未达标</li>
-                  <li>各区域销售额（你要求的那张柱状图）：华东 1,351 万元居首，占全季 32.9%</li>
-                  <li>增长动能：配增速柱状图，海外 +51.1%、西南 +24.1%、华东 +21.6%、华北 +19.9%、华南 +14.1%</li>
-                  <li>下季度建议：四条横向浅色卡片，按数据缺口排优先级</li>
-                </ol>
-              </div>
-              <div class="fix-note"><b>过程中改掉的问题</b>（请审阅模型逐页看过渲染图）：图表原本在 0 起点坐标轴上被压平、双序列图没有图例分不清颜色，所以第 3、5 页换成单序列、读数清楚的指标图；结论页卡片文字一度继承了白色（几乎看不见），已改成深色并左对齐。</div>
-            </div>
-            <div class="composer">
-              <div class="box">Type / for commands<span class="send"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5v7a3 3 0 0 1-3 3H6M10 11l-4 4 4 4"/></svg></span></div>
-              <div class="row"><span>＋ Add folder</span><span>Auto</span><span class="grow">deepseek-flash ⌄</span></div>
-            </div>
-          </div>
-          <aside class="panel">
-            <div><h4>Q3销售汇报PPT</h4></div>
-            <div>
-              <button class="ph" type="button" aria-expanded="true" aria-controls="p-progress">Progress <svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>
-              <div id="p-progress">
-              <div class="dots"><i></i><i></i><i></i><i></i></div>
-              <div class="muted" style="font-size:12px">4 of 4 done</div>
-              <ul class="tasks">
-                <li>核对 Q3 销售数据并计算汇总指标</li>
-                <li>用简洁编辑风模板生成 6 页汇报内容</li>
-                <li>在对比页插入各区域销售额柱状图并调整版面</li>
-                <li>渲染预览并请审阅，修正问题</li>
-              </ul>
-              </div>
-            </div>
-            <div>
-              <button class="ph" type="button" aria-expanded="true" aria-controls="p-outputs">Outputs <small>1</small> <svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>
-              <div id="p-outputs"><div class="file-row"><span class="badge pptx">PPTX</span><span>Q3销售汇报.pptx<small>Edited today at 4:10</small></span></div></div>
-            </div>
-            <div>
-              <button class="ph" type="button" aria-expanded="true" aria-controls="p-context">Context <svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>
-              <div id="p-context">
-              <div class="lbl">Files read</div>
-              <div class="file-row"><span class="badge xlsx">XLSX</span><span>Q3销售数据.xlsx<small>Read</small></span></div>
-              <div class="lbl">Skills</div>
-              <div class="chips"><span class="chip">PPTX Slides</span></div>
-              <div class="lbl">Tools</div>
-              <div class="chips">
-                <span class="chip">Edit PowerPoint shape<i>×19</i></span>
-                <span class="chip">List PowerPoint shapes<i>×11</i></span>
-                <span class="chip">Add PowerPoint chart<i>×9</i></span>
-                <span class="chip">Render PowerPoint preview<i>×5</i></span>
-                <span class="chip">Review work<i>×3</i></span>
-              </div>
-              </div>
-            </div>
-            <div class="save">
-              <div class="save-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M10.5 7h3a3 3 0 0 1 3 3v3.5"/></svg>Save as workflow</div>
-            </div>
-          </aside>
-        </div>
+        <span class="tour-hint"><i></i><span class="zh">窗口右上角的图标也能点</span><span class="en">The icons in the window work too</span></span>
       </div>
-      <figcaption class="stage-cap">
-        <span><span class="zh">一次真实运行的还原</span><span class="en">Recreated from a real run</span></span>
-        <span>DeepSeek Flash</span>
-        <span><span class="zh">Auto 模式</span><span class="en">Auto mode</span></span>
-        <span><span class="zh">84 次工具调用</span><span class="en">84 tool calls</span></span>
-        <span><span class="zh">约 8 分钟</span><span class="en">about 8 minutes</span></span>
+      <div class="shot" role="tabpanel" aria-label="App views">
+        <img src="assets/app/en-chat.webp" alt="A finished conversation with its progress, outputs and tools" width="1440" height="900">
+        <div class="hot-layer"></div>
+      </div>
+      <figcaption class="tour-cap">
+        <p><span class="zh"><b>对话　</b>一条消息的需求：读 Q3销售数据.xlsx，先派两个子代理并行分析，再做出 8 页 PPT，渲染预览、请评审检查后改好。右边是任务进度、产出文件和用到的工具。</span><span class="en"><b>Conversation. </b>One message: read Q3 sales.xlsx, run two sub-agents in parallel, build an 8-slide deck, render it, have a reviewer check it and fix what they found. On the right are the progress, the output file and the tools it used.</span></p>
+        <small><span class="zh">以上都是 coscribe 的真实截图。模型 deepseek-v4-pro，数据为示例，设置页里遮去了 Key。界面目前只有英文，对话和产出跟随你的语言。</span><span class="en">All real coscribe screenshots. Model deepseek-v4-pro, sample data, and the key is masked in Settings.</span></small>
       </figcaption>
+      <script type="application/json" class="tour-data">{"dir": "assets/app/", "order": ["home", "chat", "browser", "browser-picked", "agents", "scheduled", "wf-task", "wf-rundlg", "wf-run", "settings"], "start": "chat", "views": {"home": {"name_zh": "首页", "name_en": "Home", "cap_zh": "说出要做的事，添加文件夹、选好模型就能开始。会话和定时任务都在左边栏。", "cap_en": "Describe the task, add a folder and pick a model. Sessions and scheduled tasks live in the sidebar.", "alt_zh": "coscribe 首页：问候语、输入框和左侧会话列表", "alt_en": "coscribe home: greeting, message box and the session list", "tab": "home", "hot": [{"x": 0.35, "y": 13.3, "w": 18.1, "h": 3.7, "to": "chat", "zh": "打开这个会话", "en": "Open this session", "icon": false, "cls": "left"}, {"x": 15.89, "y": 0.86, "w": 2.52, "h": 3.61, "to": "scheduled", "zh": "定时任务", "en": "Scheduled", "icon": true, "cls": "left"}, {"x": 94.02, "y": 0.64, "w": 2.52, "h": 4.06, "to": "help", "zh": "快捷键", "en": "Keyboard shortcuts", "icon": true, "cls": ""}, {"x": 96.52, "y": 0.64, "w": 2.52, "h": 4.06, "to": "settings", "zh": "设置", "en": "Settings", "icon": true, "cls": ""}]}, "chat": {"name_zh": "对话", "name_en": "Conversation", "cap_zh": "一条消息的需求：读 Q3销售数据.xlsx，先派两个子代理并行分析，再做出 8 页 PPT，渲染预览、请评审检查后改好。右边是任务进度、产出文件和用到的工具。", "cap_en": "One message: read Q3 sales.xlsx, run two sub-agents in parallel, build an 8-slide deck, render it, have a reviewer check it and fix what they found. On the right are the progress, the output file and the tools it used.", "alt_zh": "一次完成的对话：中间是过程和回复，右边是任务进度、产出文件和用过的工具", "alt_en": "A finished conversation with its progress, outputs and tools", "tab": "chat", "hot": [{"x": 66.24, "y": 0.64, "w": 2.52, "h": 4.06, "to": "browser", "zh": "浏览器", "en": "Browser", "icon": true, "cls": ""}, {"x": 68.74, "y": 0.64, "w": 2.52, "h": 4.06, "to": "agents", "zh": "子代理", "en": "Sub-agents", "icon": true, "cls": ""}, {"x": 71.24, "y": 0.64, "w": 2.52, "h": 4.06, "to": "help", "zh": "快捷键", "en": "Keyboard shortcuts", "icon": true, "cls": ""}, {"x": 73.74, "y": 0.64, "w": 2.52, "h": 4.06, "to": "settings", "zh": "设置", "en": "Settings", "icon": true, "cls": ""}]}, "browser": {"name_zh": "浏览器", "name_en": "Browser", "cap_zh": "对话旁边的内置浏览器。点选取按钮，再点网页上的一块，它会连同截图一起发进对话。网页为示例。", "cap_en": "A built-in browser beside the chat. Press the pick button, click part of a page, and it goes into the conversation with a screenshot. The site is a sample.", "alt_zh": "浏览器面板打开了一个示例 CRM 页面", "alt_en": "The browser panel showing a sample CRM page", "tab": "browser", "hot": [{"x": 95.54, "y": 5.19, "w": 3.91, "h": 3.39, "to": "browser-picked", "zh": "选取网页元素", "en": "Pick an element", "icon": true, "cls": "left"}, {"x": 41.79, "y": 0.64, "w": 2.52, "h": 4.06, "to": "chat", "zh": "浏览器", "en": "Browser", "icon": true, "cls": ""}, {"x": 44.29, "y": 0.64, "w": 2.52, "h": 4.06, "to": "agents", "zh": "子代理", "en": "Sub-agents", "icon": true, "cls": ""}, {"x": 46.79, "y": 0.64, "w": 2.52, "h": 4.06, "to": "help", "zh": "快捷键", "en": "Keyboard shortcuts", "icon": true, "cls": ""}, {"x": 49.29, "y": 0.64, "w": 2.52, "h": 4.06, "to": "settings", "zh": "设置", "en": "Settings", "icon": true, "cls": ""}]}, "browser-picked": {"name_zh": "选中网页元素", "name_en": "Picked element", "cap_zh": "选中的那一块带着截图出现在面板里，一键发进对话，让 coscribe 照着它做。", "cap_en": "The picked block shows up with its screenshot, one click from the conversation.", "alt_zh": "浏览器面板里选中了页面上的一块", "alt_en": "An element picked in the browser panel", "tab": "browser", "hot": [{"x": 41.79, "y": 0.64, "w": 2.52, "h": 4.06, "to": "chat", "zh": "浏览器", "en": "Browser", "icon": true, "cls": ""}, {"x": 44.29, "y": 0.64, "w": 2.52, "h": 4.06, "to": "agents", "zh": "子代理", "en": "Sub-agents", "icon": true, "cls": ""}, {"x": 46.79, "y": 0.64, "w": 2.52, "h": 4.06, "to": "help", "zh": "快捷键", "en": "Keyboard shortcuts", "icon": true, "cls": ""}, {"x": 49.29, "y": 0.64, "w": 2.52, "h": 4.06, "to": "settings", "zh": "设置", "en": "Settings", "icon": true, "cls": ""}]}, "agents": {"name_zh": "子代理", "name_en": "Sub-agents", "cap_zh": "两个子代理同时在跑：一个分析区域，一个分析产品线、毛利和客户。每个的过程和结论都能点开看。", "cap_en": "Two sub-agents ran at the same time, one on regions and one on products, margins and customers. Open either to see its steps and findings.", "alt_zh": "子代理面板列出并行完成的分析任务", "alt_en": "The Sub Agents panel listing analyses that ran in parallel", "tab": "agents", "hot": [{"x": 57.07, "y": 0.64, "w": 2.52, "h": 4.06, "to": "browser", "zh": "浏览器", "en": "Browser", "icon": true, "cls": ""}, {"x": 59.57, "y": 0.64, "w": 2.52, "h": 4.06, "to": "chat", "zh": "子代理", "en": "Sub-agents", "icon": true, "cls": ""}, {"x": 62.07, "y": 0.64, "w": 2.52, "h": 4.06, "to": "help", "zh": "快捷键", "en": "Keyboard shortcuts", "icon": true, "cls": ""}, {"x": 64.57, "y": 0.64, "w": 2.52, "h": 4.06, "to": "settings", "zh": "设置", "en": "Settings", "icon": true, "cls": ""}]}, "scheduled": {"name_zh": "定时任务", "name_en": "Scheduled tasks", "cap_zh": "存成工作流的任务都在这里，按设定的时间自动运行，也能随时手动运行。", "cap_en": "Workflows you saved live here. They run on their schedule, or whenever you start one.", "alt_zh": "定时任务列表", "alt_en": "The scheduled tasks list", "tab": "scheduled", "hot": [{"x": 23.64, "y": 16.49, "w": 35.5, "h": 16.58, "to": "wf-task", "zh": "打开这个任务", "en": "Open this task", "icon": false, "cls": "left"}], "hot_zh": [{"x": 23.64, "y": 16.49, "w": 35.5, "h": 14.36, "to": "wf-task", "zh": "打开这个任务", "en": "Open this task", "icon": false, "cls": "left"}]}, "wf-task": {"name_zh": "定时任务", "name_en": "Scheduled task", "cap_zh": "保存好的任务：一个每次运行可以换的输入（订单文件）、几个固定步骤、每个工作日 8:30 自动运行。步骤只有脚本和检查，运行时不调用模型。", "cap_en": "The saved task: one input you can change per run (the orders file), fixed steps, and a weekday 8:30 schedule. The steps are a script and checks, so a run calls no model.", "alt_zh": "保存好的工作流任务：输入、步骤和运行时间", "alt_en": "A saved workflow task with its inputs, steps and schedule", "tab": "scheduled", "hot": [{"x": 69.54, "y": 7.6, "w": 7.38, "h": 4.36, "to": "wf-rundlg", "zh": "立即运行", "en": "Run now", "icon": false, "cls": "cta"}]}, "wf-rundlg": {"name_zh": "立即运行", "name_en": "Run now", "cap_zh": "手动运行前可以换这次的输入，比如另一天的订单表。", "cap_en": "Before a manual run you can change this run's inputs, such as another day's orders file.", "alt_zh": "运行前填写输入的对话框", "alt_en": "The dialog for this run's inputs", "tab": "scheduled", "hot": [{"x": 59.47, "y": 55.95, "w": 5.29, "h": 4.36, "to": "wf-run", "zh": "运行", "en": "Run", "icon": false, "cls": "cta"}]}, "wf-run": {"name_zh": "一次运行", "name_en": "A run", "cap_zh": "一次运行用了 2 秒：脚本写出供应商汇总和缺地址订单，检查通过。每一步的输入和输出都留有记录。", "cap_en": "A run took 2 seconds: the script wrote the supplier totals and the orders missing an address, then the checks passed. Every step's inputs and outputs are kept.", "alt_zh": "工作流的一次运行记录", "alt_en": "One run of the workflow", "tab": "scheduled", "hot": []}, "settings": {"name_zh": "模型", "name_en": "Models", "cap_zh": "兼容 OpenAI API。Claude、GPT、Gemini 原生接入；DeepSeek、Kimi、GLM、Ollama 等服务，填上接口地址和 Key 就能添加。这次运行用的就是 DeepSeek。", "cap_en": "OpenAI-compatible. Claude, GPT and Gemini are built in; DeepSeek, Kimi, GLM, Ollama and others are a base URL and key away. The run above used DeepSeek.", "alt_zh": "设置里的 Providers 页", "alt_en": "The Providers page in Settings", "tab": "settings", "hot": [{"x": 0, "y": 0, "w": 100, "h": 100, "to": "chat", "zh": "关闭设置", "en": "Close settings", "icon": false, "cls": "wide"}]}, "help": {"name_zh": "快捷键", "name_en": "Keyboard shortcuts", "cap_zh": "常用操作都有快捷键，按 ? 随时查看。", "cap_en": "Common actions have shortcuts. Press ? to see them any time.", "alt_zh": "快捷键列表", "alt_en": "The keyboard shortcuts list", "tab": "chat", "hot": [{"x": 0, "y": 0, "w": 100, "h": 100, "to": "chat", "zh": "关闭", "en": "Close", "icon": false, "cls": "wide"}]}}}</script>
     </figure>
-    <div class="deck-wrap">
-      <div class="deck-head"><span class="badge pptx">PPTX</span><span><span class="zh">这次运行生成的 6 页，按原稿还原。点开可以逐页看。</span><span class="en">The six slides this run produced, redrawn from the file. Click to page through.</span></span></div>
-              <div class="deck" aria-label="The six slides from Q3销售汇报.pptx" id="deck">
-                
-        <button class="slide-btn" type="button" data-i="0" aria-label="Slide 1: 封面"><div class="slide cover"><div class="s-r"></div><div class="s-t">Q3 销售汇报</div><div class="s-sub">第三季度 · 区域销售表现回顾</div></div></button>
-        <button class="slide-btn" type="button" data-i="1" aria-label="Slide 2: 整体概览"><div class="slide">
-                  <div class="s-t">整体概览：达成率 101.3%</div><div class="s-r"></div>
-                  <div class="s-b s-b4"><div>全季销售额 4,102 万元，超目标 52 万元</div><div>五个区域中三个达标</div><div>月度连续爬坡：7 月 1,245 → 9 月 1,518 万元</div><div>9 月环比增长 13.4%，创季度单月新高</div></div>
-                  <div class="s-c s-c4"><div class="cap">月度销售额（万元）</div><div class="bars" style="padding:0 12%;gap:14%"><i style="--h:62%"></i><i style="--h:67%"></i><i style="--h:76%"></i></div><div class="ticks" style="padding:0 12%;gap:14%"><span>7 月</span><span>8 月</span><span>9 月</span></div></div>
-                </div></button>
-        <button class="slide-btn" type="button" data-i="2" aria-label="Slide 3: 区域达成"><div class="slide">
-                  <div class="s-t">区域达成：华东领跑，华南承压</div><div class="s-r"></div>
-                  <div class="s-b s-b4"><div>华东 +51 万元，达成 103.9%</div><div>海外 +24 万元，达成 107.3% 为最高</div><div>西南 +5 万元，达成 101.0%</div><div>华南 −25 万元、华北 −3 万元未达标</div></div>
-                  <div class="s-c s-c4"><div class="cap">目标差额（万元）</div><div class="div"><div class="zero"></div>
-                    <i style="left:6%;bottom:40%;height:51%"></i><i style="left:25%;top:60%;height:25%"></i><i style="left:44%;top:60%;height:3%"></i><i style="left:63%;bottom:40%;height:5%"></i><i style="left:82%;bottom:40%;height:24%"></i>
-                  </div><div class="ticks" style="padding:0 1.5%;gap:0"><span>华东</span><span>华南</span><span>华北</span><span>西南</span><span>海外</span></div></div>
-                </div></button>
-        <button class="slide-btn" type="button" data-i="3" aria-label="Slide 4: 各区域销售额"><div class="slide">
-                  <div class="s-t">各区域销售额：华东领跑</div><div class="s-r"></div>
-                  <div class="s-b"><div>华东 1,351 万元居首，占全季 32.9%</div><div>华南 975、华北 897 万元分列二、三位</div></div>
-                  <div class="s-c" style="top:47%"><div class="cap">各区域 Q3 销售额（万元）</div><div class="bars"><i style="--h:84.4%"></i><i style="--h:60.9%"></i><i style="--h:56.1%"></i><i style="--h:32.8%"></i><i style="--h:22.1%"></i></div><div class="ticks"><span>华东</span><span>华南</span><span>华北</span><span>西南</span><span>海外</span></div></div>
-                </div></button>
-        <button class="slide-btn" type="button" data-i="4" aria-label="Slide 5: 增长动能"><div class="slide">
-                  <div class="s-t">增长动能：全区域连续三月环比上升</div><div class="s-r"></div>
-                  <div class="s-b s-b4"><div>海外 +51.1%（94 → 142 万元），增速第一</div><div>西南 +24.1%，华东 +21.6%</div><div>华北 +19.9%，华南 +14.1%</div><div>9 月五个区域同步上行，无一下滑</div></div>
-                  <div class="s-c s-c4"><div class="cap">7 月 → 9 月增速（%）</div><div class="bars"><i style="--h:85.2%"></i><i style="--h:40.2%"></i><i style="--h:36%"></i><i style="--h:33.2%"></i><i style="--h:23.5%"></i></div><div class="ticks"><span>海外</span><span>西南</span><span>华东</span><span>华北</span><span>华南</span></div></div>
-                </div></button>
-        <button class="slide-btn" type="button" data-i="5" aria-label="Slide 6: 下季度建议"><div class="slide">
-                  <div class="s-t">下季度建议</div><div class="s-r"></div>
-                  <div class="s-cards"><div><b>01</b>华南：补回 −25 万元缺口，聚焦大客户攻坚</div><div><b>02</b>华东：维持节奏，追加投放巩固头部优势</div><div><b>03</b>海外、西南：复制增长打法，加大资源投入</div><div><b>04</b>华北：按当前节奏推进，10 月内完成目标重排</div></div>
-                </div></button>
-      </div>
-    </div>
   </div>
 </section>
 
@@ -926,27 +733,46 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
           </ul>
         </div>
         <div class="specimen">
-          <div class="tpl-row">
-            <span class="lab"><span class="zh">换个内置模板看看</span><span class="en">Try another built-in template</span></span>
-            <div class="seg" role="group" aria-label="Template" id="tpl">
-              <button type="button" data-tpl="" aria-pressed="true">Minimal Light</button>
-              <button type="button" data-tpl="block" aria-pressed="false">Modern Block</button>
-              <button type="button" data-tpl="bold" aria-pressed="false">Bold Statement</button>
-              <button type="button" data-tpl="pitch" aria-pressed="false">Investor Pitch</button>
+          <div class="spec-bar">
+            <span class="lab"><span class="zh">PPT · 上面那次对话的真实产出</span><span class="en">PowerPoint · the real output of the conversation above</span></span>
+          </div>
+          <div class="player en">
+            <div class="player-big"><img src="assets/deck/en-1.webp" alt="Slide 1: Q3 Business Review" width="1280" height="720" loading="lazy"></div>
+            <div class="player-nav">
+              <button class="player-prev" type="button" aria-label="Previous slide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+              <div class="player-dots" style="--n:8">
+              <button type="button" data-src="assets/deck/en-1.webp" aria-pressed="true" aria-label="Slide 1: Q3 Business Review"><img src="assets/deck/en-1-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/en-2.webp" aria-pressed="false" aria-label="Slide 2: Q3 at a glance"><img src="assets/deck/en-2-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/en-3.webp" aria-pressed="false" aria-label="Slide 3: Every region grew; Overseas led the pace"><img src="assets/deck/en-3-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/en-4.webp" aria-pressed="false" aria-label="Slide 4: Growth is tilting toward the highest-margin line"><img src="assets/deck/en-4-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/en-5.webp" aria-pressed="false" aria-label="Slide 5: Top 8 accounts = 30% of revenue; none dominates"><img src="assets/deck/en-5-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/en-6.webp" aria-pressed="false" aria-label="Slide 6: ¥2.35M open pipeline, healthy coverage into Q4"><img src="assets/deck/en-6-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/en-7.webp" aria-pressed="false" aria-label="Slide 7: Five moves to convert the momentum"><img src="assets/deck/en-7-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/en-8.webp" aria-pressed="false" aria-label="Slide 8: Q4: convert the momentum"><img src="assets/deck/en-8-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              </div>
+              <button class="player-next" type="button" aria-label="Next slide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+              <span class="player-count">1 / 8</span>
             </div>
           </div>
-          <div class="slide" id="tpl-slide">
-            <div class="s-band"></div><div class="s-spine"></div>
-            <div class="s-t">各区域销售额：华东领跑</div><div class="s-r"></div>
-            <div class="s-b"><div>华东 1,351 万元居首，占全季 32.9%</div><div>华南 975、华北 897 万元分列二、三位</div></div>
-            <div class="s-c" style="top:47%">
-              <div class="cap">各区域 Q3 销售额（万元）</div>
-              <div class="bars"><i style="--h:84.4%"></i><i style="--h:60.9%"></i><i style="--h:56.1%"></i><i style="--h:32.8%"></i><i style="--h:22.1%"></i></div>
-              <div class="ticks"><span>华东</span><span>华南</span><span>华北</span><span>西南</span><span>海外</span></div>
+          <div class="player zh">
+            <div class="player-big"><img src="assets/deck/zh-1.webp" alt="第 1 页：Q3 季度经营分析" width="1280" height="720" loading="lazy"></div>
+            <div class="player-nav">
+              <button class="player-prev" type="button" aria-label="上一页"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+              <div class="player-dots" style="--n:8">
+              <button type="button" data-src="assets/deck/zh-1.webp" aria-pressed="true" aria-label="第 1 页：Q3 季度经营分析"><img src="assets/deck/zh-1-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/zh-2.webp" aria-pressed="false" aria-label="第 2 页：核心经营指标"><img src="assets/deck/zh-2-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/zh-3.webp" aria-pressed="false" aria-label="第 3 页：区域达成：整体 101.3%，海外与华东领先"><img src="assets/deck/zh-3-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/zh-4.webp" aria-pressed="false" aria-label="第 4 页：区域亮点与风险"><img src="assets/deck/zh-4-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/zh-5.webp" aria-pressed="false" aria-label="第 5 页：产品结构：智能门锁占 40%，服务占比提升"><img src="assets/deck/zh-5-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/zh-6.webp" aria-pressed="false" aria-label="第 6 页：产品线毛利与增长：服务双高，网关毛利最低"><img src="assets/deck/zh-6-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/zh-7.webp" aria-pressed="false" aria-label="第 7 页：重点客户：Top 8 占 30.2%，Nova 增长 63%"><img src="assets/deck/zh-7-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              <button type="button" data-src="assets/deck/zh-8.webp" aria-pressed="false" aria-label="第 8 页：Q4 行动建议"><img src="assets/deck/zh-8-s.webp" alt="" width="320" height="180" loading="lazy"></button>
+              </div>
+              <button class="player-next" type="button" aria-label="下一页"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+              <span class="player-count">1 / 8</span>
             </div>
           </div>
-          <div class="flag" style="top:62px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span class="zh">无文字溢出</span><span class="en">No text overflow</span></div>
-          <p class="note" id="tpl-note"><span class="zh">上面那次运行生成的第 4 页，用的就是 Minimal Light。其他模板为示意。</span><span class="en">Slide 4 from the run above, which used Minimal Light. Other templates are illustrative.</span></p>
+          <p class="note"><span class="zh">Q3季度经营分析.pptx，8 页，299 KB。coscribe 用 pptxgenjs 写出，图表都是可编辑的 PowerPoint 图表。页面图片由 LibreOffice 渲染，没有修改。</span><span class="en">Q3 Business Review.pptx, 8 slides, 327 KB. coscribe wrote it with pptxgenjs, so the charts are editable PowerPoint charts. Slides rendered with LibreOffice, unedited.</span></p>
         </div>
       </article>
 
@@ -971,18 +797,18 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
           </div>
           <div class="page" id="page">
             <div class="body">
-              <h5>第三季度销售总结</h5>
-              <div class="meta">销售运营部 · 草稿 v2</div>
-              <p>第三季度全区销售额 4,102 万元，完成目标的 101.3%。五个区域中三个达标，9 月环比增长 13.4%，为本季度单月最高。</p>
-              <p>华南区域<del>基本完成</del><ins>未完成</ins>目标，缺口 25 万元；<span class="hl">华北差额 3 万元，预计 10 月补齐。</span></p>
+              <h5><span class="zh">第三季度销售总结</span><span class="en">Q3 Sales Summary</span></h5>
+              <div class="meta"><span class="zh">销售运营部 · 草稿 v2</span><span class="en">Sales Operations · Draft v2</span></div>
+              <p><span class="zh">第三季度全区销售额 4,102 万元，完成目标的 101.3%。五个区域中三个达标，9 月环比增长 13.4%，为本季度单月最高。</span><span class="en">Q3 revenue across all regions was ¥4.10M, 101.3% of target. Three of five regions hit their numbers, and September grew 13.4% month over month, the best month of the quarter.</span></p>
+              <p><span class="zh">华南区域<del>基本完成</del><ins>未完成</ins>目标，缺口 25 万元；<span class="hl">华北差额 3 万元，预计 10 月补齐。</span></span><span class="en">South <del>roughly met</del><ins>missed</ins> its target by ¥25k; <span class="hl">North is ¥3k short and expects to close the gap in October.</span></span></p>
               <div class="mini-chart" aria-hidden="true">
                 <div class="bars"><i style="--h:84.4%"></i><i style="--h:60.9%"></i><i style="--h:56.1%"></i><i style="--h:32.8%"></i><i style="--h:22.1%"></i></div>
-                <div class="ticks"><span>华东</span><span>华南</span><span>华北</span><span>西南</span><span>海外</span></div>
+                <div class="ticks"><span><span class="zh">华东</span><span class="en">East</span></span><span><span class="zh">华南</span><span class="en">South</span></span><span><span class="zh">华北</span><span class="en">North</span></span><span><span class="zh">西南</span><span class="en">SW</span></span><span><span class="zh">海外</span><span class="en">Overseas</span></span></div>
               </div>
             </div>
             <div class="margin">
-              <div class="cmt rev"><b>coscribe · 修订 <span class="ok">· 已接受</span></b>“基本完成”改为“未完成”：975 万元低于目标 1,000 万元。</div>
-              <div class="cmt"><b>coscribe · 批注</b>华北的补齐时间来自哪份计划？建议注明出处。</div>
+              <div class="cmt rev"><b><span class="zh">coscribe · 修订</span><span class="en">coscribe · Change</span> <span class="ok"><span class="zh">· 已接受</span><span class="en">· Accepted</span></span></b><span class="zh">“基本完成”改为“未完成”：975 万元低于目标 1,000 万元。</span><span class="en">“Roughly met” changed to “missed”: ¥975k is below the ¥1,000k target.</span></div>
+              <div class="cmt"><b><span class="zh">coscribe · 批注</span><span class="en">coscribe · Comment</span></b><span class="zh">华北的补齐时间来自哪份计划？建议注明出处。</span><span class="en">Which plan does North’s October date come from? Worth citing the source.</span></div>
             </div>
           </div>
           <p class="note"><span class="zh">示例文档</span><span class="en">Example document</span></p>
@@ -1007,13 +833,13 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
               <table id="sheet">
                 <thead><tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th></tr></thead>
                 <tbody>
-                  <tr class="hdr"><th>1</th><td>区域</td><td>7月</td><td>8月</td><td>9月</td><td>合计</td><td>目标</td><td>达成率</td></tr>
-                  <tr><th>2</th><td class="l" data-c="A2" tabindex="0">华东</td><td data-c="B2" tabindex="0">412</td><td data-c="C2" tabindex="0">438</td><td data-c="D2" tabindex="0">501</td><td data-c="E2" data-f="=SUM(B2:D2)" tabindex="0">1,351</td><td data-c="F2" tabindex="0">1,300</td><td class="up" data-c="G2" data-f="=E2/F2" tabindex="0">103.9%</td></tr>
-                  <tr><th>3</th><td class="l" data-c="A3" tabindex="0">华南</td><td data-c="B3" tabindex="0">305</td><td data-c="C3" tabindex="0">322</td><td data-c="D3" tabindex="0">348</td><td data-c="E3" data-f="=SUM(B3:D3)" tabindex="0">975</td><td data-c="F3" tabindex="0">1,000</td><td class="down" data-c="G3" data-f="=E3/F3" tabindex="0">97.5%</td></tr>
-                  <tr><th>4</th><td class="l" data-c="A4" tabindex="0">华北</td><td data-c="B4" tabindex="0">276</td><td data-c="C4" tabindex="0">290</td><td data-c="D4" tabindex="0">331</td><td data-c="E4" data-f="=SUM(B4:D4)" tabindex="0">897</td><td data-c="F4" tabindex="0">900</td><td class="down" data-c="G4" data-f="=E4/F4" tabindex="0">99.7%</td></tr>
-                  <tr><th>5</th><td class="l" data-c="A5" tabindex="0">西南</td><td data-c="B5" tabindex="0">158</td><td data-c="C5" tabindex="0">171</td><td data-c="D5" tabindex="0">196</td><td data-c="E5" data-f="=SUM(B5:D5)" tabindex="0">525</td><td data-c="F5" tabindex="0">520</td><td class="up" data-c="G5" data-f="=E5/F5" tabindex="0">101.0%</td></tr>
-                  <tr><th>6</th><td class="l" data-c="A6" tabindex="0">海外</td><td data-c="B6" tabindex="0">94</td><td data-c="C6" tabindex="0">118</td><td data-c="D6" tabindex="0">142</td><td data-c="E6" data-f="=SUM(B6:D6)" tabindex="0">354</td><td data-c="F6" tabindex="0">330</td><td class="up" data-c="G6" data-f="=E6/F6" tabindex="0">107.3%</td></tr>
-                  <tr class="tot"><th>7</th><td class="l" data-c="A7" tabindex="0">合计</td><td data-c="B7" data-f="=SUM(B2:B6)" tabindex="0">1,245</td><td data-c="C7" data-f="=SUM(C2:C6)" tabindex="0">1,339</td><td data-c="D7" data-f="=SUM(D2:D6)" tabindex="0">1,518</td><td data-c="E7" data-f="=SUM(E2:E6)" tabindex="0">4,102</td><td data-c="F7" data-f="=SUM(F2:F6)" tabindex="0">4,050</td><td class="sel up" data-c="G7" data-f="=E7/F7" tabindex="0">101.3%</td></tr>
+                  <tr class="hdr"><th>1</th><td><span class="zh">区域</span><span class="en">Region</span></td><td><span class="zh">7月</span><span class="en">Jul</span></td><td><span class="zh">8月</span><span class="en">Aug</span></td><td><span class="zh">9月</span><span class="en">Sep</span></td><td><span class="zh">合计</span><span class="en">Total</span></td><td><span class="zh">目标</span><span class="en">Target</span></td><td><span class="zh">达成率</span><span class="en">Attain.</span></td></tr>
+                  <tr><th>2</th><td class="l" data-c="A2" tabindex="0"><span class="zh">华东</span><span class="en">East</span></td><td data-c="B2" tabindex="0">412</td><td data-c="C2" tabindex="0">438</td><td data-c="D2" tabindex="0">501</td><td data-c="E2" data-f="=SUM(B2:D2)" tabindex="0">1,351</td><td data-c="F2" tabindex="0">1,300</td><td class="up" data-c="G2" data-f="=E2/F2" tabindex="0">103.9%</td></tr>
+                  <tr><th>3</th><td class="l" data-c="A3" tabindex="0"><span class="zh">华南</span><span class="en">South</span></td><td data-c="B3" tabindex="0">305</td><td data-c="C3" tabindex="0">322</td><td data-c="D3" tabindex="0">348</td><td data-c="E3" data-f="=SUM(B3:D3)" tabindex="0">975</td><td data-c="F3" tabindex="0">1,000</td><td class="down" data-c="G3" data-f="=E3/F3" tabindex="0">97.5%</td></tr>
+                  <tr><th>4</th><td class="l" data-c="A4" tabindex="0"><span class="zh">华北</span><span class="en">North</span></td><td data-c="B4" tabindex="0">276</td><td data-c="C4" tabindex="0">290</td><td data-c="D4" tabindex="0">331</td><td data-c="E4" data-f="=SUM(B4:D4)" tabindex="0">897</td><td data-c="F4" tabindex="0">900</td><td class="down" data-c="G4" data-f="=E4/F4" tabindex="0">99.7%</td></tr>
+                  <tr><th>5</th><td class="l" data-c="A5" tabindex="0"><span class="zh">西南</span><span class="en">Southwest</span></td><td data-c="B5" tabindex="0">158</td><td data-c="C5" tabindex="0">171</td><td data-c="D5" tabindex="0">196</td><td data-c="E5" data-f="=SUM(B5:D5)" tabindex="0">525</td><td data-c="F5" tabindex="0">520</td><td class="up" data-c="G5" data-f="=E5/F5" tabindex="0">101.0%</td></tr>
+                  <tr><th>6</th><td class="l" data-c="A6" tabindex="0"><span class="zh">海外</span><span class="en">Overseas</span></td><td data-c="B6" tabindex="0">94</td><td data-c="C6" tabindex="0">118</td><td data-c="D6" tabindex="0">142</td><td data-c="E6" data-f="=SUM(B6:D6)" tabindex="0">354</td><td data-c="F6" tabindex="0">330</td><td class="up" data-c="G6" data-f="=E6/F6" tabindex="0">107.3%</td></tr>
+                  <tr class="tot"><th>7</th><td class="l" data-c="A7" tabindex="0"><span class="zh">合计</span><span class="en">Total</span></td><td data-c="B7" data-f="=SUM(B2:B6)" tabindex="0">1,245</td><td data-c="C7" data-f="=SUM(C2:C6)" tabindex="0">1,339</td><td data-c="D7" data-f="=SUM(D2:D6)" tabindex="0">1,518</td><td data-c="E7" data-f="=SUM(E2:E6)" tabindex="0">4,102</td><td data-c="F7" data-f="=SUM(F2:F6)" tabindex="0">4,050</td><td class="sel up" data-c="G7" data-f="=E7/F7" tabindex="0">101.3%</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1031,19 +857,19 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
     <div class="head">
       <div class="eyebrow"><span class="zh">工作方式</span><span class="en">How it works</span></div>
       <h2 class="h2"><span class="zh">像一位细心的同事那样做事</span><span class="en">It works like a careful colleague</span></h2>
-      <p class="sub"><span class="zh">每一步都来自上面那次运行。它先列计划，拿不准的地方问你，做完再请另一个模型挑错。</span><span class="en">Every step here comes from the run above. It plans first, asks when unsure, and has a second model look for mistakes when it's done.</span></p>
+      <p class="sub"><span class="zh">每一步都来自上面那次运行。它先列计划，分头分析，做完再请一个没参与制作的审阅者挑错。</span><span class="en">Every step here comes from the run above. It plans first, splits the analysis across sub-agents, and has a reviewer that took no part in the work look for mistakes.</span></p>
       <figure class="demo" data-demo="run-timelapse" style="margin-top:32px">
         <div class="demo-stage" style="--ar:auto">
           <div class="board" style="--n:2">
-            <div class="frame"><span class="fn">00:00</span><span class="bub">做成 6 页 PPT…</span><div class="ln m"></div><div class="ln s"></div></div>
-            <div class="frame"><span class="fn">00:20</span><span class="pill"><i style="--c:var(--success)"></i>4 tasks</span><div class="ln"></div><div class="ln m"></div><div class="ln s"></div></div>
-            <div class="frame"><span class="fn">05:40</span><span class="pill"><i style="--c:var(--k-llm)"></i>Review work</span><div class="row"><span class="x">✕</span><div class="ln m" style="flex:1"></div></div><div class="row"><span class="x">✕</span><div class="ln s" style="flex:1"></div></div></div>
-            <div class="frame"><span class="fn">08:10</span><span class="pill"><i style="--c:var(--slides)"></i>Q3销售汇报.pptx</span><div class="row"><span class="v">✓</span><div class="ln m" style="flex:1"></div></div></div>
+            <div class="frame"><span class="fn"><span class="zh">开始</span><span class="en">Start</span></span><span class="bub"><span class="zh">做成 8 页 PPT…</span><span class="en">About 8 slides…</span></span><div class="ln m"></div><div class="ln s"></div></div>
+            <div class="frame"><span class="fn"><span class="zh">分析</span><span class="en">Analyze</span></span><span class="pill"><i style="--c:var(--success)"></i>Spawn agent ×2</span><div class="ln"></div><div class="ln m"></div><div class="ln s"></div></div>
+            <div class="frame"><span class="fn"><span class="zh">复核</span><span class="en">Review</span></span><span class="pill"><i style="--c:var(--k-llm)"></i>Review work</span><div class="row"><span class="x">✕</span><div class="ln m" style="flex:1"></div></div><div class="row"><span class="x">✕</span><div class="ln s" style="flex:1"></div></div></div>
+            <div class="frame"><span class="fn"><span class="zh">交付</span><span class="en">Done</span></span><span class="pill"><i style="--c:var(--slides)"></i><span class="zh">Q3季度经营分析.pptx</span><span class="en">Q3 Business Review.pptx</span></span><div class="row"><span class="v">✓</span><div class="ln m" style="flex:1"></div></div></div>
           </div>
         </div>
         <figcaption class="demo-cap">
           <span class="demo-tag"><span class="zh">动画演示位</span><span class="en">Animation slot</span></span>
-          <span class="d"><span class="zh">8 分钟的运行压缩成 30 秒</span><span class="en">The 8-minute run in 30 seconds</span></span>
+          <span class="d"><span class="zh">一次完整运行压缩成 30 秒</span><span class="en">A full run in 30 seconds</span></span>
           <button class="play" type="button" disabled><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg><span class="play-l"><span class="zh">动画制作中</span><span class="en">Animation coming</span></span></button>
         </figcaption>
       </figure>
@@ -1054,11 +880,17 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
           <h3><span class="zh">先列计划</span><span class="en">Plan first</span></h3>
           <p><span class="zh">任务拆成清单显示在侧栏，做到哪一步一目了然。复杂的任务可以切到 Plan 模式，先只出方案，你点头后再动手。</span><span class="en">The task becomes a checklist in the side panel so you can see where it is. For bigger jobs, Plan mode drafts a plan and waits for your OK before changing anything.</span></p>
           <div class="frag pad">
-            <ul class="tasks" style="margin:0">
-              <li>核对 Q3 销售数据并计算汇总指标</li>
-              <li>用简洁编辑风模板生成 6 页汇报内容</li>
-              <li>在对比页插入各区域销售额柱状图并调整版面</li>
-              <li>渲染预览并请审阅，修正问题</li>
+            <ul class="tasks en" style="margin:0">
+              <li>Run two parallel sub-agents: region vs target/Q2 analysis, and product mix/margins/top customers analysis</li>
+              <li>Load PPTX Slides skill and locate write_pptx/add_pptx_chart tools</li>
+              <li>Build the ~8-slide navy/teal Q3 business review deck</li>
+              <li>Review rendered previews, fix layout/overflow issues</li>
+              <li>Final reviewer pass on the finished deck</li>
+            </ul>
+            <ul class="tasks zh" style="margin:0">
+              <li>用 pptxgenjs 构建 8 页藏青+青绿自定义 PPT（数据卡片/环形图/表格+柱状图）</li>
+              <li>渲染预览 + 客观检查（重叠/缺失视觉/低对比/小字号/半页空白）</li>
+              <li>review_work 视觉评审并修正</li>
             </ul>
           </div>
         </div>
@@ -1066,46 +898,62 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
       <div class="step">
         <div>
           <h3><span class="zh">拿不准就问</span><span class="en">Ask when unsure</span></h3>
-          <p><span class="zh">需求里没说清楚的地方，它会给出几个具体选项让你挑，而不是自己猜一个。</span><span class="en">When the request leaves something open, it offers a few concrete options to pick from instead of guessing.</span></p>
+          <p><span class="zh">需求里没说清楚的地方，它会给出几个具体选项让你挑，而不是自己猜一个。上面那次写了“直接做，不用问我”，所以它没问；下面是另一次运行里它提的问题。</span><span class="en">When the request leaves something open, it offers a few concrete options to pick from instead of guessing. The run above said "go ahead without asking", so it didn't ask. This question comes from another run.</span></p>
           <div class="frag" id="question">
-            <div class="q-head"><small>PPT 风格</small><b>这份 Q3 销售汇报想用哪种视觉风格？</b></div>
-            <button class="q-opt" type="button" aria-pressed="false"><span>1</span>稳重通用（色块排版，藏青主色）</button>
-            <button class="q-opt" type="button" aria-pressed="true"><span>2</span>简洁编辑风（白底细线，适合内部汇报）</button>
-            <button class="q-opt" type="button" aria-pressed="false"><span>3</span>强烈对比（深色封面 + 左侧色条，适合高管速览）</button>
-            <button class="q-opt" type="button" aria-pressed="false"><span>4</span>数字最突出（近黑底 + 青色点缀，适合业绩发布）</button>
+            <div class="q-head"><small><span class="zh">示例 · PPT 风格</span><span class="en">Example · Slide style</span></small><b><span class="zh">这份 Q3 销售汇报想用哪种视觉风格？</span><span class="en">Which visual style should this Q3 sales deck use?</span></b></div>
+            <button class="q-opt" type="button" aria-pressed="false"><span>1</span><i class="zh">稳重通用（色块排版，藏青主色）</i><i class="en">Steady and general (color blocks, navy lead)</i></button>
+            <button class="q-opt" type="button" aria-pressed="true"><span>2</span><i class="zh">简洁编辑风（白底细线，适合内部汇报）</i><i class="en">Clean editorial (white, fine rules, for internal reviews)</i></button>
+            <button class="q-opt" type="button" aria-pressed="false"><span>3</span><i class="zh">强烈对比（深色封面 + 左侧色条，适合高管速览）</i><i class="en">High contrast (dark cover and a side bar, for executives)</i></button>
+            <button class="q-opt" type="button" aria-pressed="false"><span>4</span><i class="zh">数字最突出（近黑底 + 青色点缀，适合业绩发布）</i><i class="en">Numbers first (near-black with teal, for results)</i></button>
             <button class="q-opt other" type="button" aria-pressed="false"><span>✎</span>Something else</button>
           </div>
         </div>
       </div>
       <div class="step">
         <div>
-          <h3><span class="zh">动手做</span><span class="en">Do the work</span></h3>
-          <p><span class="zh">读数据、套模板、插图表、调版面，每一次操作都记在侧栏里，用了什么工具、用了几次都看得到。</span><span class="en">It reads the data, fills the template, adds charts and adjusts the layout. Every tool it used, and how often, is listed in the side panel.</span></p>
+          <h3><span class="zh">分头动手</span><span class="en">Do the work</span></h3>
+          <p><span class="zh">读数据，派两个子代理同时分析，再用脚本写出 PPT、渲染出来检查。每一次操作都记在侧栏里，用了什么工具、用了几次都看得到。</span><span class="en">It reads the data, sends two sub-agents to analyze it at the same time, then scripts the deck and renders it to check. Every tool it used, and how often, is listed in the side panel.</span></p>
           <div class="frag pad">
-            <div class="chips">
-              <span class="chip">Read Excel</span>
-              <span class="chip">Fill PowerPoint template</span>
-              <span class="chip">Edit PowerPoint shape<i>×19</i></span>
-              <span class="chip">List PowerPoint shapes<i>×11</i></span>
-              <span class="chip">Add PowerPoint chart<i>×9</i></span>
-              <span class="chip">Edit PowerPoint text<i>×6</i></span>
+            <div class="chips en">
+              <span class="chip">Search tools<i>×6</i></span>
               <span class="chip">Render PowerPoint preview<i>×5</i></span>
-              <span class="chip">Edit PowerPoint XML<i>×4</i></span>
+              <span class="chip">Run Node script<i>×4</i></span>
+              <span class="chip">Run Python script<i>×4</i></span>
+              <span class="chip">Spawn agent<i>×2</i></span>
+              <span class="chip">Review work<i>×2</i></span>
+              <span class="chip">List files</span>
+              <span class="chip">Read Excel</span>
+            </div>
+            <div class="chips zh">
+              <span class="chip">Search tools<i>×8</i></span>
+              <span class="chip">Run Node script<i>×3</i></span>
+              <span class="chip">Render PowerPoint preview<i>×3</i></span>
+              <span class="chip">List files<i>×2</i></span>
+              <span class="chip">Spawn agent<i>×2</i></span>
+              <span class="chip">Review work<i>×2</i></span>
+              <span class="chip">Read Excel</span>
+              <span class="chip">Read PowerPoint</span>
             </div>
           </div>
         </div>
       </div>
       <div class="step">
         <div>
-          <h3><span class="zh">请另一个模型复核</span><span class="en">Get a second opinion</span></h3>
-          <p><span class="zh">审阅模型没有参与制作，只拿到只读工具和渲染出来的页面图片，对照你最初的要求找问题。这一次它提了六条意见，其中一条是封面上出现了源表里根本没有的年份。</span><span class="en">The reviewer took no part in making the file. It gets read-only tools and images of the rendered pages, and checks them against your original request. This time it raised six points, one of them a year on the cover that the source sheet never mentioned.</span></p>
+          <h3><span class="zh">请审阅者复核</span><span class="en">Get a second opinion</span></h3>
+          <p><span class="zh">审阅者没有参与制作，只拿到只读工具和渲染出来的页面图片，对照你最初的要求找问题。这一次它逐个核对了数字，也指出第 6 页标题“网关双低”说过了头：网关增长 +9.0%，并不是最低。</span><span class="en">The reviewer took no part in making the file. It gets read-only tools and images of the rendered pages, and checks them against your original request. This time it reconciled every figure, caught a stat card that contradicted its own headline, and on the second pass found that a claimed fix had not landed.</span></p>
           <div class="frag review">
             <div class="r-head"><span class="zh">审阅意见（节选，译自原文）</span><span class="en">Reviewer findings (excerpt)</span></div>
-            <ul class="r-list">
-              <li><b><span class="zh">第 3 页</span><span class="en">Slide 3</span></b><span class="zh">双序列柱状图没有图例，也没有数据标签，看不出哪种颜色是目标、哪种是实际。</span><span class="en">“It's a two-series (target vs actual) column chart … but there is no legend and no data labels.”</span></li>
-              <li><b><span class="zh">第 2 页</span><span class="en">Slide 2</span></b><span class="zh">坐标轴从 0 到 2000，三个月的“连续爬坡”被压成了一条近乎水平的线。</span><span class="en">“0–2000 axis for 1,245/1,339/1,518 makes the ‘连续爬坡’ a near-straight line.”</span></li>
-              <li><b><span class="zh">第 6 页</span><span class="en">Slide 6</span></b><span class="zh">四条建议没有编号和重点，下半页大片空白，看起来像一个遗留的文本框。</span><span class="en">“This reads as a leftover text box rather than a designed closing page.”</span></li>
-              <li class="flagged"><b><span class="zh">封面</span><span class="en">Cover</span></b><span class="zh">写着“2026 财年第三季度”，但表格里没有年份，这是编出来的信息。</span><span class="en">“The cover states ‘2026 财年第三季度’ — the workbook contains no year, so that's an invented fact.”</span></li>
+            <ul class="r-list en">
+              <li class="flagged"><b>Slide 3</b><span>“South's big number is -2.5% — which is its vs-plan variance, not its growth … To a reader the ‘-2.5%’ looks like the one region that shrank, under a headline saying every region grew.”</span></li>
+              <li><b>Text size</b><span>“Body text is under 14pt on most content slides … slide 5 at 9.8pt … too small to read from a conference room.”</span></li>
+              <li><b>Charts</b><span>“‘Charts with data labels in deck colors’ is asserted, not evidenced. Confirm the labels are actually rendered before calling it done.”</span></li>
+              <li class="flagged"><b>2nd pass</b><span>“Small text was not actually fixed … The summary says text was ‘enlarged’ … but it omitted the small-text results.”</span></li>
+            </ul>
+            <ul class="r-list zh">
+              <li class="flagged"><b>第 6 页</b><span>标题说网关“双低”，但网关增长 +9.0%，并不是最低，传感器 +8.4% 更低。“双低”说过了头。</span></li>
+              <li><b>第 3 页</b><span>数据标签约 10.2pt，是全篇最小的字，管理层在远处看不清。</span></li>
+              <li><b>图表</b><span>工具只能看到图表外框，第 5 页是不是环形图、数据标签和配色，都只是采信了总结，没有直接证据。</span></li>
+              <li><b>对比度</b><span>12 条低对比告警逐个按位置核对过，都是白字压在藏青或青绿色块上，属误报。</span></li>
             </ul>
           </div>
         </div>
@@ -1113,8 +961,8 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
       <div class="step">
         <div>
           <h3><span class="zh">交付，并说明取舍</span><span class="en">Deliver and explain</span></h3>
-          <p><span class="zh">文件放在你的文件夹里。回复里写清楚每页是什么、改过哪些问题，以及它替你做了哪些判断，比如源表没有年份，封面就只写“第三季度”。</span><span class="en">The file lands in your folder. The reply lists what each slide holds, what was fixed, and which judgement calls it made for you. The source sheet had no year, so the cover just says "Q3".</span></p>
-          <div class="frag pad"><div class="file-row"><span class="badge pptx">PPTX</span><span>Q3销售汇报.pptx<small>6 slides · 94 KB</small></span></div></div>
+          <p><span class="zh">文件放在你的文件夹里。回复里写清楚每页是什么、改过哪些问题，以及还需要你知道的事，比如图表数据标签约 11.6pt，要投到大屏上可以再放大一档。</span><span class="en">The file lands in your folder. The reply lists what each slide holds, what was fixed, and what you should still know: the chart ticks and table cells run 11 to 12.5pt, with the takeaways at 13 to 14.5pt.</span></p>
+          <div class="frag pad"><div class="file-row en"><span class="badge pptx">PPTX</span><span>Q3 Business Review.pptx<small>8 slides · 327 KB</small></span></div><div class="file-row zh"><span class="badge pptx">PPTX</span><span>Q3季度经营分析.pptx<small>8 页 · 299 KB</small></span></div></div>
         </div>
       </div>
     </div>
@@ -1138,6 +986,31 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
         <div class="vs-row" role="row"><span role="rowheader"><span class="zh">出错时</span><span class="en">On failure</span></span><span role="cell"><span class="zh">可能绕过去继续，问题不容易发现</span><span class="en">May work around it, so problems hide</span></span><span role="cell"><span class="zh">停在出错的那一步，不产出可疑数据</span><span class="en">Stops at the failing step, no doubtful output</span></span></div>
         <div class="vs-row" role="row"><span role="rowheader"><span class="zh">底层</span><span class="en">Underneath</span></span><span role="cell"><span class="zh">一段提示词</span><span class="en">A prompt</span></span><span role="cell"><span class="zh">LangGraph StateGraph，带检查点</span><span class="en">A LangGraph StateGraph with checkpoints</span></span></div>
       </div>
+    </div>
+
+    <div class="wf-block wf-real">
+      <h3><span class="zh">在 coscribe 里是这样操作的</span><span class="en">What it looks like in coscribe</span></h3>
+      <p class="lead2"><span class="zh">下面是 coscribe 的真实截图：在对话里做好一次订单日报，再把它存成每个工作日 8:30 自动运行的任务。</span><span class="en">Real coscribe screenshots: a daily orders report done once in a conversation, then saved as a task that runs every weekday at 8:30.</span></p>
+    <figure class="tour" id="wf-tour">
+      <div class="tour-bar">
+        <div class="seg tour-tabs" role="tablist" aria-label="Workflow steps">
+          <button role="tab" type="button" data-view="wf-panel" aria-selected="true"><span class="zh">① 存成工作流</span><span class="en">1 · Save as workflow</span></button>
+          <button role="tab" type="button" data-view="wf-draft" aria-selected="false" tabindex="-1"><span class="zh">② 检查草稿</span><span class="en">2 · Check the draft</span></button>
+          <button role="tab" type="button" data-view="wf-modal" aria-selected="false" tabindex="-1"><span class="zh">③ 设定时间</span><span class="en">3 · Set a schedule</span></button>
+          <button role="tab" type="button" data-view="wf-task" aria-selected="false" tabindex="-1"><span class="zh">④ 保存好的任务</span><span class="en">4 · The saved task</span></button>
+          <button role="tab" type="button" data-view="wf-run" aria-selected="false" tabindex="-1"><span class="zh">⑤ 运行</span><span class="en">5 · A run</span></button>
+        </div>
+        <span class="tour-hint"><i></i><span class="zh">点高亮的按钮走下一步</span><span class="en">Click the highlighted button to go on</span></span>
+      </div>
+      <div class="shot" role="tabpanel" aria-label="Workflow steps">
+        <img src="assets/app/en-wf-panel.webp" alt="The Save as workflow button under a finished conversation" width="1440" height="900" loading="lazy">
+        <div class="hot-layer"></div>
+      </div>
+      <figcaption class="tour-cap">
+        <p><span class="zh"><b>① 存成工作流　</b>先在对话里把事做一遍：读订单表，按供应商汇总金额，列出缺收货地址的订单。做完后点任务面板底部的 Save as workflow。</span><span class="en"><b>1 · Save as workflow. </b>First do the job once in a conversation: read the orders file, total it by supplier, list the orders missing an address. Then press Save as workflow at the bottom of the task panel.</span></p>
+      </figcaption>
+      <script type="application/json" class="tour-data">{"dir": "assets/app/", "order": ["wf-panel", "wf-draft", "wf-modal", "wf-task", "wf-rundlg", "wf-run"], "start": "wf-panel", "views": {"wf-panel": {"name_zh": "① 存成工作流", "name_en": "1 · Save as workflow", "cap_zh": "先在对话里把事做一遍：读订单表，按供应商汇总金额，列出缺收货地址的订单。做完后点任务面板底部的 Save as workflow。", "cap_en": "First do the job once in a conversation: read the orders file, total it by supplier, list the orders missing an address. Then press Save as workflow at the bottom of the task panel.", "alt_zh": "对话做完后，任务面板底部的 Save as workflow 按钮", "alt_en": "The Save as workflow button under a finished conversation", "tab": "wf-panel", "hot": [{"x": 78.15, "y": 88.82, "w": 20.36, "h": 5.02, "to": "wf-draft", "zh": "点这里", "en": "Click here", "icon": false, "cls": "up cta"}]}, "wf-draft": {"name_zh": "② 检查草稿", "name_en": "2 · Check the draft", "cap_zh": "AI 把刚才的过程整理成固定步骤：订单文件变成输入，再加上脚本和检查，还会列出值得你确认的地方和它能改动的文件夹。保存前每一步都能改。", "cap_en": "The AI turns what just happened into fixed steps: the orders file becomes an input, followed by a script and checks. It lists what to double-check and which folders it may change. Every step can be edited before you save.", "alt_zh": "AI 起草的工作流：提示、权限、输入和步骤", "alt_en": "The drafted workflow: notes, permissions, inputs and steps", "tab": "wf-draft", "hot": [{"x": 68.92, "y": 12.49, "w": 8.0, "h": 4.36, "to": "wf-modal", "zh": "点这里", "en": "Click here", "icon": false, "cls": "cta"}]}, "wf-modal": {"name_zh": "③ 设定时间", "name_en": "3 · Set a schedule", "cap_zh": "起个名字，选好频率和时间，比如工作日早上 8:30。", "cap_en": "Name it and pick when it runs, such as weekdays at 8:30.", "alt_zh": "保存为定时任务的对话框", "alt_en": "The save-as-task dialog with its schedule", "tab": "wf-modal", "hot": [{"x": 68.64, "y": 63.03, "w": 4.88, "h": 4.58, "to": "wf-task", "zh": "点这里", "en": "Click here", "icon": false, "cls": "up cta"}]}, "wf-task": {"name_zh": "④ 保存好的任务", "name_en": "4 · The saved task", "cap_zh": "保存好的任务：一个每次运行可以换的输入（订单文件）、几个固定步骤、每个工作日 8:30 自动运行。步骤只有脚本和检查，运行时不调用模型。", "cap_en": "The saved task: one input you can change per run (the orders file), fixed steps, and a weekday 8:30 schedule. The steps are a script and checks, so a run calls no model.", "alt_zh": "保存好的工作流任务：输入、步骤和运行时间", "alt_en": "A saved workflow task with its inputs, steps and schedule", "tab": "wf-task", "hot": [{"x": 69.54, "y": 7.6, "w": 7.38, "h": 4.36, "to": "wf-rundlg", "zh": "立即运行", "en": "Run now", "icon": false, "cls": "cta"}]}, "wf-rundlg": {"name_zh": "⑤ 运行", "name_en": "5 · Run it", "cap_zh": "手动运行前可以换这次的输入，比如另一天的订单表。", "cap_en": "Before a manual run you can change this run's inputs, such as another day's orders file.", "alt_zh": "运行前填写输入的对话框", "alt_en": "The dialog for this run's inputs", "tab": "wf-run", "hot": [{"x": 59.47, "y": 55.95, "w": 5.29, "h": 4.36, "to": "wf-run", "zh": "运行", "en": "Run", "icon": false, "cls": "cta"}]}, "wf-run": {"name_zh": "⑤ 运行", "name_en": "5 · A run", "cap_zh": "一次运行用了 2 秒：脚本写出供应商汇总和缺地址订单，检查通过。每一步的输入和输出都留有记录。", "cap_en": "A run took 2 seconds: the script wrote the supplier totals and the orders missing an address, then the checks passed. Every step's inputs and outputs are kept.", "alt_zh": "工作流的一次运行记录", "alt_en": "One run of the workflow", "tab": "wf-run", "hot": []}}}</script>
+    </figure>
     </div>
 
     <figure class="demo" data-demo="solidify" style="margin-top:56px">
@@ -1350,7 +1223,8 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
   <div class="wrap">
     <div class="head">
       <div class="eyebrow"><span class="zh">模型与连接</span><span class="en">Models and connections</span></div>
-      <h2 class="h2"><span class="zh">用你选的模型，接你在用的工具</span><span class="en">Your choice of model, connected to the tools you use</span></h2>
+      <h2 class="h2"><span class="zh">兼容 OpenAI API，各大模型都能用</span><span class="en">OpenAI-compatible, so the major models all work</span></h2>
+      <p class="sub"><span class="zh">Claude、GPT、Gemini 原生接入。DeepSeek、Kimi、智谱 GLM、Ollama 本地模型，以及任何提供 OpenAI 兼容接口的服务，在设置里填上接口地址和 Key 就能用，对话中途也能切换模型。</span><span class="en">Claude, GPT and Gemini are built in. DeepSeek, Kimi, Zhipu GLM, local models through Ollama, and any other service with an OpenAI-compatible API work once you add its base URL and key in Settings. You can switch models mid-conversation.</span></p>
     </div>
     <div class="spec">
       <div class="spec-row">
@@ -1392,7 +1266,7 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
     <div class="qs">
       <ol class="qs-steps">
         <li><div><h3><span class="zh">安装</span><span class="en">Install</span></h3><p><span class="zh">在 <code>office-agent</code> 目录建虚拟环境，装上网页界面需要的依赖。</span><span class="en">Create a virtualenv in <code>office-agent</code> and install it with the web extras.</span></p></div></li>
-        <li><div><h3><span class="zh">选模型</span><span class="en">Pick a model</span></h3><p><span class="zh">复制 <code>.env.example</code> 为 <code>.env</code>，填入 API Key，用 <code>服务商:模型</code> 的格式设默认模型。</span><span class="en">Copy <code>.env.example</code> to <code>.env</code>, add your API key and set the default model as <code>provider:model</code>.</span></p></div></li>
+        <li><div><h3><span class="zh">选模型</span><span class="en">Pick a model</span></h3><p><span class="zh">复制 <code>.env.example</code> 为 <code>.env</code>，填入 Anthropic、OpenAI 或 Gemini 的 Key。DeepSeek、Kimi、GLM 这类兼容 OpenAI API 的服务，启动后在“设置 › Providers”里添加接口地址和 Key。</span><span class="en">Copy <code>.env.example</code> to <code>.env</code> and add an Anthropic, OpenAI or Gemini key. For DeepSeek, Kimi, GLM or any other OpenAI-compatible service, add its base URL and key under Settings › Providers once the app is running.</span></p></div></li>
         <li><div><h3><span class="zh">启动</span><span class="en">Launch</span></h3><p><span class="zh">首次构建一次前端，然后运行 <code>coscribe-web</code> 打开网页界面，或者用 <code>coscribe</code> 在终端里对话。</span><span class="en">Build the frontend once, then run <code>coscribe-web</code> for the web UI, or <code>coscribe</code> to chat in the terminal.</span></p></div></li>
       </ol>
       <div class="term">
@@ -1412,7 +1286,7 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
 
 <span class="c"># 2. pick a model: edit .env after copying</span>
 <span class="p">$ </span><span class="cmd">cp .env.example .env</span>
-<span class="c">#   ANTHROPIC_API_KEY=...   (or OPENAI_ / GEMINI_)</span>
+<span class="c">#   ANTHROPIC_API_KEY=...   (or OPENAI_ / GEMINI_; others: Settings › Providers)</span>
 <span class="c">#   COSCRIBE_DEFAULT_MODEL=gemini:gemini-2.5-flash</span>
 
 <span class="c"># 3. build the UI once, then launch</span>
@@ -1428,7 +1302,7 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
 
 <span class="c"># 2. pick a model: edit .env after copying</span>
 <span class="p">&gt; </span><span class="cmd">copy .env.example .env</span>
-<span class="c">#   ANTHROPIC_API_KEY=...   (or OPENAI_ / GEMINI_)</span>
+<span class="c">#   ANTHROPIC_API_KEY=...   (or OPENAI_ / GEMINI_; others: Settings › Providers)</span>
 <span class="c">#   COSCRIBE_DEFAULT_MODEL=gemini:gemini-2.5-flash</span>
 
 <span class="c"># 3. build the UI once, then launch</span>
@@ -1504,7 +1378,7 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
   <div class="lb-inner">
     <div class="lb-stage" id="lb-stage"></div>
     <div class="lb-bar">
-      <span class="count" id="lb-count">1 / 6</span>
+      <span class="count" id="lb-count"></span>
       <span class="lb-title" id="lb-title"></span>
       <span class="sp"></span>
       <button type="button" id="lb-prev" aria-label="Previous slide">&larr;</button>
@@ -1538,11 +1412,12 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
 
   /* ---------- language and theme ---------- */
   var lang = get("coscribe-lang");
-  if (!lang) lang = /^zh/i.test(navigator.language || "") ? "zh-CN" : "en";
+  if (lang !== "zh-CN") lang = "en";
   root.lang = lang;
   $("lang").addEventListener("click", function () {
     root.lang = root.lang === "en" ? "zh-CN" : "en";
     set("coscribe-lang", root.lang);
+    document.dispatchEvent(new CustomEvent("coscribe:lang"));
   });
 
   var theme = get("coscribe-theme");
@@ -1620,30 +1495,26 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
     });
   }
 
-  /* ---------- hero: collapsible side panel sections ---------- */
-  all(".panel .ph").forEach(function (b) {
-    var body = $(b.getAttribute("aria-controls"));
-    b.addEventListener("click", function () {
-      var open = b.getAttribute("aria-expanded") !== "true";
-      b.setAttribute("aria-expanded", open ? "true" : "false");
-      if (body) body.hidden = !open;
-    });
-  });
+  function isEn() { return root.lang === "en"; }
 
-  /* ---------- hero: slide lightbox ---------- */
-  var slides = all("#deck .slide-btn");
-  var lb = $("lightbox"), lbStage = $("lb-stage"), lbIndex = 0, lbReturn = null;
-  function showSlide(i) {
-    lbIndex = (i + slides.length) % slides.length;
-    var src = slides[lbIndex];
+  /* ---------- image lightbox (deck slides, app screenshots) ---------- */
+  var lb = $("lightbox"), lbStage = $("lb-stage"), lbList = [], lbIndex = 0, lbReturn = null;
+  function showItem(i) {
+    lbIndex = (i + lbList.length) % lbList.length;
+    var it = lbList[lbIndex];
+    var img = document.createElement("img");
+    img.src = it.src;
+    img.alt = it.title;
     lbStage.textContent = "";
-    lbStage.appendChild(src.querySelector(".slide").cloneNode(true));
-    $("lb-count").textContent = (lbIndex + 1) + " / " + slides.length;
-    $("lb-title").textContent = (src.getAttribute("aria-label") || "").replace(/^Slide \d+:\s*/, "");
+    lbStage.appendChild(img);
+    $("lb-count").textContent = lbList.length > 1 ? (lbIndex + 1) + " / " + lbList.length : "";
+    $("lb-title").textContent = it.title;
+    $("lb-prev").hidden = $("lb-next").hidden = lbList.length < 2;
   }
-  function openLb(i) {
+  function openLb(list, i) {
+    lbList = list;
     lbReturn = document.activeElement;
-    showSlide(i);
+    showItem(i);
     lb.hidden = false;
     document.body.style.overflow = "hidden";
     $("lb-close").focus();
@@ -1653,32 +1524,106 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
     document.body.style.overflow = "";
     if (lbReturn && lbReturn.focus) lbReturn.focus();
   }
-  slides.forEach(function (b, i) { b.addEventListener("click", function () { openLb(i); }); });
   if (lb) {
-    $("lb-prev").addEventListener("click", function () { showSlide(lbIndex - 1); });
-    $("lb-next").addEventListener("click", function () { showSlide(lbIndex + 1); });
+    $("lb-prev").addEventListener("click", function () { showItem(lbIndex - 1); });
+    $("lb-next").addEventListener("click", function () { showItem(lbIndex + 1); });
     $("lb-close").addEventListener("click", closeLb);
-    lb.addEventListener("click", function (e) { if (e.target === lb) closeLb(); });
+    lb.addEventListener("click", function (e) { if (e.target === lb || e.target === lbStage) closeLb(); });
     document.addEventListener("keydown", function (e) {
       if (lb.hidden) return;
       if (e.key === "Escape") closeLb();
-      else if (e.key === "ArrowLeft") showSlide(lbIndex - 1);
-      else if (e.key === "ArrowRight") showSlide(lbIndex + 1);
+      else if (e.key === "ArrowLeft" && lbList.length > 1) showItem(lbIndex - 1);
+      else if (e.key === "ArrowRight" && lbList.length > 1) showItem(lbIndex + 1);
       else if (e.key === "Tab") {
         // keep focus inside the dialog
-        var f = all("button", lb), first = f[0], last = f[f.length - 1];
+        var f = all("button", lb).filter(function (b) { return !b.hidden; }), first = f[0], last = f[f.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       }
     });
   }
 
-  /* ---------- files: template switcher, tracked changes, sheet ---------- */
-  var tplSlide = $("tpl-slide");
-  pressGroup($("tpl"), function (b) {
-    var t = b.getAttribute("data-tpl");
-    if (t) tplSlide.setAttribute("data-tpl", t); else tplSlide.removeAttribute("data-tpl");
+  /* ---------- product tours over real screenshots ---------- */
+  all(".tour").forEach(function (tour) {
+    var T = JSON.parse(tour.querySelector(".tour-data").textContent);
+    var shotBox = tour.querySelector(".shot"), shotImg = shotBox.querySelector("img"), hotLayer = tour.querySelector(".hot-layer");
+    var tabList = tour.querySelector(".tour-tabs"), tabBtns = all("[role=tab]", tabList), cap = tour.querySelector(".tour-cap p");
+    var view = T.start || T.order[0], hinted = false;
+    function srcOf(v) { return T.dir + (isEn() ? "en" : "zh") + "-" + v + ".webp"; }
+    function render(v) {
+      var V = T.views[v];
+      if (!V) return;
+      view = v;
+      var src = srcOf(v);
+      if (shotImg.getAttribute("src") !== src) {
+        shotBox.classList.add("loading");
+        shotImg.onload = function () { shotBox.classList.remove("loading"); };
+        shotImg.src = src;
+      }
+      shotImg.alt = isEn() ? V.alt_en : V.alt_zh;
+      cap.textContent = "";
+      var bz = el("span", "zh"); bz.appendChild(el("b", null, V.name_zh + "　")); bz.appendChild(document.createTextNode(V.cap_zh));
+      var be = el("span", "en"); be.appendChild(el("b", null, V.name_en + ". ")); be.appendChild(document.createTextNode(V.cap_en));
+      cap.appendChild(bz); cap.appendChild(be);
+      hotLayer.textContent = "";
+      ((!isEn() && V.hot_zh) || V.hot || []).forEach(function (s) {
+        var b = el("button", "hs" + (s.icon ? " icon" : "") + (s.cls ? " " + s.cls : ""));
+        b.type = "button";
+        b.style.left = s.x + "%"; b.style.top = s.y + "%"; b.style.width = s.w + "%"; b.style.height = s.h + "%";
+        b.setAttribute("data-zh", s.zh); b.setAttribute("data-en", s.en);
+        b.setAttribute("aria-label", isEn() ? s.en : s.zh);
+        b.addEventListener("click", function (e) { e.stopPropagation(); render(s.to); });
+        hotLayer.appendChild(b);
+      });
+      tabBtns.forEach(function (t) {
+        var on = t.getAttribute("data-view") === (V.tab || v);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        t.tabIndex = on ? 0 : -1;
+      });
+    }
+    tabs(tabList, function (b) { render(b.getAttribute("data-view")); });
+    shotImg.addEventListener("click", function () {
+      openLb(T.order.map(function (v) {
+        var V = T.views[v];
+        return { src: srcOf(v), title: isEn() ? V.name_en : V.name_zh };
+      }), Math.max(0, T.order.indexOf(view)));
+    });
+    render(view);
+    // a few pulses on the clickable spots, once the tour scrolls into view
+    if ("IntersectionObserver" in window) {
+      var hio = new IntersectionObserver(function (es) {
+        if (es[0].isIntersecting && !hinted) { hinted = true; shotBox.classList.add("hint"); hio.disconnect(); }
+      }, { threshold: .5 });
+      hio.observe(shotBox);
+    }
+    // warm the other views once the page is in
+    window.addEventListener("load", function () {
+      setTimeout(function () { T.order.forEach(function (v) { var i = new Image(); i.src = srcOf(v); }); }, 1500);
+    });
+    document.addEventListener("coscribe:lang", function () { render(view); });
   });
+
+  /* ---------- files: slide player ---------- */
+  all(".player").forEach(function (pl) {
+    var big = pl.querySelector(".player-big img"), dots = all(".player-dots button", pl), i = 0;
+    var count = pl.querySelector(".player-count");
+    function show(j) {
+      i = (j + dots.length) % dots.length;
+      big.src = dots[i].getAttribute("data-src");
+      big.alt = dots[i].getAttribute("aria-label");
+      dots.forEach(function (d, k) { d.setAttribute("aria-pressed", k === i ? "true" : "false"); });
+      if (count) count.textContent = (i + 1) + " / " + dots.length;
+    }
+    dots.forEach(function (d, k) { d.addEventListener("click", function () { show(k); }); });
+    var prev = pl.querySelector(".player-prev"), next = pl.querySelector(".player-next");
+    if (prev) prev.addEventListener("click", function () { show(i - 1); });
+    if (next) next.addEventListener("click", function () { show(i + 1); });
+    big.addEventListener("click", function () {
+      openLb(dots.map(function (d) { return { src: d.getAttribute("data-src"), title: d.getAttribute("aria-label") }; }), i);
+    });
+  });
+
+  /* ---------- files: tracked changes, sheet ---------- */
   pressGroup($("track"), function (b) {
     $("page").classList.toggle("accepted", b.getAttribute("data-v") === "accept");
   });
@@ -1689,7 +1634,8 @@ button.q-opt[aria-pressed="true"] span { border-color: var(--accent); color: var
     cells.forEach(function (c) { c.classList.toggle("sel", c === td); });
     var f = td.getAttribute("data-f");
     fxRef.textContent = td.getAttribute("data-c");
-    fxVal.textContent = f || td.textContent;
+    var lab = td.querySelector(root.lang === "en" ? ".en" : ".zh");
+    fxVal.textContent = f || (lab ? lab : td).textContent;
     fxVal.classList.toggle("is-f", !!f);
   }
   var cellAt = {};

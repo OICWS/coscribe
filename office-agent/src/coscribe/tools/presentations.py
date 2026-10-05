@@ -82,7 +82,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from functools import cache, lru_cache
 from io import BytesIO
 from pathlib import Path
@@ -5593,7 +5593,7 @@ class PresentationToolkit:
         title = title_shape.text if title_shape is not None else ""
         title_shape_id = title_shape.shape_id if title_shape is not None else None
         lines = [f"## {title}"] if with_heading else []
-        for shape in slide.shapes:
+        for shape in _leaf_shapes(slide.shapes):
             if title_shape_id is not None and shape.shape_id == title_shape_id:
                 continue
             if shape.has_table:
@@ -5604,6 +5604,19 @@ class PresentationToolkit:
                     if paragraph.text:
                         lines.append(f"- {paragraph.text}")
         return "\n".join(lines)
+
+
+def _leaf_shapes(shapes: Any) -> Iterator[Any]:
+    """Every shape on a slide in document order, with groups opened up --
+    SVG-compiled and designer-made decks keep most of their text inside
+    groups."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from _leaf_shapes(shape.shapes)
+        else:
+            yield shape
 
 
 def build_presentation_tools(

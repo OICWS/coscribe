@@ -12,11 +12,11 @@ SVG-to-OOXML converter was deliberately rejected as out of scope: a real
 open-source implementation (``hugohe3/ppt-master``) was evaluated and its
 core technique (SVG as intermediate format, converted deterministically to
 native DrawingML shapes) was verified to work end-to-end via a live spike,
-but its own code carries a deliberate integrity gate requiring its entire
-118MB distribution to ship intact, which is disproportionate to what this
-project needs and entangles licensing/attribution concerns beyond a plain
-MIT credit. This module applies the same general *technique* -- confirmed
-to work by that spike -- as a small, fully independent implementation.
+but its scripts refuse to run unless its SKILL.md metadata, LICENSE and
+SPONSORS files are intact (an attribution gate), so it can't be vendored
+piecemeal or patched -- only shipped whole (see PPTX_DESIGN.md §38).
+This module applies the same general *technique* -- confirmed to work by
+that spike -- as a small, fully independent implementation.
 Nothing here is copied from any other project.
 
 Extended (after the decision to build decorative graphics via code instead

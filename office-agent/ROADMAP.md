@@ -7082,6 +7082,33 @@ the tools around the numbers.
   two pages, re-adding the chart each time. Turn 1 took 14 min, the corrections 6, the rerun 28 (the
   test suite was running beside it).
 
+## Phase 8cj -- Tool discovery no longer throws away DeepSeek's prompt cache (shipped)
+
+Asked how to keep cost down after the ppt-master comparison, every model
+call of the session's real runs was priced from its own usage numbers
+(deepseek-flash: ¥0.02 per 1M cached input, ¥1 uncached, ¥4 output,
+off-peak; peak doubles, Beijing 9-12 and 14-18 on weekdays). One 6-page
+deck cost ¥1.15 (ppt-master) or ¥1.55 (coscribe's own route) off-peak; the
+¥8.5 the balance dropped over the afternoon was every experiment, the
+biggest run at peak prices, billed late.
+
+- [x] Over 4 real runs, 22-56% of the cost was cache misses right after a
+      `search_tools` call: finding a tool changes the tool list, which is
+      sent before the conversation, so the whole conversation is re-read
+      uncached (one request: 178,704 of 204,560 tokens missed). Appending
+      found tools at the end (2026-09-26) only kept the tool list's own
+      prefix. On DeepSeek every built-in tool (115, ~35k tokens) is now
+      bound from the first request; connector tools still wait behind
+      `search_tools`, which is left out when there are none. Other
+      providers unchanged until their prices are checked; sub-agents follow
+      their own model's answer. DeepSeek documents no limit on tools per
+      request, and the first live request with all of them went through.
+      Same brief again: no `search_tools` call, uncached input per request
+      10.1k -> 3.7k, ¥1.55 -> ¥0.62, figures all correct.
+- Not done, measured and proposed: running background and scheduled work
+  off-peak (half price), capping review rounds and editing a page in place
+  instead of rewriting it, a draft mode without visual review.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
