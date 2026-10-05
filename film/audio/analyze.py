@@ -1,7 +1,7 @@
 """Objective checks of the audio build (development tool; needs matplotlib).
 
   python3 audio/analyze.py spec  <wav> [t0 t1] [-o out.png]   spectrogram + RMS envelope
-  python3 audio/analyze.py report [--lang zh]                  full report: stems vs cue sheet, drops, peaks, VO fit
+  python3 audio/analyze.py report [--lang en]                  stems vs cue sheet: hits, drops, clicks, peaks, loudness
 """
 import argparse
 import json
@@ -61,6 +61,61 @@ def spec_plot(x, t0, t1, out, title="", marks=HITS):
     print(out)
 
 
+DROPS = [  # (label, quiet window, reference window before it) -- the cue sheet's drops and stops
+    ("M1-d 21.0", (21.3, 23.8), (18.5, 20.8)), ("M2-d 42.0", (42.3, 43.8), (39.5, 41.8)),
+    ("M3-d 65.0", (65.3, 66.9), (62.5, 64.8)), ("M4-d 86.0", (86.4, 88.3), (83.5, 85.8)),
+    ("vacuum 100.0", (100.03, 100.36), (98.0, 99.9)), ("cut 113.6", (113.63, 114.38), (111.5, 113.5))]
+CUE_HITS = [13.0, 28.5, 34.5, 49.5, 56.6, 72.5, 78.6, 82.5, 92.5, 94.0, 95.5, 97.0, 98.5, 110.0]
+
+
+def _rms_db(x, a, b):
+    seg = x[:, int(a * dsp.SR):int(b * dsp.SR)]
+    return 10 * np.log10(np.mean(seg ** 2) + 1e-20)
+
+
+def clicks(x, thr_db=24.0):
+    """Clicks = broadband HF bursts (> 9 kHz, 2 ms frames) that jump thr_db above the local median and are
+    not quiet. Returns [(t, jump_db, level_db)]."""
+    from scipy import signal
+    from scipy.ndimage import median_filter
+    hp = signal.sosfilt(signal.butter(6, 9000, "high", fs=dsp.SR, output="sos"), x.mean(0))
+    hop = int(0.002 * dsp.SR)
+    k = len(hp) // hop
+    e = 10 * np.log10((hp[:k * hop].reshape(k, hop) ** 2).mean(1) + 1e-20)
+    med = median_filter(e, 101)
+    out = []
+    for i in np.nonzero((e - med > thr_db) & (e > -75))[0]:
+        if not out or i * hop / dsp.SR - out[-1][0] > 0.05:
+            out.append((round(i * hop / dsp.SR, 3), round(float(e[i] - med[i]), 1), round(float(e[i]), 1)))
+    return out
+
+
+def report(lang):
+    music = load(OUT / "music.wav")
+    fx = load(OUT / f"sfx_{lang}.wav")
+    mix = load(OUT / f"mix_{lang}.wav")
+    print(f"mix_{lang}: {mix.shape[1] / dsp.SR:.4f} s, {dsp.lufs(mix):.2f} LUFS, true peak "
+          f"{20 * np.log10(dsp.true_peak(mix)):.2f} dBTP, sample peak {20 * np.log10(np.abs(mix).max()):.2f} dBFS")
+    print("drops (music stem; quiet window vs the 2 s before):")
+    for lab, (a, b), (c, d) in DROPS:
+        q, r = _rms_db(music, a, b), _rms_db(music, c, d)
+        print(f"  {lab:14s} {q:7.1f} dB vs {r:6.1f} dB  -> {q - r:6.1f} dB   (mix {_rms_db(mix, a, b):6.1f} dB)")
+    print("hits (music stem; 150 ms after vs 300 ms before):")
+    for h in CUE_HITS:
+        print(f"  {h:6.1f}  +{_rms_db(music, h, h + 0.15) - _rms_db(music, h - 0.3, h - 0.01):5.1f} dB   "
+              f"level {_rms_db(music, h, h + 0.15):6.1f} dB")
+    for nm, x in (("music", music), (f"sfx_{lang}", fx), (f"mix_{lang}", mix)):
+        c = clicks(x)
+        print(f"click candidates in {nm}: {len(c)} {c[:12]}")
+    tl, L = dsp.short_term(mix)
+    print("short-term loudness (3 s) per section:")
+    for a, b, lab in ((0, 8, "open"), (8, 30, "sentence 1"), (30, 52, "sentence 2"), (52, 74, "sentence 3"),
+                      (74, 94, "sentence 4"), (94, 100, "montage"), (100.4, 106, "M6-a/b"), (106, 113.6, "climax"),
+                      (114.4, 120, "close")):
+        m = (tl >= a) & (tl < b)
+        print(f"  {lab:11s} {a:6.1f}-{b:6.1f}  max {L[m].max():6.1f}  median {np.median(L[m]):6.1f} LUFS")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd")
@@ -72,6 +127,8 @@ def main():
         t0 = float(a.args[1]) if len(a.args) > 1 else 0
         t1 = float(a.args[2]) if len(a.args) > 2 else x.shape[1] / dsp.SR
         spec_plot(x, t0, t1, a.o or str(Path(a.args[0]).with_suffix(".png")), Path(a.args[0]).name)
+    elif a.cmd == "report":
+        report(a.args[0] if a.args else "en")
 
 
 if __name__ == "__main__":

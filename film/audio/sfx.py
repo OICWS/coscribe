@@ -474,7 +474,7 @@ FAMILY = {  # event name -> sound family (synonyms the animators use or might us
     "click": "click", "approve": "click",
     "scratch": "scratch", "pencil": "scratch", "strike": "scratch",
     "paper": "paper", "page": "paper", "flip": "paper", "peel": "paper", "slide": "paper", "lift": "paper",
-    "paper_lift": "paper", "paper_slide": "paper",
+    "paper_lift": "paper", "paper_slide": "paper", "paper_fan": "paper",
     "flutter": "flutter", "pages": "flutter", "paper_flow": "flutter",
     "silk": "silk", "thread": "silk",
     "chime": "chime", "check": "check", "ding": "check",
@@ -587,7 +587,7 @@ def place(buf, e, events, unknown):
     elif fam == "paper":
         nm = e["name"]
         kind = e.get("kind") if e.get("kind") in ("flip", "peel", "slide", "fall", "pull", "lift") else \
-            {"slide": "slide", "paper_slide": "slide", "peel": "peel", "lift": "lift", "paper_lift": "pull"}.get(nm, "fall" if "i" in e else "flip")
+            {"slide": "slide", "paper_slide": "slide", "peel": "peel", "lift": "lift", "paper_lift": "pull", "paper_fan": "slide"}.get(nm, "fall" if "i" in e else "flip")
         add(buf, paper(kind, e.get("dur")), t, _g(e, -31) * _density(e, events, fam, 0.8))
     elif fam == "flutter":
         add(buf, flutter(_num(e.get("dur"), 4.0)), t, _g(e, -38))

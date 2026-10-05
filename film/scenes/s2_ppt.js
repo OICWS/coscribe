@@ -76,7 +76,7 @@
   const TH = [34.3, 36.3];                         // storyline thread
   const tGrid = (i) => 37.95 + 0.04 * i;           // TOC line -> frame
   const BUILD_ORDER = [4, 1, 3, 7, 0, 5, 2, 8, 6]; // centre first, then around
-  const tBuild = (i) => 38.5 + 0.085 * BUILD_ORDER.indexOf(i);
+  const tBuild = (i) => 38.4 + 0.07 * BUILD_ORDER.indexOf(i);
   const T_THEME = 39.95;                           // swatches converge, accents unify
   const TOOLS = [39.0, 39.7, 40.4];
   const A0 = 42.0, B0 = 44.6;                      // quality shots
@@ -199,7 +199,7 @@
       slides.forEach((s) => world.append(s.root));
       F.event(38.0, 'frames');
       slides.forEach((s, i) => F.event(tBuild(i) + 0.18, 'knock', { slide: i + 1 }));
-      F.event(39.45, 'grow');
+      F.event(tBuild(4) + 0.3, 'grow', { dur: 1.0 });
       F.event(T_THEME, 'chord');
 
       // ===== screen-space overlays =====
@@ -215,7 +215,7 @@
       F.event(B0 + 0.55, 'roll', { dur: 0.45 }); F.event(B0 + 1.0, 'check');
       F.event(45.62, 'lift');
       DROP_ORDER.forEach((s, r) => F.event(tDrop(s) + 0.42, 'paper', { gain: +(1 - r * 0.07).toFixed(2), i: r + 1 }));
-      F.event(T_FOLD, 'collapse'); F.event(T_LAND, 'drop');
+      F.event(T_FOLD, 'collapse'); F.event(T_FLY + 0.1, 'slide', { dur: T_LAND - T_FLY }); F.event(T_LAND, 'drop');
 
       // type scale readout (top-left) and template palette (top-right)
       const panel = (o) => div(over, { borderRadius: 12, border: '1px solid var(--d-border)', background: 'rgba(35,33,32,.94)', boxShadow: '0 18px 50px rgba(0,0,0,.4)', opacity: 0, ...o });
@@ -287,7 +287,8 @@
         { t: 37.55, x: 940, y: 448, d: 120, rx: 2, ry: 1.5, e: 'inOutCubic' },
         { t: 37.95, x: 944, y: 452, d: 140, rx: 2, ry: 1.5, e: 'linear' },
         { t: 39.0, x: 1010, y: 566, d: -720, rx: 5, ry: -3.5, e: 'inOutCubic' },
-        { t: 41.3, x: 780, y: 520, d: 80, rx: 2, ry: 2.5, e: 'inOutQuad' },
+        { t: 40.45, x: 975, y: 556, d: -590, rx: 4, ry: -1.5, e: 'inOutQuad' },
+        { t: 41.3, x: 780, y: 520, d: 80, rx: 2, ry: 2.5, e: 'inOutCubic' },
         { t: 42.0, x: NUM.x, y: NUM.y, d: 1180, rx: 0, ry: 0, e: 'inOutCubic' },
         { t: 42.2, x: NUM.x + 4, y: NUM.y + 6, d: 1200, e: 'linear' },
         { t: 43.0, x: C4.cx + 60, y: C4.cy + 10, d: 1480, rx: 0, ry: 0, e: 'inOutCubic' },
@@ -370,7 +371,7 @@
         S5.contrast(t);
 
         // overlays during the layout build
-        const ovO = env(t, 38.6, 41.05, 0.5, 0.4);
+        const ovO = env(t, 38.6, 40.75, 0.5, 0.35);
         css(spec, { opacity: ovO * 0.95, display: ovO > 0 ? '' : 'none' });
         for (const e of [specP, palP]) css(e, { opacity: ovO, display: ovO > 0 ? '' : 'none' });
         specRows.forEach((r, i) => {
@@ -529,7 +530,7 @@
           const kd2 = t >= td ? tw(t, td + 0.1, td + 0.4) : 0;
           const eo = kd2 > 0 ? `1.5px solid ${mix('#e4e1dd', TPL.accent, kd2)}` : '1px solid rgba(0,0,0,0)';
           if (eo !== cache.eo) { cache.eo = eo; edge.style.border = eo; }
-          const sh = t >= td ? '0 26px 70px rgba(0,0,0,.5)' : (kp >= 1 ? '0 10px 28px rgba(0,0,0,.35)' : 'none');
+          const sh = t >= td ? (t > T_FOLD + 0.3 && RANK[i] < 8 ? 'none' : t > T_FLY ? '0 14px 40px rgba(0,0,0,.4)' : '0 26px 70px rgba(0,0,0,.5)') : (kp >= 1 ? '0 10px 28px rgba(0,0,0,.35)' : 'none');
           if (sh !== cache.sh) { cache.sh = sh; root.style.boxShadow = sh; }
           const kT = tw(t, tocT[i], tocT[i] + 0.45, 'outCubic');
           const kc = cover ? tw(t, tGrid(i) + 0.2, tGrid(i) + 0.9, 'inOutCubic') : 0;
@@ -564,7 +565,7 @@
   function mixPose(a, b, k) { return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k), z: lerp(a.z, b.z, k), s: Math.exp(lerp(Math.log(a.s), Math.log(b.s), k)), rot: lerp(a.rot, b.rot, k) }; }
 
   // ---------- slide bodies (960 × 540, 1 px = 1 pt) ----------
-  const bt = (i) => 38.5 + 0.085 * [4, 1, 3, 7, 0, 5, 2, 8, 6].indexOf(i);
+  const bt = (i) => 38.4 + 0.07 * [4, 1, 3, 7, 0, 5, 2, 8, 6].indexOf(i);
   function vbar(parent, ctx, x, base, w, hgt, color, t, lab) {
     const e = div(parent, { left: x, top: base - hgt, width: w, height: hgt, background: color, transformOrigin: '50% 100%', transform: 'scaleY(0)' });
     ctx.bars.push({ e, t, dur: 0.6, dir: 'y', lab });

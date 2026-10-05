@@ -140,7 +140,7 @@
   // pair reads as two pieces of evidence, not two captions
   const QA = {
     label: L('招标文件.pdf · 第 147 页 · 4.3', 'tender.pdf · p. 147 · §4.3'),
-    pre: L('交付期限：合同签订后 ', 'Delivery period: within '), key: L('30 日', '30 days'), post: L('内', ' of signing'),
+    pre: L('交付期限：合同签订后 ', 'Delivery deadline: within '), key: L('30 日', '30 days'), post: L('内', ' of signing'),
     ctx: ZH ? ['第四章　商务条款', '4.2　付款方式：验收合格后 60 日内支付货款，按批次开具发票。'] :
       ['Chapter 4  Commercial terms', '4.2  Payment within 60 days of acceptance, invoiced per batch.'],
   };
@@ -168,7 +168,7 @@
   const Q0 = 65.0;                         // quality shot
   const PAGE_T = [70.0, 70.22, 70.46], WIPE = 0.62;
   const Q_FS = ZH ? 44 : 40;   // the two held lines
-  const TAUT = 68.0, CMT = 68.4, QC = 68.72, DOC0 = 69.8, OUT0 = 72.32;
+  const TAUT = 68.0, CMT = 68.45, QC = 68.72, DOC0 = 69.8, OUT0 = 72.32;
 
   // scroll position of the tender text (px, focus-column units): a numeric
   // integral of a smooth velocity, plus the 203-page rush
@@ -776,8 +776,8 @@
         { t: 62.0, x: 960, y: 520, s: 0.985, e: 'inOutCubic' },
         { t: 65.0, x: 962, y: 524, s: 0.995, e: 'inOutQuad' },
         { t: 66.4, x: PAIRX, y: 580, s: 1.1, e: 'inOutCubic' },
-        { t: 68.2, x: PAIRX + 6, y: 580, s: 1.125, e: 'inOutQuad' },
-        { t: 69.2, x: 952, y: 568, s: 1.0, e: 'inOutCubic', ph2: true, dx: 0 },
+        { t: 68.1, x: PAIRX + 6, y: 580, s: 1.125, e: 'inOutQuad' },
+        { t: 69.05, x: 952, y: 568, s: 1.0, e: 'inOutCubic', ph2: true, dx: 0 },
         { t: 70.0, x: 958, y: 568, s: 1.012, e: 'inOutQuad', ph2: true, dx: 6 },
       ];
       const docKeys = [
@@ -915,7 +915,7 @@
         const scrollRows = Math.max(0, nRows - WIN);
         const cnt = CUM[Math.min(TOTAL, nInt)];
         const numTxt = String(Math.min(TOTAL, nInt));
-        if (capNum.textContent !== numTxt) capNum.textContent = numTxt;
+        if (capNum.textContent !== numTxt) { capNum.textContent = numTxt; capLbl.textContent = L('条要求', numTxt === '1' ? 'requirement' : 'requirements'); }
         const brk = `${CAT.tec} ${cnt.tec} · ${CAT.com} ${cnt.com} · ${CAT.eli} ${cnt.eli}`;
         if (capBrk.textContent !== brk) capBrk.textContent = brk;
         const rushV = (rowsAt(t + 0.02) - rowsAt(t - 0.02)) / 0.04; // rows per second

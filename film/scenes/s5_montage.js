@@ -145,7 +145,7 @@
         for (let i = 0; i < 9; i++) {
           const user = i % 4 === 0, e = h('div', { class: 'abs' });
           const w = user ? 380 + r() * 200 : 560 + r() * 420;
-          css(e, user ? { left: 1960 - w, top: y, width: w, height: 52, borderRadius: 16, background: 'var(--card-bg)' } : { left: 1020, top: y, width: w, height: 12, borderRadius: 4, background: 'rgba(32,30,29,.14)' });
+          css(e, user ? { left: 1960 - w, top: y, width: w, height: 52, borderRadius: 16, background: 'var(--card-bg)' } : { left: 1020, top: y, width: w, height: 12, borderRadius: 4, background: 'rgba(32,30,29,.09)' });
           app.append(e); y += user ? 92 : 30;
         }
       }

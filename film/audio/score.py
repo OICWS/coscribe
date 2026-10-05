@@ -163,15 +163,26 @@ def motif(S, t0, beat, oct_notes=("D4", "F4", "A4", "G4"), vel=(0.5, 0.46, 0.55,
     return times
 
 
-def compose(events=None):
+def compose(events=None, lines=None):
     S = Score()
     ev = events or []
+    # the on-screen narrative lines (content/vo.js; no narration) are musical moments: small gestures are
+    # placed relative to their times so they follow the picture if the lines move
+    LN = {ln["id"]: ln for ln in (lines or [])}
+
+    def lt(lid, key, default):
+        v = LN.get(lid, {}).get(key)
+        return float(v) if v else default
 
     # ---------------- M0 0.0–8.0: single notes, pad very slowly in ----------------
     S.piano(0.6, "D3", 0.40, ring=7.5, human=False)
     S.piano(0.6, "D2", 0.18, ring=7.5, human=False)
     S.pad(2.0, 12.4, ["D2", "A2", "F3", "E4"], level=0.15, fi=4.0, fo=0.6)
     S.piano(5.0, "A3", 0.36, ring=6.0, human=False)
+    # the two opening lines: the motif as an embryo, one note per breath (D 0.6 · F · A 5.0 · G off the beat)
+    S.piano(lt("VO-01", "in", 1.6) + 1.15, "F3", 0.26, ring=5.0, human=False, send=0.4)
+    S.piano(lt("VO-02", "at", 5.2) + 1.25, "G3", 0.24, ring=4.2, human=False, send=0.45)
+    S.piano(lt("VO-02", "at", 5.2) + 1.27, "D4", 0.13, ring=4.2, human=False, send=0.45)
     # ---------------- M1-a 8.0–11.2: pad only (keys are the rhythm) ----------------
     # ---------------- M1-b 11.2–13.0: riser, lands on low D2 at 13.0 ----------------
     S.riser(11.2, 13.0, 140, 2400, ["D3", "A3", "D4"], level=0.24, noise=0.11, kinds=["vc", "va", "vn"])
@@ -191,6 +202,7 @@ def compose(events=None):
         S.piano(t0, "D4", 0.30, ring=0.95)
         S.piano(t0 + BEAT, "F4", 0.27, ring=1.2)
     # ---------------- M1-d 21.0–25.0: drop (pulse + room); 24.0 pad back ----------------
+    drop_note(S, 21.0, "D5", "A4")
     S.pad(24.0, 25.4, ["Bb2", "D3", "F3", "C4"], level=0.12, fi=0.8, fo=0.6)
     # ---------------- M1-e 25.0–30.0: motif #1, piano alone; strings follow; 28.5 hit ----------------
     b1 = 3.5 / 4
@@ -203,6 +215,9 @@ def compose(events=None):
     S.bow(26.75, 28.5, "Bb3", 0.08, kind="va", fi=0.5, fo=0.3)
     S.bow(26.75, 28.5, "D3", 0.08, kind="vc", fi=0.5, fo=0.3)
     S.pad(25.0, 28.5, ["D3", "F3", "A3"], level=0.10, fi=0.8, fo=0.4)
+    t3 = max(26.75, lt("VO-03", "in", 26.4))
+    S.bow(t3, 28.5, "D5", 0.045, kind="vn", env=[(0, 0), (0.9, 0.55), (28.5 - t3, 1.0), (28.5 - t3 + 1.4, 0)],
+          fo=1.4, bright=0.75, vib=0.8, auto=None, send=0.6)
     hit(S, 28.5, ["D1", "D2"], tomf=62, vel=0.62)
     S.bow(28.5, 30.0, "D3", 0.10, kind="vc", fi=0.08, fo=1.6)
     S.bow(28.5, 30.0, "A3", 0.08, kind="va", fi=0.08, fo=1.6)
@@ -224,6 +239,7 @@ def compose(events=None):
         S.bow(a, b, nt, 0.12, kind="vc", fi=0.25, fo=0.35)
     S.bow(34.5, 42.0, "G1", 0.08, kind="cb", fi=1.0, fo=0.2)
     # ---------------- M2-d 42.0–46.0: drop; 44.0 pad back ----------------
+    drop_note(S, 42.0, "E5", "A4")
     S.pulse(42.0, 46.0, BEAT / 2, [(42.0, "A1")], vel=0.42)
     S.pad(44.0, 46.3, ["A2", "E3", "G3", "C#4"], level=0.11, fi=0.9, fo=0.5)
     # ---------------- M2-e 46.0–52.0: motif #2, piano + viola; 49.5 hit ----------------
@@ -236,6 +252,10 @@ def compose(events=None):
                       (46.0 + 2 * b2, "Bb1", .32), (46.0 + 2.5 * b2, "F2", .25), (ts[3], "G2", .24)):
         S.piano(tt, nt, v, ring=49.45 - tt)
     S.pad(46.0, 49.5, ["D3", "F3", "A3"], level=0.10, fi=0.6, fo=0.4)
+    S.bow(ts[2], 49.5, "F5", 0.042, kind="vn", env=[(0, 0), (0.7, 0.6), (49.5 - ts[2], 1.0), (49.5 - ts[2] + 1.6, 0)],
+          fo=1.6, bright=0.75, vib=0.8, auto=None, send=0.6)
+    S.bow(ts[2], 49.5, "D5", 0.032, kind="vn", env=[(0, 0), (0.9, 0.5), (49.5 - ts[2], 0.9), (49.5 - ts[2] + 1.6, 0)],
+          fo=1.6, bright=0.7, vib=0.8, auto=None, send=0.6)
     hit(S, 49.5, ["Bb0", "Bb1"], tomf=56, vel=0.6)
     S.bow(49.5, 51.8, "D3", 0.10, kind="vc", fi=0.08, fo=1.2)
     S.bow(49.5, 51.8, "F3", 0.08, kind="va", fi=0.08, fo=1.2)
@@ -261,6 +281,7 @@ def compose(events=None):
         S.piano(tt, "A4", 0.22, ring=1.6)
         S.piano(tt + BEAT * 2, "F4", 0.2, ring=1.6)
     # ---------------- M3-d 65.0–69.5: longest drop; 67 pad very soft; 68 low string ----------------
+    drop_note(S, 65.0, "F5", None, vel=0.17)
     S.pad(67.0, 69.7, ["A2", "E3", "G3"], level=0.07, fi=1.2, fo=0.4)
     S.bow(68.0, 69.5, "A1", 0.16, kind="cb", fi=0.5, fo=0.25, env=[(0, 0), (0.35, 1), (1.5, 0.8), (1.75, 0)], auto=None)
     S.bow(68.0, 69.5, "A2", 0.10, kind="vc", fi=0.5, fo=0.25, env=[(0, 0), (0.4, 1), (1.5, 0.8), (1.75, 0)], auto=None)
@@ -323,17 +344,20 @@ def compose(events=None):
             S.bow(a, b + 0.05, nt, lv, kind=kind, fi=0.35 if a == ts[0] else 0.2, fo=0.25)
     for tt, nt, v in ((88.5, "D2", .36), (ts[2], "Bb1", .34), (ts[3], "C2", .32)):
         S.piano(tt, nt, v, ring=92.45 - tt)
+    S.bow(ts[2], ts[3] + 0.05, "A5", 0.035, kind="vn", fi=0.4, fo=0.3, bright=0.75, vib=0.9, auto=None, send=0.6)
+    S.bow(ts[3], 92.5, "G5", 0.038, kind="vn", env=[(0, 0), (0.3, 0.8), (92.5 - ts[3], 1.0), (92.5 - ts[3] + 1.5, 0)],
+          fo=1.5, bright=0.75, vib=0.9, auto=None, send=0.6)
     hit(S, 92.5, ["D1", "D2"], tomf=58, vel=0.68)
     for kind, nt, lv in zip(("cb", "vc", "va", "vn"), ("D2", "A2", "F3", "D4"), (0.1, 0.1, 0.08, 0.05)):
         S.bow(92.5, 94.0, nt, lv, kind=kind, fi=0.06, fo=0.6)
 
     # ---------------- M5 94.0–100.0: four percussion hits, riser, full stop ----------------
     for tt, nts, f in ((94.0, ("D1", "D2"), 60), (95.5, ("Bb0", "Bb1"), 54), (97.0, ("C1", "C2"), 57), (98.5, ("A0", "A1"), 50)):
-        S.tom(tt, f, 0.75, decay=0.75, gain=0.6)
-        S.tom(tt + 0.0, f * 1.5, 0.35, decay=0.4, gain=0.18, p=0.3)
+        S.tom(tt, f, 0.7, decay=0.75, gain=0.45)
+        S.tom(tt + 0.0, f * 1.5, 0.35, decay=0.4, gain=0.14, p=0.3)
         for nt in nts:
-            S.piano(tt, nt, 0.66, ring=1.4, human=False)
-        S.sub(tt, nts[1], 0.8, gain=0.4)
+            S.piano(tt, nt, 0.56, ring=1.4, human=False)
+        S.sub(tt, nts[1], 0.7, gain=0.32)
     k = 0
     while 94.0 + k * 0.375 < 99.95:
         t = 94.0 + k * 0.375
@@ -355,6 +379,9 @@ def compose(events=None):
         S.bow(103.2, 104.85, nt, lv, kind=kind, env=[(0, 0.02), (1.65, 0.6), (1.85, 0)], fo=0.2)
     for kind, nt, lv in zip(("cb", "vc", "vc", "va", "vn"), ("C2", "G2", "E3", "G3", "C5"), (0.13, 0.11, 0.09, 0.08, 0.045)):
         S.bow(104.8, 106.05, nt, lv, kind=kind, env=[(0, 0.5), (1.2, 1.0), (1.4, 0)], fo=0.2)
+    # the violins rise out of the flood: D5 over Bb, E5 over C, falling back to D as the motif starts at 106
+    S.bow(103.2, 104.85, "D5", 0.040, kind="vn", env=[(0, 0.0), (1.65, 0.75), (1.85, 0)], fo=0.2, bright=0.85, vib=0.9)
+    S.bow(104.8, 106.05, "E5", 0.046, kind="vn", env=[(0, 0.6), (1.2, 1.0), (1.4, 0)], fo=0.2, bright=0.9, vib=1.0)
     ost = [104.2, 105.0, 105.8] + [106.6 + 0.8 * i for i in range(5)]
     ost_root = {104.2: "Bb1", 105.0: "C2", 105.8: "C2"}
     for t in ost:
@@ -375,6 +402,10 @@ def compose(events=None):
                           (ts[3], 110.0, ("C2", "G2", "E3", "G3", "C4", "E4"))):
         for kind, nt, lv in zip(("cb", "vc", "vc", "va", "va", "vn"), chord, (0.15, 0.12, 0.1, 0.09, 0.08, 0.06)):
             S.bow(a, b + 0.04, nt, lv, kind=kind, fi=0.12, fo=0.15, bright=1.1)
+    # the strings sing the motif with the piano: cellos two octaves down, violins on top (octaves, tutti)
+    for i, (a, b) in enumerate(zip(ts, list(ts[1:]) + [110.0])):
+        for kind, nt, lv in (("vc", ("D3", "F3", "A3", "G3")[i], 0.085), ("vn", ("D5", "F5", "A5", "G5")[i], 0.045)):
+            S.bow(a, b + 0.05, nt, lv, kind=kind, fi=0.08, fo=0.2, bright=1.05, vib=1.0)
     S.pad(106.0, 110.0, ["D3", "A3", "E4"], level=0.12, fi=0.3, fo=0.2)
     S.pulse(106.2, 110.0, 0.4, [(106.2, "D2"), (ts[2], "Bb1"), (ts[3], "C2")], vel=0.5)
     for t in (106.6, 107.4, 108.2, 109.0, 109.8):
@@ -384,28 +415,61 @@ def compose(events=None):
         if i % 2:
             S.finger(t, 0.28, p=0.4 if i % 4 == 1 else -0.4, tone=0.9)
     # ---------------- M6-d 110.0 biggest hit, Dm → Bb, scissor cut 113.6 ----------------
-    S.put(I.bass_drum(41.2, 1.0, decay=1.5), 110.0, 0.75, 0.3)
+    # back on the 72 BPM grid (the records stack on its beats). Over the hit the violins and cellos sing the
+    # motif once more, augmented, in octaves: D 110.0 · F 110.83 · A 111.67 (over Bb: the maj7) · G 112.92,
+    # off the beat, over Bb (6th) -- and the cut at 113.6 takes it away before it can resolve.
+    bt = BEAT
+    mel = [(110.0, "D"), (110.0 + bt, "F"), (110.0 + 2 * bt, "A"), (110.0 + 3.5 * bt, "G")]
+    chg = 110.0 + 2 * bt
+    S.put(I.bass_drum(41.2, 1.0, decay=1.5), 110.0, 0.55, 0.3)
     S.tom(110.0, 55, 0.8, decay=1.2, gain=0.4)
-    S.chord(110.0, ["D1", "D2", "A2", "D3", "F3", "A3", "D4", "F4", "A4"], 0.8, ring=2.2, spread=0.006, gain=0.5)
-    S.chord(111.8, ["Bb0", "Bb1", "F2", "D3", "F3", "Bb3", "D4", "F4"], 0.55, ring=3.0, spread=0.01, gain=0.48)
-    for (a, b, chord) in ((110.0, 111.8, ("D2", "A2", "D3", "F3", "A3", "D4", "F4")),
-                          (111.8, 113.65, ("Bb1", "F2", "D3", "F3", "Bb3", "D4", "F4"))):
-        for kind, nt, lv in zip(("cb", "vc", "vc", "va", "va", "vn", "vn"), chord, (0.16, 0.13, 0.11, 0.1, 0.09, 0.065, 0.05)):
+    S.chord(110.0, ["D1", "D2", "A2", "D3", "F3", "A3", "D4", "F4", "A4"], 0.74, ring=chg - 110.0, spread=0.006, gain=0.5)
+    S.chord(chg, ["Bb0", "Bb1", "F2", "D3", "F3", "Bb3", "D4"], 0.58, ring=3.0, spread=0.01, gain=0.48)
+    for (a, b, chord) in ((110.0, chg, ("D2", "A2", "D3", "F3", "A3", "D4")),
+                          (chg, 113.65, ("Bb1", "F2", "D3", "F3", "Bb3", "D4"))):
+        for kind, nt, lv in zip(("cb", "vc", "vc", "va", "va", "vn"), chord, (0.16, 0.12, 0.10, 0.09, 0.08, 0.055)):
             env = [(0, 0.0), (0.05, 1.0), (0.5, 0.8), (b - a, 0.85), (b - a + 0.2, 0)] if a == 110.0 else [(0, 0.3), (0.5, 0.85), (b - a, 1.0), (b - a + 0.2, 0)]
             S.bow(a, b, nt, lv, kind=kind, env=env, fo=0.2, bright=1.1)
-    S.pad(110.0, 113.7, ["D3", "A3", "E4"], level=0.13, fi=0.05, fo=0.1)
-    S.pulse(110.0, 113.6, 0.4, [(110.0, "D2"), (111.8, "Bb1")], vel=0.55)
+    for i, (a, nt) in enumerate(mel):
+        b = mel[i + 1][0] if i + 1 < len(mel) else 113.65
+        sw = [(0, 0.0), (0.06 if i == 0 else 0.12, 0.85), (b - a, 1.0 if i < 3 else 1.15), (b - a + 0.15, 0)]
+        S.bow(a, b + 0.04, nt + "5", 0.060, kind="vn", env=sw, fo=0.15, bright=1.15, vib=1.15)
+        S.bow(a, b + 0.04, nt + "6", 0.022, kind="vn", env=sw, fo=0.15, bright=0.9, vib=1.15)
+        S.bow(a, b + 0.04, nt + "4", 0.040, kind="va", env=sw, fo=0.15, bright=1.1, vib=1.1)
+        S.bow(a, b + 0.04, nt + "3", 0.070, kind="vc", env=sw, fo=0.15, bright=1.1, vib=1.1)
+        S.piano(a, nt + "5", 0.5, ring=(b - a) + 0.1, gain=0.5)
+        S.piano(a + 0.004, nt + "4", 0.42, ring=(b - a) + 0.1, gain=0.5)
+    S.pad(110.0, chg + 0.2, ["D3", "A3", "E4"], level=0.13, fi=0.05, fo=0.3)
+    S.pad(chg, 113.7, ["D3", "F3", "C4"], level=0.12, fi=0.3, fo=0.1)
+    S.pulse(110.0, 113.6, bt / 2, [(110.0, "D2"), (chg, "Bb1")], vel=0.55)
 
     # ================= take 3: 114.4–120 =================
     # ---------------- M7: 114.5 piano F4; 117.5 pad resolves to F major ----------------
+    # The last line ("You only have to say what you want.") gets the motif's answer: F (114.5) · A · G off the
+    # beat, and at 117.5 the G finally falls to F, in F major -- the sentence the cut left hanging is finished.
     S.piano(114.5, "F4", 0.40, ring=5.5, human=False, send=0.45)
     S.piano(114.5, "F3", 0.16, ring=5.5, human=False, send=0.45)
+    t9 = lt("VO-09", "in", 114.9)
+    S.piano(t9 + 1.0, "A4", 0.27, ring=1.5, human=False, send=0.5)
+    S.piano(t9 + 1.0 + 1.5 * BEAT, "G4", 0.24, ring=117.5 - (t9 + 1.0 + 1.5 * BEAT) + 0.15, human=False, send=0.5)
     S.pad(114.6, 117.6, ["D3", "A3", "E4"], level=0.07, fi=1.4, fo=0.6)
     S.pad(117.5, 120.0, ["F2", "C3", "A3", "F4"], level=0.12, fi=0.9, fo=0.3)
+    S.bow(117.5, 120.0, "C5", 0.022, kind="vn", fi=1.2, fo=0.3, bright=0.7, vib=0.7, auto=None, send=0.6)
     S.piano(117.5, "F2", 0.24, ring=2.5, human=False, send=0.45)
     S.piano(117.5, "C4", 0.20, ring=2.5, send=0.45)
-    S.piano(117.52, "A4", 0.24, ring=2.5, send=0.45)
+    S.piano(117.51, "F4", 0.26, ring=2.5, human=False, send=0.45)
+    S.piano(117.53, "A4", 0.22, ring=2.5, send=0.45)
+    # the wordmark: one high F, very soft
+    S.piano(lt("VO-10", "at", 118.4), "F5", 0.16, ring=1.6, human=False, send=0.6)
     return S
+
+
+def drop_note(S, t, note, low=None, vel=0.2):
+    """A quality-shot drop: as the bed falls away, one soft high piano note is left hanging in the room
+    (heavy reverb send), with an optional quieter fifth/fourth below."""
+    S.piano(t + 0.02, note, vel, ring=3.2, human=False, send=0.75, gain=0.5)
+    if low:
+        S.piano(t + 0.03, low, vel * 0.55, ring=3.2, human=False, send=0.75, gain=0.5)
 
 
 def hit(S, t, notes, tomf=60, vel=0.6):
@@ -415,8 +479,8 @@ def hit(S, t, notes, tomf=60, vel=0.6):
     S.sub(t, notes[-1], 0.7, gain=0.35)
 
 
-def render(events=None):
-    S = compose(events)
+def render(events=None, lines=None):
+    S = compose(events, lines)
     ir = make_ir(dur=3.6, t60_low=3.0, t60_high=1.1, predelay=0.025, seed=11, width=1.0, hp=90, lp=7000)
     x = S.render(ir)
     # master music colour: no harsh top, no rumble

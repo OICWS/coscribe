@@ -1,6 +1,6 @@
 // Sentence 1 · Excel analysis — script §3 S1-02 … S1-07, example data §4.1.
-// The depth under the first sentence: 48 store exports as a fanned stack of
-// glass sheets that the blue thread stitches clean; three hypotheses tested
+// The depth under the first sentence: 48 store exports standing in one long
+// file, like cards in a drawer, that the blue thread stitches clean; three hypotheses tested
 // and struck; the reviewer catching 2,316 double-posted rows; then the
 // workbook floats up, assembles, and shrinks into the next box's chip.
 // Layers (all under the surface's z 100): bg 5 · world 10 · hypotheses 12 ·
@@ -56,8 +56,8 @@
   const COLS = [ // key, width, numeric
     ['date', 132], ['store', 92], ['region', 92], ['cat', 76], ['order', 168], ['amt', 132, 1], ['disc', 80, 1], ['qty', 64, 1], ['ch', 76], [null, 80], [null, 80], [null, 82]];
   const COLX = []; { let x = GUT; for (const c of COLS) { COLX.push(x); x += c[1]; } }
-  const C = { bgHero: 'rgba(33,31,30,0.95)', bgGlass: 'rgba(30,28,27,0.96)', grid: 'rgba(247,245,243,0.075)', strip: 'rgba(247,245,243,0.045)',
-    letter: 'rgba(161,157,155,0.75)', head: 'rgba(247,245,243,0.70)', clean: 'rgba(247,245,243,0.86)', dirty: 'rgba(161,157,155,0.62)', bad: 'rgba(161,157,155,0.50)',
+  const C = { bgHero: 'rgb(33,31,30)', bgGlass: 'rgba(30,28,27,0.96)', grid: 'rgba(247,245,243,0.075)', strip: 'rgba(247,245,243,0.045)',
+    letter: 'rgba(161,157,155,0.75)', head: 'rgba(247,245,243,0.70)', clean: 'rgba(247,245,243,0.86)', dirty: 'rgba(176,172,169,0.74)', bad: 'rgba(176,172,169,0.62)',
     accent: '#4b8fe3', danger: '#f09a9a' };
   const MONO = '"IBM Plex Mono", "Noto Sans SC", monospace';
   const SANS = '"IBM Plex Sans", "Noto Sans SC", sans-serif';
@@ -144,7 +144,7 @@
   }
   // grey (dirty) -> paper white (clean); `bad` biases toward the dirtier grey
   function lerpColor(c, bad = 0) {
-    const a = lerp(0.62 - bad * 0.25, 0.86, c), g = Math.round(lerp(161, 247, c)), g2 = Math.round(lerp(157, 245, c)), g3 = Math.round(lerp(155, 243, c));
+    const a = lerp(0.7 - bad * 0.25, 0.88, c), g = Math.round(lerp(176, 247, c)), g2 = Math.round(lerp(172, 245, c)), g3 = Math.round(lerp(169, 243, c));
     return `rgba(${g},${g2},${g3},${a.toFixed(3)})`;
   }
 
@@ -194,8 +194,8 @@
   const camAt = (k, o) => { const p = ladder(k); return { cx: p.X + (o.dx || 0), cy: p.Y + (o.dy || 0), cZ: p.Z + (o.dz || 0) }; };
   const CAM = [
     { t: 11.2, cx: H0.X - 120, cy: H0.Y - 30, cZ: -2700, ry: 5, rx: 1, s: 1.15 },
-    { t: 13.0, cx: H0.X - 170, cy: H0.Y - 70, cZ: 0, ry: -13, rx: 5, s: 1.2, e: 'outCubic' },
-    { t: 14.6, cx: H0.X - 150, cy: H0.Y - 80, cZ: 60, ry: -14, rx: 4, s: 1.24, e: 'inOutQuad' },
+    { t: 13.0, cx: H0.X - 110, cy: H0.Y - 70, cZ: 0, ry: -13, rx: 5, s: 1.2, e: 'outCubic' },
+    { t: 14.6, cx: H0.X - 95, cy: H0.Y - 80, cZ: 60, ry: -14, rx: 4, s: 1.24, e: 'inOutQuad' },
     // orbit round the hero's left edge until we look down the file
     { t: 15.75, ...camAt(0.6, { dx: -300, dy: -40 }), ry: 40, rx: 3.5, s: 1.04, e: 'inOutCubic' },
     // then glide along it behind the thread
@@ -424,10 +424,10 @@
         const fog = (z) => Math.pow(clamp(1 - (-z - 300) / 4200), 1.1);
         ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = C.accent;
         // pieces: straight on the hero, smoothed through midpoints in the depth (a thread, not a polygon)
-        const piece = (from, ctrl, to, behind) => {
-          if (from.z > near || to.z > near || (ctrl && ctrl.z > near)) return;
+        const piece = (from, ctrl, to, behind, fa = 1) => {
+          if (fa <= 0.01 || from.z > near || to.z > near || (ctrl && ctrl.z > near)) return;
           const zm = (from.z + to.z) / 2;
-          ctx.globalAlpha = fadeOut * fog(zm) * (1 - smooth(PERSP * 0.3, PERSP * 0.62, Math.max(from.z, to.z)));
+          ctx.globalAlpha = fa * (1 - 0.85 * smooth(150, 900, zm)) * fadeOut * fog(zm) * (1 - smooth(PERSP * 0.3, PERSP * 0.62, Math.max(from.z, to.z)));
           ctx.lineWidth = Math.max(1, 2.2 * c.s * (from.k + to.k) / 2);
           if (behind && heroQuad) { ctx.save(); ctx.beginPath(); ctx.rect(0, 0, 1920, 1080); heroQuad.forEach((q, j) => (j ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath(); ctx.clip('evenodd'); }
           ctx.beginPath(); ctx.moveTo(from.x, from.y);
@@ -438,10 +438,12 @@
         const mid = (a, b) => lp(a, b, 0.5);
         const P = pts.slice(0, n + 1).concat(n + 1 < pts.length ? [head] : []);
         for (let i = 1; i < P.length; i++) {
-          if (i <= 2) { piece(P[i - 1], null, P[i], false); continue; }
+          // the run down the hero and the turn into the file let go once the camera has swung past
+          const fa = i <= 4 ? 1 - tw(t, 16.2, 16.6, 'inOutQuad') : 1;
+          if (i <= 2) { piece(P[i - 1], null, P[i], false, fa); continue; }
           const a = i === 3 ? P[2] : mid(P[i - 2], P[i - 1]);
           const b = i === P.length - 1 ? P[i] : mid(P[i - 1], P[i]);
-          piece(a, P[i - 1], b, true);
+          piece(a, P[i - 1], b, true, fa);
         }
         // a small ring where each sheet was just pierced
         for (let i = 3; i <= n; i++) {
@@ -708,8 +710,9 @@
           css(minus, { transform: `translateX(${(1 - clamp(pos2)) * 0.6 * 62}px)` });
           css(tens.box, { opacity: clamp(pos2) });
           const sw = tw(t, SWAP[0], SWAP[1], 'inOutCubic');
-          css(east.r, { transform: `translateY(${sw * RHt}px)` });
-          css(south.r, { transform: `translateY(${(1 - sw) * RHt}px)` });
+          // they pass each other: South rises a little to the right, East dips back under it
+          css(east.r, { transform: `translateY(${sw * RHt}px)`, opacity: 1 - smooth(0.05, 0.35, sw) + smooth(0.65, 0.95, sw) });
+          css(south.r, { transform: `translate(${bump(sw) * 30}px,${(1 - sw) * RHt}px)` });
           css(east.val, { color: sw > 0.5 ? D.muted : D.fg }); css(east.nm, { color: sw > 0.5 ? D.muted : D.fg });
           css(south.val, { color: D.fg });
         }
@@ -1062,7 +1065,7 @@
           css(back, { left: BK.x, top: BK.y, width: BK.w, height: BK.h, borderRadius: 10 });
           css(inner, { transform: 'none', opacity: 1 });
         }
-        const kchip = tw(t, BOOK.morph[1] - 0.4, BOOK.morph[1] - 0.05, 'inOutQuad');
+        const kchip = tw(t, BOOK.morph[0] + 0.32, BOOK.morph[1] - 0.12, 'inOutQuad');
         css(chipWrap, { display: kchip > 0 ? '' : 'none', opacity: kchip, transform: `translate(${cxm - (cw * S2) / 2}px,${cym - (chh * S2) / 2}px) scale(${S2})` });
       };
     },

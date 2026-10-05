@@ -1,12 +1,14 @@
 """Build the film's soundtrack: score + SFX + VO, mixed and mastered.
 
-  python3 film/audio/build.py [--lang zh|en|all] [--asr] [--fresh]
+  python3 film/audio/build.py [--lang en|zh|all] [--asr] [--fresh]      (default: en)
 
 1. reads the sound-sync events from the live page (window.FILM_EVENTS, headless Chromium),
 2. synthesises the score from the cue sheet (score.py; cached by source + relevant events),
 3. places the SFX on the events (sfx.py), with the script's SFX column as fallback,
-4. renders the VO with Kokoro (vo.py; cached per line) and fits it to the VO timeline,
-5. ducks the music under the VO, masters to -16 LUFS integrated / <= -1 dBTP, 48 kHz stereo,
+4. renders the VO with Kokoro (vo.py; cached per line) and fits it to the VO timeline -- only when
+   content/vo.js has "speak": true; the current film has no narration ("speak": false), so the
+   lines are on-screen text and the score treats them as musical moments (score.py),
+5. (with VO only) ducks the music under the VO; masters to -16 LUFS integrated / <= -1 dBTP, 48 kHz stereo,
    exactly 120.0 s, and encodes out/mix_<lang>.m4a (AAC 256k).
 Stems: out/music.wav, out/sfx_<lang>.wav, out/vo_<lang>.wav. Report: cache/report_<lang>.json.
 --asr transcribes every VO line (dry and in the final mix) with faster-whisper and compares.
@@ -46,21 +48,21 @@ def log(*a):
 
 
 # ---------------------------------------------------------------- music (cached)
-def music_key(evs):
+def music_key(evs, lines):
     h = hashlib.sha1()
     for f in ("score.py", "instruments.py", "dsp.py"):
         h.update((HERE / f).read_bytes())
     rel = [e for e in evs if sfx.family(e) in ("glass", "music")]
-    h.update(json.dumps(rel, sort_keys=True).encode())
+    h.update(json.dumps([rel, lines], sort_keys=True).encode())
     return h.hexdigest()[:16]
 
 
-def build_music(evs, fresh=False):
+def build_music(evs, lines, fresh=False):
     CACHE.mkdir(exist_ok=True)
-    p = CACHE / f"music_{music_key(evs)}.npy"
+    p = CACHE / f"music_{music_key(evs, lines)}.npy"
     if p.exists() and not fresh:
         return np.load(p).astype(np.float64), True
-    x = score.render(evs)
+    x = score.render(evs, lines)
     # level: fixed integrated loudness for the stem
     x *= db(MUSIC_LUFS - dsp.lufs(x))
     for old in CACHE.glob("music_*.npy"):
@@ -202,7 +204,7 @@ def dsp_write_mono16(p, x):
 # ---------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lang", default="all", choices=["zh", "en", "all"])
+    ap.add_argument("--lang", default="en", choices=["zh", "en", "all"])
     ap.add_argument("--asr", action="store_true", help="ASR round-trip of every VO line (dry and in the mix)")
     ap.add_argument("--fresh", action="store_true", help="ignore the music cache")
     args = ap.parse_args()
@@ -218,9 +220,12 @@ def main():
         c = Counter(e["name"] for e in evs[l])
         log(f"  {l}: {len(evs[l])} events {dict(c)}" + (f"  PAGE ERRORS: {errs[l][:3]}" if errs[l] else ""))
     vo_data = film_events.load_vo()
+    speak = bool(vo_data.get("speak", True))
+    log(f"vo.js: speak={speak}" + ("" if speak else " -> no narration, no ducking; text lines are musical moments"))
+    lines = [{k: ln.get(k) for k in ("id", "at", "in", "out")} for ln in vo_data["lines"]]
 
     t = time.time()
-    music, cached = build_music(evs[langs[0]], args.fresh)
+    music, cached = build_music(evs[langs[0]], lines, args.fresh)
     dsp.write_wav(OUT / "music.wav", music)
     log(f"music: {'cached' if cached else 'synthesised'} in {time.time() - t:.1f}s, {dsp.lufs(music):.1f} LUFS")
 
@@ -235,23 +240,12 @@ def main():
             log(f"  UNHANDLED names mapped by guess: {rep['guessed']}")
         log(f"  UNHANDLED names (soft tick used): {rep['unknown'] or 'none'}")
 
-        t = time.time()
-        vost, lines, out_lines = vomod.render(vo_data, lang, evs[lang])
-        vost *= db(VO_GAIN_DB)
-        dsp.write_wav(OUT / f"vo_{lang}.wav", vost)
-        log(f"vo[{lang}]: {time.time() - t:.1f}s")
-        for ln in lines:
-            flag = "ok " if ln["fits"] else "OVER"
-            log(f"  {flag} {ln['id']} at {ln['at']:6.2f} -> {ln['end']:6.2f} (limit {ln['limit']:6.2f}) speed {ln['speed']:.3f}"
-                f"{' tightened' if ln['tightened'] else ''}{'  over by %.2fs' % ln['over'] if not ln['fits'] else ''}  {ln['text']}"
-                + (f"  [spoken: {ln['spoken']}]" if ln["spoken"] != ln["text"] else ""))
-
-        # ---- mix
-        gm, pres = duck_curve(vost, DUCK_DB)
-        gs = db(-3.0 * pres)
-        mix = music * gm[None] + fx * gs[None] + vost
-        mix = master(mix)
-        wav = CACHE / f"mix_{lang}.wav"
+        if not speak:
+            mix = master(music + fx)
+            vo_lines, out_lines = [], []
+        else:
+            mix, vo_lines, out_lines = mix_with_vo(vo_data, lang, evs[lang], music, fx)
+        wav = OUT / f"mix_{lang}.wav"
         dsp.write_wav(wav, mix)
         m4a = OUT / f"mix_{lang}.m4a"
         dur = encode(wav, m4a)
@@ -262,10 +256,10 @@ def main():
             dur = encode(wav, m4a)
             I, tp = ffmpeg_measure(m4a)
         log(f"mix[{lang}]: {m4a.name}  {dur:.3f}s  {I:.1f} LUFS  TP {tp:.1f} dBTP  (internal {dsp.lufs(mix):.1f} LUFS)")
-        info = {"lines": lines, "sfx": rep, "lufs": I, "true_peak": tp, "duration": dur}
-        if args.asr:
+        info = {"speak": speak, "lines": vo_lines, "sfx": rep, "lufs": I, "true_peak": tp, "duration": dur}
+        if args.asr and speak:
             t = time.time()
-            info["asr"] = asr_check(lang, lines, out_lines, mix)
+            info["asr"] = asr_check(lang, vo_lines, out_lines, mix)
             for a in info["asr"]:
                 log(f"  asr {a['id']} {a['src']:3s} err {a['err']:.2f}  '{a['asr']}'")
             log(f"  asr: {time.time() - t:.1f}s")
@@ -273,6 +267,25 @@ def main():
         summary[lang] = info
     vomod.close()
     log(f"done in {time.time() - T0:.1f}s")
+
+
+def mix_with_vo(vo_data, lang, evs, music, fx):
+    """Narrated version: VO stem, ~6 dB sidechain ducking of the music (and -3 dB of the SFX)."""
+    t = time.time()
+    vost, lines, out_lines = vomod.render(vo_data, lang, evs)
+    vost *= db(VO_GAIN_DB)
+    dsp.write_wav(OUT / f"vo_{lang}.wav", vost)
+    log(f"vo[{lang}]: {time.time() - t:.1f}s")
+    for ln in lines:
+        flag = "ok " if ln["fits"] else "OVER"
+        log(f"  {flag} {ln['id']} at {ln['at']:6.2f} -> {ln['end']:6.2f} (limit {ln['limit']:6.2f}) speed {ln['speed']:.3f}"
+            f"{' tightened' if ln['tightened'] else ''}{'  over by %.2fs' % ln['over'] if not ln['fits'] else ''}  {ln['text']}"
+            + (f"  [spoken: {ln['spoken']}]" if ln["spoken"] != ln["text"] else ""))
+
+    gm, pres = duck_curve(vost, DUCK_DB)
+    gs = db(-3.0 * pres)
+    mix = master(music * gm[None] + fx * gs[None] + vost)
+    return mix, lines, out_lines
 
 
 if __name__ == "__main__":

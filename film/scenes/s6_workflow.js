@@ -72,8 +72,7 @@
     { kind: 'approval', icon: 'approval', title: L('确认异常后再发送', 'Confirm before sending'), sum: [['l', 'Pauses for your approval']], d: '', nested: true },
     { kind: 'tool', icon: 'tool', title: L('发送邮件', 'Email the results'), sum: [['l', 'Microsoft 365 · Send mail'], ['k', 'subject'], ['m', L('销售周报 · {{month}}', 'Sales · {{month}}')]], d: '2.8s' },
   ];
-  // (a word joiner after the hyphen keeps "daily-report" from breaking across lines)
-  const NAME = L('每周一 · 销售分析与日报校验', 'Monday · sales analysis & daily-\u2060report check');
+  const NAME = L('每周一 · 销售分析与日报校验', 'Monday · sales analysis & daily-report check');
   const APPROVAL = 12, BRANCH = 11;
 
   // list geometry in product px (1x); the list is drawn at scale S
@@ -292,7 +291,9 @@
       // ======================= scheduled task header (ScheduledTaskDetail / RunPanel) =======================
       const task = h('div', { class: 'abs' });
       css(task, { left: 0, top: 0, width: RCOLW, fontFamily: SANS, color: D.fg, transformOrigin: '0 0' });
-      const tName = h('div', { text: NAME }); css(tName, { fontSize: 22, fontWeight: '600', lineHeight: '1.3' });
+      // the title wraps before "daily-report check", never at its hyphen
+      const tName = h('div');
+      { const k = NAME.indexOf('daily-report'); if (k < 0) tName.textContent = NAME; else { const nb = h('span', { text: NAME.slice(k) }); css(nb, { whiteSpace: 'nowrap' }); tName.append(NAME.slice(0, k), nb); } } css(tName, { fontSize: 22, fontWeight: '600', lineHeight: '1.3' });
       const tRow = h('div'); css(tRow, { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 });
       const toggle = h('span'); css(toggle, { position: 'relative', width: 36, height: 20, borderRadius: 10, background: D.accent, flex: 'none' });
       const knob = h('span'); css(knob, { position: 'absolute', left: 18, top: 2, width: 16, height: 16, borderRadius: 8, background: D.bg }); toggle.append(knob);
@@ -693,7 +694,7 @@
           const tin = MONDAYS[k] + (k === 2 ? rowT(APPROVAL) * SWEEP + 0.05 : SWEEP + 0.03);
           const a = tw(t, tin, tin + 0.3, 'outCubic');
           // rows that arrived later push this one down
-          let slot = 0; for (let j = k + 1; j < RUNS.length; j++) { const tj = MONDAYS[j] + (j === 2 ? rowT(APPROVAL) * SWEEP + 0.05 : SWEEP + 0.03); slot += tw(t, tj, tj + 0.3, 'inOutCubic'); }
+          let slot = 0; for (let j = k + 1; j < RUNS.length; j++) { const tj = MONDAYS[j] + (j === 2 ? rowT(APPROVAL) * SWEEP + 0.05 : SWEEP + 0.03); slot += tw(t, tj - 0.3, tj + 0.02, 'inOutCubic'); }   // make room first, then the new run lands
           css(r, { opacity: a, transform: `translateY(${(slot * 36 - (1 - a) * 10).toFixed(2)}px)` });
         });
 
@@ -746,7 +747,7 @@
               a = ease.outCubic(clamp((fillR - sd) / 0.3));
             }
             if (a <= 0) continue;
-            const pull = (1 - a) * 0.12;
+            const pull = ring <= 3 ? (1 - a) * 0.12 : 0;   // the first rings stamp in; the outer weave only fades in, in register
             const wx = X0 + (i * PW) * (1 - pull) - sprites.ox, wy = V0 + (j * PH) * (1 - pull) - sprites.oy;
             const sx = 960 + (wx - cxF) * f, sy = 540 + (wy - vc) * f;
             if (sx > 1920 || sy > 1080 || sx + sw * f < 0 || sy + sh * f < 0) continue;

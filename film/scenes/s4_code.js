@@ -347,7 +347,7 @@
       const cardWrap = h('div', { class: 'abs' });
       css(cardWrap, { left: 960, top: 470, width: 0, height: 0 });
       const card = h('div');
-      css(card, { position: 'absolute', left: -330, width: 660, top: -150, borderRadius: 12, border: `1px solid ${COL.accent}`, background: '#322f2e',
+      css(card, { position: 'absolute', left: -380, width: 760, top: -150, borderRadius: 12, border: `1px solid ${COL.accent}`, background: '#322f2e',
         padding: '8px 12px', fontSize: 14, lineHeight: '1.45', color: COL.fg, fontFamily: 'var(--sans)', boxShadow: '0 30px 80px rgba(0,0,0,.45)', transformOrigin: '50% 50%' });
       const desc = L('合并并校验三个系统的日报', 'Merge and check the three daily exports');
       const head = h('div');
@@ -424,9 +424,18 @@
       const box = K.inputBox(scam.world, { y: 540, placeholder: T('placeholder') });
       const chipDefs = [['s1_out', 'sheet'], ['s2_out', 'slides'], ['s3_out', 'doc'], ['s4_out', 'code']];
       const chips = chipDefs.map(([k, kind]) => box.addChip(T(k), kind));
+      // four chips on one row, exactly as s6_workflow sets them (Composer.tsx chips: max-w 220px, names truncate)
+      const tighten = (c) => {
+        css(c, { fontSize: 14, padding: '6px 12px 6px 7px', gap: 8, maxWidth: 220, minWidth: 0, flex: '0 1 auto', whiteSpace: 'nowrap' });
+        css(c.firstChild, { flex: 'none' });
+        css(c.lastChild, { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' });
+      };
+      chips.forEach(tighten);
+      css(box.chips, { flexWrap: 'nowrap', gap: 7 });
       const sgrain = K.grain(surf, 0.035);
       // the flying deliverable: a chip that grows out of the shrinking table
       const flyer = K.fileChip(T('s4_out'), 'code');
+      tighten(flyer);
       css(flyer, { position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', opacity: 0, boxShadow: '0 10px 30px rgba(0,0,0,.18)' });
       layer.append(flyer);
       layer.insertBefore(out, flyer);   // the shrinking table rides above the opening surface
@@ -618,7 +627,8 @@
           // the chip resolves out of the shrinking card: same width, cross-dissolve
           const kf = tw(t, 92.98, 93.14, 'outQuad');
           const fs = Math.max(1, (outBase.w * sc2) / slot.w);
-          css(flyer, { opacity: t < 93.4 ? kf : 0, transform: `translate(${(cx - slot.w * fs / 2).toFixed(1)}px, ${(cy - slot.h * fs / 2).toFixed(1)}px) scale(${(fs * slot.w / Math.max(1, flyerW())).toFixed(4)})` });
+          // same width as the slot so the label truncates exactly like the chip it becomes
+          css(flyer, { width: chips[3].offsetWidth || 200, opacity: t < 93.4 ? kf : 0, transform: `translate(${(cx - slot.w * fs / 2).toFixed(1)}px, ${(cy - slot.h * fs / 2).toFixed(1)}px) scale(${(fs * slot.w / Math.max(1, flyerW())).toFixed(4)})` });
           css(chips[3], { opacity: t >= 93.35 ? 1 : 0, transform: `scale(${t >= 93.35 ? 1 + 0.04 * Math.sin(Math.PI * prog(t, 93.35, 93.6)) : 1})` });
         } else {
           css(out, { transformOrigin: '0 0', left: outBase.x, top: outBase.y, transform: `translateY(${((1 - ko) * 24).toFixed(1)}px)`, opacity: ko.toFixed(3), background: 'transparent', boxShadow: 'none' });
