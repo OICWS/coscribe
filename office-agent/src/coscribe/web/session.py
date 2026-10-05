@@ -109,7 +109,7 @@ from ..runtime_lg.messages import (
 )
 from ..runtime_lg.providers import keeps_tool_list_fixed, with_prompt_cache_key
 from ..runtime_lg.selfwake import SilentSocket
-from ..runtime_lg.subagents import subagent_report
+from ..runtime_lg.subagents import SUBAGENT_MAX_STEPS, subagent_report
 from ..runtime_lg.tool_calls import ORPHANED_TOOL_CALL_NOTE, answer_every_tool_call
 from ..runtime_lg.tool_deferral import bound_tool_names, build_search_tools_tool
 from ..tools import (
@@ -707,7 +707,7 @@ class ChatSessionLG:
                 child_model, self._custom_providers
             ),
             interrupt_all=bool(self.hooks_config["PreToolUse"]),
-            max_turns=self.settings.max_turns,
+            max_turns=SUBAGENT_MAX_STEPS,
         )
 
     async def _subagent_changed(self, task: SubAgentTask) -> None:

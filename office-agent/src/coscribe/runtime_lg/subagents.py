@@ -16,6 +16,7 @@ import asyncio
 import base64
 import contextvars
 import logging
+import posixpath
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -58,6 +59,11 @@ _BUDGET_NOTE = (
 # The model-call cap ends a run with langchain's own "Model call limits
 # exceeded" message, which reports nothing of the work.
 _LIMIT_MESSAGE_PREFIX = "Model call limits exceeded"
+
+# Its own number, not Settings.max_turns: that one is sized for a whole
+# multi-file turn of the main conversation, and a delegated task left that
+# much room keeps searching long after it has enough.
+SUBAGENT_MAX_STEPS = 20
 _WRAP_UP_REQUEST = (
     "You've used all your steps, and nothing more will run: a file you didn't "
     "write below is not written. Report only what the record below shows you "
@@ -539,6 +545,45 @@ def select_reviewer_tools(
 
 _REVIEWER_MAX_MODEL_CALLS = 8
 
+# A review and one re-check per file, for up to three files. The prompt
+# asks for exactly that, but nothing else stops a model that keeps fixing
+# and re-reviewing: the main loop's own call cap restarts with every
+# approval, so in Auto mode a turn has no other bound.
+_MAX_REVIEWS_PER_FILE = 2
+_MAX_REVIEWS_PER_TURN = 6
+_REVIEW_LIMIT_REPLY = (
+    "Not reviewed: this turn has used its reviews ({per_file} per file, {per_turn} in "
+    "all). Don't call review_work again in this turn. Finish now, and tell the user "
+    "plainly which problems from the last review are still not fixed."
+)
+
+
+def _review_key(file_path: str) -> str:
+    path = file_path.strip().replace("\\", "/")
+    return posixpath.normpath(path) if path else ""
+
+
+def reviews_this_turn(messages: Sequence[Any]) -> list[str]:
+    """The file each finished review_work call since the user's last
+    message checked ("" for none), oldest first."""
+    start = next(
+        (i + 1 for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)),
+        0,
+    )
+    turn = messages[start:]
+    calls = {
+        call["id"]: call["args"]
+        for message in turn
+        if isinstance(message, AIMessage)
+        for call in message.tool_calls
+    }
+    return [
+        _review_key(str(calls.get(message.tool_call_id, {}).get("file_path", "")))
+        for message in turn
+        if isinstance(message, ToolMessage) and message.name == "review_work"
+    ]
+
+
 # What the work observed: script output and what was read or searched.
 # Bookkeeping tools (tasks, tool search, skills) show nothing about the data.
 _EVIDENCE_EXCLUDED = frozenset({"search_tools", "read_skill_file"})
@@ -699,6 +744,12 @@ def build_review_work_tool(
                 looks at slide 1 can miss real problems on the rest of a
                 deck.
         """
+        done = reviews_this_turn((state or {}).get("messages", []))
+        key = _review_key(file_path)
+        if len(done) >= _MAX_REVIEWS_PER_TURN or done.count(key) >= _MAX_REVIEWS_PER_FILE:
+            return _REVIEW_LIMIT_REPLY.format(
+                per_file=_MAX_REVIEWS_PER_FILE, per_turn=_MAX_REVIEWS_PER_TURN
+            )
         # A reviewer that keeps digging turns a one-minute check into a
         # five-minute one; its verdict is only as good as what it read in
         # the first few calls.

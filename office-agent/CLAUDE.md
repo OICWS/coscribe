@@ -140,6 +140,14 @@ Live runs: `coscribe-web` (port 8000) started from a scratch directory
 holding its own `.env` and workspace, `npx vite --host 127.0.0.1` in
 `frontend/` (port 5173), then `npx playwright test <spec>`.
 
+Long live runs on DeepSeek (multi-turn tasks, benchmarks, anything over a
+few calls) go off-peak: weekdays 9:00-12:00 and 14:00-18:00 Beijing time
+cost double (checked on DeepSeek's pricing page 2026-10-05; re-check
+before relying on it). Outside those hours, start now; inside, schedule
+the run (`send_later`) rather than paying peak. This is for our own
+testing only -- the product doesn't time anything around one vendor's
+prices.
+
 ## Model-name / provider facts: verify, don't guess
 
 This session repeatedly found stale/wrong model names and provider

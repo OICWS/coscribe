@@ -124,11 +124,11 @@ def test_extra_dirs_parse_as_comma_separated_paths(monkeypatch: pytest.MonkeyPat
     assert settings.extra_writable_dirs == [Path("/tmp/c")]
 
 
-def test_max_turns_defaults_to_20(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_max_turns_defaults_to_150(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COSCRIBE_DEFAULT_MODEL", "anthropic:claude-sonnet-4-5")
     monkeypatch.delenv("COSCRIBE_MAX_TURNS", raising=False)
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
-    assert settings.max_turns == 20
+    assert settings.max_turns == 150
 
 
 def test_max_turns_loads_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3597,3 +3597,19 @@ reviewer's chunks as its own. Its reply streamed into the chat as
 reviewer's usage onto the parent's (a fake 50,001-token response reported
 50,902). The reviewer now runs in a fresh `contextvars.Context()`, as
 `spawn_agent`'s runner already did.
+
+
+## `max_turns` is per turn now, not per run (2026-10-05)
+
+The section above wired `max_turns` as `ModelCallLimitMiddleware(run_limit=
+max_turns)`. Its run counter is an `UntrackedValue`: not checkpointed, so a
+run that resumes after an approval starts counting at 0 again. In Auto mode
+a gated tool pauses the run on nearly every step, and a measured turn made
+61 main-loop calls under a cap of 20 (ROADMAP Phase 8cl). The cap is now
+`agent._TurnModelCallLimitMiddleware`, which counts the model's replies
+since the user's last message from the history itself (a compact summary,
+`lc_source="summarization"`, doesn't count as a new message). Default 150.
+Sub-agents keep a fixed 20 (`subagents.SUBAGENT_MAX_STEPS`); they had been
+following the setting. A test fake that returns one `AIMessage` object
+twice gets the same message id both times, and the second replaces the
+first in the history, so the cap's tests script distinct replies.

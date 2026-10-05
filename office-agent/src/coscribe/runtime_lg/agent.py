@@ -18,11 +18,11 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import (
     AgentMiddleware,
     HumanInTheLoopMiddleware,
-    ModelCallLimitMiddleware,
     SummarizationMiddleware,
+    hook_config,
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphBubbleUp
@@ -212,6 +212,43 @@ class _AnswerEveryToolCallMiddleware(AgentMiddleware):
         return await handler(self._patched(request))
 
 
+def model_calls_this_turn(messages: Sequence[Any]) -> int:
+    """The model's replies since the user's last message. An auto-compact
+    summary is a HumanMessage too, but not a new request."""
+    count = 0
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            count += 1
+        elif (
+            isinstance(message, HumanMessage)
+            and message.additional_kwargs.get("lc_source") != "summarization"
+        ):
+            break
+    return count
+
+
+class _TurnModelCallLimitMiddleware(AgentMiddleware):
+    """Ends a turn after `limit` model calls, counted from the history.
+    LangChain's ModelCallLimitMiddleware keeps its run count out of the
+    checkpoint, so it starts again at 0 whenever a run resumes after an
+    approval -- in Auto mode nearly every step -- and a looping turn never
+    reaches it."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__()
+        self.limit = limit
+
+    @hook_config(can_jump_to=["end"])
+    def before_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        calls = model_calls_this_turn(state["messages"])
+        if calls < self.limit:
+            return None
+        message = f"Model call limits exceeded: turn limit ({calls}/{self.limit})"
+        return {"jump_to": "end", "messages": [AIMessage(content=message)]}
+
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        return self.before_model(state, runtime)
 
 
 def build_langgraph_agent(
@@ -287,9 +324,10 @@ def build_langgraph_agent(
     that same scope exactly, rather than silently widening what these
     settings apply to.
 
-    `max_turns`: caps the number of *model calls* this graph makes (via
-    `ModelCallLimitMiddleware(run_limit=max_turns, exit_behavior="end")`),
-    ending the run gracefully with an injected message instead of raising
+    `max_turns`: caps the number of *model calls* per user turn (via
+    `_TurnModelCallLimitMiddleware`, counted from the history so approvals
+    don't reset it), ending the turn gracefully with an injected message
+    instead of raising
     -- chosen over LangGraph's own `recursion_limit` config knob, which
     counts raw graph steps (not model calls) and raises `GraphRecursionError`
     instead of ending cleanly; see runtime_lg/README.md for the
@@ -373,7 +411,7 @@ def build_langgraph_agent(
         )
         middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
     if max_turns is not None:
-        middleware.append(ModelCallLimitMiddleware(run_limit=max_turns, exit_behavior="end"))
+        middleware.append(_TurnModelCallLimitMiddleware(max_turns))
     if auto_compact_tokens is not None:
         middleware.append(
             SummarizationMiddleware(model=model, trigger=("tokens", auto_compact_tokens))

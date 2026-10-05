@@ -7171,10 +7171,35 @@ per 1M), peak is double. n=1 per side.
       duplicates, 21 cancelled orders), and both corrections reached all
       three files and the PDF. Region figures differ from the truth by a
       few cents, the same per-line `.round(2)` as Phase 8ci's rerun.
-- Next, by these numbers: off-peak runs for scheduled and background
-  work (half price, no quality cost). Capping review rounds would have
-  cut real catches in turn 1; a draft mode without visual review saves up
-  to ~45% only by dropping exactly that stage, so it stays an opt-in idea.
+- Decided after these numbers: off-peak timing stays a development
+  practice (CLAUDE.md), not a product feature -- every provider prices
+  differently. No draft mode. Review rounds get a hard cap (Phase 8cm):
+  not to save money on a run like this one, but because nothing bounded
+  them.
+
+## Phase 8cm -- Review rounds capped in code (shipped)
+
+- [x] The "one fix-and-reverify round per review" rule was only in the
+      prompt. `review_work` now refuses a third review of the same file,
+      or a seventh in all, since the user's last message, and tells the
+      model to finish and say what is still unfixed. Turn 1 above used 4
+      (two files, review plus re-check each), so the cap doesn't cut what
+      the reviews caught there.
+- [x] Why it had no other bound: `max_turns` (20) is LangChain's
+      `ModelCallLimitMiddleware(run_limit=...)`, whose run counter is an
+      `UntrackedValue` -- not checkpointed, so it starts again at 0 each
+      time a run resumes after an approval. In Auto mode a gated tool
+      pauses the run on nearly every step: turn 1 above made 61 main-loop
+      calls under a cap of 20.
+- [x] The main loop gets the same treatment: `max_turns` now counts the
+      model's replies since the user's last message, from the history, so
+      approvals don't reset it (`agent._TurnModelCallLimitMiddleware`; an
+      auto-compact summary doesn't start a new turn). Default 150, up from
+      20 that a real turn needs three times over; the settings page calls
+      it "Max steps per reply". Sub-agents keep their budget of 20
+      (`SUBAGENT_MAX_STEPS`) instead of following this setting, which they
+      did before. With LangChain's run limit swapped back in, the new
+      approval test's turn runs past its cap.
 
 ## Later -- real intentions, not actively scheduled
 

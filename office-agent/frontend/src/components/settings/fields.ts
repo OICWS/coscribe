@@ -23,9 +23,10 @@ export const GENERAL_FIELDS: SettingsField[] = [
   },
   {
     key: "COSCRIBE_MAX_TURNS",
-    label: "Max turns",
-    placeholder: "20",
-    description: "The most tool steps one reply can take before it stops.",
+    label: "Max steps per reply",
+    placeholder: "150",
+    description:
+      "The most model calls one reply can make before it stops, approvals included. Raise it if long tasks stop before they finish.",
   },
 ];
 

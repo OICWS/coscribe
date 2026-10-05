@@ -141,20 +141,17 @@ class Settings(BaseSettings):
     _handle_compact) still works independently of this threshold.
     """
 
-    max_turns: int = 20
-    """Upper bound on how many tool-calling turns a single agent loop runs
-    before giving up -- caps runaway token/time spend from a loop that
-    keeps calling tools without finishing.
+    max_turns: int = 150
+    """The most model calls the main conversation makes for one user
+    message before the turn ends with a note saying so -- caps the spend of
+    a loop that keeps calling tools without finishing.
 
-    Wired in via web/session.py's ChatSessionLG._build_lg_agent, which
-    passes `ModelCallLimitMiddleware(run_limit=max_turns,
-    exit_behavior="end")` to build_langgraph_agent -- the run ends
-    gracefully with an injected message instead of raising. Only applies
-    to the top-level conversation loop; spawn_agent/review_work's own
-    sub-agents use their own independent, unrelated turn cap (a
-    spawn_agent function parameter, not this setting), same scope the old
-    runtime's Runner used. See runtime_lg/README.md's "max_turns and
-    auto_compact_threshold" section.
+    Counted from the conversation's history (runtime_lg/agent.py's
+    _TurnModelCallLimitMiddleware), so resuming after an approval doesn't
+    reset it. Sized for real multi-file work: building an xlsx, a docx and
+    a pptx with reviews took 61 calls in one turn (ROADMAP Phase 8cl).
+    Sub-agents have their own budget (subagents.SUBAGENT_MAX_STEPS) and
+    review_work its own reviewer cap; neither follows this setting.
     """
 
     default_permission_mode: PermissionMode = "auto"
