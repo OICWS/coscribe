@@ -49,7 +49,7 @@
   F.event(95.92, 'tick', { what: 'connector connected' });
   F.event(96.22, 'paper', { what: 'custom connector row', soft: true });
   F.event(97.10, 'click', { what: 'model pill' });
-  F.event(97.76, 'key', { ch: '3' });
+  F.event(97.78, 'key', { ch: '3' });
   F.event(98.50, 'riser', { dur: 1.5 });
   F.event(100.0, 'stop', { what: 'everything stops' });
 
@@ -133,6 +133,23 @@
       // ================= S5-02 · Connectors =================
       const c = shots[1];
       const ccam = K.camera(c, { perspective: 2600 });
+      // the app behind the modal (sidebar, a conversation), dimmed by the modal's real bg-black/60 backdrop
+      const app = h('div', { class: 'abs' });
+      css(app, { left: -400, top: -400, width: 2720, height: 1880, background: 'var(--bg)', filter: 'blur(2.5px)' });
+      {
+        const side = h('div', { class: 'abs' }); css(side, { left: 400, top: 400, width: 300, height: 1080, background: 'var(--card-bg)', borderRight: '1px solid var(--border)' });
+        const r = F.rng(52);
+        for (let i = 0; i < 14; i++) { const e = h('div', { class: 'abs' }); css(e, { left: 24, top: 120 + i * 44, width: 140 + r() * 110, height: 12, borderRadius: 4, background: 'rgba(32,30,29,.16)' }); side.append(e); }
+        app.append(side);
+        let y = 330;
+        for (let i = 0; i < 9; i++) {
+          const user = i % 4 === 0, e = h('div', { class: 'abs' });
+          const w = user ? 380 + r() * 200 : 560 + r() * 420;
+          css(e, user ? { left: 1960 - w, top: y, width: w, height: 52, borderRadius: 16, background: 'var(--card-bg)' } : { left: 1020, top: y, width: w, height: 12, borderRadius: 4, background: 'rgba(32,30,29,.14)' });
+          app.append(e); y += user ? 92 : 30;
+        }
+      }
+      ccam.world.append(app);
       const dim = h('div', { class: 'abs' }); css(dim, { left: -400, top: -400, width: 2720, height: 1880, background: 'rgba(0,0,0,.6)' }); ccam.world.append(dim);
       const modal = h('div', { class: 'abs' });
       css(modal, { left: 410, top: 120, width: 1100, height: 840, borderRadius: 16, border: '1px solid var(--border)', background: 'var(--bg)', boxShadow: '0 4px 24px rgba(0,0,0,.06)', display: 'flex', overflow: 'hidden', fontFamily: 'var(--sans)', color: 'var(--fg)' });
@@ -254,7 +271,7 @@
           css(cite, { opacity: tw(u, 0.95, 1.08, 'outQuad'), transform: `translate(${lerp(x0, x1, kf).toFixed(1)}px, ${(lerp(y0, y1, kf) - Math.sin(Math.PI * kf) * 60).toFixed(1)}px) scale(${lerp(0.82, 1.12, kf).toFixed(4)}) rotate(${(-1.5 * Math.sin(Math.PI * kf)).toFixed(2)}deg)` });
           css(bCap, { opacity: tw(u, 0.05, 0.3, 'outQuad') });
         } else if (idx === 1) {
-          ccam.set({ x: lerp(1060, 1110, ease.outQuad(prog(u, 0, 1.5))), y: lerp(312, 296, prog(u, 0, 1.5)), s: lerp(1.82, 1.98, ease.outCubic(prog(u, 0, 1.5))), ry: lerp(4, 2.5, prog(u, 0, 1.5)), rx: -1.5 });
+          ccam.set({ x: lerp(1040, 1090, ease.outQuad(prog(u, 0, 1.5))), y: lerp(338, 326, prog(u, 0, 1.5)), s: lerp(1.74, 1.88, ease.outCubic(prog(u, 0, 1.5))), ry: lerp(4, 2.5, prog(u, 0, 1.5)), rx: -1.5 });
           // Microsoft 365: Connecting… then the check
           const connected = u >= 0.42;
           ms.conn.style.display = connected ? 'none' : '';
@@ -273,23 +290,29 @@
           const boxEl = mbox.root;
           const pillX = boxEl.offsetLeft + mbox.card.offsetLeft + pill.offsetLeft;
           const pillY = boxEl.offsetTop + mbox.card.offsetTop + pill.offsetTop;
-          mcam.set({ x: lerp(pillX + 40, pillX + 70, ease.outQuad(prog(u, 0, 1.5))), y: pillY - 70, s: lerp(2.0, 2.15, ease.outCubic(prog(u, 0, 1.5))), ry: -3, rx: 2 });
-          const open = u >= 0.12 && u < 1.12;
-          const ko = tw(u, 0.12, 0.3, 'outBack') * (1 - tw(u, 1.0, 1.12, 'inQuad'));
+          // the camera frames the pill as first laid out (the label width changes on switch)
+          // (anchored on the pill's right edge, which does not move when the label changes)
+          const camAnchor = { x: pillX + pill.offsetWidth - 130, y: pillY };
+          mcam.set({ x: lerp(camAnchor.x + 40, camAnchor.x + 70, ease.outQuad(prog(u, 0, 1.5))), y: camAnchor.y - 70, s: lerp(2.0, 2.15, ease.outCubic(prog(u, 0, 1.5))), ry: -3, rx: 2 });
+          // as in ModelPicker.tsx: a digit key picks that entry and closes the menu at once
+          const PRESS = 0.78;
+          const open = u >= 0.12 && u < PRESS + 0.1;
+          const ko = tw(u, 0.12, 0.3, 'outBack') * (1 - tw(u, PRESS + 0.02, PRESS + 0.12, 'inQuad'));
           css(menu, { left: pillX, top: pillY - 4 - menu.offsetHeight, opacity: clamp(ko * 1.5), transform: `translateY(${((1 - ko) * 8).toFixed(1)}px) scale(${(0.97 + 0.03 * clamp(ko)).toFixed(4)})` });
-          const current = u >= 0.76 ? 2 : 0;
           mrows.forEach((r, i) => {
-            const txt = (i === current ? '✓ ' : '') + r.name;
+            const txt = (i === 0 ? '✓ ' : '') + r.name;
             if (r.lab.textContent !== txt) r.lab.textContent = txt;
-            css(r.r, { background: i === 2 && u >= 0.6 && u < 1.12 ? 'var(--card-bg)' : 'transparent' });
+            css(r.r, { background: i === 2 && u >= PRESS && u < PRESS + 0.12 ? 'var(--card-bg)' : 'transparent' });
           });
-          const label = u >= 1.1 ? 'glm-4.6' : 'deepseek-chat';
+          const label = u >= PRESS + 0.04 ? 'glm-4.6' : 'deepseek-chat';
           if (pillTx.textContent !== label) pillTx.textContent = label;
-          css(pill, { background: open ? 'var(--card-bg)' : 'transparent', color: open ? 'var(--fg)' : 'var(--muted)' });
+          const kl = tw(u, PRESS + 0.04, PRESS + 0.3, 'outCubic');
+          css(pillTx, { display: 'inline-block', transform: `translateY(${u >= PRESS + 0.04 ? ((1 - kl) * 6).toFixed(1) : 0}px)`, opacity: u >= PRESS + 0.04 ? kl : 1 });
+          css(pill, { background: open ? 'var(--card-bg)' : 'transparent', color: open || u >= PRESS ? 'var(--fg)' : 'var(--muted)' });
           mbox.update({ str: '', k: 1, t, caretOn: true });
           // the number key
-          const kk = tw(u, 0.42, 0.6, 'outCubic') * (1 - tw(u, 1.05, 1.3));
-          const press = u >= 0.76 && u < 0.86;
+          const kk = tw(u, 0.42, 0.6, 'outCubic') * (1 - tw(u, 0.98, 1.2));
+          const press = u >= PRESS && u < PRESS + 0.1;
           css(keycap, { left: pillX + menu.offsetWidth + 22, top: pillY - 4 - menu.offsetHeight + mrows[2].r.offsetTop + mrows[2].r.offsetHeight / 2 - 23, opacity: kk, transform: `translateY(${press ? 3 : (1 - kk) * 8}px)`, boxShadow: press ? '0 0 0 rgba(32,30,29,.16)' : '0 3px 0 rgba(32,30,29,.16)' });
           // pointer clicks the pill, then drifts away
           const pp = toStage(pill.getBoundingClientRect());
@@ -298,16 +321,16 @@
           css(mptr, { opacity: 1 - tw(u, 0.5, 0.8), transform: `translate(${(px - 3).toFixed(1)}px, ${(py - 3).toFixed(1)}px) scale(${u >= 0.1 && u < 0.18 ? 0.9 : 1})` });
         } else {
           scam.set({ x: lerp(960, 930, ease.outQuad(prog(u, 0, 1.5))), y: 540, s: lerp(1.0, 1.03, prog(u, 0, 1.5)) });
-          const kout = tw(u, 0.85, 1.25, 'inOutQuad');
-          l1.update(TX1, prog(u, 0.02, 0.55), kout);
-          l2.update(TX2, prog(u, 0.2, 0.8), tw(u, 0.8, 1.2, 'inOutQuad'));
+          // in fast (on the hit), hold to read, then everything leaves by ~99.9: an empty surface at 100.0
+          l1.update(TX1, prog(u, 0.0, 0.32), tw(u, 1.02, 1.36, 'inOutQuad'));
+          l2.update(TX2, prog(u, 0.1, 0.46), tw(u, 1.08, 1.40, 'inOutQuad'));
           trows.forEach((r, i) => {
-            const k = tw(u, 0.18 + i * 0.07, 0.5 + i * 0.07, 'outCubic') * (1 - tw(u, 0.78 + i * 0.04, 1.08 + i * 0.04, 'inQuad'));
+            const k = tw(u, 0.16 + i * 0.05, 0.42 + i * 0.05, 'outCubic') * (1 - tw(u, 0.98 + i * 0.03, 1.22 + i * 0.03, 'inQuad'));
             css(r, { opacity: k.toFixed(3), transform: `translateY(${((1 - k) * 10).toFixed(1)}px)` });
           });
-          const kg = tw(u, 0.3, 0.5) * (1 - tw(u, 0.8, 1.05));
+          const kg = tw(u, 0.25, 0.45) * (1 - tw(u, 0.98, 1.2));
           css(guide, { opacity: kg });
-          const kst = tw(u, 0.4, 0.7, 'outCubic') * (1 - tw(u, 0.92, 1.2, 'inQuad'));
+          const kst = tw(u, 0.3, 0.55, 'outCubic') * (1 - tw(u, 1.1, 1.34, 'inQuad'));
           css(status, { opacity: kst.toFixed(3), transform: `translateY(${((1 - kst) * 8).toFixed(1)}px)` });
         }
         grainU(t);

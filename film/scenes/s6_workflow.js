@@ -19,7 +19,7 @@
   const TAUT0 = 104.5, TAUT1 = 104.92;      // ... and is pulled taut
   const SWITCH = 105.15;                     // 3D line hands over to the 2D step list rail
   const CRYST = 105.2, CRYST_STEP = 0.034;   // rows crystallise top to bottom
-  const CARD_IN = 105.45, SAVED = 106.0, OPEN = 106.3, TASK_IN = 106.42;
+  const CARD_IN = 105.45, SAVED = 106.0, OPEN = 106.36, TASK_IN = 106.5;
   const MONDAYS = [106.6, 107.4, 108.2, 109.0, 109.8];
   const SWEEP = 0.56;                        // one run, top to bottom
   const HIT = 110.0, BEAT = 60 / 72;         // 72 BPM
@@ -57,22 +57,23 @@
   // ---------- the workflow (script §4.5), summaries in StepSummary.tsx's own wording ----------
   // summary segments: l label (muted) · k arg key (muted) · m mono value · v value token · i input token · a arrow
   const STEPS = [
-    { kind: 'tool', icon: 'tool', title: L('读取门店销售', 'Read store sales'), sum: [['l', 'Read Excel'], ['k', 'path'], ['m', L('门店销售_{{month}}.xlsx', 'store-sales_{{month}}.xlsx')], ['a'], ['v', 'sales']], d: '1.2s' },
+    { kind: 'tool', icon: 'tool', title: L('读取门店销售', 'Read store sales'), sum: [['l', 'Read Excel'], ['k', 'path'], ['m', L('门店销售_{{month}}.xlsx', 'stores_{{month}}.xlsx')], ['a'], ['v', 'sales']], d: '1.2s' },
     { kind: 'script', icon: 'script', title: L('清洗与对齐', 'Clean and align'), sum: [['l', 'Python · 48 lines'], ['v', 'sales'], ['a'], ['v', 'clean']], d: '4.8s' },
     { kind: 'check', icon: 'check', title: L('无重复入账', 'No duplicate orders'), sum: [['v', 'clean.duplicates'], ['l', '='], ['m', '0'], ['l', '· otherwise stop']], d: '0.1s' },
     { kind: 'script', icon: 'script', title: L('归因分析', 'Find the causes'), sum: [['l', 'Python · 112 lines'], ['v', 'clean'], ['a'], ['v', 'findings']], d: '6.3s' },
     { kind: 'tool', icon: 'file', title: L('写入分析工作簿', 'Write the workbook'), sum: [['l', 'Write Excel'], ['k', 'path'], ['m', L('销售下滑分析_{{month}}.xlsx', 'sales-decline_{{month}}.xlsx')]], d: '2.2s' },
     { kind: 'tool', icon: 'file', title: L('添加图表', 'Add the charts'), sum: [['l', 'Add Excel chart'], ['k', 'chart_type'], ['m', 'line'], ['k', 'sheet'], ['m', L('区域×月份', 'Region×Month')]], d: '1.4s' },
     { kind: 'llm', icon: 'llm', title: L('撰写结论页', 'Write the conclusions'), sum: [['l', 'Returns'], ['m', 'headline, points'], ['a'], ['v', 'summary']], d: '9.6s' },
-    { kind: 'tool', icon: 'file', title: L('生成管理层汇报', 'Build the briefing'), sum: [['l', 'Write PowerPoint'], ['k', 'template_path'], ['m', L('公司模板.pptx', 'company-template.pptx')]], d: '5.1s' },
+    { kind: 'tool', icon: 'file', title: L('生成管理层汇报', 'Build the briefing'), sum: [['l', 'Write PowerPoint'], ['k', 'template_path'], ['m', L('公司模板.pptx', 'house-style.pptx')]], d: '5.1s' },
     { kind: 'tool', icon: 'tool', title: L('渲染预览', 'Render a preview'), sum: [['l', 'Render PowerPoint preview'], ['a'], ['v', 'preview']], d: '3.9s' },
     { kind: 'check', icon: 'check', title: L('对比度检查', 'Contrast check'), sum: [['v', 'preview.low_contrast_warnings'], ['l', '='], ['m', '0'], ['l', '· otherwise stop']], d: '0.1s' },
     { kind: 'script', icon: 'script', title: L('三系统日报校验', 'Check the daily exports'), sum: [['l', 'Python · 64 lines'], ['i', 'exports'], ['a'], ['v', 'anomalies']], d: '3.4s' },
     { kind: 'branch', icon: 'branch', title: L('有异常吗', 'Any anomalies?'), sum: [['l', 'If'], ['l', 'count of'], ['v', 'anomalies'], ['l', '>'], ['m', '0']], d: '0.1s' },
     { kind: 'approval', icon: 'approval', title: L('确认异常后再发送', 'Confirm before sending'), sum: [['l', 'Pauses for your approval']], d: '', nested: true },
-    { kind: 'tool', icon: 'tool', title: L('发送邮件', 'Email the results'), sum: [['l', 'Microsoft 365 · Send mail'], ['k', 'subject'], ['m', L('销售周报 · {{month}}', 'Weekly sales · {{month}}')]], d: '2.8s' },
+    { kind: 'tool', icon: 'tool', title: L('发送邮件', 'Email the results'), sum: [['l', 'Microsoft 365 · Send mail'], ['k', 'subject'], ['m', L('销售周报 · {{month}}', 'Sales · {{month}}')]], d: '2.8s' },
   ];
-  const NAME = L('每周一 · 销售分析与日报校验', 'Monday · sales analysis & daily-report check');
+  // (a word joiner after the hyphen keeps "daily-report" from breaking across lines)
+  const NAME = L('每周一 · 销售分析与日报校验', 'Monday · sales analysis & daily-\u2060report check');
   const APPROVAL = 12, BRANCH = 11;
 
   // list geometry in product px (1x); the list is drawn at scale S
@@ -115,7 +116,12 @@
       const chipDefs = [['s1_out', 'sheet'], ['s2_out', 'slides'], ['s3_out', 'doc'], ['s4_out', 'code']];
       const chips = chipDefs.map(([k, kind]) => box.addChip(T(k), kind));
       // four chips must sit on one row: tighten them a little (same chip, smaller set)
-      chips.forEach((c) => css(c, { fontSize: 14, padding: '6px 12px 6px 7px', gap: 8 }));
+      // like Composer.tsx's attachment chips: max-w 220px, the name truncates (and they shrink to share one row)
+      chips.forEach((c) => {
+        css(c, { fontSize: 14, padding: '6px 12px 6px 7px', gap: 8, maxWidth: 220, minWidth: 0, flex: '0 1 auto', whiteSpace: 'nowrap' });
+        css(c.firstChild, { flex: 'none' });
+        css(c.lastChild, { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' });
+      });
       css(box.chips, { flexWrap: 'nowrap', gap: 7 });
       rig.append(paper);
 
@@ -239,15 +245,15 @@
 
       // ======================= draft card (WorkflowDraftCard) =======================
       const card = h('div', { class: 'abs' });
-      css(card, { left: 0, top: 0, width: 330, padding: 16, borderRadius: 12, border: `1px solid ${D.border}`, background: D.bg,
+      css(card, { left: 0, top: 0, width: RCOLW, padding: 16, borderRadius: 12, border: `1px solid ${D.border}`, background: D.bg,
         fontFamily: SANS, color: D.fg, transformOrigin: '0 0', boxShadow: '0 30px 80px rgba(0,0,0,.45)' });
       const cHead = h('div'); css(cHead, { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 12, fontWeight: '500', letterSpacing: '.04em', textTransform: 'uppercase', color: D.muted });
       cHead.innerHTML = svgIcon('workflow', 14, D.muted, 2) + '<span>Fixed workflow draft</span>';
       const cName = h('div', { text: NAME }); css(cName, { fontSize: 15, fontWeight: '500', lineHeight: '1.4' });
       const cStatusBox = h('div'); css(cStatusBox, { position: 'relative', height: 20, marginTop: 4, perspective: '400px' });
       const statusLine = (icon, text, color) => {
-        const e = h('div'); css(e, { position: 'absolute', left: 0, top: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color, whiteSpace: 'nowrap', transformOrigin: '50% 50%', backfaceVisibility: 'hidden' });
-        e.innerHTML = svgIcon(icon, 14, color, 2) + `<span>${text}</span>`; return e;
+        const e = h('div'); css(e, { position: 'absolute', left: 0, top: 0, right: 0, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color, whiteSpace: 'nowrap', transformOrigin: '50% 50%', backfaceVisibility: 'hidden' });
+        e.innerHTML = svgIcon(icon, 14, color, 2) + `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis">${text}</span>`; return e;
       };
       const stTested = statusLine('checkCircle', 'Tested · every step passed in 41s', D.success);
       const stSaved = statusLine('checkCircle', `Saved to “${NAME}”`, D.success);
@@ -260,20 +266,20 @@
       const btnsA = h('div'); css(btnsA, { position: 'absolute', left: 0, top: 0, whiteSpace: 'nowrap' });
       btnsA.append(btn('Review and save', 'p'), btn('Test again', 's'), btn('Continue in chat', 'g'));
       const btnsB = h('div'); css(btnsB, { position: 'absolute', left: 0, top: 0, whiteSpace: 'nowrap', opacity: 0 });
-      btnsB.append(btn('Open task', 's'));
+      const openBtn = btn('Open task', 's'); css(openBtn, { transformOrigin: '50% 50%' }); btnsB.append(openBtn);
       cBtns.append(btnsA, btnsB);
       card.append(cHead, cName, cStatusBox, cSteps, cBtns);
       world.append(card);
 
       // ======================= runs (ScheduledTaskDetail RunsSection + RunStatusIcon) =======================
       const runs = h('div', { class: 'abs' });
-      css(runs, { left: 0, top: 0, width: 330, fontFamily: SANS, color: D.fg, transformOrigin: '0 0' });
+      css(runs, { left: 0, top: 0, width: RCOLW, fontFamily: SANS, color: D.fg, transformOrigin: '0 0' });
       const runsLabel = h('div', { text: 'Runs' }); css(runsLabel, { fontSize: 14, color: D.muted, marginBottom: 4 });
       const runsBody = h('div'); css(runsBody, { position: 'relative', height: 5 * 36 });
       runs.append(runsLabel, runsBody);
       const RUNS = [['Oct 12', '41s', 'ok'], ['Oct 19', '39s', 'ok'], ['Oct 26', '', 'wait'], ['Nov 2', '40s', 'ok'], ['Nov 9', '42s', 'ok']];
       const runRows = RUNS.map(([day, secs, st]) => {
-        const r = h('div'); css(r, { position: 'absolute', left: -8, top: 0, width: 346, height: 36, padding: '0 8px', display: 'flex', alignItems: 'center', gap: 12, fontSize: 14, whiteSpace: 'nowrap', opacity: 0 });
+        const r = h('div'); css(r, { position: 'absolute', left: -8, top: 0, width: RCOLW + 16, height: 36, padding: '0 8px', display: 'flex', alignItems: 'center', gap: 12, fontSize: 14, whiteSpace: 'nowrap', opacity: 0 });
         const ic = h('span'); ic.innerHTML = st === 'ok' ? svgIcon('checkCircle', 14, D.success, 2) : svgIcon('alert', 14, D.warning, 2);
         const tx = h('span'); css(tx, { flex: '1', minWidth: 0 });
         tx.append(`${day} at 9:00 AM`); const m = h('span', { text: ` · Scheduled${secs ? ' · ' + secs : ''}` }); css(m, { color: D.muted }); tx.append(m);
@@ -285,7 +291,7 @@
 
       // ======================= scheduled task header (ScheduledTaskDetail / RunPanel) =======================
       const task = h('div', { class: 'abs' });
-      css(task, { left: 0, top: 0, width: 300, fontFamily: SANS, color: D.fg, transformOrigin: '0 0' });
+      css(task, { left: 0, top: 0, width: RCOLW, fontFamily: SANS, color: D.fg, transformOrigin: '0 0' });
       const tName = h('div', { text: NAME }); css(tName, { fontSize: 22, fontWeight: '600', lineHeight: '1.3' });
       const tRow = h('div'); css(tRow, { display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 });
       const toggle = h('span'); css(toggle, { position: 'relative', width: 36, height: 20, borderRadius: 10, background: D.accent, flex: 'none' });
@@ -300,9 +306,9 @@
 
       // ======================= the calendar ruler (five Mondays) =======================
       const ruler = h('div', { class: 'abs' });
-      css(ruler, { left: 0, top: 0, width: 1680, height: 60, fontFamily: MONO, color: D.muted });
-      const DAY = 1680 / 46; // 10-05 .. 11-19
-      const rbase = h('div', { class: 'abs' }); css(rbase, { left: 0, top: 0, width: 1680, height: 1, background: D.border });
+      css(ruler, { left: 0, top: 0, width: RULER_W, height: 60, fontFamily: MONO, color: D.muted });
+      const DAY = RULER_W / 46; // 10-05 .. 11-19
+      const rbase = h('div', { class: 'abs' }); css(rbase, { left: 0, top: 0, width: RULER_W, height: 1, background: D.border });
       ruler.append(rbase);
       const MON_LABELS = ['10-05', '10-12', '10-19', '10-26', '11-02', '11-09', '11-16'];
       for (let d = 0; d <= 46; d++) {
@@ -311,7 +317,7 @@
         ruler.append(tk);
       }
       const monEls = MON_LABELS.map((s, i) => {
-        const e = h('div', { class: 'abs', text: s }); css(e, { left: i * 7 * DAY - 40, top: 18, width: 80, textAlign: 'center', fontSize: 14, letterSpacing: '.04em', color: D.muted, opacity: 0.55 });
+        const e = h('div', { class: 'abs', text: s }); css(e, { left: i * 7 * DAY - 50, top: 20, width: 100, textAlign: 'center', fontSize: 17, letterSpacing: '.04em', color: D.muted, opacity: 0.55 });
         ruler.append(e); return e;
       });
       const marker = h('div', { class: 'abs' }); css(marker, { left: 0, top: -16, width: 2, height: 16, background: D.accent });
@@ -425,6 +431,7 @@
       STEPS.forEach((s, i) => F.event(CRYST + i * CRYST_STEP, 'glass', { i }));
       F.event(CARD_IN, 'paper');
       F.event(SAVED, 'chime');
+      F.event(OPEN, 'click', { what: 'Open task' });
       F.event(TASK_IN, 'snap');
       MONDAYS.forEach((tm, w) => {
         F.event(tm, 'clock', { week: w });
@@ -609,7 +616,10 @@
         const in2D = t >= SWITCH;
         world.style.display = in2D ? '' : 'none';
         if (!in2D) { fabric.style.display = 'none'; css(exTag, { opacity: 0.6 * tw(t, 103.6, 104.2) }); scrim.style.opacity = 0; collapseLine.style.opacity = 0; return; }
-        const r0 = REST();
+        const r0 = REST(), sw0 = SW0();
+        // after the hand-over the camera settles into the rest layout as the list crystallises
+        const kSet = ease.inOutCubic(prog(t, SWITCH, SWITCH + 0.95));
+        const rcx = lerp(sw0.cx, r0.cx, kSet), rvc = lerp(sw0.vc, r0.vc, kSet);
         // camera: rest after crystallisation, a slow push through the Mondays, then the long pull-back
         const kPull = prog(t, HIT, TEND);
         const pullE = 1 - Math.pow(1 - kPull, 1.7);
@@ -617,8 +627,8 @@
         const f = Math.exp(lerp(Math.log(fPush), Math.log(0.105), pullE));
         const listMidV = V0 + (LIST_H * S) / 2 - 10;
         const kRe = ease.inOutCubic(prog(t, HIT, HIT + 2.2));
-        const cxF = lerp(lerp(r0.cx, X0 + COLW * S / 2 - 11 * S, kRe), X0, ease.inOutQuad(prog(t, 112.2, 113.35)));
-        const vc = lerp(r0.vc, listMidV, kRe);
+        const cxF = lerp(lerp(rcx, X0 + COLW * S / 2 - 11 * S, kRe), X0, ease.inOutQuad(prog(t, 112.2, 113.35)));
+        const vc = lerp(rvc, listMidV, kRe);
         world.style.transform = `translate(960px,540px) scale(${f}) translate(${-cxF}px,${-vc}px)`;
 
         // list placement (rail on the caret axis)
@@ -663,16 +673,22 @@
         // draft card, top right; Tested flips to Saved
         const kCard = tw(t, CARD_IN, CARD_IN + 0.5, 'outCubic');
         const outR = 1 - tw(t, HIT - 0.12, HIT + 0.22, 'inOutQuad');
-        css(card, { transform: `translate(${r0.cx + 430}px,${r0.vc - 270}px) scale(${S}) translateY(${(1 - kCard) * 18}px)`, opacity: kCard * outR });
+        // "Open task" is pressed; the card gives way to the task it saved
+        const kOpen = Math.sin(Math.PI * prog(t, OPEN - 0.08, OPEN + 0.12));
+        const kGone = tw(t, OPEN + 0.04, OPEN + 0.34, 'inOutCubic');
+        const [cwx, cwy] = RS(r0, RCOL_SX, LIST_SY);
+        css(card, { transform: `translate(${cwx}px,${cwy - kGone * 26}px) scale(${SR}) translateY(${(1 - kCard) * 18}px)`, opacity: kCard * (1 - kGone), display: kGone >= 1 ? 'none' : '' });
+        css(openBtn, { background: kOpen > 0.01 ? `rgba(247,245,243,${(0.1 * kOpen).toFixed(3)})` : D.bg, transform: `scale(${(1 - 0.05 * kOpen).toFixed(3)})` });
         const kFlip = tw(t, SAVED, SAVED + 0.4, 'inOutCubic');
         css(stTested, { transform: `rotateX(${kFlip * 90}deg)`, opacity: kFlip < 0.5 ? 1 : 0 });
         css(stSaved, { transform: `rotateX(${(kFlip - 1) * 90}deg)`, opacity: kFlip >= 0.5 ? 1 : 0 });
         css(btnsA, { opacity: 1 - tw(t, SAVED, SAVED + 0.25) });
-        css(btnsB, { opacity: tw(t, SAVED + 0.15, SAVED + 0.45) });
+        css(btnsB, { opacity: tw(t, SAVED + 0.08, SAVED + 0.3) });
 
         // runs list under the card: newest first
         const kRuns = tw(t, MONDAYS[0] - 0.2, MONDAYS[0] + 0.2, 'outCubic');
-        css(runs, { transform: `translate(${r0.cx + 430}px,${r0.vc - 270 + 255 * S}px) scale(${S})`, opacity: kRuns * outR });
+        const [rwx, rwy] = RS(r0, RCOL_SX, LIST_SY + 300);
+        css(runs, { transform: `translate(${rwx}px,${rwy}px) scale(${SR})`, opacity: kRuns * outR });
         runRows.forEach((r, k) => {
           const tin = MONDAYS[k] + (k === 2 ? rowT(APPROVAL) * SWEEP + 0.05 : SWEEP + 0.03);
           const a = tw(t, tin, tin + 0.3, 'outCubic');
@@ -683,10 +699,12 @@
 
         // the scheduled task, left
         const kTask = tw(t, TASK_IN, TASK_IN + 0.5, 'outCubic');
-        css(task, { transform: `translate(${r0.cx - 960 + 130}px,${r0.vc - 540 + 300 + (1 - kTask) * 14}px) scale(${S})`, opacity: kTask * outR });
+        const [twx, twy] = RS(r0, RCOL_SX, LIST_SY);
+        css(task, { transform: `translate(${twx}px,${twy + (1 - kTask) * 16}px) scale(${SR})`, opacity: kTask * outR });
         // the calendar ruler, bottom: the marker steps from Monday to Monday
-        const kRul = tw(t, TASK_IN + 0.1, TASK_IN + 0.6, 'outCubic');
-        css(ruler, { transform: `translate(${r0.cx - 960 + 120}px,${r0.vc - 540 + 948}px)`, opacity: kRul * outR });
+        const kRul = tw(t, TASK_IN - 0.1, TASK_IN + 0.4, 'outCubic');
+        const [uwx, uwy] = RS(r0, LIST_SX, RULER_SY);
+        css(ruler, { transform: `translate(${uwx}px,${uwy}px)`, opacity: kRul * outR });
         let mx = 4 * DAY; // the day the task was saved (Fri 10-09)
         for (let k = 0; k < MONDAYS.length; k++) mx = lerp(mx, (k + 1) * 7 * DAY, ease.inOutCubic(prog(t, MONDAYS[k] - 0.42, MONDAYS[k])));
         css(marker, { left: mx - 1 });
@@ -706,7 +724,7 @@
           fctx.clearRect(0, 0, 1920, 1080);
           const lvl = Math.min(4, Math.max(0, Math.floor(Math.log2(1 / Math.max(f, 1e-3)))));
           const mip = sprites.mips[lvl], amip = sprites.abs[lvl];
-          const kAbs = clamp((0.42 - f) / 0.2);                          // far away: only the threads remain
+          const kAbs = clamp((0.28 - f) / 0.12);                          // far away: only the threads remain
           const sw = mip.cv.width / mip.s, sh = mip.cv.height / mip.s;  // world size of the sprite
           const live = clamp((f - 0.36) / 0.14);                          // the live DOM column hands over to the sprite
           // the first three rings stamp out on the beat; beyond that a soft elliptical wave fills the frame

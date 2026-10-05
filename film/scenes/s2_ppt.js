@@ -17,7 +17,7 @@
   // ---------- example content (script §4.2) ----------
   const TITLES = [
     L('40 家门店销售下滑：原因与建议', 'Sales decline across 40 stores: causes and proposals'),
-    L('结论先行：下滑 6.8%，七成来自家居品类折扣加深', 'The answer first: down 6.8%, seven-tenths of it from deeper Home discounts'),
+    L('结论先行：下滑 6.8%，七成来自家居品类折扣加深', 'The answer first: down 6.8%, 70% of it from Home discounts'),
     L('不是客流：客流 −1.2%，客单价 −5.7%', 'Not footfall: footfall −1.2%, average ticket −5.7%'),
     L('不是新店：剔除新店后仍 −6.1%', 'Not new stores: still −6.1% without them'),
     L('是折扣：家居品类折扣率 12% → 19%', 'Discounts: Home category discount rate 12% → 19%'),
@@ -78,10 +78,10 @@
   const BUILD_ORDER = [4, 1, 3, 7, 0, 5, 2, 8, 6]; // centre first, then around
   const tBuild = (i) => 38.5 + 0.085 * BUILD_ORDER.indexOf(i);
   const T_THEME = 39.95;                           // swatches converge, accents unify
-  const TOOLS = [39.2, 40.0, 40.8];
+  const TOOLS = [39.0, 39.7, 40.4];
   const A0 = 42.0, B0 = 44.6;                      // quality shots
-  const tDrop = (i) => 46.15 + 0.27 * RANK[i];
-  const T_FOLD = 49.15, T_FLY = 49.55, T_LAND = 50.3;
+  const tDrop = (i) => 45.95 + 0.27 * RANK[i];
+  const T_FOLD = 48.95, T_FLY = 49.35, T_LAND = 50.2;
 
   F.scene({
     id: 's2_ppt', start: T0, end: T1, z: 10,
@@ -173,11 +173,13 @@
       const words = WORDS.map((w, c) => K.line(world, { x: COL[c] + 600, y: WORD_Y, size: 62, color: 'var(--d-fg)', maxW: 1200, align: 'left' }));
       const arrows = [0, 1].map((c) => {
         const x0 = COL[c] + (ZH ? 190 : 300), x1 = COL[c + 1] - 70, y = WORD_Y + 2;
-        const p = h('path', { d: `M ${x0} ${y} L ${x1} ${y} M ${x1 - 11} ${y - 7} L ${x1} ${y} L ${x1 - 11} ${y + 7}`, fill: 'none', stroke: 'rgba(247,245,243,.42)', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
-        svgW.append(p);
-        const len = x1 - x0 + 30; p.setAttribute('stroke-dasharray', len); p.setAttribute('stroke-dashoffset', len);
+        const sty = { fill: 'none', stroke: 'rgba(247,245,243,.42)', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+        const p = h('path', { d: `M ${x0} ${y} L ${x1} ${y}`, ...sty });
+        const hd = h('path', { d: `M ${x1 - 11} ${y - 7} L ${x1} ${y} L ${x1 - 11} ${y + 7}`, ...sty, opacity: 0 });
+        svgW.append(p, hd);
+        const len = x1 - x0 + 2; p.setAttribute('stroke-dasharray', `${len} ${len + 10}`); p.setAttribute('stroke-dashoffset', len);
         let ta = TH[0]; while (ta < TH[1] && headX(ta) < x0) ta += 0.005;
-        return { p, len, t: ta, t1: ta + (x1 - x0) / 1850 * (TH[1] - TH[0]) * 1.1 };
+        return { p, hd, len, t: ta, t1: ta + (x1 - x0) / 1850 * (TH[1] - TH[0]) * 1.1 };
       });
       const tocNums = [], tocT = [];
       for (let i = 0; i < 9; i++) {
@@ -211,11 +213,14 @@
       F.event(A0 + 0.12, 'silk'); F.event(42.9, 'cell'); F.event(43.3, 'silk'); F.event(43.9, 'tick');
       F.event(44.0, 'whoosh', { dur: 0.6 });
       F.event(B0 + 0.55, 'roll', { dur: 0.45 }); F.event(B0 + 1.0, 'check');
-      F.event(45.72, 'lift');
+      F.event(45.62, 'lift');
       DROP_ORDER.forEach((s, r) => F.event(tDrop(s) + 0.42, 'paper', { gain: +(1 - r * 0.07).toFixed(2), i: r + 1 }));
       F.event(T_FOLD, 'collapse'); F.event(T_LAND, 'drop');
 
       // type scale readout (top-left) and template palette (top-right)
+      const panel = (o) => div(over, { borderRadius: 12, border: '1px solid var(--d-border)', background: 'rgba(35,33,32,.94)', boxShadow: '0 18px 50px rgba(0,0,0,.4)', opacity: 0, ...o });
+      const specP = panel({ left: 22, top: 136, width: 214, height: 140 });
+      const palP = panel({ left: 1548, top: 134, width: 352, height: 102 });
       const spec = div(over, { left: 34, top: 150, fontFamily: 'var(--mono)', fontSize: 15, color: 'var(--d-muted)', lineHeight: 1.9, opacity: 0 });
       const SPEC = [[40, L('标题页', 'Cover')], [28, L('页标题', 'Title')], [18, L('正文', 'Body')], [12, L('注释', 'Caption')]];
       const specRows = SPEC.map(([n, lab]) => {
@@ -281,8 +286,8 @@
         { t: 36.2, x: 1330, y: 444, d: 580, rx: 2, ry: 1, e: 'linear' },
         { t: 37.55, x: 940, y: 448, d: 120, rx: 2, ry: 1.5, e: 'inOutCubic' },
         { t: 37.95, x: 944, y: 452, d: 140, rx: 2, ry: 1.5, e: 'linear' },
-        { t: 39.1, x: 1142, y: 574, d: -760, rx: 6, ry: -4, e: 'inOutCubic' },
-        { t: 41.2, x: 1146, y: 572, d: -700, rx: 5, ry: 2.5, e: 'inOutQuad' },
+        { t: 39.0, x: 1010, y: 566, d: -720, rx: 5, ry: -3.5, e: 'inOutCubic' },
+        { t: 41.3, x: 780, y: 520, d: 80, rx: 2, ry: 2.5, e: 'inOutQuad' },
         { t: 42.0, x: NUM.x, y: NUM.y, d: 1180, rx: 0, ry: 0, e: 'inOutCubic' },
         { t: 42.2, x: NUM.x + 4, y: NUM.y + 6, d: 1200, e: 'linear' },
         { t: 43.0, x: C4.cx + 60, y: C4.cy + 10, d: 1480, rx: 0, ry: 0, e: 'inOutCubic' },
@@ -299,6 +304,7 @@
       let lastFocus = null;
       return (lt, t) => {
         if (!drawn && document.fonts.status === 'loaded') drawAll();
+        if (!chipW && t > 46) { chip.style.display = ''; chipW = chip.offsetWidth; chipH = chip.offsetHeight; }
         const c = camPath(KEYS, t);
         world.style.transform = `translate(960px,540px) translateZ(${c.d}px) rotateX(${c.rx}deg) rotateY(${c.ry}deg) translate(${-c.x}px,${-c.y}px)`;
 
@@ -322,7 +328,11 @@
         words.forEach((w, c2) => {
           w.update(WORDS[c2], prog(t, wordT[c2] - 0.05, wordT[c2] + 0.45), outS);
         });
-        arrows.forEach((a) => a.p.setAttribute('stroke-dashoffset', a.len * (1 - tw(t, a.t, a.t1, 'inOutQuad'))));
+        arrows.forEach((a) => {
+          const k = tw(t, a.t, a.t1, 'inOutQuad');
+          a.p.setAttribute('stroke-dashoffset', a.len * (1 - k));
+          a.hd.setAttribute('opacity', clamp((k - 0.9) / 0.1).toFixed(3));
+        });
         tocNums.forEach((n, i) => css(n, { opacity: (tw(t, tocT[i], tocT[i] + 0.3, 'outQuad') * (1 - tw(t, 37.9, 38.3))).toFixed(3) }));
 
         // slides
@@ -360,8 +370,9 @@
         S5.contrast(t);
 
         // overlays during the layout build
-        const ovO = env(t, 38.6, 41.5, 0.5, 0.45);
+        const ovO = env(t, 38.6, 41.05, 0.5, 0.4);
         css(spec, { opacity: ovO * 0.95, display: ovO > 0 ? '' : 'none' });
+        for (const e of [specP, palP]) css(e, { opacity: ovO, display: ovO > 0 ? '' : 'none' });
         specRows.forEach((r, i) => {
           const settle = prog(t, 38.9 + i * 0.12, 40.3 + i * 0.1);
           const jit = settle < 1 ? Math.round((F.hash(Math.floor(t * 18) + i * 31) - 0.5) * 16 * (1 - settle)) : 0;
@@ -395,11 +406,10 @@
         css(toolOut, { height: 76 * outH, padding: outH > 0 ? '9px 15px' : '0 15px', display: outH > 0 ? '' : 'none' });
 
         // chip flight into sentence 3's input box
-        if (!chipW && t > 46) { chip.style.display = ''; chipW = chip.offsetWidth; chipH = chip.offsetHeight; }
-        const chipO = tw(t, T_FLY + 0.22, T_FLY + 0.5, 'outQuad');
+        const chipO = tw(t, T_FLY + 0.38, T_FLY + 0.56, 'outQuad');
         if (chipO > 0) {
           const fp = flyPos(t);
-          const s = lerp(2.0, fp.sc3, ease.outCubic(fp.k));
+          const s = fp.sc3;
           css(chip, { opacity: chipO, display: '', transform: `translate(${fp.x - chipW / 2}px,${fp.y - chipH / 2}px) scale(${s})` });
         } else css(chip, { display: 'none' });
 
@@ -453,11 +463,12 @@
           const grid = { x: GRID_C[c], y: GRID_R[r], z: ZOFF[i], s: S_GRID, rot: 0 };
           const fanA = FAN_ANG[RANK[i]];
           const fan = { x: 960 + fanA * 15, y: 452 + Math.abs(fanA) * 3.2, z: RANK[i] * 4, s: S_FAN, rot: fanA };
-          let p;
+          let p, morph = { m: 0 };
           const kg = tw(t, tGrid(i), tGrid(i) + 0.9, 'inOutCubic');
           const td = tDrop(i);
-          if (t < 45.7) p = mixPose(toc, grid, kg);
-          else if (t < td) { const kl = ease.inCubic(prog(t, 45.7 + 0.03 * (8 - i), 46.12)); p = { ...grid, y: grid.y - 1700 * kl, z: grid.z + 200 * kl }; }
+          const liftA = 45.62 + 0.025 * RANK[i], liftB = liftA + 0.3;
+          if (t < 45.62) p = mixPose(toc, grid, kg);
+          else if (t < td) { const kl = ease.inCubic(prog(t, liftA, liftB)); p = { ...grid, y: grid.y - 1700 * kl, z: grid.z + 200 * kl }; }
           else {
             const kd = prog(t, td, td + 0.52);
             const above = { x: fan.x + fanA * 8, y: -560, z: fan.z, s: S_FAN, rot: fanA * 2.4 + (RANK[i] % 2 ? 7 : -7) };
@@ -465,16 +476,29 @@
             const breathe = 1 + 0.012 * tw(t, 46.6, 49.1, 'inOutQuad');
             p.s *= breathe; p.x = 960 + (p.x - 960) * breathe; p.y = 452 + (p.y - 452) * breathe;
             // fold the fan into a stack, then fly the stack into the chip
-            const kf = tw(t, T_FOLD, T_FOLD + 0.45, 'inOutCubic');
+            const kf = tw(t, T_FOLD, T_FOLD + 0.4, 'inOutCubic');
             if (kf > 0) { const stk = { x: 960 + (RANK[i] - 8) * 1.4, y: 452 + (8 - RANK[i]) * 1.6, z: fan.z, s: S_FAN * breathe, rot: 0 }; p = mixPose(p, stk, kf); }
             if (t > T_FLY) {
               const fp = flyPos(t);
-              p = { ...p, x: fp.x + (p.x - 960) * (1 - fp.k), y: fp.y + (p.y - 452) * (1 - fp.k), s: p.s * lerp(1, 0.09, ease.inOutCubic(Math.min(1, fp.k * 1.25))) };
+              // the stack squeezes into a pill the size of the chip it becomes (chip-like form), then hands over to the chip
+              const m = ease.inOutCubic(prog(t, T_FLY, T_FLY + 0.5));
+              const cw = (chipW || 200) * fp.sc3, chh = (chipH || 37) * fp.sc3;
+              const sx = Math.exp(lerp(Math.log(p.s), Math.log(cw / 960), m)), sy = Math.exp(lerp(Math.log(p.s), Math.log(chh / 540), m));
+              p = { ...p, x: fp.x + (p.x - 960) * (1 - fp.k), y: fp.y + (p.y - 452) * (1 - fp.k), s: sx, sy: sy / sx };
+              morph = { m, rx: m * chh / 2 / sx, ry: m * chh / 2 / sy };
             }
           }
-          const vis = t < 45.7 || t >= td ? 1 - prog(t, T_FLY + 0.3, T_FLY + 0.5) : (prog(t, 45.7, 46.12) < 1 ? 1 : 0);
-          const key = `${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(1)},${p.s.toFixed(4)},${p.rot.toFixed(2)}`;
-          if (key !== cache.key) { cache.key = key; root.style.transform = `translate3d(${p.x - 480}px,${p.y - 270}px,${p.z}px) rotate(${p.rot}deg) scale(${p.s})`; }
+          {
+            const rad = morph.m > 0 ? `${morph.rx.toFixed(1)}px / ${morph.ry.toFixed(1)}px` : '0px';
+            if (rad !== cache.rad) { cache.rad = rad; paper.style.borderRadius = rad; edge.style.borderRadius = rad; root.style.borderRadius = rad; }
+            const pc = morph.m > 0 ? mix('#ffffff', '#f0f0ef', morph.m) : '#ffffff';
+            if (pc !== cache.pc) { cache.pc = pc; paper.style.background = pc; }
+            css(content, { opacity: (1 - tw(t, T_FLY, T_FLY + 0.25)).toFixed(3) });
+          }
+          const vis = t < 45.62 || t >= td ? 1 - prog(t, T_FLY + 0.42, T_FLY + 0.58) : (t < liftB ? 1 : 0);
+          const sy = p.sy ?? 1;
+          const key = `${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(1)},${p.s.toFixed(4)},${sy.toFixed(4)},${p.rot.toFixed(2)}`;
+          if (key !== cache.key) { cache.key = key; root.style.transform = `translate3d(${p.x - 480}px,${p.y - 270}px,${p.z}px) rotate(${p.rot}deg) scale(${p.s},${p.s * sy})`; }
           css(root, { opacity: vis.toFixed(3), display: vis > 0.001 ? '' : 'none' });
 
           // depth of field: blur by distance from the plane in focus
@@ -554,12 +578,19 @@
     return e;
   }
   const SLIDE_BODY = [
-    // 1 · cover
+    // 1 · cover: title (moves into place from the TOC line), date, agenda, source
     (p, { block }) => {
-      block(tx(p, L('管理层汇报 · 2026 年 10 月', 'Management briefing · October 2026'), 80, 300, { size: 18, color: TPL.gray }), 0.1);
-      block(tx(p, L('数据来源：销售下滑分析.xlsx（2025-10 至 2026-09）', 'Source: sales-decline-analysis.xlsx (Oct 2025 – Sep 2026)'), 80, 462, { size: 12, color: TPL.gray }), 0.2);
+      block(tx(p, L('管理层汇报 · 2026 年 10 月', 'Management briefing · October 2026'), 80, 312, { size: 18, color: TPL.gray }), 0.1);
+      block(div(p, { left: 80, top: 384, width: 824, height: 1, background: TPL.rule }), 0.14, 0);
+      [[L('问题', 'Problem'), L('下滑有多大', 'How big is the decline')], [L('原因', 'Cause'), L('不是客流，是折扣', 'Discounts, not footfall')], [L('建议', 'Proposal'), L('三件事与时间表', 'Three moves and a timeline')]].forEach(([a, b], j) => {
+        const x = 80 + j * 275;
+        block(tx(p, String(j + 1).padStart(2, '0'), x, 404, { size: 12, color: TPL.gray, font: 'var(--mono)' }), 0.18 + j * 0.06);
+        block(tx(p, a, x + 30, 400, { size: 18, weight: 500 }), 0.18 + j * 0.06);
+        block(tx(p, b, x + 30, 428, { size: 12, color: TPL.gray }), 0.2 + j * 0.06);
+      });
+      block(tx(p, L('数据来源：销售下滑分析.xlsx（2025-10 至 2026-09）', 'Source: sales-decline-analysis.xlsx (Oct 2025 – Sep 2026)'), 80, 478, { size: 11, color: TPL.gray }), 0.3);
     },
-    // 2 · the answer first: three stat callouts
+    // 2 · the answer first: three stat callouts + what the −6.8 points are made of
     (p, ctx) => {
       const { block, ret } = ctx;
       const cards = [
@@ -568,37 +599,53 @@
         [L('来自家居品类折扣', 'From Home discounts'), L('约 70%', '≈ 70%'), L('折扣率 12% → 19%', 'Discount rate 12% → 19%'), TPL.gray],
       ];
       cards.forEach(([lab, num, sub, sc], j) => {
-        const x = 56 + j * 292;
-        const card = block(div(p, { left: x, top: 150, width: 268, height: 158, border: `1px solid ${TPL.rule}`, borderRadius: 3 }), 0.12 + j * 0.1, -18);
-        tx(card, lab, 19, 17, { size: 12, color: TPL.gray });
-        const n = tx(card, num, 18, 40, { size: 40, weight: 500, color: TPL.ink, ls: '-0.01em' });
-        tx(card, sub, 19, 114, { size: 12, color: sc });
+        const x = 56 + j * 290;
+        const card = block(div(p, { left: x, top: 128, width: 268, height: 142, border: `1px solid ${TPL.rule}`, borderRadius: 3 }), 0.08 + j * 0.08, -18);
+        tx(card, lab, 19, 16, { size: 12, color: TPL.gray });
+        tx(card, num, 18, 38, { size: 40, weight: 500, color: TPL.ink, ls: '-0.01em' });
+        tx(card, sub, 19, 108, { size: 12, color: sc });
         if (j === 1) {
-          ret.numAnchor = div(card, { left: 60, top: 95, width: 2, height: 2 });
-          const ring = h('svg', { width: 200, height: 90 }); st(ring, { position: 'absolute', left: 6, top: 34, overflow: 'visible' });
+          ret.numAnchor = div(card, { left: 60, top: 93, width: 2, height: 2 });
+          const ring = h('svg', { width: 200, height: 90 }); st(ring, { position: 'absolute', left: 6, top: 32, overflow: 'visible' });
           const rr = h('rect', { x: 0, y: 0, width: 168, height: 64, rx: 8, fill: 'none', stroke: '#4b8fe3', 'stroke-width': 2.5, 'stroke-dasharray': 520, 'stroke-dashoffset': 520 });
           ring.append(rr); card.append(ring); ret.ring = rr;
         }
       });
-      block(tx(p, L('下滑的七成来自家居品类折扣加深；客流与新店都不是主因。', 'Seven-tenths of the decline comes from deeper Home discounts; footfall and new stores are not the cause.'),
-        56, 350, { size: 18, color: TPL.body, w: 848, wrap: true, lh: 1.5 }), 0.45);
+      block(tx(p, L('下滑的七成来自家居品类折扣加深；客流与新店都不是主因。', 'Seven-tenths of the decline is deeper Home discounts, not footfall or new stores.'),
+        56, 296, { size: 18, color: TPL.body, w: 848 }), 0.32);
+      // decomposition: one stacked bar, 848 px = 6.8 points
+      block(tx(p, L('同比 −6.8 个百分点的构成', 'What makes up the −6.8 points'), 56, 360, { size: 12, color: TPL.gray }), 0.36);
+      const PT = 848 / 6.8, t0 = bt(1) + 0.5;
+      const segs = [[4.8, TPL.accent, L('家居品类折扣', 'Home discounts')], [1.3, TPL.bar, L('其他品类', 'Other categories')], [0.7, '#e4e1dd', L('新店', 'New stores')]];
+      let x = 56;
+      segs.forEach(([v, col, lab], j) => {
+        const w = v * PT - (j < 2 ? 2 : 0);
+        const last = j === 2;
+        const lb = tx(p, `${lab}  −${v.toFixed(1)}`, last ? x + w - 200 : x, 426, { size: 12, color: j ? TPL.gray : TPL.ink, weight: j ? 400 : 500, w: last ? 200 : 'auto', align: last ? 'right' : 'left' });
+        const b = hbar(p, ctx, x, 386, w, 28, col, t0 + j * 0.22, lb);
+        if (!j) ctx.accent(b);
+        x += v * PT;
+      });
     },
-    // 3 · not footfall: horizontal bars
+    // 3 · not footfall: sales = footfall × average ticket
     (p, ctx) => {
       const { block } = ctx;
       const t = bt(2) + 0.35;
-      const rows = [[L('客流', 'Footfall'), 1.2, TPL.bar], [L('客单价', 'Avg. ticket'), 5.7, null]];
-      block(div(p, { left: 160, top: 168, width: 1, height: 150, background: TPL.gray }), 0.1, 0);
+      const rows = [[L('客流', 'Footfall'), 1.2, TPL.bar], [L('客单价', 'Avg. ticket'), 5.7, null], [L('销售额', 'Sales'), 6.8, '#5c5753']];
+      block(div(p, { left: 160, top: 150, width: 1, height: 232, background: TPL.gray }), 0.1, 0);
       rows.forEach(([lab, v, col], j) => {
-        const y = 186 + j * 70;
-        block(tx(p, lab, 56, y + 4, { size: 18, color: TPL.body, w: 96 }), 0.1);
-        const val = tx(p, `−${v.toFixed(1)}%`, 172 + v * 55, y + 4, { size: 18, weight: 500 });
-        const b = hbar(p, ctx, 161, y, v * 55, 34, col || TPL.accent, t + j * 0.12, val);
+        const y = 164 + j * 74 + (j === 2 ? 6 : 0);
+        block(tx(p, lab, 56, y + 8, { size: 18, color: j === 2 ? TPL.ink : TPL.body, weight: j === 2 ? 500 : 400, w: 96 }), 0.1);
+        const val = tx(p, `−${v.toFixed(1)}%`, 172 + v * 55, y + 8, { size: 18, weight: 500 });
+        const b = hbar(p, ctx, 161, y, v * 55, 40, col || TPL.accent, t + j * 0.14, val);
         if (!col) ctx.accent(b);
       });
-      block(tx(p, L('同比变化 · 2025-10 至 2026-09', 'Year-on-year change · Oct 2025 – Sep 2026'), 56, 340, { size: 12, color: TPL.gray }), 0.2);
-      block(div(p, { left: 600, top: 168, width: 1, height: 150, background: TPL.rule }), 0.1, 0);
-      block(tx(p, L('客流基本持平；下滑来自每一单买得更少。', 'Footfall barely moved; each basket got smaller.'), 630, 186, { size: 18, color: TPL.body, w: 270, wrap: true, lh: 1.55 }), 0.25);
+      block(div(p, { left: 56, top: 304, width: 480, height: 1, background: TPL.rule }), 0.2, 0);
+      block(tx(p, L('同比变化 · 销售额 = 客流 × 客单价', 'Year-on-year change · sales = footfall × average ticket'), 56, 404, { size: 12, color: TPL.gray }), 0.2);
+      block(div(p, { left: 620, top: 150, width: 1, height: 232, background: TPL.rule }), 0.1, 0);
+      block(tx(p, '−5.7%', 650, 146, { size: 40, weight: 500 }), 0.2);
+      block(tx(p, L('客单价同比', 'Average ticket, YoY'), 652, 200, { size: 12, color: TPL.gray }), 0.25);
+      block(tx(p, L('客流基本持平；下滑来自每一单买得更少。', 'Footfall barely moved; each basket got smaller.'), 652, 246, { size: 18, color: TPL.body, w: 252, wrap: true, lh: 1.55 }), 0.3);
     },
     // 4 · not new stores: two columns
     (p, ctx) => {
@@ -612,9 +659,12 @@
         if (!col) ctx.accent(b);
         block(tx(p, lab, x - 30, base + 10, { size: 12, color: TPL.gray, w: 160, align: 'center' }), 0.15);
       });
-      block(tx(p, '−6.1%', 560, 168, { size: 40, weight: 500 }), 0.2);
-      block(tx(p, L('剔除 2026 年新开 6 店后的同比', 'YoY without the 6 stores opened in 2026'), 562, 222, { size: 12, color: TPL.gray }), 0.25);
-      block(tx(p, L('新店只解释了 0.7 个百分点。', 'New stores explain only 0.7 points.'), 562, 268, { size: 18, color: TPL.body, w: 340, wrap: true, lh: 1.5 }), 0.3);
+      block(div(p, { left: 530, top: 160, width: 1, height: 272, background: TPL.rule }), 0.1, 0);
+      block(tx(p, '−6.1%', 560, 156, { size: 40, weight: 500 }), 0.2);
+      block(tx(p, L('剔除 2026 年新开 6 店后的同比', 'YoY without the 6 stores opened in 2026'), 562, 210, { size: 12, color: TPL.gray }), 0.25);
+      block(tx(p, L('新店只解释了 0.7 个百分点。', 'New stores explain only 0.7 points.'), 562, 256, { size: 18, color: TPL.body, w: 340, wrap: true, lh: 1.5 }), 0.3);
+      block(div(p, { left: 562, top: 380, width: 342, height: 1, background: TPL.rule }), 0.32, 0);
+      block(tx(p, L('同店口径：开业满 12 个月的 34 家门店', 'Like-for-like: the 34 stores open 12+ months'), 562, 394, { size: 12, color: TPL.gray }), 0.34);
     },
     // 5 · discounts: native column chart + the low-contrast subtitle
     (p, ctx) => {
@@ -673,7 +723,7 @@
         }
       };
     },
-    // 6 · concentrated in South China: horizontal bars by region
+    // 6 · concentrated in South China: horizontal bars by region + the stores behind it
     (p, ctx) => {
       const { block } = ctx;
       const t = bt(5) + 0.35;
@@ -681,15 +731,23 @@
       block(div(p, { left: 160, top: 150, width: 1, height: 248, background: TPL.gray }), 0.08, 0);
       rows.forEach(([lab, v, hi], j) => {
         const y = 160 + j * 60;
-        block(tx(p, lab, 56, y + 3, { size: 18, color: TPL.body, w: 96 }), 0.1);
-        const val = tx(p, `−${v.toFixed(1)}%`, 172 + v * 32, y + 3, { size: 18, weight: hi ? 500 : 400 });
-        const b = hbar(p, ctx, 161, y, v * 32, 32, hi ? TPL.accent : TPL.bar, t + j * 0.08, val);
+        block(tx(p, lab, 56, y + 6, { size: 18, color: TPL.body, w: 96 }), 0.1);
+        const val = tx(p, `−${v.toFixed(1)}%`, 172 + v * 32, y + 6, { size: 18, weight: hi ? 500 : 400 });
+        const b = hbar(p, ctx, 161, y, v * 32, 36, hi ? TPL.accent : TPL.bar, t + j * 0.08, val);
         if (hi) ctx.accent(b);
       });
       block(tx(p, L('区域同比 · 剔除重复入账后', 'YoY by region · after removing duplicates'), 56, 420, { size: 12, color: TPL.gray }), 0.2);
       block(div(p, { left: 600, top: 150, width: 1, height: 248, background: TPL.rule }), 0.1, 0);
-      block(tx(p, '8 / 10', 630, 150, { size: 40, weight: 500 }), 0.2);
-      block(tx(p, L('华南下滑集中的门店', 'South China stores carrying the decline'), 632, 204, { size: 12, color: TPL.gray }), 0.25);
+      block(tx(p, '8 / 10', 630, 146, { size: 40, weight: 500 }), 0.2);
+      block(tx(p, L('华南门店中下滑超过 9% 的', 'South China stores down more than 9%'), 632, 200, { size: 12, color: TPL.gray }), 0.25);
+      const ST = [['S-14', 14.2], ['S-17', 13.5], ['S-12', 12.8], ['S-19', 12.1], ['S-11', 11.6], ['S-16', 10.9], ['S-20', 10.4], ['S-13', 9.8]];
+      block(div(p, { left: 632, top: 236, width: 272, height: 1, background: TPL.rule }), 0.28, 0);
+      ST.forEach(([id, v], j) => {
+        const x = 632 + Math.floor(j / 4) * 146, y = 248 + (j % 4) * 36;
+        block(tx(p, id, x, y, { size: 12, color: TPL.gray, font: 'var(--mono)' }), 0.3 + j * 0.03);
+        block(tx(p, `−${v.toFixed(1)}%`, x + 40, y - 2, { size: 14, w: 86, align: 'right' }), 0.3 + j * 0.03);
+        if (j % 4 < 3) block(div(p, { left: x, top: y + 26, width: 126, height: 1, background: '#efedea' }), 0.3 + j * 0.03, 0);
+      });
     },
     // 7 · data correction: a quiet table (rules only, numbers right-aligned)
     (p, { block }) => {
@@ -706,47 +764,53 @@
         block(tx(p, cells[1], X[1] - 200, y, { ...o, w: 200, align: 'right' }), dt);
         block(tx(p, cells[2], X[2] - 200, y, { ...o, w: 200, align: 'right', weight: o.size === 18 ? 500 : 400 }), dt);
       };
-      row(hd, 150, { size: 12, color: TPL.gray }, 0.05);
-      block(div(p, { left: 56, top: 176, width: 848, height: 1.5, background: TPL.ink }), 0.08, 0);
+      block(div(p, { left: 704, top: 168, width: 200, height: 232, background: 'rgba(196,86,31,.06)' }), 0.1, 0);
+      row(hd, 140, { size: 12, color: TPL.gray }, 0.05);
+      block(div(p, { left: 56, top: 166, width: 848, height: 1.5, background: TPL.ink }), 0.08, 0);
       rows.forEach((r, j) => {
-        row(r, 192 + j * 56, { size: 18, color: TPL.body }, 0.12 + j * 0.06);
-        block(div(p, { left: 56, top: 232 + j * 56, width: 848, height: 1, background: TPL.rule }), 0.12 + j * 0.06, 0);
+        row(r, 184 + j * 58, { size: 18, color: TPL.body }, 0.12 + j * 0.06);
+        block(div(p, { left: 56, top: 226 + j * 58, width: 848, height: 1, background: TPL.rule }), 0.12 + j * 0.06, 0);
       });
+      block(tx(p, L('判定规则：订单号、日期、金额完全相同 · 来源：清洗明细', 'Rule: same order number, date and amount · source: Cleaned sheet'), 56, 426, { size: 12, color: TPL.gray }), 0.4);
     },
     // 8 · proposals (the third one is the tender)
     (p, ctx) => {
       const { block } = ctx;
       const items = [
-        [L('收紧折扣授权', 'Tighten discount authority'), L('家居品类折扣率已从 12% 升至 19%', 'Home discount rate has risen from 12% to 19%')],
-        [L('调整家居品类陈列', 'Re-plan Home category displays'), L('先在华南 8 家门店试行', 'Start with the 8 South China stores')],
-        [L('参与「华南连锁渠道」2027 年度供应招标', 'Bid for the South China retail-chain 2027 supply tender'), L('以新渠道对冲华南下滑', 'A new channel to offset the South China decline')],
+        [L('收紧折扣授权', 'Tighten discount authority'), L('家居品类折扣率已从 12% 升至 19%', 'Home discount rate has risen from 12% to 19%'), L('11 月起', 'From Nov')],
+        [L('调整家居品类陈列', 'Re-plan Home category displays'), L('先在华南 8 家门店试行', 'Start with the 8 South China stores'), L('12 月试点', 'Pilot in Dec')],
+        [L('参与「华南连锁渠道」2027 年度供应招标', 'Bid for the South China retail-chain 2027 supply tender'), L('以新渠道对冲华南下滑', 'A new channel to offset the South China decline'), L('2027 年 1 月', 'Jan 2027')],
       ];
-      items.forEach(([a, b], j) => {
-        const y = 150 + j * 104;
+      items.forEach(([a, b, when], j) => {
+        const y = 142 + j * 108;
         block(ctx.accent(tx(p, String(j + 1).padStart(2, '0'), 56, y - 4, { size: 28, weight: 500, font: 'var(--sans)' }), 'color'), 0.1 + j * 0.1);
         block(tx(p, a, 130, y, { size: 18, weight: 500 }), 0.12 + j * 0.1);
         block(tx(p, b, 130, y + 34, { size: 12, color: TPL.gray }), 0.14 + j * 0.1);
-        if (j < 2) block(div(p, { left: 130, top: y + 76, width: 774, height: 1, background: TPL.rule }), 0.14 + j * 0.1, 0);
+        block(tx(p, when, 704, y + 2, { size: 12, color: TPL.gray, w: 200, align: 'right' }), 0.14 + j * 0.1);
+        if (j < 2) block(div(p, { left: 130, top: y + 78, width: 774, height: 1, background: TPL.rule }), 0.14 + j * 0.1, 0);
       });
+      block(tx(p, L('负责：商品部 · 华南大区 · 渠道拓展部', 'Owners: Merchandising · South China region · Channel development'), 130, 452, { size: 12, color: TPL.gray }), 0.45);
     },
     // 9 · next steps: a three-point timeline
     (p, ctx) => {
       const { block } = ctx;
-      block(div(p, { left: 56, top: 290, width: 848, height: 1.5, background: TPL.rule }), 0.05, 0);
+      block(div(p, { left: 56, top: 250, width: 848, height: 1.5, background: TPL.rule }), 0.05, 0);
       const pts = [
-        [L('2026 年 11 月', 'Nov 2026'), L('收紧家居品类折扣授权', 'Tighten Home discount authority')],
-        [L('2026 年 12 月', 'Dec 2026'), L('华南 8 店调整陈列', 'Re-plan displays in 8 South China stores')],
-        [L('2027 年 1 月', 'Jan 2027'), L('提交招标响应', 'Submit the tender response')],
+        [L('2026 年 11 月', 'Nov 2026'), L('收紧家居品类折扣授权', 'Tighten Home discount authority'), L('商品部', 'Merchandising'), L('折扣率回到 15% 以内', 'Discount rate back under 15%')],
+        [L('2026 年 12 月', 'Dec 2026'), L('华南 8 店调整陈列', 'Re-plan displays in 8 South China stores'), L('华南大区', 'South China region'), L('试点 4 周后复盘', 'Review after a 4-week pilot')],
+        [L('2027 年 1 月', 'Jan 2027'), L('提交招标响应', 'Submit the tender response'), L('渠道拓展部', 'Channel development'), L('逐条响应招标文件', 'Clause-by-clause response')],
       ];
-      pts.forEach(([d, s], j) => {
+      pts.forEach(([d, s, who, kpi], j) => {
         const x = 56 + j * 300;
-        block(ctx.accent(div(p, { left: x, top: 284, width: 13, height: 13, borderRadius: 7 })), 0.1 + j * 0.1, 0);
-        block(tx(p, d, x, 246, { size: 12, color: TPL.gray }), 0.12 + j * 0.1);
-        block(tx(p, s, x, 316, { size: 18, color: TPL.body, w: 260, wrap: true, lh: 1.45 }), 0.14 + j * 0.1);
+        block(ctx.accent(div(p, { left: x, top: 244, width: 13, height: 13, borderRadius: 7 })), 0.1 + j * 0.1, 0);
+        block(tx(p, d, x, 206, { size: 12, color: TPL.gray }), 0.12 + j * 0.1);
+        block(tx(p, s, x, 280, { size: 18, color: TPL.ink, weight: 500, w: 260, wrap: true, lh: 1.4 }), 0.14 + j * 0.1);
+        block(div(p, { left: x, top: 372, width: 260, height: 1, background: TPL.rule }), 0.16 + j * 0.1, 0);
+        block(tx(p, who, x, 384, { size: 12, color: TPL.body }), 0.18 + j * 0.1);
+        block(tx(p, kpi, x, 406, { size: 12, color: TPL.gray }), 0.2 + j * 0.1);
       });
     },
   ];
-
   // ---------- the workbook (canvas) ----------
   const WB = (() => {
     const r = F.rng(4242);

@@ -76,6 +76,11 @@
     'Questions about this tender shall be raised in writing no later than 10 days before closing.',
     'Stores receive goods daily between 8:00 and 11:00.',
   ];
+  // one-line clauses around the starred requirements in the focus column
+  const SHORT = ZH ? ['3.1.3　产品尺寸公差 ±2 mm。', '3.1.4　五金件盐雾试验不少于 48 h。', '2.6　近三年无重大违法记录。', '3.2.3　色差 ΔE 不大于 1.5。',
+    '4.1.3　报价以人民币计。', '3.3.1　标签须注明环保等级。', '3.4.1　提供产品使用说明书。', '4.2.1　按批次开具发票。', '3.5.3　样品须加封标识。', '2.7　提供社保缴纳证明。'] :
+    ['3.1.3  Dimensional tolerance ±2 mm.', '3.1.4  Salt-spray test of 48 h or more.', '2.6  No major violations in 3 years.', '3.2.3  Colour difference ΔE ≤ 1.5.',
+      '4.1.3  Prices quoted in CNY.', '3.3.1  Labels show the emission class.', '3.4.1  Product manuals supplied.', '4.2.1  One invoice per batch.', '3.5.3  Samples sealed and labelled.', '2.7  Social-insurance records.'];
   const CHAPTERS = ZH
     ? ['第一章　投标人须知', '第二章　资格要求', '第三章　技术要求', '第四章　商务条款', '第五章　售后服务', '附件 A　供货清单', '附件 B　供货计划']
     : ['Chapter 1  Instructions to bidders', 'Chapter 2  Eligibility', 'Chapter 3  Technical requirements', 'Chapter 4  Commercial terms', 'Chapter 5  After-sales service', 'Annex A  Supply list', 'Annex B  Delivery schedule'];
@@ -131,16 +136,22 @@
     [1, '5', L('服务承诺', 'Service commitments'), 55], [1, '6', L('附件', 'Annexes'), 63],
   ];
   // the quality shot (S3-05)
+  // each line is held with a little of its own page around it (ctx), so the
+  // pair reads as two pieces of evidence, not two captions
   const QA = {
-    label: L('招标文件 · 第 147 页 · 4.3', 'Tender · p. 147 · §4.3'),
-    pre: L('交付期限：合同签订后 ', 'Delivery within '), key: L('30 日', '30 days'), post: L('内', ' of signing'),
+    label: L('招标文件.pdf · 第 147 页 · 4.3', 'tender.pdf · p. 147 · §4.3'),
+    pre: L('交付期限：合同签订后 ', 'Delivery period: within '), key: L('30 日', '30 days'), post: L('内', ' of signing'),
+    ctx: ZH ? ['第四章　商务条款', '4.2　付款方式：验收合格后 60 日内支付货款，按批次开具发票。'] :
+      ['Chapter 4  Commercial terms', '4.2  Payment within 60 days of acceptance, invoiced per batch.'],
   };
   const QB = {
-    label: L('附件 B · 第 2 页 · 供货计划', 'Annex B · p. 2 · Delivery schedule'),
-    pre: L('供货计划：合同签订后 ', 'Delivery schedule: within '), key: L('45 日', '45 days'), post: L('内交付', ''),
+    label: L('招标文件.pdf · 附件 B · 第 2 页', 'tender.pdf · Annex B · p. 2'),
+    pre: L('供货计划：合同签订后 ', 'Delivery schedule: within '), key: L('45 日', '45 days'), post: L('内交付', ' of signing'),
+    ctx: ZH ? ['首批到货后 15 日内完成验收，后续批次见表 B-2。', '各门店收货时间为每日 8:00 至 11:00。'] :
+      ['Acceptance within 15 days of first delivery; later batches in Table B-2.', 'Stores receive goods daily between 8:00 and 11:00.'],
   };
   const COMMENT = L('两处交付期限矛盾（第 147 页 30 日 / 附件 B 45 日），请确认按哪一个响应。',
-    'The two delivery deadlines conflict (p. 147: 30 days / Annex B: 45 days). Please confirm which one to respond to.');
+    'The two delivery deadlines conflict (30 / 45 days). Please confirm which one to respond to.');
   const QCARD = {
     header: L('交付期限', 'Delivery deadline'),
     question: L('按哪个期限响应？', 'Which deadline should the response follow?'),
@@ -155,7 +166,9 @@
   const TOTAL = 187, WIN = 12;             // table window: 12 rows
   const CONN0 = 62.05, CONN_DT = 0.2, CONN_DUR = 0.45;
   const Q0 = 65.0;                         // quality shot
-  const TAUT = 68.0, CMT = 68.2, QC = 68.75, DOC0 = 69.5, OUT0 = 72.32;
+  const PAGE_T = [70.0, 70.22, 70.46], WIPE = 0.62;
+  const Q_FS = ZH ? 44 : 40;   // the two held lines
+  const TAUT = 68.0, CMT = 68.4, QC = 68.72, DOC0 = 69.8, OUT0 = 72.32;
 
   // scroll position of the tender text (px, focus-column units): a numeric
   // integral of a smooth velocity, plus the 203-page rush
@@ -276,7 +289,7 @@
           const s1 = POOL[Math.floor(r() * POOL.length)], s2 = r() < 0.45 ? POOL[Math.floor(r() * POOL.length)] : '';
           const num = `${1 + (chapter % 5)}.${1 + Math.floor(r() * 6)}.${1 + Math.floor(r() * 9)}`;
           const text = `${num}${ZH ? '　' : '  '}${s1}${s2 ? (ZH ? '' : ' ') + s2 : ''}`;
-          for (const ln of wrapText(ctx, text, c.w)) { out.push({ k: 'body', s: ln }); sinceFoot++; }
+          for (const ln of wrapText(ctx, text, c.w)) { out.push({ k: 'body', s: ln, p: para }); sinceFoot++; }
           para++;
           if (sinceFoot > perPage) { out.push({ k: 'blank' }); out.push({ k: 'foot', s: `— ${++page} —` }); out.push({ k: 'blank' }); sinceFoot = 0; }
         }
@@ -299,6 +312,17 @@
           for (const d of [-1, 1]) { const nb = focus.lines[j + d]; if (nb && (nb.k === 'head' || nb.k === 'foot')) focus.lines[j + d] = { k: 'blank' }; }
           FLOWN[i].line = j;
         });
+        // the starred requirements sit in a run of short one-line clauses, so
+        // no paragraph is cut mid-sentence around them
+        {
+          const L2 = focus.lines, js = FLOWN.map((f) => f.line);
+          let a = Math.min(...js), b = Math.max(...js);
+          const pa = L2[a - 1] && L2[a - 1].p, pb = L2[b + 1] && L2[b + 1].p;
+          while (a > 0 && pa != null && L2[a - 1].p === pa) a--;
+          while (b < L2.length - 1 && pb != null && L2[b + 1].p === pb) b++;
+          let n = 0;
+          for (let j = a; j <= b; j++) if (L2[j].k !== 'req') L2[j] = { k: 'body', s: SHORT[n++ % SHORT.length] };
+        }
         // the annex B line (pulled out in S3-05) lives in the far column
         // the near and far columns are pre-rendered (blurred) into atlases
         atlases = COLS.map((c) => {
@@ -494,16 +518,26 @@
       W.append(qLayer);
       function qLine(q, below = false) {
         const wrap = div({ position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', whiteSpace: 'nowrap' });
-        const lab = div({ fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--d-muted)', letterSpacing: '.02em', marginBottom: 10 }, q.label);
-        const ln = div({ fontFamily: SERIF, fontSize: 38, color: 'var(--d-fg)', lineHeight: 1.25, position: 'relative' });
-        const hl = div({ position: 'absolute', left: -6, top: -2, bottom: -4, background: 'rgba(140,180,240,.20)', borderRadius: 3, transformOrigin: '0 50%' });
+        const lab = div({ display: 'flex', alignItems: 'center', gap: 9, fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--d-muted)', letterSpacing: '.02em', marginBottom: 12 });
+        lab.append(badge('pdf', 10), span({}, q.label));
+        const ln = div({ fontFamily: SERIF, fontSize: Q_FS, color: 'var(--d-fg)', lineHeight: 1.25, position: 'relative' });
+        const hl = div({ position: 'absolute', left: -8, top: -2, bottom: -5, background: 'rgba(140,180,240,.20)', borderRadius: 3, transformOrigin: '0 50%' });
         const pre = span({}, q.pre), key = span({ position: 'relative' }, q.key), post = span({}, q.post);
-        const ul = div({ position: 'absolute', left: 0, right: 0, bottom: -5, height: 2, background: 'var(--d-accent)', transformOrigin: '0 50%' });
+        const ul = div({ position: 'absolute', left: 0, right: 0, bottom: -6, height: 2, background: 'var(--d-accent)', transformOrigin: '0 50%' });
         key.append(ul);
         ln.append(hl, pre, key, post);
-        if (below) { css(lab, { marginBottom: 0, marginTop: 12 }); wrap.append(ln, lab); } else wrap.append(lab, ln);
+        // a little of the page around the line: dim serif, fading away from the line
+        const ctx = div({ fontFamily: SERIF, fontSize: 20, lineHeight: '34px', color: 'rgba(247,245,243,.42)' });
+        q.ctx.forEach((s2, i) => ctx.append(div(i === 0 && !below ? { fontFamily: SANS, fontWeight: 600, fontSize: 18, color: 'rgba(247,245,243,.5)' } : {}, s2)));
+        const fade = below ? 'linear-gradient(180deg,#000 0%,#000 30%,rgba(0,0,0,.15) 100%)' : 'linear-gradient(0deg,#000 0%,#000 30%,rgba(0,0,0,.15) 100%)';
+        css(ctx, { webkitMaskImage: fade, maskImage: fade });
+        // a hairline rule down the left edge, like a quoted excerpt
+        const rule = div({ position: 'absolute', left: -28, width: 1, background: 'rgba(247,245,243,.16)', transformOrigin: '50% 0' });
+        if (below) { css(lab, { marginBottom: 0, marginTop: 14 }); css(ctx, { marginTop: 18 }); wrap.append(ln, lab, ctx); }
+        else { css(ctx, { marginBottom: 16 }); wrap.append(ctx, lab, ln); }
+        wrap.append(rule);
         qLayer.append(wrap);
-        return { wrap, lab, ln, hl, pre, key, post, ul, m: null };
+        return { wrap, lab, ln, hl, pre, key, post, ul, ctx, rule, below, m: null };
       }
       const qa = qLine(QA), qb = qLine(QB, true);
       css(qb.hl, { display: 'none' });
@@ -584,6 +618,7 @@
       // ---------- the document (S3-06 / S3-07) ----------
       const docCam = K.camera(layer, { perspective: 2400 });
       const D = docCam.world;
+      docCam.view.style.visibility = 'hidden';   // laid out from the start (no first-show layout spike), shown at DOC0
       const PW = 440, PH = 622, PT = 132, PX = [190, 666, 1142];
       const ink = '#201e1d', docBlue = '#2d62b8';
       const BODY = ZH ? `400 10.5px/1.75 "Noto Serif SC", serif` : `400 10.5px/1.6 "Source Serif 4", serif`;
@@ -593,13 +628,15 @@
         const pg = div({ position: 'absolute', left: PX[i], top: PT, width: PW, height: PH, background: '#ffffff', borderRadius: 2, overflow: 'hidden',
           boxShadow: '0 30px 80px rgba(0,0,0,.5), 0 0 0 1px rgba(0,0,0,.25)', color: ink, transformOrigin: '50% 50%' });
         const inner = div({ position: 'absolute', left: 0, top: 0, width: PW, height: PH, padding: '34px 44px 0', transformOrigin: '0 0' });
-        pg.append(inner);
+        // the agent's line, writing the page top-down (light-surface accent)
+        const wl = div({ position: 'absolute', left: 0, right: 0, top: 0, height: 2, background: 'var(--accent)', opacity: 0 });
+        pg.append(inner, wl);
         const blocks = [];
         const add = (e) => { inner.append(e); blocks.push(e); return e; };
         // running header
         const hd = add(div({ display: 'flex', justifyContent: 'space-between', fontFamily: HFONT, fontSize: 7.5, color: '#8a8685', borderBottom: '0.75px solid #cfcccb', paddingBottom: 4, marginBottom: 16 }));
         hd.append(span({}, L('华南连锁渠道 2027 年度供应项目', 'South China retail chain · 2027 supply')), span({}, L('投标文件', 'Bid response')));
-        return { pg, inner, blocks, add };
+        return { pg, inner, blocks, add, wl };
       }
       const H1 = (txt, num) => { const e = div({ fontFamily: HFONT, fontSize: 15, fontWeight: 700, color: docBlue, margin: '4px 0 9px', letterSpacing: ZH ? '.02em' : 0 }); e.append(span({ marginRight: 10 }, num), span({}, txt)); return e; };
       const H2 = (txt, num) => { const e = div({ fontFamily: HFONT, fontSize: 12, fontWeight: ZH ? 700 : 600, color: ink, margin: '10px 0 6px' }); e.append(span({ marginRight: 8 }, num), span({}, txt)); return e; };
@@ -656,7 +693,7 @@
           r.forEach((c, i) => { const td = h('td', { text: c }); css(td, { border: '0.75px solid #b9b6b5', padding: '3px 4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip', fontFamily: i === 0 ? '"IBM Plex Mono", monospace' : 'inherit', fontSize: i === 0 ? 8 : 8.6, color: (c === '负偏离' || c === 'Below') ? '#93600f' : ink }); tr.append(td); });
           tb.append(tr); trs.push(tr);
         });
-        p.add(tb);
+        p.add(tb); p.table = tb;
         p.add(div({ font: BODY, fontSize: 9, color: '#4a4645', marginTop: 8 }, L('注：负偏离项的原因与替代方案见附件 7《偏离表》。', 'Note: reasons and alternatives for each deviation are given in Annex 7.')));
         p.inner.append(foot('12'));
         p.rows = trs;
@@ -698,7 +735,7 @@
       stack.reverse().forEach((s) => D.append(s));
       pages.forEach((p) => D.append(p.pg));
       css(pages[1].pg, { zIndex: 3 }); css(pages[0].pg, { zIndex: 2 }); css(pages[2].pg, { zIndex: 1 });
-      const pcount = div({ position: 'absolute', left: PX[2] + PW + 28, top: PT + PH + 18, fontFamily: 'var(--mono)', fontSize: 15, color: 'var(--d-fg)', whiteSpace: 'nowrap', transform: 'translateX(-100%)', fontVariantNumeric: 'tabular-nums' });
+      const pcount = div({ position: 'absolute', left: PX[2] + PW + 28, top: PT + PH + 46, fontFamily: 'var(--mono)', fontSize: 15, color: 'var(--d-fg)', whiteSpace: 'nowrap', transform: 'translateX(-100%)', fontVariantNumeric: 'tabular-nums' });
       const flabel = div({ position: 'absolute', left: PX[0], top: PT - 40, display: 'flex', alignItems: 'center', gap: 9, fontSize: 15, color: 'var(--d-muted)', fontFamily: SANS, whiteSpace: 'nowrap' });
       flabel.append(badge('doc', 10), span({}, T('s3_out')));
       D.append(pcount, flabel);
@@ -714,7 +751,8 @@
       const chip = K.fileChip(T('s3_out'), 'doc');
       chipWrap.append(chip);
       layer.append(chipWrap);
-      [69.75, 70.01, 70.39].forEach((tp, i) => F.event(tp, 'paper', { gain: [1, 0.7, 0.5][i], note: 'page lands' }));
+      PAGE_T.forEach((tp, i) => F.event(tp, 'paper', { gain: [1, 0.7, 0.5][i], dur: WIPE, note: 'a page of the bid is written top-down (accent line sweeps it)' }));
+      F.event(PAGE_T[2] + WIPE + 0.05, 'paper_fan', { note: 'the remaining pages fan out behind page 49' });
       F.event(TAUT, 'string', { note: 'the blue line pulls taut between 30 and 45' });
       F.event(65.05, 'paper_lift', { note: 'p.147 line lifted out' });
       F.event(65.3, 'paper_lift', { note: 'Annex B line lifted out' });
@@ -727,18 +765,24 @@
       const grainU = K.grain(layer, 0.04);
 
       // ---------- per-frame ----------
+      // quality-shot layout (world coords)
+      const PAIRX = 640, PAIR_AY = 446, PAIR_GAP = 216, CMT_Y = 334, QC_Y = 500, CS = 1.32, QS = 1.32;
+      let CARD_X = 1080, qFinal = false;
+      const CAM2 = { x: 952 };
       const camKeys = [
         { t: 56.3, x: 960, y: 540, s: 1.22 },
         { t: 57.4, x: 962, y: 540, s: 1.035, e: 'outCubic' },
         { t: 61.0, x: 985, y: 532, s: 1.0, e: 'inOutQuad' },
         { t: 62.0, x: 960, y: 520, s: 0.985, e: 'inOutCubic' },
         { t: 65.0, x: 962, y: 524, s: 0.995, e: 'inOutQuad' },
-        { t: 66.4, x: 1010, y: 520, s: 1.05, e: 'inOutCubic' },
-        { t: 69.6, x: 1014, y: 522, s: 1.065, e: 'inOutQuad' },
+        { t: 66.4, x: PAIRX, y: 580, s: 1.1, e: 'inOutCubic' },
+        { t: 68.2, x: PAIRX + 6, y: 580, s: 1.125, e: 'inOutQuad' },
+        { t: 69.2, x: 952, y: 568, s: 1.0, e: 'inOutCubic', ph2: true, dx: 0 },
+        { t: 70.0, x: 958, y: 568, s: 1.012, e: 'inOutQuad', ph2: true, dx: 6 },
       ];
       const docKeys = [
-        { t: 69.4, x: 1000, y: 600, s: 0.94 },
-        { t: 70.6, x: 1000, y: 556, s: 1.0, e: 'outCubic' },
+        { t: 69.7, x: 1000, y: 596, s: 0.95 },
+        { t: 70.9, x: 1000, y: 556, s: 1.0, e: 'outCubic' },
         { t: 72.4, x: 1004, y: 554, s: 1.035, e: 'inOutQuad' },
       ];
       const camAt = (t) => K.camPath(camKeys, t);
@@ -790,7 +834,7 @@
         }
         // --- tender columns (S3-03 …) ---
         const colIn = tw(t, 56.35, 57.1, 'inOutQuad');
-        const colA = colIn * (1 - 0.8 * tw(t, 61.0, 62.0, 'inOutQuad')) * (1 - 0.6 * inQ) * (1 - outQ);
+        const colA = colIn * (1 - 0.8 * tw(t, 61.0, 62.0, 'inOutQuad')) * (1 - 0.82 * inQ) * (1 - outQ);
         if (colA > 0.002) {
           const zoomIn = lerp(1.0, 1.0, 1);
           const vel = (POS(t + 1 / 60) - POS(t - 1 / 60)) * 30; // px/s
@@ -842,13 +886,13 @@
         }
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         // depth of field: the text goes soft behind the quality shot
-        const blurPx = 5 * inQ;
+        const blurPx = 7 * inQ;
         css(cv, { filter: blurPx > 0.05 ? `blur(${blurPx.toFixed(2)}px)` : 'none' });
 
         // ======== reading thread ========
         const thrA = tw(t, 56.9, 57.2) * (1 - tw(t, 61.0, 61.8, 'inOutQuad'));
-        if (thrA > 0.002) {
-          const pts = trailPts(t);
+        const pts = thrA > 0.002 ? trailPts(t) : [];
+        if (pts.length > 1) {
           const d = pathD(pts);
           attr(trail, { d, opacity: thrA }); attr(trailHalo, { d, opacity: 0.1 * thrA });
           const hp = pts[pts.length - 1];
@@ -859,8 +903,8 @@
         // ======== table ========
         const kMove = tw(t, 61.0, 61.9, 'inOutCubic');
         const tblX = lerp(1226, 548, kMove), tblW = lerp(596, 706, kMove), respW = lerp(0, 120, kMove);
-        const tblA = tw(t, 57.0, 57.6, 'outQuad') * (1 - 0.8 * inQ) * (1 - outQ);
-        css(tbl, { left: tblX, top: 296, width: tblW, opacity: tblA, display: tblA > 0.002 ? '' : 'none', filter: inQ > 0.01 ? `blur(${(3.5 * inQ).toFixed(2)}px)` : 'none' });
+        const tblA = tw(t, 57.0, 57.6, 'outQuad') * (1 - 0.93 * inQ) * (1 - outQ);
+        css(tbl, { left: tblX, top: 296, width: tblW, opacity: tblA, display: tblA > 0.002 ? '' : 'none', filter: inQ > 0.01 ? `blur(${(6 * inQ).toFixed(2)}px)` : 'none' });
         const grid = `78px 1fr ${ZH ? 72 : 106}px ${respW.toFixed(1)}px`;
         css(thead, { gridTemplateColumns: grid, position: 'relative' });
         css(body, { position: 'relative' });
@@ -945,12 +989,12 @@
 
         // ======== company documents (S3-04) ========
         const compK = tw(t, 61.2, 62.1, 'outCubic');
-        const compA = compK * (1 - 0.8 * inQ) * (1 - outQ);
-        css(comp, { display: compA > 0.002 ? '' : 'none', opacity: compA, transform: `translateX(${(1 - compK) * 320}px)`, filter: inQ > 0.01 ? `blur(${(3.5 * inQ).toFixed(2)}px)` : 'none' });
+        const compA = compK * (1 - 0.93 * inQ) * (1 - outQ);
+        css(comp, { display: compA > 0.002 ? '' : 'none', opacity: compA, transform: `translateX(${(1 - compK) * 320}px)`, filter: inQ > 0.01 ? `blur(${(6 * inQ).toFixed(2)}px)` : 'none' });
         compEls.forEach((ce2, n) => { const kk = tw(t, 61.35 + n * 0.035, 61.75 + n * 0.035, 'outCubic'); css(ce2.el, { opacity: kk, transform: `translateX(${(1 - kk) * 24}px)` }); });
         // ======== outline (S3-04, left) ========
-        const outA = tw(t, 61.15, 61.5) * (1 - 0.8 * inQ) * (1 - outQ);
-        css(outl, { display: outA > 0.002 ? '' : 'none', opacity: outA, filter: inQ > 0.01 ? `blur(${(3.5 * inQ).toFixed(2)}px)` : 'none' });
+        const outA = tw(t, 61.15, 61.5) * (1 - 0.93 * inQ) * (1 - outQ);
+        css(outl, { display: outA > 0.002 ? '' : 'none', opacity: outA, filter: inQ > 0.01 ? `blur(${(6 * inQ).toFixed(2)}px)` : 'none' });
         let lastY = 184;
         OUT_ELS.forEach((e, i) => {
           const t0 = 61.45 + i * 0.205, kk = tw(t, t0, t0 + 0.35, 'outCubic');
@@ -974,43 +1018,61 @@
           cn.p.setAttribute('stroke', cn.dev && k >= 1 ? 'var(--d-warning)' : 'var(--d-accent)');
           const pt = cn.p.getPointAtLength(cn.len * k);
           attr(cn.dot, { cx: pt.x, cy: pt.y, r: k < 1 ? 3 : 2.5, fill: cn.dev && k >= 1 ? 'var(--d-warning)' : 'var(--d-accent)' });
-          css(cn.p, { opacity: (0.75 * (1 - 0.85 * inQ) * (1 - outQ)).toFixed(3) });
-          css(cn.dot, { opacity: ((1 - 0.85 * inQ) * (1 - outQ)).toFixed(3) });
+          css(cn.p, { opacity: (0.75 * (1 - 0.96 * inQ) * (1 - outQ)).toFixed(3) });
+          css(cn.dot, { opacity: ((1 - 0.96 * inQ) * (1 - outQ)).toFixed(3) });
         });
 
         // ======== quality shot (S3-05) ========
+        // composition: first the pair alone, centred, each line held with a
+        // little of its own page (65.0-68.2); after the snap the camera pulls
+        // back and the frame opens to the right for the comment and the
+        // question (68.2-69.8): evidence left, the decision right.
         const qOn = t >= Q0 - 0.05 && t < DOC0 + 1.4;
         qLayer.style.display = qOn ? '' : 'none';
         topL.style.display = qOn ? '' : 'none';
         if (qOn) {
           // measure once the lines have laid out
-          for (const q of [qa, qb]) if (!q.m || !q.m.w) q.m = { w: q.ln.offsetWidth, kx: q.key.offsetLeft + q.key.offsetWidth / 2, kw: q.key.offsetWidth, lw: q === qa ? q.lab.offsetHeight + 10 : 0 };
-          const KX = 780, AY = 380, BY = 566;
-          const ax = KX - qa.m.kx, bx = KX - qb.m.kx;
-          const qOut = tw(t, DOC0 - 0.15, DOC0 + 0.3, 'inOutQuad');
+          if (!qa.m || !qa.m.w || !qFinal) {
+            for (const q of [qa, qb]) q.m = { w: q.ln.offsetWidth, h: q.ln.offsetHeight, kx: q.key.offsetLeft + q.key.offsetWidth / 2, lw: q.ln.offsetTop, H: q.wrap.offsetHeight };
+            qFinal = document.fonts.status === 'loaded';
+            // phase 2 framing: pair's left edge and the cards' right edge get equal margins
+            const wmax = Math.max(qa.m.w, qb.m.w), lx = PAIRX - wmax / 2, cardsW = 420 * QS;
+            const room = 1920 - wmax - cardsW, gap = Math.min(140, Math.max(70, room * 0.3)), margin = (room - gap) / 2;
+            CAM2.x = lx - margin + 960;            // camera x putting lx at screen x = margin (s = 1)
+            CARD_X = lx + wmax + gap;
+            camKeys.forEach((k) => { if (k.ph2) k.x = CAM2.x + k.dx; });
+          }
+          // one shared left edge (one excerpt rule); the group is centred on PAIRX
+          const LX = PAIRX - Math.max(qa.m.w, qb.m.w) / 2, AY = PAIR_AY, BY = PAIR_AY + PAIR_GAP;
+          const ax = LX, bx = LX, KA = LX + qa.m.kx, KB = LX + qb.m.kx;
+          const qOut = tw(t, DOC0 - 0.3, DOC0 + 0.2, 'inOutQuad');
           // A rises out of the 4.3 row; B out of the text flow
           const qi = TOTAL - FINAL.length + Q_ROW;
-          const aFrom = { x: tblX + 78 + 12, y: 296 + 36 + 4 + (qi - scrollRows) * 36 + 2, s: 15 / 38 };
-          const bFrom = { x: focus.x + 30, y: 760, s: 18 / 38 };
-          const ka = tw(t, Q0 + 0.05, Q0 + 1.05, 'inOutCubic'), kb = tw(t, Q0 + 0.3, Q0 + 1.35, 'inOutCubic');
+          const aFrom = { x: tblX + 78 + 12, y: 296 + 36 + 4 + (qi - scrollRows) * 36 + 2, s: 15 / Q_FS };
+          const bFrom = { x: focus.x + 30, y: 760, s: 18 / Q_FS };
+          const ka = tw(t, Q0 + 0.05, Q0 + 1.15, 'inOutCubic'), kb = tw(t, Q0 + 0.3, Q0 + 1.4, 'inOutCubic');
+          const recede = 1 - 0.06 * qOut;
           const place = (q, from, x, y, k, kl) => {
-            const s = lerp(from.s, 1, k);
+            const s = lerp(from.s, 1, k) * recede;
             const yy = lerp(from.y - q.m.lw * s, y - q.m.lw, k);
-            css(q.wrap, { transform: `translate(${lerp(from.x, x, k).toFixed(1)}px,${yy.toFixed(1)}px) scale(${s.toFixed(4)})`, opacity: Math.min(1, k * 3) * (1 - qOut), filter: k < 0.6 ? `blur(${((1 - k / 0.6) * 2).toFixed(2)}px)` : 'none' });
+            css(q.wrap, { transform: `translate(${lerp(from.x, x, k).toFixed(1)}px,${yy.toFixed(1)}px) scale(${s.toFixed(4)})`, opacity: Math.min(1, k * 3) * (1 - qOut),
+              filter: k < 0.6 ? `blur(${((1 - k / 0.6) * 2).toFixed(2)}px)` : qOut > 0.01 ? `blur(${(qOut * 3).toFixed(2)}px)` : 'none' });
             css(q.lab, { opacity: kl });
+            css(q.ctx, { opacity: kl, transform: `translateY(${((1 - kl) * (q.below ? -8 : 8)).toFixed(1)}px)` });
+            css(q.rule, { top: 4, height: q.m.H - 8, opacity: kl, transform: `scaleY(${ease.outCubic(kl).toFixed(3)})`, transformOrigin: q.below ? '50% 0' : '50% 100%' });
           };
-          place(qa, aFrom, ax, AY, ka, tw(t, Q0 + 0.9, Q0 + 1.4));
-          place(qb, bFrom, bx, BY, kb, tw(t, Q0 + 1.1, Q0 + 1.6));
+          place(qa, aFrom, ax, AY, ka, tw(t, Q0 + 1.0, Q0 + 1.7, 'inOutQuad'));
+          place(qb, bFrom, bx, BY, kb, tw(t, Q0 + 1.2, Q0 + 1.9, 'inOutQuad'));
           // underline the two numbers
-          css(qa.ul, { transform: `scaleX(${tw(t, 65.75, 66.2, 'outCubic')})` });
-          css(qb.ul, { transform: `scaleX(${tw(t, 65.85, 66.3, 'outCubic')})` });
+          css(qa.ul, { transform: `scaleX(${tw(t, 65.8, 66.25, 'outCubic')})` });
+          css(qb.ul, { transform: `scaleX(${tw(t, 65.9, 66.35, 'outCubic')})` });
           // the thread between them: drawn slack, then pulled taut at 68.0
-          const pA = { x: KX, y: AY + 46 + 4 }, pB = { x: KX, y: BY - 6 };
-          const draw = tw(t, 65.95, 66.9, 'inOutQuad');
-          let sag = lerp(64, 46, tw(t, 66.9, 67.85, 'inOutQuad'));
-          if (t >= 67.85) { const u = t - 67.85; sag = u < 0.15 ? lerp(46, 0, ease.inCubic(u / 0.15)) : -10 * Math.exp(-(u - 0.15) * 7) * Math.sin((u - 0.15) * 34); }
-          const mid = { x: KX - sag * 2.0, y: (pA.y + pB.y) / 2 };
-          const dq = `M${pA.x} ${pA.y} Q${mid.x.toFixed(1)} ${mid.y.toFixed(1)} ${pB.x} ${pB.y}`;
+          const pA = { x: KA, y: AY + qa.m.h + 8 }, pB = { x: KB, y: BY - 8 };
+          const draw = tw(t, 66.0, 66.95, 'inOutQuad');
+          let sag = lerp(70, 50, tw(t, 66.95, 67.85, 'inOutQuad'));
+          if (t >= 67.85) { const u = t - 67.85; sag = u < 0.15 ? lerp(50, 0, ease.inCubic(u / 0.15)) : -11 * Math.exp(-(u - 0.15) * 7) * Math.sin((u - 0.15) * 34); }
+          const mid = { x: (pA.x + pB.x) / 2 - sag * 2.0, y: (pA.y + pB.y) / 2 };
+          const dq = `M${pA.x.toFixed(1)} ${pA.y.toFixed(1)} Q${mid.x.toFixed(1)} ${mid.y.toFixed(1)} ${pB.x.toFixed(1)} ${pB.y.toFixed(1)}`;
           attr(qPath, { d: dq }); attr(qHalo, { d: dq });
           const Lq = qPath.getTotalLength();
           for (const e of [qPath, qHalo]) attr(e, { 'stroke-dasharray': Lq, 'stroke-dashoffset': Lq * (1 - draw) });
@@ -1022,31 +1084,28 @@
           attr(qPath, { opacity: 1 - qOut, 'stroke-width': lerp(2.5, 2.2, taut) });
           attr(qHalo, { opacity: (0.1 + 0.1 * taut * Math.exp(-Math.max(0, t - 68.1) * 2.5)) * (1 - qOut) });
           // Word comment: highlight on line A, then the card
-          const hk = tw(t, CMT - 0.25, CMT + 0.2, 'outCubic');
+          const hk = tw(t, CMT - 0.3, CMT + 0.15, 'outCubic');
           css(qa.hl, { opacity: hk, transform: `scaleX(${hk})`, background: 'rgba(140,180,240,.22)' });
           const ck = tw(t, CMT, CMT + 0.55, 'outCubic');
-          const cx = 1158, cy = 236;
           // the comment card later docks into the document's margin
           const dock = tw(t, DOC0 + 0.15, DOC0 + 1.05, 'inOutCubic');
-          const from = scr(c, cx, cy + (1 - ck) * 14), dockTo = docTarget(t);
-          const ccx = lerp(from.x, dockTo.x, dock), ccy = lerp(from.y, dockTo.y, dock), ccs = lerp(c.s, dockTo.s, dock);
+          const from = scr(c, CARD_X + (1 - ck) * 24, CMT_Y), dockTo = docTarget(t);
+          const ccx = lerp(from.x, dockTo.x, dock), ccy = lerp(from.y, dockTo.y, dock), ccs = lerp(CS * c.s, dockTo.s, dock);
           css(cmt, { transform: `translate(${ccx.toFixed(1)}px,${ccy.toFixed(1)}px) scale(${ccs.toFixed(4)})`, opacity: ck * (dock >= 1 ? 0 : 1) });
           // dashed link from the highlighted text to the card
-          const ax2 = ax + qa.m.w + 6, ay2 = AY + 23;
-          const lk = tw(t, CMT + 0.1, CMT + 0.5) * (1 - qOut);
-          attr(cLink, { d: `M${ax2} ${ay2} L${(ax2 + 40).toFixed(1)} ${ay2} L${cx} ${(cy + 24).toFixed(1)}`, opacity: 0.9 * lk });
+          const ax2 = ax + qa.m.w + 10, ay2 = AY + qa.m.h / 2;
+          const lk = tw(t, CMT + 0.1, CMT + 0.5) * (1 - qOut) * (1 - dock);
+          attr(cLink, { d: `M${ax2.toFixed(1)} ${ay2.toFixed(1)} L${(ax2 + 36).toFixed(1)} ${ay2.toFixed(1)} L${CARD_X - 2} ${(CMT_Y + 34).toFixed(1)}`, opacity: 0.9 * lk });
           // QuestionCard
           const qk = tw(t, QC, QC + 0.6, 'outCubic');
-          const qcOut = tw(t, 70.1, 70.55, 'inOutQuad');
-          const QS = 1.32;
-          const qp = scr(c, 1158, 398 + (1 - qk) * 26 + qcOut * 18);
+          const qcOut = tw(t, DOC0, DOC0 + 0.35, 'inOutQuad');
+          const qp = scr(c, CARD_X + (1 - qk) * 0, QC_Y + (1 - qk) * 30 + qcOut * 18);
           css(qc, { transform: `translate(${qp.x.toFixed(1)}px,${qp.y.toFixed(1)}px) scale(${(QS * c.s).toFixed(4)})`, opacity: qk * (1 - qcOut) });
           // the cursor comes to the edge of the card and does not click
-          const curK = tw(t, 69.05, 69.95, 'inOutCubic');
-          const cur0 = { x: 1840, y: 960 }, cur1 = { x: 1158 + 420 * QS + 14, y: 398 + 128 * QS };
+          const curK = tw(t, 69.1, 69.9, 'inOutCubic');
+          const cur0 = { x: 1900, y: 1010 }, cur1 = { x: CARD_X + 420 * QS + 16, y: QC_Y + 132 * QS };
           const cxp = lerp(cur0.x, cur1.x, curK) + Math.sin(curK * Math.PI) * 30, cyp = lerp(cur0.y, cur1.y, curK);
-          const curA = tw(t, 69.0, 69.25) * (1 - qcOut);
-          // cursor is in world space with the card
+          const curA = tw(t, 69.05, 69.3) * (1 - qcOut);
           const cp = scr(c, cxp, cyp);
           css(cursor, { transform: `translate(${cp.x.toFixed(1)}px,${cp.y.toFixed(1)}px)`, opacity: curA, display: curA > 0.002 ? '' : 'none' });
         }
@@ -1077,63 +1136,69 @@
         }
 
         // ======== the document (S3-06) ========
+        // each page is written top-down: a thin accent line sweeps the page
+        // and the text settles in just behind it
         const docOn = t >= DOC0 - 0.2;
-        docCam.view.style.display = docOn ? '' : 'none';
+        if (docCam.view.style.visibility !== (docOn ? 'visible' : 'hidden')) docCam.view.style.visibility = docOn ? 'visible' : 'hidden';
         if (docOn) {
           const dc = K.camPath(docKeys, t);
           docCam.set(dc);
           const fold = tw(t, OUT0, OUT0 + 0.38, 'inOutCubic');         // pages slide onto page 12
           const shrink = tw(t, OUT0 + 0.22, 73.22, 'inOutCubic');       // and fly into the chip slot
           pages.forEach((p, i) => {
-            const t0 = [69.72, 69.98, 70.36][i];
-            const k = tw(t, t0, t0 + 0.6, 'outCubic');
-            let x = PX[i], y = PT;
-            x = lerp(x, PX[1], fold);
-            const op = Math.min(1, k * 4) * (i === 1 ? 1 : 1 - tw(t, OUT0 + 0.25, OUT0 + 0.45));
-            css(p.pg, { left: x, opacity: op, transform: `translate3d(0,${((1 - k) * 46).toFixed(1)}px,${((1 - k) * -260).toFixed(1)}px) rotateX(${((1 - k) * 9).toFixed(2)}deg)` });
-            // content assembles top-down
-            p.blocks.forEach((b, bi) => {
-              const tb = t0 + 0.28 + bi * (i === 0 ? 0.055 : 0.1);
-              const kb = tw(t, tb, tb + 0.35, 'outCubic');
-              css(b, { opacity: kb, transform: `translateY(${((1 - kb) * 6).toFixed(1)}px)` });
+            const t0 = PAGE_T[i];
+            const k = tw(t, t0, t0 + 0.75, 'outCubic');
+            const wk = tw(t, t0 + 0.05, t0 + 0.05 + WIPE, 'inOutQuad');
+            const x = lerp(PX[i], PX[1], fold);
+            const op = (t >= t0 ? Math.min(1, (t - t0) / 0.08) : 0) * (i === 1 ? 1 : 1 - tw(t, OUT0 + 0.25, OUT0 + 0.45));
+            const clip = wk >= 1 ? 'none' : `inset(-140px -140px ${((1 - wk) * PH).toFixed(1)}px -140px)`;
+            css(p.pg, { left: x, opacity: op, clipPath: clip, transform: shrink > 0 && i === 1 ? 'none' : `translate3d(0,${((1 - k) * 34).toFixed(1)}px,${((1 - k) * -180).toFixed(1)}px) rotateX(${((1 - k) * 6).toFixed(2)}deg)` });
+            css(p.wl, { top: (wk * PH - 1).toFixed(1), opacity: wk > 0 && wk < 1 ? Math.min(1, (1 - wk) * 8) : 0 });
+            if (p.tops == null && p.pg.offsetHeight) p.tops = p.blocks.map((b2) => b2.offsetTop);
+            p.blocks.forEach((b2, bi) => {
+              const tb = t0 + 0.05 + WIPE * clamp(((p.tops ? p.tops[bi] : bi * 30) + 8) / PH) * 0.92;
+              const kb = tw(t, tb, tb + 0.3, 'outCubic');
+              css(b2, { opacity: kb, transform: `translateY(${((1 - kb) * 5).toFixed(1)}px)` });
             });
-            if (p.rows) p.rows.forEach((r, ri) => { const kr = tw(t, t0 + 0.75 + ri * 0.05, t0 + 1.0 + ri * 0.05); css(r, { opacity: kr }); });
+            if (p.rows) {
+              const tt = t0 + 0.05 + WIPE * clamp((p.tops ? p.tops[p.blocks.indexOf(p.table)] : 300) / PH) * 0.92;
+              p.rows.forEach((r, ri) => { const kr = tw(t, tt + 0.06 + ri * 0.035, tt + 0.3 + ri * 0.035); css(r, { opacity: kr }); });
+            }
           });
-          stack.forEach((s, k) => {
-            const ks = tw(t, 70.2 + (3 - k) * 0.08, 70.6 + (3 - k) * 0.08, 'outCubic');
-            css(s, { opacity: ks * (1 - tw(t, OUT0 + 0.1, OUT0 + 0.3)), left: lerp(PX[2] + (4 - k) * 7, PX[1], fold) });
+          // the rest of the 86 pages fan out from behind page 49 once it is written
+          stack.forEach((s2, k) => {
+            const ks = tw(t, PAGE_T[2] + WIPE + 0.05 + (3 - k) * 0.06, PAGE_T[2] + WIPE + 0.5 + (3 - k) * 0.06, 'outCubic');
+            const off = (4 - k) * 7 * ks;
+            css(s2, { opacity: ks > 0 ? 1 - tw(t, OUT0 + 0.1, OUT0 + 0.3) : 0, left: lerp(PX[2] + off, PX[1], fold), top: PT + off });
           });
-          const pc = Math.round(1 + 85 * ease.inOutQuad(prog(t, 69.8, 71.3)));
+          const pc = Math.round(1 + 85 * ease.inOutQuad(prog(t, PAGE_T[0] + 0.1, 71.7)));
           const pcs = L(`${pc} 页`, `${pc} pages`);
           if (pcount.textContent !== pcs) pcount.textContent = pcs;
-          css(pcount, { opacity: tw(t, 69.8, 70.2) * (1 - tw(t, OUT0, OUT0 + 0.2)) });
-          css(flabel, { opacity: tw(t, 69.7, 70.2) * (1 - tw(t, OUT0, OUT0 + 0.2)) });
+          css(pcount, { opacity: tw(t, PAGE_T[0] + 0.1, PAGE_T[0] + 0.5) * (1 - tw(t, OUT0, OUT0 + 0.2)) });
+          css(flabel, { opacity: tw(t, PAGE_T[0], PAGE_T[0] + 0.5) * (1 - tw(t, OUT0, OUT0 + 0.2)) });
           // docked comment in page 49's margin
           const dk = tw(t, DOC0 + 0.9, DOC0 + 1.1);
           const dt2 = docTargetLocal();
           css(dcmt, { transform: `translate(${dt2.x}px,${dt2.y}px) scale(${dt2.s})`, opacity: dk * (1 - tw(t, OUT0, OUT0 + 0.2)) });
           // S3-07: page 12 becomes the chip
           const P2 = pages[1];
+          const fp = flightPoint(dc, shrink, t);
           if (shrink > 0) {
             const cw = chip.offsetWidth * 1.2, ch = chip.offsetHeight * 1.2;
-            const target = toDoc(dc, K.CHIP_SLOT.x - 4, K.CHIP_SLOT.y + 1);
-            const ks = shrink;
-            const w = Math.exp(lerp(Math.log(PW), Math.log(cw / dc.s), ks)), hh = Math.exp(lerp(Math.log(PH), Math.log(ch / dc.s), ks));
-            const cx0 = PX[1] + PW / 2, cy0 = PT + PH / 2;
-            const cx1 = lerp(cx0, target.x, ks), cy1 = lerp(cy0, target.y, ks) - Math.sin(Math.PI * ks) * 40;
-            css(P2.pg, { left: cx1 - w / 2, top: cy1 - hh / 2, width: w, height: hh, borderRadius: lerp(2, hh / 2, smooth(clamp((ks - 0.55) / 0.4))),
-              background: ks > 0.6 ? 'var(--card-bg)' : '#ffffff', transform: 'none' });
+            const w = Math.exp(lerp(Math.log(PW), Math.log(cw / dc.s), shrink)), hh = Math.exp(lerp(Math.log(PH), Math.log(ch / dc.s), shrink));
+            css(P2.pg, { left: fp.x - w / 2, top: fp.y - hh / 2, width: w, height: hh, borderRadius: lerp(2, hh / 2, smooth(clamp((shrink - 0.55) / 0.4))),
+              background: shrink > 0.6 ? 'var(--card-bg)' : '#ffffff' });
             css(P2.inner, { transform: `scale(${(w / PW).toFixed(4)})`, opacity: 1 - tw(t, OUT0 + 0.3, OUT0 + 0.6) });
           } else {
             css(P2.pg, { top: PT, width: PW, height: PH, borderRadius: 2, background: '#ffffff' });
             css(P2.inner, { transform: 'none', opacity: 1 });
           }
-          // chip itself (screen space)
-          const chipK = tw(t, 72.88, 73.12, 'inOutQuad');
+          // the chip itself (screen space) takes over from the shrinking page
+          const chipK = tw(t, 72.86, 73.1, 'inOutQuad');
           if (chipK > 0) {
-            const ks = shrink;
-            const sp = docToScreen(dc, ...(() => { const cx0 = PX[1] + PW / 2, cy0 = PT + PH / 2; const tg = toDoc(dc, K.CHIP_SLOT.x - 4, K.CHIP_SLOT.y + 1); return [lerp(cx0, tg.x, ks), lerp(cy0, tg.y, ks) - Math.sin(Math.PI * ks) * 40]; })());
+            const sp = docToScreen(dc, fp.x, fp.y);
             css(chipWrap, { opacity: chipK, transform: `translate(${(sp.x - chip.offsetWidth / 2).toFixed(1)}px,${(sp.y - chip.offsetHeight / 2).toFixed(1)}px) scale(1.2)` });
+            css(P2.pg, { opacity: 1 - chipK });
           } else css(chipWrap, { opacity: 0 });
         } else css(chipWrap, { opacity: 0 });
 
@@ -1141,6 +1206,15 @@
       };
 
       // ---------- coordinate helpers ----------
+      // centre of the page-becoming-chip (doc coords). It lands 12 px low and
+      // rises with the next surface's own chip (which eases up 10 px x 1.2 zoom
+      // over 73.2-73.65), so the two coincide instead of doubling.
+      function flightPoint(dc, ks, t) {
+        const settle = 12 * (1 - ease.outCubic(prog(t, 73.2, 73.65)));
+        const tg = toDoc(dc, K.CHIP_SLOT.x - 4, K.CHIP_SLOT.y + 1 + settle);
+        const cx0 = PX[1] + PW / 2, cy0 = PT + PH / 2;
+        return { x: lerp(cx0, tg.x, ks), y: lerp(cy0, tg.y, ks) - Math.sin(Math.PI * ks) * 40 };
+      }
       function toDoc(dc, sx, sy) { return { x: (sx - 960) / dc.s + dc.x, y: (sy - 540) / dc.s + dc.y }; }
       function docToScreen(dc, x, y) { return { x: (x - dc.x) * dc.s + 960, y: (y - dc.y) * dc.s + 540 }; }
       // where the comment docks: right margin of page 49, beside the 4.3 heading (doc coords)

@@ -56,7 +56,7 @@
   const COLS = [ // key, width, numeric
     ['date', 132], ['store', 92], ['region', 92], ['cat', 76], ['order', 168], ['amt', 132, 1], ['disc', 80, 1], ['qty', 64, 1], ['ch', 76], [null, 80], [null, 80], [null, 82]];
   const COLX = []; { let x = GUT; for (const c of COLS) { COLX.push(x); x += c[1]; } }
-  const C = { bgHero: 'rgba(33,31,30,0.95)', bgGlass: 'rgba(30,28,27,0.80)', grid: 'rgba(247,245,243,0.075)', strip: 'rgba(247,245,243,0.045)',
+  const C = { bgHero: 'rgba(33,31,30,0.95)', bgGlass: 'rgba(30,28,27,0.96)', grid: 'rgba(247,245,243,0.075)', strip: 'rgba(247,245,243,0.045)',
     letter: 'rgba(161,157,155,0.75)', head: 'rgba(247,245,243,0.70)', clean: 'rgba(247,245,243,0.86)', dirty: 'rgba(161,157,155,0.62)', bad: 'rgba(161,157,155,0.50)',
     accent: '#4b8fe3', danger: '#f09a9a' };
   const MONO = '"IBM Plex Mono", "Noto Sans SC", monospace';
@@ -174,35 +174,44 @@
   const project = (p) => ({ x: 960 + p.x * PERSP / (PERSP - p.z), y: 540 + p.y * PERSP / (PERSP - p.z), k: PERSP / (PERSP - p.z) });
 
   // layout: sheets 0..4 hang far in front (we fall through them on the way
-  // down); the hero; then the other 42 files float deeper and deeper, spiralling
-  // around the line of travel so the camera can fly through the field
-  const DZ = 330;
+  // down); the hero; then the other 42 files stand behind it in one long,
+  // evenly spaced file, like cards in a drawer. The camera swings round to
+  // the left and looks down the file at an angle, so every sheet shows its tab
+  // (华东_2025-10 … 西南_2026-09) and its first columns, crisp, in depth.
+  const DZ = 210;
+  const ladder = (k) => ({ X: 600, Y: 560, Z: k * DZ });
   const stack = Array.from({ length: 48 }, (_, i) => {
-    if (i < HERO) { const j = HERO - i; return { X: 560 + (hash(i + 3) - 0.5) * 260, Y: 540 + (hash(i + 9) - 0.5) * 160, Z: -1300 - (j - 1) * 260, th: 0 }; }
-    if (i === HERO) return { X: 600, Y: 560, Z: 0, th: 0 };
-    const k = i - HERO, th = 2.2 + k * 0.74, R = 720 + 220 * hash(k * 1.7);
-    return { X: 500 + Math.cos(th) * R, Y: 540 + Math.sin(th) * R * 0.62, Z: k * DZ + (hash(k * 5.1) - 0.5) * 120, th };
+    if (i < HERO) { const j = HERO - i; return { X: 560 + (hash(i + 3) - 0.5) * 260, Y: 540 + (hash(i + 9) - 0.5) * 160, Z: -1300 - (j - 1) * 260 }; }
+    return ladder(i - HERO);
   });
-  // where the thread goes through each sheet: the side facing the line of travel
-  const pierce = (i) => { const th = stack[i].th; return { x: SW / 2 - Math.cos(th) * 300, y: SH / 2 - Math.sin(th) * 190 }; };
+  // where the thread goes through each sheet: in the date column, leaving the
+  // hero's last row and easing up to mid-height over the first few files
+  const pierce = (i) => ({ x: COLX[0] + 74, y: LET + RH * lerp(22.5, 12.5, smooth(0, 9, i - HERO)) });
   const H0 = stack[HERO];
-  const FLY = 4000; // camera depth for the quality shot
+  const KQ = 11;                         // the quality shot hangs at this depth in the file
+  const FLY = ladder(KQ).Z;
+  // look point on rung k: o.dx/o.dy from the sheet centre, o.dz along the file
+  const camAt = (k, o) => { const p = ladder(k); return { cx: p.X + (o.dx || 0), cy: p.Y + (o.dy || 0), cZ: p.Z + (o.dz || 0) }; };
   const CAM = [
     { t: 11.2, cx: H0.X - 120, cy: H0.Y - 30, cZ: -2700, ry: 5, rx: 1, s: 1.15 },
     { t: 13.0, cx: H0.X - 170, cy: H0.Y - 70, cZ: 0, ry: -13, rx: 5, s: 1.2, e: 'outCubic' },
-    { t: 14.6, cx: H0.X - 150, cy: H0.Y - 70, cZ: 60, ry: -14, rx: 5.5, s: 1.24, e: 'inOutQuad' },
-    { t: 17.3, cx: 500, cy: 540, cZ: 3300, ry: -5, rx: 3, s: 1.0, e: 'inOutCubic' },
-    { t: 20.2, cx: 500, cy: 540, cZ: 3750, ry: -8, rx: 3.5, s: 1.0, e: 'inOutQuad' },
-    { t: 21.15, cx: 500, cy: 540, cZ: FLY, ry: -12, rx: 4, s: 1.0, e: 'inOutCubic' },
-    { t: 25.0, cx: 520, cy: 540, cZ: FLY + 60, ry: -10, rx: 3.5, s: 1.0, e: 'inOutQuad' },
-    { t: 26.0, cx: 520, cy: 600, cZ: FLY + 60, ry: -9, rx: 10, s: 0.96, e: 'inQuad' },
+    { t: 14.6, cx: H0.X - 150, cy: H0.Y - 80, cZ: 60, ry: -14, rx: 4, s: 1.24, e: 'inOutQuad' },
+    // orbit round the hero's left edge until we look down the file
+    { t: 15.75, ...camAt(0.6, { dx: -300, dy: -40 }), ry: 40, rx: 3.5, s: 1.04, e: 'inOutCubic' },
+    // then glide along it behind the thread
+    { t: 17.3, ...camAt(7, { dx: -270, dy: -10 }), ry: 44, rx: 3, s: 1.0, e: 'inOutQuad' },
+    { t: 20.2, ...camAt(8.5, { dx: -260, dy: -10 }), ry: 41, rx: 2.5, s: 1.0, e: 'inOutQuad' },
+    { t: 21.15, ...camAt(KQ, { dx: -100, dy: -20, dz: -1100 }), ry: -12, rx: 4, s: 1.0, e: 'inOutCubic' },
+    { t: 25.0, ...camAt(KQ, { dx: -80, dy: -20, dz: -1040 }), ry: -10, rx: 3.5, s: 1.0, e: 'inOutQuad' },
+    { t: 26.0, ...camAt(KQ, { dx: -80, dy: 40, dz: -1040 }), ry: -9, rx: 10, s: 0.96, e: 'inQuad' },
   ];
   // the hero's own pose: in the stack, then pulled forward out of the depth for the review
-  const HERO_SHOW = { X: 500 + 330, Y: 560, Z: FLY + 120, ry: -6 };
+  const CQ = CAM[5];
+  const HERO_SHOW = { X: CQ.cx + 330, Y: CQ.cy + 20, Z: CQ.cZ + 120, ry: -6 };
   function heroPose(t) {
     if (t < 20.0) return { X: H0.X, Y: H0.Y, Z: H0.Z, ry: 0 };
     const k = tw(t, 20.3, 21.2, 'outCubic');
-    return { X: HERO_SHOW.X, Y: HERO_SHOW.Y, Z: HERO_SHOW.Z + (1 - k) * 2600, ry: HERO_SHOW.ry };
+    return { X: HERO_SHOW.X + (1 - k) * 900, Y: HERO_SHOW.Y - (1 - k) * 200, Z: HERO_SHOW.Z + (1 - k) * 1500, ry: HERO_SHOW.ry };
   }
   const cam = (t) => camKeys(CAM, t);
 
@@ -211,7 +220,12 @@
   const ALIGN = [14.5, 14.95];          // columns slide into place
   const CASCADE_DUR = 0.4;
   // the thread reaches file k (1..42) a little faster each time
-  const casStart = (i) => 14.75 + 2.1 * Math.pow((i - HERO) / 42, 0.72) + (hash(i * 3.7) - 0.5) * 0.02;
+  const CAS = [15.0, 17.0];
+  const casStart = (i) => { // invert an eased index(t) so the thread gathers speed, then settles
+    const g = (i - HERO) / 42; let a = 0, b = 1;
+    for (let n = 0; n < 24; n++) { const m = (a + b) / 2; if (ease.inOutQuad(m) < g) a = m; else b = m; }
+    return CAS[0] + (CAS[1] - CAS[0]) * a;
+  };
   const SCROLL = [20.25, 21.1];         // hero scrolls down to row 1,201
   const B0 = 1200 + 6, BN = 12;          // duplicate block: data rows B0..B0+BN
   const RED = [21.2, 21.75], LIFT = [22.15, 22.6], DUST = [22.65, 23.45], CLOSE = [23.45, 23.95];
@@ -278,8 +292,10 @@
           s.dirty = own ? h('canvas', { width: SW * DPI, height: SH * DPI }) : h('img'); css(s.dirty, { position: 'absolute', left: 0, top: 0, width: SW, height: SH });
           s.clean = own ? h('canvas', { width: SW * DPI, height: SH * DPI }) : h('img'); css(s.clean, { position: 'absolute', left: 0, top: 0, width: SW, height: SH, clipPath: 'inset(0 100% 0 0)' });
           s.own = own;
-          face.append(s.dirty, s.clean);
-          css(face, { border: '1px solid rgba(247,245,243,.09)' });
+          // depth fog: darken toward the background instead of fading (fading stacks into murk)
+          s.fog = h('div', { class: 'abs' }); css(s.fog, { left: -1, top: -32, right: -1, bottom: -1, background: '#141312', opacity: 0, borderRadius: '7px 7px 0 0' });
+          face.append(s.dirty, s.clean, s.fog);
+          css(face, { border: '1px solid rgba(247,245,243,.12)', boxShadow: '0 -1px 0 rgba(247,245,243,.06), 0 24px 60px rgba(0,0,0,.45)' });
         }
         world.append(el);
         return s;
@@ -392,7 +408,7 @@
       function drawThread(t, c, heroQuad) {
         const ctx = tctx; ctx.clearRect(0, 0, 1920, 1080);
         if (t < TPTS[0][1] || t > 17.9) return;
-        const fadeOut = 1 - tw(t, 16.95, 17.6, 'inOutQuad');
+        const fadeOut = 1 - tw(t, 17.05, 17.65, 'inOutQuad');
         const near = PERSP * 0.8;
         const pts = TPTS.map(([p]) => { const q = camSpace(p.x, p.y, p.Z, c); return { ...project(q), z: q.z }; });
         // head: index of the last point reached, and how far along the next leg
@@ -476,7 +492,7 @@
 
         // focus plane: on the hero while it is the subject, on the stack between
         const hp = heroPose(t);
-        const fw = tw(t, 14.6, 15.4, 'inOutQuad') * (1 - tw(t, 20.4, 21.1, 'inOutQuad'));
+        const fw = tw(t, 15.35, 16.0, 'inOutQuad') * (1 - tw(t, 20.4, 21.1, 'inOutQuad'));
         const fz = lerp(camSpace(hp.X, hp.Y, hp.Z, c).z, 0, fw);
         for (const s of sheets) {
           const { X, Y, Z } = s.i === HERO ? hp : s.p;
@@ -484,18 +500,22 @@
           for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) zmax = Math.max(zmax, camSpace(X + dx * SW / 2, Y + dy * SH / 2, Z, c).z);
           cz = camSpace(X, Y, Z, c).z;
           let o = 1 - smooth(PERSP * 0.32, PERSP * 0.7, zmax);
-          o *= Math.pow(clamp(1 - (-cz - 300) / 3600), 1.2);
+          const fog = s.i > HERO ? 0.86 * smooth(500, 3600, -cz) : 0;
+          if (s.i < HERO) o *= Math.pow(clamp(1 - (-cz - 300) / 3600), 1.2);
           if (s.i < HERO && t > 13.05) o = 0;               // passed on the way down
-          if (s.i !== HERO) o *= 0.82;
-          if (s.i !== HERO && t > 20.6) o *= 1 - 0.72 * tw(t, 20.6, 21.3);  // the hero leads the quality shot
+          if (s.i !== HERO && t > 20.4) {                   // the hero leads the quality shot
+            o *= Z < HERO_SHOW.Z ? 1 - tw(t, 20.4, 21.0) : 1 - 0.6 * tw(t, 20.6, 21.3);
+          }
           if (o < 0.01) { if (s._vis !== false) { s.el.style.display = 'none'; s._vis = false; } continue; }
           if (s._vis !== true) { s.el.style.display = ''; s._vis = true; }
           s.el.style.transform = `translate3d(${X - SW / 2}px,${Y - SH / 2}px,${-Z}px)` + (s.i === HERO && hp.ry ? ` rotateY(${hp.ry}deg)` : '');
           // depth of field: near layers blur fast, far layers soften slowly
           const dz = cz - fz;
-          const b = dz > 0 ? Math.min(14, dz * 0.02) : Math.min(7, -dz * 0.0032);
+          const b = dz > 0 ? Math.min(7, dz * 0.008) : Math.min(2.5, -dz * 0.0011);
           const bq = Math.round(b * 2) / 2;
+          if (s.i !== HERO) o *= 1 - 0.45 * clamp(b / 7);   // out-of-focus foreground recedes
           css(s.face, { opacity: o.toFixed(3), filter: bq > 0.25 ? `blur(${bq}px)` : 'none' });
+          if (s.fog) css(s.fog, { opacity: fog.toFixed(3) });
           if (s.i > HERO) {
             // where the thread pierces, the clean sheet opens sideways from that point
             const k = ease.outCubic(prog(t, casStart(s.i), casStart(s.i) + CASCADE_DUR));

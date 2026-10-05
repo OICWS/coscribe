@@ -175,8 +175,8 @@
   F.event(87.85, 'click', { what: 'Approve' });
   F.event(88.80, 'tick', { what: 'row count settles' });
   [89.55, 89.90, 90.25].forEach((t, i) => F.event(t, 'pop', { step: i }));   // three rising light notes
-  F.event(92.50, 'whoosh', { what: 'table shrinks into chip', soft: true });
-  F.event(93.32, 'drop', { what: 'chip settles' });
+  F.event(92.50, 'whoosh', { what: 'table shrinks into chip, surface irises open', soft: true, reverse: true, dur: 0.9 });
+  F.event(93.35, 'drop', { what: 'chip settles' });
 
   F.scene({
     id: 's4_code', start: S0, end: S1, z: 10,
@@ -325,10 +325,10 @@
       const run1 = h('div', { class: 'abs' }); css(run1, { left: 18, top: 0, width: 1090 });
       const run2 = h('div', { class: 'abs' }); css(run2, { left: 18, top: 0, width: 1090 });
       termBox.append(run1, run2); world.append(termBox);
-      const TLH = 21, TVIS = 8, TPAD = 13;
+      const TLH = 23, TVIS = 8, TPAD = 13;
       const H1 = TPAD * 2 + TVIS * TLH, H2 = TPAD * 2 + (TERM.length - RUN2_AT) * TLH;
       const termLines = TERM.map((ln, i) => {
-        const e = h('div'); css(e, { height: TLH, lineHeight: TLH + 'px', fontFamily: MONO, fontSize: 13.4, whiteSpace: 'pre', color: COL.text, overflow: 'hidden' });
+        const e = h('div'); css(e, { height: TLH, lineHeight: TLH + 'px', fontFamily: MONO, fontSize: 14.6, whiteSpace: 'pre', color: COL.text, overflow: 'hidden' });
         const spans = ln.segs.map(([s, c, b]) => { const sp = h('span', { text: s }); if (c) css(sp, { color: c }); if (b) css(sp, { fontWeight: 600 }); e.append(sp); return sp; });
         (i < RUN2_AT ? run1 : run2).append(e);
         return { e, spans, at: ln.at, shown: null };
@@ -392,7 +392,7 @@
       css(outPath, { fontFamily: MONO, fontSize: 14, color: COL.muted, letterSpacing: '.02em', marginBottom: 14 });
       const prog1 = h('div'); css(prog1, { fontFamily: 'var(--sans)', fontSize: 27, color: COL.fg, marginBottom: 34, fontVariantNumeric: 'tabular-nums' });
       const progA = h('span', { text: L('合并 3 个来源 · 4,812 行 → ', 'Merged 3 sources · 4,812 rows → ') });
-      const progN = h('span', { text: '4,812' }); css(progN, { fontFamily: MONO, fontSize: 26 });
+      const progN = h('span', { text: '4,812' });
       const progB = h('span', { text: L(' 行', ' rows') });
       prog1.append(progA, progN, progB);
       const GRID = '120px 330px 170px 1fr';
@@ -429,6 +429,7 @@
       const flyer = K.fileChip(T('s4_out'), 'code');
       css(flyer, { position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', opacity: 0, boxShadow: '0 10px 30px rgba(0,0,0,.18)' });
       layer.append(flyer);
+      layer.insertBefore(out, flyer);   // the shrinking table rides above the opening surface
       const grainU = K.grain(layer, 0.04);
 
       const stageScale = () => layer.getBoundingClientRect().width / 1920;
@@ -462,7 +463,7 @@
         const recede = Math.max(back * 0.75, back2 * 1.25);
         css(view, { transform: `scale(${1 - 0.04 * recede})`, filter: recede > 0.01 ? `blur(${(recede * 3.6).toFixed(2)}px) brightness(${(1 - 0.48 * recede).toFixed(3)})` : 'none' });
 
-        css(scrim, { opacity: (Math.max(back * 0.25, back2 * 0.5)).toFixed(3) });
+        css(scrim, { opacity: (Math.max(back * 0.25, back2 * 0.62)).toFixed(3) });
         // corner labels
         css(rt, { opacity: 0.85 * tw(t, 78.0, 78.7, 'outQuad') * (1 - tw(t, 92.3, 92.8)) });
         css(ex, { opacity: 0.55 * tw(t, 78.4, 79.0, 'outQuad') * (1 - tw(t, 92.3, 92.8)) });
@@ -582,9 +583,6 @@
         });
         // S4-07: shrink into the chip slot
         const kS = tw(t, 92.5, 93.35, 'inOutCubic');
-        // surface fades in over the depth
-        const kSurf = tw(t, 92.55, 93.45, 'inOutCubic');
-        css(surf, { opacity: kSurf.toFixed(3), visibility: t >= 92.3 ? 'visible' : 'hidden' });
         if (t >= 92.3) {
           scam.set({ x: 960, y: 540, s: lerp(1.2, 1.215, prog(t, 92.5, 94.0)) });
           box.update({ str: '', k: 1, t, caretOn: true });
@@ -593,6 +591,16 @@
             css(ch, { opacity: k, transform: `translateY(${((1 - k) * 10).toFixed(1)}px) scale(${(0.96 + 0.04 * k).toFixed(4)})` });
           });
           sgrain(t);
+        }
+        // an iris that opens from the chip slot (the dive, reversed), feathered
+        const kSurf = tw(t, 92.6, 93.5, 'inOutCubic');
+        css(surf, { visibility: t >= 92.6 ? 'visible' : 'hidden', opacity: 1 });
+        if (t >= 92.6) {
+          const slotC = slotCentre();
+          // a clean edge, like the dive's iris (no soft glow)
+          const r = kSurf * 1900;
+          const m = kSurf >= 1 ? 'none' : `radial-gradient(circle at ${slotC.x.toFixed(1)}px ${slotC.y.toFixed(1)}px, #000 ${r.toFixed(1)}px, transparent ${(r + 1.5).toFixed(1)}px)`;
+          css(surf, { webkitMaskImage: m, maskImage: m });
         }
         const outBase = { x: 270, y: 250, w: 1380, h: out.offsetHeight || 380 };
         if (t >= 92.4) {
@@ -603,14 +611,17 @@
           const sEnd = slot.w / outBase.w;
           const sc2 = Math.exp(lerp(0, Math.log(sEnd), kS));
           const cx = lerp(cx0, cx1, kS), cy = lerp(cy0, cy1, kS) - Math.sin(Math.PI * kS) * 40;
-          css(out, { transformOrigin: '50% 50%', left: cx - outBase.w / 2, top: cy - outBase.h / 2, transform: `scale(${sc2.toFixed(4)})`, opacity: (ko * (1 - tw(t, 92.85, 93.2))).toFixed(3) });
+          const kc2 = tw(t, 92.4, 92.65, 'outQuad');
+          css(out, { transformOrigin: '50% 50%', left: cx - outBase.w / 2, top: cy - outBase.h / 2, transform: `scale(${sc2.toFixed(4)})`, opacity: (ko * (1 - tw(t, 93.0, 93.2))).toFixed(3),
+            background: `rgba(42,40,39,${kc2.toFixed(3)})`, borderRadius: 18, boxShadow: `0 0 0 34px rgba(42,40,39,${kc2.toFixed(3)}), 0 40px 90px 30px rgba(0,0,0,${(0.35 * kc2).toFixed(3)})` });
           // the chip grows out of it and lands
-          const kf = tw(t, 92.85, 93.15, 'outQuad');
-          const fs = lerp(1.9, 1, ease.outCubic(prog(t, 92.75, 93.35)));
+          // the chip resolves out of the shrinking card: same width, cross-dissolve
+          const kf = tw(t, 92.98, 93.14, 'outQuad');
+          const fs = Math.max(1, (outBase.w * sc2) / slot.w);
           css(flyer, { opacity: t < 93.4 ? kf : 0, transform: `translate(${(cx - slot.w * fs / 2).toFixed(1)}px, ${(cy - slot.h * fs / 2).toFixed(1)}px) scale(${(fs * slot.w / Math.max(1, flyerW())).toFixed(4)})` });
           css(chips[3], { opacity: t >= 93.35 ? 1 : 0, transform: `scale(${t >= 93.35 ? 1 + 0.04 * Math.sin(Math.PI * prog(t, 93.35, 93.6)) : 1})` });
         } else {
-          css(out, { transformOrigin: '0 0', left: outBase.x, top: outBase.y, transform: `translateY(${((1 - ko) * 24).toFixed(1)}px)`, opacity: ko.toFixed(3) });
+          css(out, { transformOrigin: '0 0', left: outBase.x, top: outBase.y, transform: `translateY(${((1 - ko) * 24).toFixed(1)}px)`, opacity: ko.toFixed(3), background: 'transparent', boxShadow: 'none' });
           css(flyer, { opacity: 0 });
           css(chips[3], { opacity: 0 });
         }
@@ -619,6 +630,8 @@
 
       // helpers that need the built DOM
       function flyerW() { return flyer.offsetWidth || 1; }
+      // centre of the fourth chip's slot on screen (the surface camera is set first)
+      function slotCentre() { const r = toStage(chips[3].getBoundingClientRect()); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; }
       function lastTyped(t) { let li = -1; LINES.forEach((ln, i) => { const s = lineStart(i); if (s != null && t >= s) li = i; }); return li; }
       function prevTyped(i) { for (let j = i - 1; j >= 0; j--) if (lineStart(j) != null) return j; return 0; }
     },

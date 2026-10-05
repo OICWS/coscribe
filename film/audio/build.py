@@ -243,7 +243,8 @@ def main():
         for ln in lines:
             flag = "ok " if ln["fits"] else "OVER"
             log(f"  {flag} {ln['id']} at {ln['at']:6.2f} -> {ln['end']:6.2f} (limit {ln['limit']:6.2f}) speed {ln['speed']:.3f}"
-                f"{' tightened' if ln['tightened'] else ''}{'  over by %.2fs' % ln['over'] if not ln['fits'] else ''}  {ln['text']}")
+                f"{' tightened' if ln['tightened'] else ''}{'  over by %.2fs' % ln['over'] if not ln['fits'] else ''}  {ln['text']}"
+                + (f"  [spoken: {ln['spoken']}]" if ln["spoken"] != ln["text"] else ""))
 
         # ---- mix
         gm, pres = duck_curve(vost, DUCK_DB)
