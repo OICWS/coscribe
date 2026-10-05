@@ -1,3 +1,40 @@
-// All on-screen copy, by language. Scenes read it with T('key').
-// Filled from the final script (script/剧本与分镜.md).
-window.FILM_COPY = { zh: {}, en: {} };
+// Shared on-screen copy (the typed sentences and their attachment chips).
+// Scene-specific example content lives in each scene file via F.L(zh, en).
+window.FILM_COPY = {
+  zh: {
+    placeholder: 'Type / for commands',
+    s1: '找出过去 12 个月、40 家门店销售下滑的真正原因。',
+    s1_chip: '门店销售导出 · 48 个文件',
+    s1_out: '销售下滑分析.xlsx',
+    s2: '把这份分析，做成十分钟给管理层讲的汇报。',
+    s2_chip: '公司模板.pptx',
+    s2_out: '管理层汇报.pptx',
+    s3: '按这份 200 页的招标文件，写一份逐条响应的投标书。',
+    s3_chip: '招标文件.pdf · 203 页',
+    s3_chip2: '公司资料/',
+    s3_out: '投标书_逐条响应.docx',
+    s4: '写个小工具，每天把三个系统导出的报表合并、校验，有异常就标出来。',
+    s4_chips: ['ERP_export/', 'POS_export/', '电商_export/'],
+    s4_out: '日报校验工具 · 已运行',
+    s5: '以后每周一，都这样做一遍。',
+    example: '示例',
+  },
+  en: {
+    placeholder: 'Type / for commands',
+    s1: 'Find the real reason sales fell across 40 stores over the last 12 months.',
+    s1_chip: 'Store sales exports · 48 files',
+    s1_out: 'sales-decline-analysis.xlsx',
+    s2: 'Turn this analysis into a ten-minute briefing for management.',
+    s2_chip: 'company-template.pptx',
+    s2_out: 'management-briefing.pptx',
+    s3: 'Write a clause-by-clause bid response to this 200-page tender.',
+    s3_chip: 'tender.pdf · 203 pages',
+    s3_chip2: 'company-docs/',
+    s3_out: 'bid-response.docx',
+    s4: 'Write a small tool that merges and checks the daily exports from three systems, and flags anything odd.',
+    s4_chips: ['ERP_export/', 'POS_export/', 'webshop_export/'],
+    s4_out: 'Daily-report checker · ran',
+    s5: 'Every Monday, do this again.',
+    example: 'Example',
+  },
+};

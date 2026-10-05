@@ -39,7 +39,9 @@ def ranges(spec):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", default="/tmp/claude-0/fontcache")
-    cache = Path(ap.parse_args().cache)
+    ap.add_argument("--all", action="store_true", help="development: symlink every chunk (any character renders); never commit this state")
+    args = ap.parse_args()
+    cache = Path(args.cache)
     cache.mkdir(parents=True, exist_ok=True)
 
     chars = {ord(c) for c in map(chr, range(0x20, 0x7F))}
@@ -61,10 +63,13 @@ def main():
         for cssf in files:
             for block in re.findall(r"@font-face\s*{[^}]*}", (pkg / cssf).read_text()):
                 ur = re.search(r"unicode-range:\s*([^;]+);", block)
-                if ur and not any(any(a <= c <= b for c in chars) for a, b in ranges(ur.group(1))):
+                if ur and not args.all and not any(any(a <= c <= b for c in chars) for a, b in ranges(ur.group(1))):
                     continue
                 woff2 = re.search(r"url\(\./files/([^)]+\.woff2)\)", block).group(1)
-                shutil.copy(pkg / "files" / woff2, out / woff2)
+                if args.all:
+                    (out / woff2).symlink_to(pkg / "files" / woff2)
+                else:
+                    shutil.copy(pkg / "files" / woff2, out / woff2)
                 total += (out / woff2).stat().st_size
                 block = re.sub(r"src:[^;]+;", f"src: url(files/{woff2}) format('woff2');", block)
                 block = block.replace("font-display: swap", "font-display: block")

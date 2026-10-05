@@ -69,18 +69,24 @@
   // shown only while start <= t < end; scenes may overlap for transitions and
   // stack by z (default: order of registration).
   const scenes = [];
+  // Sound-sync events. Scenes call F.event(t, 'key') etc. while building; the
+  // audio build reads window.FILM_EVENTS so SFX land on the exact frame.
+  const events = [];
+  const event = (t, name, data) => { events.push({ t: Math.round(t * 1000) / 1000, name, ...(data || {}) }); };
   function scene(def) { scenes.push(def); }
 
-  let stage, lang = 'zh', copy = {}, built = false;
-  function T(key) { // localized copy lookup: content/<lang>.js sets window.FILM_COPY
-    const v = (copy[key] ?? (window.FILM_COPY_FALLBACK || {})[key]);
+  // language is known from the URL before any scene file runs, so scenes may
+  // resolve copy at load time as well as in build()
+  const qs = new URLSearchParams(location.search);
+  let stage, lang = qs.get('lang') || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en'), built = false;
+  function T(key) { // localized copy lookup: content/copy.js sets window.FILM_COPY
+    const all = window.FILM_COPY || {};
+    const v = ((all[lang] || {})[key] ?? (all.zh || {})[key]);
     return v == null ? `[${key}]` : v;
   }
 
   function build(root, opts = {}) {
-    lang = opts.lang || 'zh';
-    copy = (window.FILM_COPY || {})[lang] || {};
-    window.FILM_COPY_FALLBACK = (window.FILM_COPY || {}).zh || {};
+    lang = opts.lang || lang;
     stage = root;
     stage.dataset.lang = lang;
     scenes.forEach((s, i) => {
@@ -89,6 +95,8 @@
       stage.append(s.layer);
       s.update = s.build(s.layer, { W, H, lang, T }) || (() => {});
     });
+    events.sort((a, b) => a.t - b.t);
+    window.FILM_EVENTS = events;
     built = true;
   }
 
@@ -100,8 +108,11 @@
     }
   }
 
-  const duration = () => Math.max(0, ...scenes.map((s) => s.end));
+  const duration = () => window.FILM_DURATION || 120;
 
-  window.F = { W, H, clamp, lerp, prog, ease, tw, env, rng, hash, h, css, attr, typed, scene, scenes, T, build, seek, duration,
+  // pick by language: L('中文', 'English')
+  const L = (zh, en) => (lang === 'zh' ? zh : en);
+
+  window.F = { W, H, L, clamp, lerp, prog, ease, tw, env, rng, hash, h, css, attr, typed, scene, scenes, event, T, build, seek, duration,
     get lang() { return lang; } };
 })();

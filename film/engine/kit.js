@@ -85,16 +85,20 @@
     const plus = h('span', { text: '+' });
     css(plus, { width: 30, height: 30, borderRadius: 15, display: 'grid', placeItems: 'center', fontSize: 22, color: 'var(--muted)' });
     const right = h('div'); css(right, { display: 'flex', gap: 14, alignItems: 'center' });
+    const timer = h('span'); css(timer, { fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', marginRight: 6 });
     const modelChip = h('span', { text: model }); css(modelChip, { fontFamily: 'var(--mono)', fontSize: 14 });
     const send = h('span', { html: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10l-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>' });
     css(send, { width: 34, height: 34, borderRadius: 9, display: 'grid', placeItems: 'center', color: 'var(--muted)' });
-    right.append(modelChip, send); bar.append(plus, right);
+    right.append(timer, modelChip, send); bar.append(plus, right);
     const chips = h('div'); css(chips, { display: 'flex', gap: 8, flexWrap: 'wrap' });
     card.append(chips, text, bar); root.append(card); parent.append(root);
     return {
       root, card, text, chips, modelChip,
       // str typed up to progress k (0..1); t drives the caret blink; sent=0..1 animates the send key
-      update({ str = '', k = 1, t = 0, caretOn = true, sent = 0 }) {
+      // elapsed: seconds since send (null hides the run timer + token count)
+      update({ str = '', k = 1, t = 0, caretOn = true, sent = 0, elapsed = null }) {
+        const tm = elapsed == null ? '' : `${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, '0')} · ${(elapsed * 0.9 + 0.4).toFixed(1)}k`;
+        if (timer.textContent !== tm) timer.textContent = tm;
         const s = typed(str, k);
         if (words.textContent !== s) words.textContent = s;
         ph.style.display = s ? 'none' : '';
@@ -107,7 +111,7 @@
   }
 
   // ---------- file chip (attachment / deliverable) ----------
-  const KIND = { sheet: ['var(--file-sheet)', 'XLSX'], doc: ['var(--file-doc)', 'DOCX'], slides: ['var(--file-slides)', 'PPTX'], pdf: ['var(--file-pdf)', 'PDF'], code: ['var(--kind-script)', 'PY'] };
+  const KIND = { sheet: ['var(--file-sheet)', 'XLSX'], doc: ['var(--file-doc)', 'DOCX'], slides: ['var(--file-slides)', 'PPTX'], pdf: ['var(--file-pdf)', 'PDF'], code: ['var(--kind-script)', 'PY'], folder: ['var(--kind-tool)', 'DIR'] };
   function fileChip(label, kind = 'sheet', { dark = false } = {}) {
     const [color, ext] = KIND[kind] || KIND.sheet;
     const c = h('span');
@@ -209,4 +213,29 @@
   const fmt = (v, d = 0) => v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 
   window.K = { camera, camPath, surface, depth, grain, inputBox, fileChip, card, rise, checklist, thread, line, fmt, KIND };
+})();
+
+// ---------- typing schedule ----------
+// Human-ish keystroke times for str typed from t0 over dur seconds: jittered
+// intervals, a short thinking pause after the first comma. Returns an array
+// of key times (one per character) and registers 'key' sound events.
+(function () {
+  function typing(str, t0, dur, { seed = 1, sound = true } = {}) {
+    const chars = Array.from(str), r = F.rng(seed);
+    const gaps = chars.map((c, i) => {
+      let g = 0.75 + r() * 0.5;
+      if (/[，,、]/.test(chars[i - 1] || '')) g += 2.2;   // pause after a comma
+      if (c === ' ') g *= 0.6;
+      return g;
+    });
+    const sum = gaps.reduce((a, b) => a + b, 0);
+    let acc = 0;
+    const times = gaps.map((g) => { acc += g; return t0 + (acc / sum) * dur; });
+    if (sound) times.forEach((t, i) => F.event(t, 'key', { ch: chars[i] }));
+    return times;
+  }
+  // number of characters visible at time t
+  const typedCount = (times, t) => { let n = 0; while (n < times.length && times[n] <= t) n++; return n; };
+  K.typing = typing;
+  K.typedCount = typedCount;
 })();
