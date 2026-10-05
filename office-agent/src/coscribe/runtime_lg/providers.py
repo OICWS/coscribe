@@ -34,7 +34,10 @@ def resolve_chat_model(
         from langchain_openai import ChatOpenAI
 
         config = custom_providers[provider_key]
-        return ChatOpenAI(
+        model_class = (
+            _deepseek_chat_model_class() if _is_deepseek(config["base_url"]) else ChatOpenAI
+        )
+        return model_class(
             model=model_name,
             base_url=config["base_url"],
             api_key=SecretStr(config["api_key"]),
@@ -147,9 +150,67 @@ def keeps_tool_list_fixed(model: str, custom_providers: dict[str, dict[str, str]
     large: DeepSeek charges 2% of a miss for a hit (deepseek-flash, ¥0.02
     vs ¥1 per 1M, checked 2026-10-05) and has a 1M-token window. Other
     providers keep deferral until their numbers are checked the same way."""
+    provider_key = model.split(":", 1)[0]
+    return _is_deepseek(custom_providers.get(provider_key, {}).get("base_url", ""))
+
+
+def _is_deepseek(base_url: str) -> bool:
     from urllib.parse import urlparse
 
-    provider_key = model.split(":", 1)[0]
-    base_url = custom_providers.get(provider_key, {}).get("base_url", "")
     host = urlparse(base_url).hostname or ""
     return host == "deepseek.com" or host.endswith(".deepseek.com")
+
+
+def _deepseek_chat_model_class() -> Any:
+    """ChatOpenAI that keeps DeepSeek's `reasoning_content` and sends it
+    back with each assistant message, which langchain-openai drops.
+
+    DeepSeek requires it on every request that carries tools. Without it
+    the server renders the previous turn differently once a new user
+    message arrives, so each turn re-read the conversation uncached:
+    measured, 10,478 of 11,246 prompt tokens missed at the next turn
+    without it, 191 with it (ROADMAP Phase 8ck)."""
+    from langchain_core.messages import AIMessage
+    from langchain_openai import ChatOpenAI
+
+    class ChatDeepSeek(ChatOpenAI):
+        def _convert_chunk_to_generation_chunk(
+            self,
+            chunk: dict[str, Any],
+            default_chunk_class: type,
+            base_generation_info: dict[str, Any] | None,
+        ) -> Any:
+            generation = super()._convert_chunk_to_generation_chunk(
+                chunk, default_chunk_class, base_generation_info
+            )
+            choices = chunk.get("choices") or [{}]
+            reasoning = (choices[0].get("delta") or {}).get("reasoning_content")
+            if generation is not None and reasoning:
+                generation.message.additional_kwargs["reasoning_content"] = reasoning
+            return generation
+
+        def _create_chat_result(
+            self, response: Any, generation_info: dict[str, Any] | None = None
+        ) -> Any:
+            result = super()._create_chat_result(response, generation_info)
+            response_dict = response if isinstance(response, dict) else response.model_dump()
+            for generation, choice in zip(
+                result.generations, response_dict.get("choices") or [], strict=False
+            ):
+                reasoning = (choice.get("message") or {}).get("reasoning_content")
+                if reasoning:
+                    generation.message.additional_kwargs["reasoning_content"] = reasoning
+            return result
+
+        def _get_request_payload(
+            self, input_: Any, *, stop: list[str] | None = None, **kwargs: Any
+        ) -> dict[str, Any]:
+            payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+            messages = self._convert_input(input_).to_messages()
+            for message, sent in zip(messages, payload.get("messages", []), strict=False):
+                reasoning = message.additional_kwargs.get("reasoning_content")
+                if isinstance(message, AIMessage) and reasoning:
+                    sent["reasoning_content"] = reasoning
+            return payload
+
+    return ChatDeepSeek

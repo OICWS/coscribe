@@ -7109,6 +7109,30 @@ biggest run at peak prices, billed late.
   off-peak (half price), capping review rounds and editing a page in place
   instead of rewriting it, a draft mode without visual review.
 
+## Phase 8ck -- Prompt cache kept across conversations and turns (shipped)
+
+An audit of every model call the app makes on DeepSeek (see
+`runtime_lg/README.md`, "Prompt-cache audit"), each cause proven with a
+direct API experiment before the fix.
+
+- [x] A new conversation in another folder re-read the system prompt and
+      all tool schemas uncached (18% hit): the folders and remembered facts
+      were in the system prompt, which DeepSeek caches before the tools.
+      They are a context note on the user's message now, sent again only
+      when they change; the system prompt is identical for every
+      conversation. First request of a conversation in another folder:
+      100% hit.
+- [x] Each new turn re-read the whole conversation uncached (52,602 of
+      101,114 tokens in a two-turn task): DeepSeek's `reasoning_content`
+      was dropped by langchain-openai and never sent back, which DeepSeek
+      requires with tools. Kept and sent back now; the next turn's first
+      request missed 180 tokens.
+- [x] Measured what the app spends besides the main loop, two two-turn
+      conversations: main ¥0.47, `review_work` ¥0.13, auto-mode reviewer
+      ¥0.045 (off-peak).
+- Open: `review_work`'s model calls leak into the main conversation's usage
+  events.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

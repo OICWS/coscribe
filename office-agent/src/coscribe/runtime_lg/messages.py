@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -132,13 +133,41 @@ def language_note(text: str) -> str:
     )
 
 
-def strip_mode_note(text: str) -> str:
+_CONTEXT_NOTE_RE = re.compile(
+    r"^\[Conversation context\]\n(.*?)\n\[/Conversation context\]\n", re.DOTALL
+)
+
+
+def context_note(context: str) -> str:
+    """The conversation's folders and remembered facts, sent ahead of the
+    user's text when they differ from what the conversation was last told
+    (see coordinator.conversation_context)."""
+    return f"[Conversation context]\n{context}\n[/Conversation context]\n"
+
+
+def last_conversation_context(messages: Sequence[Any]) -> str | None:
+    """The context the conversation was most recently told, or None if no
+    message in it carries one (a new conversation, or one compacted since)."""
+    for message in reversed(messages):
+        if getattr(message, "type", None) != "human":
+            continue
+        match = _CONTEXT_NOTE_RE.search(_strip_turn_notes(extract_text(message.content)))
+        if match:
+            return match.group(1)
+    return None
+
+
+def _strip_turn_notes(text: str) -> str:
     text = _DATE_NOTE_RE.sub("", text, count=1)
     for note in _MODE_NOTES:
         if text.startswith(note):
             text = text[len(note) :]
             break
     return _LANGUAGE_NOTE_RE.sub("", text, count=1)
+
+
+def strip_mode_note(text: str) -> str:
+    return _CONTEXT_NOTE_RE.sub("", _strip_turn_notes(text), count=1)
 
 
 def extract_text(content: Any) -> str:

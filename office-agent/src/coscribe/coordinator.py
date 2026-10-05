@@ -749,6 +749,23 @@ def _describe_extra_dirs(extra_readable: Sequence[Path], extra_writable: Sequenc
     return "\n".join(lines)
 
 
+def conversation_context(
+    settings: Settings,
+    workspace_root: Path | None = None,
+    extra_folders: Sequence[Path] = (),
+) -> str:
+    """What the model needs to know about this conversation in particular:
+    its folders and the facts remembered across sessions. Sent with the
+    user's message whenever it differs from what the conversation was last
+    told, not in the system prompt."""
+    root = workspace_root if workspace_root is not None else settings.workspace_root
+    parts = [_describe_folders(root, extra_folders)]
+    memory = load_memory(settings.memory_path)
+    if memory:
+        parts.append(format_memory_section(memory))
+    return "\n\n".join(parts)
+
+
 def _describe_folders(root: Path, extra_folders: Sequence[Path]) -> str:
     """Names the folders by path: a user refers to them by name ("the
     reports folder"), and without the paths the model looks for a
@@ -870,7 +887,12 @@ def build_coordinator_agent(
         )
         + build_subagent_task_tools(thread_id, settings.state_dir)
     )
-    instructions = f"{INSTRUCTIONS}\n\n{_describe_folders(root, extra_folders)}"
+    # Nothing that differs between conversations goes in here (the folders
+    # and remembered facts are in conversation_context): providers cache
+    # by prefix, and the tool list comes after the system prompt, so a
+    # per-conversation line here makes every new conversation re-read the
+    # rest of the prompt and every tool schema uncached.
+    instructions = INSTRUCTIONS
     if settings.browser_host_token:
         tools += build_browser_tools(
             thread_id,
@@ -886,9 +908,6 @@ def build_coordinator_agent(
     )
     if extra_dirs_note:
         instructions = f"{instructions}\n\n{extra_dirs_note}"
-    memory = load_memory(settings.memory_path)
-    if memory:
-        instructions = f"{instructions}\n\n{format_memory_section(memory)}"
     skills = load_builtin_skills() + load_skills(settings.skills_dir)
     if skill_names is not None:
         skills = [skill for skill in skills if skill.name in skill_names]
