@@ -6966,6 +6966,19 @@ The numbers were right; the bugs were in the edges.
 - [x] Checked on a 131-page Chinese-named PDF: every figure, page number and
       the 32 formulas of the summary workbook matched.
 
+## Phase 8ch -- Drag sessions between groups (shipped)
+
+- [x] Once any group exists, a session row can be dragged onto a group
+      (its header or its rows, collapsed or not) or onto Ungrouped; the
+      target is outlined while hovered and the move is the same
+      `/meta` call the "Move to group" menu makes. Dropping on the
+      group the session is already in does nothing. The drag carries
+      its own MIME type, so the composer's file drop ignores it.
+      Verified in the sidebar e2e (drag in, drag back out) against a
+      local OpenAI-compatible stub model.
+- Still not done, deliberately: the reference menu's keyboard
+  shortcuts and projects.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

@@ -34,6 +34,15 @@ test("sessions can be grouped, filtered, archived and brought back", async ({ pa
     await expect(header).toHaveAttribute("aria-expanded", "false");
     await header.click();
 
+    // Drag a session between groups and back.
+    const inGroup = page.locator('[data-testid="thread-section"][data-group="E2E group"]').getByTestId("thread-row");
+    const ungrouped = page.locator('[data-testid="thread-section"][data-group=""]');
+    await expect(inGroup).toHaveCount(1);
+    await ungrouped.getByTestId("thread-row").first().dragTo(header);
+    await expect(inGroup).toHaveCount(2);
+    await inGroup.first().dragTo(page.getByRole("button", { name: /^Ungrouped/ }));
+    await expect(inGroup).toHaveCount(1);
+
     // Archive the first row: it leaves the list and shows under Archived.
     const before = await rows.count();
     await rows.first().click({ button: "right" });

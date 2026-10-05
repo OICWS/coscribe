@@ -34,6 +34,9 @@ import {
 import { ThreadStatusIcon } from "./ThreadStatusIcon";
 
 const COLLAPSED_KEY = "coscribe.collapsedGroups";
+// A type of our own, not text/plain, so the composer and other drop
+// targets ignore a dragged conversation.
+const THREAD_DRAG_TYPE = "application/x-coscribe-thread";
 const STATUS_POLL_MS = 3000;
 const MENU_WIDTH = 208;
 
@@ -209,14 +212,20 @@ function ThreadRow({
   thread,
   isCurrent,
   renaming,
+  draggable,
   onOpenMenu,
   onRenameDone,
+  onDragStart,
+  onDragEnd,
 }: {
   thread: ThreadSummary;
   isCurrent: boolean;
   renaming: boolean;
+  draggable: boolean;
   onOpenMenu: (thread: ThreadSummary, x: number, y: number) => void;
   onRenameDone: (title: string | null) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
 }) {
   const [value, setValue] = useState(thread.preview);
   const title = thread.preview || thread.thread_id;
@@ -251,6 +260,13 @@ function ThreadRow({
         isCurrent ? "bg-[var(--card-bg)] font-medium" : "cursor-pointer"
       }`}
       title={`${title} · ${STATUS_LABEL[thread.status]}`}
+      draggable={draggable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(THREAD_DRAG_TYPE, thread.thread_id);
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
       onClick={() => !isCurrent && goToThread(thread.thread_id)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -421,6 +437,8 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
   const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<ThreadSummary | null>(null);
+  const [dropKey, setDropKey] = useState<string | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
   useClickOutside(filterRef, () => setFilterOpen(false), filterOpen);
 
@@ -569,8 +587,33 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
           const open = !collapsed.has(key);
           // Without any group the list is the plain list it always was.
           const plain = section.group === null && !hasGroups;
+          const accepts = !plain && dragging !== null && (dragging.group ?? "") !== key;
           return (
-            <div key={key || "__ungrouped"} className="flex flex-col gap-0.5">
+            <div
+              key={key || "__ungrouped"}
+              data-testid="thread-section"
+              data-group={key}
+              className={`flex flex-col gap-0.5 rounded-md ${
+                accepts && dropKey === key ? "bg-[var(--card-bg)] outline outline-1 outline-[var(--accent)]" : ""
+              }`}
+              onDragOver={(e) => {
+                if (!accepts || !e.dataTransfer.types.includes(THREAD_DRAG_TYPE)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dropKey !== key) setDropKey(key);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null) && dropKey === key) setDropKey(null);
+              }}
+              onDrop={(e) => {
+                if (!accepts || !dragging) return;
+                e.preventDefault();
+                const thread = dragging;
+                setDragging(null);
+                setDropKey(null);
+                void move(thread, key);
+              }}
+            >
               {!plain && (
                 <GroupHeader
                   name={section.group}
@@ -591,8 +634,14 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
                     thread={thread}
                     isCurrent={thread.thread_id === currentId}
                     renaming={renamingId === thread.thread_id}
+                    draggable={hasGroups}
                     onOpenMenu={(t, x, y) => setMenu({ thread: t, x, y })}
                     onRenameDone={(value) => finishRename(thread, value)}
+                    onDragStart={() => setDragging(thread)}
+                    onDragEnd={() => {
+                      setDragging(null);
+                      setDropKey(null);
+                    }}
                   />
                 ))}
               {!plain && open && section.threads.length === 0 && (
