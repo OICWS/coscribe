@@ -114,7 +114,7 @@ async def test_events_reach_a_slow_watcher_in_order_and_before_the_turn_ends(
 
     await _thread(host, workdir).run_turn("basic", _Approvals(True), slow_on_first)
 
-    assert [e.kind for e in events] == ["text", "text", "usage"]
+    assert [e.kind for e in events] == ["text", "text", "message", "usage"]
     assert "".join(e.data["text"] for e in events if e.kind == "text") == "Hello from Codex"
 
 
@@ -252,6 +252,32 @@ def test_plain_reads_of_the_folder_pass(script: str, tmp_path: Path) -> None:
 )
 def test_anything_else_is_asked_about(script: str, tmp_path: Path) -> None:
     assert not reads_only(f"/bin/bash -lc {shlex.quote(script)}", str(tmp_path), tmp_path)
+
+
+def test_codex_cd_prefix_into_the_folder_still_counts_as_a_read(tmp_path: Path) -> None:
+    (tmp_path / "sub").mkdir()
+    folder = str(tmp_path)
+
+    def wrapped(script: str) -> str:
+        return f"/bin/bash -lc {shlex.quote(script)}"
+
+    assert reads_only(wrapped(f'cd "{tmp_path}" && ls -la'), folder, tmp_path)
+    assert reads_only(wrapped(f"cd '{tmp_path}' && cat summary.csv"), folder, tmp_path)
+    assert reads_only(wrapped("cd sub && head -n 3 a.csv"), folder, tmp_path)
+    for script in [
+        "cd .. && ls",
+        "cd / && cat etc/passwd",
+        "cd ~ && ls",
+        "cd $HOME && ls",
+        'cd "$HOME" && ls',
+        "cd sub && cd .. && cd .. && ls",
+        f'cd "{tmp_path}" && rm -f summary.csv',
+        f'cd "{tmp_path}" && cat a > b',
+        f'cd "{tmp_path}" && python x.py',
+        "cd sub* && ls",
+        "cd sub && ls ../..",
+    ]:
+        assert not reads_only(wrapped(script), folder, tmp_path), script
 
 
 def test_a_read_outside_the_folder_or_from_outside_it_is_asked_about(tmp_path: Path) -> None:

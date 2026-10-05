@@ -87,6 +87,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset(
         "draft_workflow",
         "revise_workflow",
         "test_workflow",
+        "run_code_task",
     }
 )
 
@@ -687,6 +688,17 @@ evidence of what a fresh, wordless attachment is about.
 """
 
 
+CODE_MODULE_INSTRUCTIONS = """\
+The code module (run_code_task) is a coding agent that works in this \
+conversation's folder. Hand it the task, instead of doing it yourself with \
+run_python_script and the file tools, when the user wants code as the \
+result -- a script they will run again, with its tests -- or the work takes \
+many rounds of writing, running and fixing code. A script you can get right \
+in one or two runs stays with you. It sees nothing of this conversation, so \
+its task must name the files, the rules and what to produce. When its \
+report comes back, check it against what the user asked; don't redo its \
+work with your own tools."""
+
 BROWSER_INSTRUCTIONS = """\
 You have your own browser: the browser_* tools (browser_navigate, \
 browser_snapshot, browser_click, browser_type, ...) drive the tabs in \
@@ -903,6 +915,8 @@ def build_coordinator_agent(
             allowed_sites=lambda: _sites_allowed_to_run(settings, thread_id),
         )
         instructions = f"{instructions}\n\n{BROWSER_INSTRUCTIONS}"
+    if settings.code_module_enabled:
+        instructions = f"{instructions}\n\n{CODE_MODULE_INSTRUCTIONS}"
     extra_dirs_note = _describe_extra_dirs(
         settings.extra_readable_dirs, settings.extra_writable_dirs
     )

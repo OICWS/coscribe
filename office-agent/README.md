@@ -1639,6 +1639,32 @@ A sub-agent can never be given `spawn_agent`, `review_work`,
 delegation can't recurse and questions stay with the user's own
 conversation.
 
+## The code module (optional)
+
+Off by default. With `COSCRIBE_CODE_MODULE_ENABLED=true` in `.env`, a
+conversation can hand a programming task -- a script you'll run again
+with its tests, or work that takes many rounds of writing and running
+code -- to a coding agent, [Codex](https://github.com/openai/codex)
+(Apache-2.0), through the `run_code_task` tool. It works in the
+conversation's folder and shows up in the Sub Agents panel like any
+sub-agent: you watch it, approve its commands there, and can stop it.
+
+- **Models**: it runs on the conversation's model, and Codex only speaks
+  OpenAI's Responses API -- OpenAI, or a custom provider that serves
+  `/responses` (DeepSeek does). Other models get a message instead of a run.
+- **Download**: the first run fetches the pinned Codex build (~111 MB
+  download, ~330 MB on disk on Windows) into the state directory; nothing
+  is bundled with the app. `COSCRIBE_CODEX_WHEEL_URL` points it at a
+  mirror of the same file (the pinned hashes still have to match).
+- **Approvals**: there is no sandbox -- every command and file change it
+  wants comes to you as an approval, under the conversation's permission
+  mode, except plain reads of the folder (`ls`, `cat`, `grep`, ... with
+  nothing that writes, chains or leaves the folder). Its commands use the
+  same Python environment as `run_python_script`.
+
+Not there yet: its own conversations in the sidebar, a switch in
+Settings, and a run on real Windows.
+
 ## MCP servers
 
 Set `COSCRIBE_MCP_CONFIG_PATH` in `.env` to a JSON file in the same

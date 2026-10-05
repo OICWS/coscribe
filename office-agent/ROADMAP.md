@@ -7201,7 +7201,7 @@ per 1M), peak is double. n=1 per side.
       did before. With LangChain's run limit swapped back in, the new
       approval test's turn runs past its cap.
 
-## Phase 8cm -- Code module, part 1: Codex downloaded on demand, and the adapter (shipped, not wired in)
+## Phase 8cn -- Code module, part 1: Codex downloaded on demand, and the adapter (shipped, not wired in)
 
 The first step of the code module planned in the Codex entry under
 "Later": `code_runtime/` can install Codex 0.160.0 and drive it through
@@ -7282,6 +7282,68 @@ sub-agent tool is the next step. `Settings.code_module_enabled` (off) and
   parent only, so shutdown kills the tree first there (POSIX lets Codex
   exit, then kills the group); a Codex that crashes on its own would
   still leave its children. Untested on real Windows.
+
+## Phase 8co -- Code module, part 2: the chat hands tasks to it (shipped, behind the setting)
+
+With `COSCRIBE_CODE_MODULE_ENABLED=true` the conversation gets
+`run_code_task(description, task)`: a sub-agent run driven by Codex in the
+conversation's folder, on the conversation's model (one Codex can use --
+Responses API; anything else gets a reason back and no run). Setting off,
+nothing changes.
+
+- [x] **A sub-agent, not a new mechanism** (`runtime_lg/code_agent.py`):
+      same `SubAgentTask` record, Sub Agents panel, Stop and background
+      hand-off as `spawn_agent`. `register_subagent_run` now takes a
+      transcript reader instead of a LangGraph graph (the LangGraph child
+      passes one that reads its state, as before); the Codex run keeps
+      its own entries -- its replies, each command with exit code and
+      output, file changes -- in the same shape the panel already renders.
+- [x] **Approvals through the conversation's own path.** Codex's requests
+      become calls to `run_code_command` (EXEC) and `apply_code_change`
+      (WRITE_LOCAL), registered as gated in `_risks_of_gated_tools`
+      (missing there, `_decide_action_request` approves without asking --
+      a test fails if that line goes). So hooks, plan mode (declines every
+      request), accept-edits (file changes only), Auto and its reviewer,
+      a scheduled task's tier and the audit log all apply. The card shows
+      the command like a script: `script` + `description`, and the front
+      end lists `run_code_command` with the other command tools.
+- [x] **Nothing reaches the parent's chat stream**: no `agent_delta`, no
+      `usage`; tokens go on the task record only (test).
+- [x] Found reviewing the diff: Codex's approvals are answered from the
+      client's tasks, not the run's, so a run stopped from the panel
+      while its card waited left that card asking for good. A turn now
+      cancels its unanswered approvals when it ends (test; fails without).
+- [x] Stop cancels the run and Codex gets `turn/interrupt` (test). The
+      Codex host is per `state_dir`, readied in a worker thread (download,
+      script env), and shut down with the app.
+- [x] **Reads behind `cd`.** Codex put `cd "<folder>" &&` in front of
+      every command, so no command ever passed as a plain read. One
+      leading `cd` into a folder inside the conversation's folder is
+      allowed now; an unquoted target with shell syntax (`cd ~`, `cd $HOME`,
+      `cd sub*`) still asks -- caught by a test that failed without that
+      check.
+- [x] **Live, deepseek-flash, off-peak, one request** (write a reusable
+      cleaning script for the order workbook plus its tests, run both):
+      - Without guidance the chat never handed over: it did it itself, 40
+        tool calls, 20 cards, 185 s. The tool was bound (one of 114); the
+        model just preferred its own tools.
+      - With a short instruction block (only when the setting is on:
+        hand over when the user wants code as the result, or the work
+        takes many write-run-fix rounds; one or two script runs stay with
+        the chat) it handed over in 4 of 4 runs: 110-283 s, 8-27 cards in
+        all, the code run itself 6-11 commands and 92k-196k tokens (three runs
+        measured). In
+        two runs the chat's own review then found problems and it fixed
+        them itself with `edit_file` -- most of the spread.
+      - Files, tests and region totals right in every run. One run's turn
+        ended with an `error` event after the code run had finished, its
+        message not captured; three more runs didn't repeat it.
+      - In the last run all 9 of Codex's commands were scripts or writes,
+        so the `cd` change saved no card there; it pays only where Codex
+        lists or reads files.
+- Not yet: the code entry (its own conversations); a UI switch for the
+  setting; Windows; and whether the chat should send a review's findings
+  back to the code module rather than fix them itself.
 
 ## Later -- real intentions, not actively scheduled
 
@@ -7939,7 +8001,7 @@ a concrete reason to prioritize a new surface.
     without a card** -- the user opened that folder for the work, so
     reading it needs no further permission. This is a new, explicit
     exception to `exec_policy.py`'s "coscribe never decides what is safe"
-    stance, kept to the code module and to reads; see Phase 8cm for the
+    stance, kept to the code module and to reads; see Phase 8cn for the
     rule and why it isn't Codex's own classification.
   - **Usage stays with the run.** A Codex run's tokens go on its
     `SubAgentTask.tokens` only, never out as the parent conversation's

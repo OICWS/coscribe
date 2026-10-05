@@ -76,6 +76,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import __version__
 from ..cli import _dotenv_path, _load_settings_or_none
+from ..code_runtime.service import shutdown_code_services
 from ..config import PermissionMode, Settings
 from ..coordinator import build_coordinator_agent
 from ..runtime import (
@@ -1579,6 +1580,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # shutdown (a lingering Playwright browser, most visibly).
             for connection in mcp_connections.values():
                 await connection.close()
+            await shutdown_code_services()
 
     app = FastAPI(lifespan=lifespan)
     # Exposed on app.state so tests can reach the same bus _wake_poll_loop
