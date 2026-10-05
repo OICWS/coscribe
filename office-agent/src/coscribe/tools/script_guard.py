@@ -108,6 +108,15 @@ _NODE_FLAG_SETS = (
     # know fewer of the allowances.
     ("--permission", "--allow-addons"),
     ("--permission",),
+    # Node 20 prints an ExperimentalWarning and two SecurityWarnings on every
+    # run under these flags, which would land in every script's stderr.
+    # --disable-warning arrived in 20.11; earlier Nodes reject it and fall
+    # through to the next set.
+    (
+        "--experimental-permission",
+        "--disable-warning=ExperimentalWarning",
+        "--disable-warning=SecurityWarning",
+    ),
     ("--experimental-permission",),
 )
 _NODE_ALLOWANCES = ("--allow-fs-read=*", "--allow-child-process", "--allow-worker")
