@@ -74,10 +74,10 @@
 
   // ---------- timings ----------
   const TH = [34.3, 36.3];                         // storyline thread
-  const tGrid = (i) => 38.0 + 0.05 * i;            // TOC line -> frame
+  const tGrid = (i) => 37.95 + 0.04 * i;           // TOC line -> frame
   const BUILD_ORDER = [4, 1, 3, 7, 0, 5, 2, 8, 6]; // centre first, then around
-  const tBuild = (i) => 38.85 + 0.12 * BUILD_ORDER.indexOf(i);
-  const T_THEME = 40.2;                            // swatches converge, accents unify
+  const tBuild = (i) => 38.5 + 0.085 * BUILD_ORDER.indexOf(i);
+  const T_THEME = 39.95;                           // swatches converge, accents unify
   const TOOLS = [39.2, 40.0, 40.8];
   const A0 = 42.0, B0 = 44.6;                      // quality shots
   const tDrop = (i) => 46.15 + 0.27 * RANK[i];
@@ -422,7 +422,7 @@
         const gl = [];
         const gLine = (x1, y1, x2, y2, w = 1) => { const l = h('line', { x1, y1, x2, y2, stroke: '#4b8fe3', 'stroke-width': w, 'stroke-dasharray': '1000', 'stroke-dashoffset': 1000 }); guides.append(l); gl.push(l); };
         gLine(56, 0, 56, 540, 1.4); gLine(904, 0, 904, 540, 1.4); gLine(0, 44, 960, 44, 1.4); gLine(0, 500, 960, 500, 1.4);
-        for (let k = 1; k < 12; k++) { const x = 56 + k * (848 / 12); gLine(x, 44, x, 500, 0.8); }
+        for (let k = 1; k < 12; k++) { const x = 56 + k * (848 / 12); gLine(x, 44, x, 500, 0.6); }
         const blocks = [], bars = [], accents = [];
         const block = (e, dt = 0, dy = -14) => { blocks.push({ e, dt, dy }); e.style.opacity = 0; return e; };
         const accent = (e, prop = 'background') => { accents.push({ e, prop, m: MESSY[(i * 2 + accents.length) % 6] }); return e; };
@@ -493,12 +493,12 @@
 
           // ---- paper, title colour, edge ----
           // the page opens out of the title line: a white strip behind the title, then the full 16:9
-          const kp = tw(t, tGrid(i) + 0.3, tGrid(i) + 0.95, 'inOutCubic');
+          const kp = tw(t, tGrid(i) + 0.22, tGrid(i) + 0.8, 'inOutCubic');
           const ks = tw(t, tGrid(i) + 0.02, tGrid(i) + 0.22, 'outQuad');
           if (cache.th == null && t > tGrid(i)) cache.th = tEl.offsetHeight;
           const lineB = 540 - (58 + (cache.th || 35) + 8);
           const clip = kp >= 1 ? 'none' : `inset(${lerp(50, 0, kp).toFixed(1)}px ${lerp(40, 0, kp).toFixed(1)}px ${lerp(lineB, 0, kp).toFixed(1)}px ${lerp(46, 0, kp).toFixed(1)}px)`;
-          if (clip !== cache.clip) { cache.clip = clip; paper.style.clipPath = clip; }
+          if (clip !== cache.clip) { cache.clip = clip; paper.style.clipPath = clip; if (!cover) content.style.clipPath = clip; }
           css(paper, { opacity: ks.toFixed(3), display: ks > 0 ? '' : 'none' });
           const tc = ks >= 1 ? TPL.ink : mix('#f7f5f3', TPL.ink, ks);
           if (tc !== cache.tc) { cache.tc = tc; tEl.style.color = tc; }
@@ -512,10 +512,10 @@
           css(tEl, { opacity: kT.toFixed(3), transform: `translate(${24 * kc}px,${138 * kc + (1 - kT) * 12}px) scale(${lerp(1, 40 / 28, kc)})` });
 
           // ---- guides ----
-          const kgd = tw(t, tGrid(i) + 0.85, tGrid(i) + 1.4, 'outCubic'), gout = 1 - tw(t, 40.5, 41.1);
+          const kgd = tw(t, tGrid(i) + 0.45, tGrid(i) + 0.95, 'outCubic'), gout = 1 - tw(t, tBuild(i) + 0.45, tBuild(i) + 0.95);
           const gk = (kgd * 1000).toFixed(0);
           if (gk !== cache.gk) { cache.gk = gk; gl.forEach((l, j) => l.setAttribute('stroke-dashoffset', 1000 - Math.min(1000, kgd * 1000 * (1 + j * 0.04)))); }
-          css(guides, { opacity: (0.55 * gout).toFixed(3), display: gout > 0 && kgd > 0 ? '' : 'none' });
+          css(guides, { opacity: (0.42 * gout).toFixed(3), display: gout > 0 && kgd > 0 ? '' : 'none' });
 
           // ---- blocks drop in, bars grow, accents unify ----
           const tb = tBuild(i);
@@ -540,7 +540,7 @@
   function mixPose(a, b, k) { return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k), z: lerp(a.z, b.z, k), s: Math.exp(lerp(Math.log(a.s), Math.log(b.s), k)), rot: lerp(a.rot, b.rot, k) }; }
 
   // ---------- slide bodies (960 × 540, 1 px = 1 pt) ----------
-  const bt = (i) => 38.85 + 0.12 * [4, 1, 3, 7, 0, 5, 2, 8, 6].indexOf(i);
+  const bt = (i) => 38.5 + 0.085 * [4, 1, 3, 7, 0, 5, 2, 8, 6].indexOf(i);
   function vbar(parent, ctx, x, base, w, hgt, color, t, lab) {
     const e = div(parent, { left: x, top: base - hgt, width: w, height: hgt, background: color, transformOrigin: '50% 100%', transform: 'scaleY(0)' });
     ctx.bars.push({ e, t, dur: 0.6, dir: 'y', lab });

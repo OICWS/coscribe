@@ -19,7 +19,7 @@
   const TAUT0 = 104.5, TAUT1 = 104.92;      // ... and is pulled taut
   const SWITCH = 105.15;                     // 3D line hands over to the 2D step list rail
   const CRYST = 105.2, CRYST_STEP = 0.034;   // rows crystallise top to bottom
-  const CARD_IN = 105.45, SAVED = 106.0, TASK_IN = 106.2;
+  const CARD_IN = 105.45, SAVED = 106.0, OPEN = 106.3, TASK_IN = 106.42;
   const MONDAYS = [106.6, 107.4, 108.2, 109.0, 109.8];
   const SWEEP = 0.56;                        // one run, top to bottom
   const HIT = 110.0, BEAT = 60 / 72;         // 72 BPM
@@ -76,7 +76,11 @@
   const APPROVAL = 12, BRANCH = 11;
 
   // list geometry in product px (1x); the list is drawn at scale S
-  const S = 1.25, COLW = 560, RAILX = 11;
+  const S = 1.7, COLW = 560, RAILX = 11;
+  // the right-hand column (draft card / scheduled task / runs) is drawn at SR
+  const SR = 1.55, RCOLW = 370;
+  // rest layout on screen (f = 1): the list fills the left two thirds, the column sits right, the calendar below
+  const LIST_SX = 148, LIST_SY = 118, RCOL_SX = 1772 - RCOLW * SR, RULER_SY = 968, RULER_W = 1624;
   const ROWY = STEPS.map((s, i) => (i <= BRANCH ? i * 28 : i === APPROVAL ? 368 : 430));
   const SECTION = { y: 336, hgt: 62, x: 36 }, OTHER_Y = 404, LIST_H = 452;
   // which depth world each step was made in (for the node positions on the strata)
@@ -326,7 +330,12 @@
       const nodeV = STEPS.map((s, i) => V0 + (ROWY[i] + 11) * S);
       const V_END = 1500;
       // rest camera for the 2D world (screen = 960 + (u - cx) f, 540 + (v - vc) f)
-      const REST = () => ({ cx: X0 + 320, vc: V0 - 270 + 540 - 0, f: 1 });
+      // the 3D line hands over to the 2D list with the rail at screen x 640, list top at y 270 (SW0);
+      // the camera then eases to the rest layout (REST) while the rows crystallise
+      const SW0 = () => ({ cx: X0 + 320, vc: V0 + 270 });
+      const REST = () => ({ cx: X0 - RAILX * S + 960 - LIST_SX, vc: V0 + 540 - LIST_SY, f: 1 });
+      // a rest-layout screen point -> world
+      const RS = (r, x, y) => [r.cx - 960 + x, r.vc - 540 + y];
 
       // node positions on the strata (in-plane offsets from the caret axis)
       const OFF = [[-300, -150], [-110, -230], [150, -120], [320, 60], [90, 190], [-190, 120],
@@ -349,7 +358,7 @@
       }
       let KEYS3 = null;
       function keys3() {
-        const r = REST();
+        const r = SW0();
         return [
           { t: T0, th: 0, Dz: 0, cx: 960, cy: 540, cz: -300 },
           { t: ENTER + 0.08, th: 0, Dz: -36, cx: 960, cy: 540, cz: -300 },

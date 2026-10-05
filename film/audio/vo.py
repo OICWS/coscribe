@@ -32,7 +32,8 @@ REPO = {"zh": "hexgrad/Kokoro-82M-v1.1-zh", "en": "hexgrad/Kokoro-82M"}
 LANG_CODE = {"zh": "z", "en": "a"}
 BASE_SPEED = 0.92
 SPEED_MIN, SPEED_MAX = 0.85, 1.05
-MARGIN = 0.08            # end this much before the subtitle disappears
+POST = 0.06              # post-roll kept after the last audible sample (below -38 dB re peak)
+MARGIN = 0.05            # last audible sample at least this much before the subtitle is gone
 COSCRIBE = "[coscribe](/kˈOskɹˌIb/)"   # "co-scribe" (misaki would otherwise say "kahs-crib")
 
 # What is actually sent to the TTS when it must differ from the subtitle text (pronunciation or
@@ -41,7 +42,7 @@ SPOKEN = {}
 
 # level offsets (dB) relative to the normal VO level
 SOFT = {"VO-07": -5.0, "VO-10": -6.0}
-INCLUDE_VO10 = True
+INCLUDE_VO10 = {"zh": True, "en": True}   # decided by listening proxies: ASR + level, see report
 
 
 def _key(job):
@@ -106,11 +107,11 @@ def _trim(x, sr=24000):
     if not len(idx):
         return 0, len(x)
     a = max(0, idx[0] - int(0.015 * sr))
-    b = min(len(x), idx[-1] + int(0.06 * sr))
+    b = min(len(x), idx[-1] + int(POST * sr))
     return a, b
 
 
-def _tighten(x, sr=24000, max_gap=0.13):
+def _tighten(x, max_gap=0.13, sr=24000):
     """Shorten internal pauses longer than max_gap (keeps natural breath at the edges)."""
     w = int(0.01 * sr)
     e = np.sqrt(np.convolve(x ** 2, np.ones(w) / w, mode="same"))
@@ -157,60 +158,87 @@ def _render_line(lang, text, voice, speed):
     return x[a:b]
 
 
+def _variants(lang, text):
+    """Spoken forms to try, in order of preference, when a line does not fit its window: the text as
+    written; without the closing full stop (Kokoro lengthens the last syllable before it); with the
+    comma pause shortened to a word break. The subtitle always shows the text as written; every
+    variant is checked by the ASR round-trip (build.py --asr)."""
+    out = [text]
+    t2 = re.sub(r"[。．.!！]+$", "", text)
+    out.append(t2)
+    if lang == "zh":
+        out.append(t2.replace("，", " "))
+    return list(dict.fromkeys(v for v in out if v))
+
+
+def _fit(lang, text, voice, avail, target=None):
+    """Speed search (0.85-1.05) then pause tightening; returns (x, speech_dur, speed, tightened)."""
+    speed = BASE_SPEED
+    x = _render_line(lang, text, voice, speed)
+    d = len(x) / 24000 - POST
+    if target is not None:   # sync with typing: aim at the typing span
+        for _ in range(3):
+            s2 = float(np.clip(speed * d / target, SPEED_MIN, SPEED_MAX))
+            if abs(s2 - speed) < 0.01:
+                break
+            speed = s2
+            x = _render_line(lang, text, voice, speed)
+            d = len(x) / 24000 - POST
+    for _ in range(5):
+        if d <= avail:
+            break
+        s2 = float(np.clip(speed * d / avail * 1.01, SPEED_MIN, SPEED_MAX))
+        if s2 <= speed + 1e-3:
+            break
+        speed = s2
+        x = _render_line(lang, text, voice, speed)
+        d = len(x) / 24000 - POST
+    tight = False
+    for gap in (0.13, 0.09):
+        if d <= avail:
+            break
+        x = _tighten(x, max_gap=gap)
+        d = len(x) / 24000 - POST
+        tight = True
+    return x, d, speed, tight
+
+
 def plan(vo, lang, events):
-    """Choose speed per line; returns list of dicts with the 24 kHz take and fit info."""
+    """Choose spoken form, speed and pause tightening per line; list of dicts with the 24 kHz take and fit info.
+    A line fits when its last audible sample is at least MARGIN before the subtitle's `out`."""
     voice = vo["voices"][lang]
-    keys = [e["t"] for e in events if e["name"] == "key" and 100.0 <= e["t"] <= 104.0]
+    keys = [e["t"] for e in events if e["name"] in ("key", "keys") and 100.0 <= e["t"] <= 104.0]
     res = []
-    # batch the first pass so Kokoro loads once
     lines = [ln for ln in vo["lines"] if ln.get(lang)]
-    first = [_job(lang, SPOKEN.get((lang, ln["id"]), ln[lang]), voice, BASE_SPEED) for ln in lines]
-    tts(first)
+    tts([_job(lang, SPOKEN.get((lang, ln["id"]), ln[lang]), voice, BASE_SPEED) for ln in lines])  # one batch
     for ln in lines:
         lid, at = ln["id"], float(ln["at"])
-        text = SPOKEN.get((lang, lid), ln[lang])
-        if lid == "VO-10" and not INCLUDE_VO10:
+        if lid == "VO-10" and not INCLUDE_VO10.get(lang, True):
             continue
+        text = SPOKEN.get((lang, lid), ln[lang])
+        target = None
         if ln.get("out"):
             limit = float(ln["out"]) - MARGIN
-            target = None
-        elif lid == "VO-07":
+        elif lid == "VO-07":   # no subtitle: spoken with the typing (first key -> a little after the last)
             span = (keys[-1] - keys[0]) if len(keys) > 3 else 2.5
             limit = (keys[-1] + 0.35) if keys else at + 2.8
             target = min(span, limit - at)
         else:
-            limit = 119.6
-            target = None
+            limit = 119.4      # before the picture fades
         avail = limit - at
-        speed = BASE_SPEED
-        x = _render_line(lang, text, voice, speed)
-        d = len(x) / 24000
-        tight = False
-        if target is not None:   # sync with typing: aim at the typing span
-            for _ in range(3):
-                s2 = float(np.clip(speed * d / target, SPEED_MIN, SPEED_MAX))
-                if abs(s2 - speed) < 0.01:
-                    break
-                speed = s2
-                x = _render_line(lang, text, voice, speed)
-                d = len(x) / 24000
-        for _ in range(4):
+        best = None
+        for v in _variants(lang, text):
+            x, d, speed, tight = _fit(lang, v, voice, avail, target)
+            if best is None or d < best[1] - 1e-3:
+                best = (x, d, speed, tight, v)
             if d <= avail:
+                best = (x, d, speed, tight, v)
                 break
-            s2 = float(np.clip(speed * d / avail * 1.01, SPEED_MIN, SPEED_MAX))
-            if s2 <= speed + 1e-3:
-                break
-            speed = s2
-            x = _render_line(lang, text, voice, speed)
-            d = len(x) / 24000
-        if d > avail:
-            x = _tighten(x)
-            d = len(x) / 24000
-            tight = True
-        res.append({"id": lid, "text": text, "at": at, "speed": round(speed, 3), "dur": round(d, 3),
-                    "end": round(at + d, 3), "limit": round(limit, 3), "fits": d <= avail + 1e-3,
-                    "over": round(max(0.0, d - avail), 3), "tightened": tight, "x24": x,
-                    "soft": SOFT.get(lid, 0.0)})
+        x, d, speed, tight, spoken = best
+        res.append({"id": lid, "text": ln[lang], "spoken": spoken, "at": at, "speed": round(speed, 3),
+                    "dur": round(d, 3), "end": round(at + d, 3), "limit": round(limit, 3),
+                    "out": ln.get("out") or None, "fits": d <= avail + 1e-3, "over": round(max(0.0, d - avail), 3),
+                    "tightened": tight, "x24": x, "soft": SOFT.get(lid, 0.0)})
     return res
 
 

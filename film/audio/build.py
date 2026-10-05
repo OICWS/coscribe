@@ -230,8 +230,10 @@ def main():
         fx, rep = sfx.render(evs[lang])
         dsp.write_wav(OUT / f"sfx_{lang}.wav", fx)
         log(f"sfx[{lang}]: {time.time() - t:.1f}s; fallback cues used: {rep['fallback_used']}")
-        if rep["unknown"]:
-            log(f"  unknown event names (soft tick used): {rep['unknown']}")
+        log(f"  event names handled ({len(rep['handled'])}): " + ", ".join(f"{k}->{v}" for k, v in rep["handled"].items()))
+        if rep["guessed"]:
+            log(f"  UNHANDLED names mapped by guess: {rep['guessed']}")
+        log(f"  UNHANDLED names (soft tick used): {rep['unknown'] or 'none'}")
 
         t = time.time()
         vost, lines, out_lines = vomod.render(vo_data, lang, evs[lang])

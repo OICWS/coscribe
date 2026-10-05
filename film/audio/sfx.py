@@ -490,7 +490,17 @@ FAMILY = {  # event name -> sound family (synonyms the animators use or might us
     "ui": "ui", "row": "ui", "card": "ui",
     "dust": "dust", "hum": "hum",
     "cut": "music", "stop": "music", "silence": "music", "riser": "music", "hit": "music",
+    # picture-only events: the score already plays these moments (117.5 F-major pad, 119.4 fade)
+    "wordmark": "none", "logo": "none", "fade": "none", "fadeout": "none", "fade_out": "none", "black": "none",
 }
+# substring heuristics for names nobody has mapped yet (checked in order); the rest get a soft tick
+GUESS = [("whoosh", "whoosh"), ("swish", "whoosh"), ("dive", "dive"), ("key", "key"), ("type", "keyburst"),
+         ("enter", "enter"), ("paper", "paper"), ("page", "paper"), ("glass", "glass"), ("crystal", "glass"),
+         ("chime", "chime"), ("bell", "bell"), ("ding", "check"), ("tick", "tick"), ("click", "click"),
+         ("snap", "snap"), ("knock", "knock"), ("wood", "knock"), ("thud", "thud"), ("drop", "settle"),
+         ("land", "settle"), ("silk", "silk"), ("thread", "silk"), ("line", "silk"), ("pop", "pop"),
+         ("tap", "tap"), ("ui", "ui"), ("card", "ui"), ("row", "ui"), ("dust", "dust"), ("hum", "hum"),
+         ("stack", "stack"), ("clock", "clock"), ("scroll", "scroll"), ("riser", "music"), ("hit", "music")]
 # events that belong to the score (montage hits, the riser, the stops): no SFX for them
 SKIP_GROUP = {"ticks": "tick", "tap": "tick"}  # for fallback skipping: these families count as one
 
@@ -500,6 +510,8 @@ GLASS_NOTES = ["D6", "A5", "F6", "E6", "A6", "C6", "D6", "G6", "F6", "A5", "E6",
 def family(e):
     nm = e["name"]
     f = FAMILY.get(nm) or FAMILY.get(nm.lower()) or FAMILY.get(nm.lower().split("_")[0])
+    if f is None:
+        f = next((fam for sub, fam in GUESS if sub in nm.lower()), None)
     if f == "settle" and ("ring" in e or e.get("big")):
         return "stack"  # records stacking in the climax are 'drop' events with a ring index
     if f == "whoosh" and e.get("reverse"):
@@ -616,8 +628,8 @@ def place(buf, e, events, unknown):
         add(buf, dust(_num(e.get("dur"), 1.2)), t, _g(e, -34))
     elif fam == "hum":
         add(buf, hum(_num(e.get("dur"), 1.2)), t, _g(e, -34))
-    elif fam == "music":
-        pass  # the score plays these (montage hits, riser) or they are silences (stop / cut)
+    elif fam in ("music", "none"):
+        pass  # the score plays these (montage hits, riser, wordmark) or they are silences (stop / cut / fade)
     else:
         unknown.add(e["name"])
         add(buf, pan(tick(0.8), 0.0), t, _g(e, -38))
@@ -727,4 +739,9 @@ def render(events):
     g = uniform_filter1d(g, int(0.004 * SR))
     x *= g[None]
     x = filt(x, highpass(35), lowpass(12000))
-    return x, {"counts": counts, "fallback_used": used, "unknown": sorted(unknown)}
+    names = sorted({e["name"] for e in events})
+    explicit = lambda nm: nm in FAMILY or nm.lower() in FAMILY or nm.lower().split("_")[0] in FAMILY
+    guessed = {nm: family({"name": nm}) for nm in names if not explicit(nm) and nm not in unknown}
+    handled = {nm: family({"name": nm}) for nm in names if explicit(nm)}
+    return x, {"counts": counts, "fallback_used": used, "unknown": sorted(unknown), "guessed": guessed,
+               "handled": handled}

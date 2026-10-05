@@ -129,6 +129,7 @@
   // each line: [segments [text, color]], print time
   const TERM = [];
   const tl = (at, ...segs) => TERM.push({ at, segs });
+  let RUN2_AT = 0;   // index of the first line of the second run
   tl(82.20, ['$ ', M], ['pytest -q', X]);
   tl(82.36, ['..FFF', null], [' '.repeat(COLS - 11) + '[100%]', R]);   // dots line is filled progressively
   const fails = [
@@ -150,10 +151,11 @@
     }
     tl(at += step, [bar('short test summary info'), X]);
     for (const [name, , , , short] of fails) tl(at += 0.012, ['FAILED', R], [trunc(` test_daily_check.py::${name} - ${short}`), X]);
-    tl(82.79, ['3 failed', R], [', ', R], ['2 passed', G], [' in 0.38s', R]);
+    tl(82.79, ['3 failed', R, 1], [', ', R], ['2 passed', G, 1], [' in 0.38s', R]);
+    RUN2_AT = TERM.length;
     tl(83.62, ['$ ', M], ['pytest -q', X]);
     tl(83.72, ['.....', null], [' '.repeat(COLS - 11) + '[100%]', G]);
-    tl(84.00, ['5 passed in 0.41s', G]);
+    tl(84.00, ['5 passed', G, 1], [' in 0.41s', G]);
   }
   const RUN1_DOTS = [82.36, 82.43, 82.50, 82.535, 82.57], RUN2_DOTS = [83.72, 83.79, 83.86, 83.92, 83.97];
 
@@ -315,16 +317,20 @@
         return { e, barEl, lab, dx: 40 + r() * 50, dy: (r() - 0.5) * 30, rot: (r() - 0.5) * 3 };
       });
 
-      // terminal block under the code
+      // terminal block under the code. Two runs, two containers: the red run
+      // scrolls away as a whole before the green run prints, so the two never
+      // share the box (and the box tightens to the short green result).
       const termBox = h('div', { class: 'abs' });
-      css(termBox, { left: 110, top: TERM_Y, width: 1120, height: 0, overflow: 'hidden', webkitMaskImage: 'linear-gradient(transparent 0, #000 34px)', maskImage: 'linear-gradient(transparent 0, #000 34px)', borderRadius: 10, background: 'rgba(10,9,9,.42)', border: '1px solid rgba(247,245,243,.08)' });
-      const termInner = h('div', { class: 'abs' }); css(termInner, { left: 18, top: 0, width: 1090 });
-      termBox.append(termInner); world.append(termBox);
+      css(termBox, { left: 110, top: TERM_Y, width: 1120, height: 0, overflow: 'hidden', webkitMaskImage: 'linear-gradient(transparent 0, #000 11px)', maskImage: 'linear-gradient(transparent 0, #000 11px)', borderRadius: 10, background: 'rgba(10,9,9,.42)', border: '1px solid rgba(247,245,243,.08)' });
+      const run1 = h('div', { class: 'abs' }); css(run1, { left: 18, top: 0, width: 1090 });
+      const run2 = h('div', { class: 'abs' }); css(run2, { left: 18, top: 0, width: 1090 });
+      termBox.append(run1, run2); world.append(termBox);
       const TLH = 21, TVIS = 8, TPAD = 13;
+      const H1 = TPAD * 2 + TVIS * TLH, H2 = TPAD * 2 + (TERM.length - RUN2_AT) * TLH;
       const termLines = TERM.map((ln, i) => {
         const e = h('div'); css(e, { height: TLH, lineHeight: TLH + 'px', fontFamily: MONO, fontSize: 13.4, whiteSpace: 'pre', color: COL.text, overflow: 'hidden' });
-        const spans = ln.segs.map(([s, c]) => { const sp = h('span', { text: s }); if (c) css(sp, { color: c }); e.append(sp); return sp; });
-        termInner.append(e);
+        const spans = ln.segs.map(([s, c, b]) => { const sp = h('span', { text: s }); if (c) css(sp, { color: c }); if (b) css(sp, { fontWeight: 600 }); e.append(sp); return sp; });
+        (i < RUN2_AT ? run1 : run2).append(e);
         return { e, spans, at: ln.at, shown: null };
       });
       const dotsLines = [termLines[1], termLines[termLines.length - 2]];
@@ -508,15 +514,23 @@
 
         // ---- terminal ----
         const unfold = tw(t, 82.02, 82.26, 'outCubic');
-        css(termBox, { height: Math.round(unfold * (TPAD * 2 + TVIS * TLH)), opacity: unfold > 0 ? 1 : 0 });
+        const kx = tw(t, 83.40, 83.62, 'inOutCubic');           // red run leaves
+        const kh = tw(t, 83.46, 83.80, 'outCubic');             // box tightens
+        css(termBox, { height: Math.round(unfold * lerp(H1, H2, kh)), opacity: unfold > 0 ? 1 : 0 });
         let printed = 0;
-        termLines.forEach((tl2, i) => { const on = t >= tl2.at; if (on !== tl2.shown) { tl2.e.style.visibility = on ? 'visible' : 'hidden'; tl2.shown = on; } if (on) printed = i + 1; });
-        // smooth scroll: follow the last printed line, with a short ease
-        let target = Math.max(0, printed - TVIS);
+        termLines.forEach((tl2, i) => {
+          const on = t >= tl2.at;
+          if (on !== tl2.shown) { tl2.e.style.visibility = on ? 'visible' : 'hidden'; tl2.shown = on; }
+          if (on && i < RUN2_AT) printed = i + 1;
+        });
+        // run 1: smooth scroll following the last printed line, then lift out
+        const target = Math.max(0, printed - TVIS);
         const lastAt = printed ? termLines[printed - 1].at : 0;
         const prevTarget = Math.max(0, printed - 1 - TVIS);
         const sc = lerp(prevTarget, target, ease.outCubic(prog(t, lastAt, lastAt + 0.05)));
-        css(termInner, { top: TPAD - sc * TLH });
+        css(run1, { top: TPAD - sc * TLH - kx * H1, opacity: (1 - kx).toFixed(3), display: kx >= 1 ? 'none' : '' });
+        // run 2 rises in from below as run 1 leaves
+        css(run2, { top: TPAD + (1 - kx) * 40, opacity: kx.toFixed(3), display: kx > 0 ? '' : 'none' });
         // progressive dots
         const dotsStr = (times, finalStr) => { let n = 0; times.forEach((x) => { if (t >= x) n++; }); return finalStr.slice(0, n); };
         const d1 = dotsStr(RUN1_DOTS, '..FFF'), d2 = dotsStr(RUN2_DOTS, '.....');
