@@ -208,6 +208,28 @@ def test_read_pptx_out_of_range_slide_names_real_count(tmp_path: Path) -> None:
         tools["read_pptx"](path="deck.pptx", slide=5)
 
 
+def test_read_pptx_reads_text_inside_groups(tmp_path: Path) -> None:
+    """A deck compiled from SVG keeps nearly all of its text in groups;
+    read_pptx showed only the slide headings of one."""
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    outer = slide.shapes.add_group_shape()
+    box = (Inches(3), Inches(1))
+    outer.shapes.add_textbox(Inches(1), Inches(1), *box).text = "净收入 2,345.79 万元"
+    inner = outer.shapes.add_group_shape()
+    inner.shapes.add_textbox(Inches(1), Inches(2), *box).text = "达成率 96.34%"
+    slide.shapes.add_textbox(Inches(5), Inches(1), *box).text = "顶层文字"
+    prs.save(str(tmp_path / "grouped.pptx"))
+    tools = _tools_by_name(tmp_path)
+
+    text = tools["read_pptx"](path="grouped.pptx", slide=1)
+
+    assert text.splitlines() == ["- 净收入 2,345.79 万元", "- 达成率 96.34%", "- 顶层文字"]
+
+
 def test_write_pptx_skips_qa_gracefully_when_soffice_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

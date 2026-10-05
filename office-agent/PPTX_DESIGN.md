@@ -3481,3 +3481,64 @@ clean on every touched file.
 
 Sources: [hugohe3/ppt-master#256](https://github.com/hugohe3/ppt-master/issues/256);
 [Anthropic vision docs](https://platform.claude.com/docs/en/build-with-claude/vision).
+
+## 38. ppt-master run inside coscribe, head to head with coscribe's own route
+
+User asked how to align with `hugohe3/ppt-master`, now that writing code
+(SVG, a script) looks like a more controllable way to build a deck than
+assembling one tool call at a time. Researched by cloning it (v6.6.0, MIT,
+commit `4eb7b3d`, 2026-10-05, 57.6k stars) and running it, not from its
+README.
+
+**What it is, measured.** About 196,000 lines of Python under
+`skills/ppt-master/scripts` (`svg_quality/checker.py` 10.3k, the SVG ->
+DrawingML builder 8.6k); 857 KB of workflow/reference Markdown; a 125 MB
+skill folder (templates 66 MB, references 45 MB: 23 brand kits, 36 chart
+and 9 table templates, 9 layout sets, 16 styles, 12k icons). The model
+hand-writes one SVG per slide in a constrained subset; a deterministic
+checker (39 checks, errors block export) and compiler turn it into native
+shapes and text. Native Chart/Table objects are opt-in: the model writes
+the visible drawing plus a JSON payload, hash-stamped to stay in sync.
+Animations, notes and narration are JSON/Markdown sidecars. Every script
+entry point runs `attribution_guard.py`, which checks the SKILL.md
+metadata, the exact LICENSE text and the SPONSORS files, not the whole
+distribution (`_svg_slide.py`'s docstring said otherwise; corrected), so
+it can ship as long as it ships unmodified.
+
+**Same brief, same model (deepseek-flash), both inside coscribe** -- a
+6-page Q3 review from the analysis workbook built in 8ci:
+
+| | coscribe's route | ppt-master skill in coscribe |
+|---|---|---|
+| Time | 687 s | 696 s |
+| Model calls / tool calls | 89 / 91 | 71 / 92 |
+| Tokens (cache hits) | 11.9M (92%) | 12.3M (96%) |
+| Figures | all correct | all correct |
+| Look | stock Office charts, much empty space | editorial, consulting-grade pages |
+| Charts | native, editable | drawn as shapes (native not chosen) |
+
+Both decks were rendered and every region/category/customer figure checked
+against the workbook. The quality gap is large and comes from the medium
+(one coherent page program instead of ~50 incremental edits) plus
+ppt-master's design references; the cost is the same. ppt-master read 18
+skill files (271k characters) and ran 41 scripts, 5 of which failed on
+plumbing: its commands are `python3 scripts/x.py ...`, and coscribe offers
+only `run_python_script` -- `runpy` breaks the scripts' sibling imports and
+the system `python3` lacks their dependencies. Its project folder landed
+outside the workspace: the folder guard watches the script's own process,
+not the subprocesses it starts. Its pages keep titles out of placeholders
+(outline view is empty). All four compiled dependencies (skia-pathops,
+uharfbuzz, PyMuPDF, curl_cffi) have win_amd64 wheels.
+
+**Two coscribe bugs it exposed.** `read_pptx` skipped text inside groups
+and showed only slide headings for the whole ppt-master deck -- fixed (it
+walks groups now). The geometry checks behind `render_pptx_preview`
+(overlap, contrast, missing visual) also only see top-level shapes, so they
+reported that deck as clean without having looked at its text; group
+children sit in the group's own coordinate space, so this needs the
+transform applied -- not fixed yet.
+
+Recommendation and phasing are in the analysis delivered to the user; the
+short form: run ppt-master as an engine for new decks rather than
+re-implement it, after making skill scripts run cleanly; keep coscribe's
+tools for editing existing decks and filling the user's own templates.
