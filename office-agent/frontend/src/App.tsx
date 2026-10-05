@@ -933,6 +933,7 @@ function App() {
             <ChatLog
               items={state.items}
               turnInFlight={state.turnInFlight}
+              connectorTools={state.connectorTools}
               onApprove={onApprove}
               onAnswerQuestion={onAnswerQuestion}
               onAnswerPlan={onAnswerPlan}

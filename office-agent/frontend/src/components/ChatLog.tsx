@@ -71,6 +71,8 @@ interface ChatLogProps {
   /** A reply is being generated -- its tool calls without a result yet
    * are shown as running. */
   turnInFlight?: boolean;
+  /** The connected connectors' tool names, counted as "used N tools". */
+  connectorTools?: ReadonlySet<string>;
   onApprove: (id: string, approved: boolean) => void;
   onAnswerQuestion: (id: string, answer: string) => void;
   onAnswerPlan?: (item: PlanItem, choice: PlanChoice, feedback: string) => void;
@@ -135,6 +137,7 @@ export function ChatLog({
   olderStatus,
   onLoadOlder,
   turnInFlight = false,
+  connectorTools = NO_CONNECTOR_TOOLS,
 }: ChatLogProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -246,6 +249,7 @@ export function ChatLog({
   }
 
   return (
+    <ConnectorTools.Provider value={connectorTools}>
     <FolderActionsContext.Provider value={folderActions ?? null}>
     <DraftCardsContext.Provider value={cards}>
     <div data-testid="chat-log" className="chat-font flex-1 overflow-y-auto" ref={scrollRef}>
@@ -290,6 +294,7 @@ export function ChatLog({
     </div>
     </DraftCardsContext.Provider>
     </FolderActionsContext.Provider>
+    </ConnectorTools.Provider>
   );
 }
 
@@ -423,6 +428,9 @@ function TurnView({
 /** The Sub Agents panel leaves out the "+N -M" line counts. */
 const ShowDiffStats = createContext(true);
 
+const NO_CONNECTOR_TOOLS: ReadonlySet<string> = new Set();
+const ConnectorTools = createContext(NO_CONNECTOR_TOOLS);
+
 /** A read-only transcript -- a sub-agent's, in the Sub Agents panel --
  * drawn with the chat's own components. `live` shows its last call as
  * running. */
@@ -472,10 +480,15 @@ function SummaryLabel({ parts }: { parts: SummaryParts }) {
   const showDiffStats = useContext(ShowDiffStats);
   if (parts.shimmer) {
     return (
-      <span className="shimmer-text">
-        {parts.verb}
-        {parts.object && `${parts.glue ?? " "}${parts.object}`}
-      </span>
+      <>
+        <span className="shimmer-text">
+          {parts.verb}
+          {parts.object && `${parts.glue ?? " "}${parts.object}`}
+        </span>
+        {parts.failedCount !== undefined && (
+          <span className="ml-1 text-[var(--danger)]">({parts.failedCount} failed)</span>
+        )}
+      </>
     );
   }
   const label = (
@@ -534,6 +547,7 @@ function ToolRunGroupView({
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const connectorTools = useContext(ConnectorTools);
 
   if (groupHasPendingApproval(group)) {
     return (
@@ -545,7 +559,7 @@ function ToolRunGroupView({
     );
   }
 
-  const header = summarizeGroupParts(group.items, live);
+  const header = summarizeGroupParts(group.items, live, connectorTools);
   const single = group.items.length === 1 ? group.items[0] : null;
   return (
     <div className="w-full max-w-[92%] self-start text-sm">
@@ -562,7 +576,8 @@ function ToolRunGroupView({
               <SummaryLabel parts={inSentence(parts, index)} />
             </span>
           ))}
-          {header.more > 0 && `, and ${header.more} more`}
+          {header.more > 0 &&
+            `${header.shown.length > 0 ? ", and " : "And "}${header.more} more action${header.more === 1 ? "" : "s"}`}
           {header.active && (
             <>
               {header.shown.length > 0 && ", "}

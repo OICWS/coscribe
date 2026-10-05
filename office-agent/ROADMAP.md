@@ -7345,7 +7345,35 @@ nothing changes.
   setting; Windows; and whether the chat should send a review's findings
   back to the code module rather than fix them itself.
 
-## Phase 8cp -- Code module, part 3: its own conversations and a Settings section
+## Phase 8cp -- Tool-run headers counted by kind of work; running text shimmers (shipped)
+
+- [x] A run's collapsed header listed its first three calls one by one
+      and "and N more", merging only back-to-back commands -- a 100-step
+      run showed its first three steps. It now counts by kind, in the
+      order each first happened: "Ran 5 commands (2 failed), wrote 2
+      files, read 2 files, and 4 more actions". Kinds: commands (the
+      script runners and the code module's commands), wrote / edited /
+      read N files (files counted by path, so five edits to one deck are
+      "Edited `deck.pptx`" with the line counts summed), searched N
+      times, fetched N pages, finished N sub-agent tasks (spawn_agent,
+      review_work, run_code_task), used N tools (connector tools). A kind
+      done once keeps the call's own wording; everything else, and kinds
+      past the third, go into "N more actions"; a run of nothing but such
+      calls is still listed call by call. "Wrote", not "created": no write
+      tool reports whether the file existed.
+- [x] Connector tools are told apart by name, not prefix: the `state`
+      event carries `connector_tools`, the connected MCP tools' names.
+      History is judged against the connectors connected now.
+- [x] Every running label shimmers now, not just a run's last call: a
+      running step in the opened list and an aggregated "Running 3
+      commands" too. The band is the text faded toward the background,
+      sweeping left to right in 1.4 s; reduced motion keeps it still.
+      Checked live on deepseek-flash: headers went "Running a command" ->
+      "Running 2 commands, running a command: ..." -> "Ran 3 commands (1
+      failed)", and frames 350 ms apart show the band moving through the
+      text.
+
+## Phase 8cq -- Code module, part 3: its own conversations and a Settings section
 
 The third mode the nav rail promised: `</>` after Chat and Scheduled, with
 its own list of code sessions. A code conversation is a conversation with

@@ -341,21 +341,23 @@ body {
   text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
-/* The running tool call: a highlight sweeping across muted text. */
+/* Work still running: a pale band sweeping left to right through the
+   text, letter by letter. The band is the text faded toward the page
+   background, so it reads the same way in light and dark themes. */
 .shimmer-text {
   background: linear-gradient(
       90deg,
       var(--muted) 0%,
-      var(--muted) 35%,
-      var(--fg) 50%,
-      var(--muted) 65%,
+      var(--muted) 42%,
+      color-mix(in srgb, var(--muted) 30%, var(--bg)) 50%,
+      var(--muted) 58%,
       var(--muted) 100%
     )
-    0 0 / 250% 100%;
+    0 0 / 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: shimmer-sweep 1.8s linear infinite;
+  animation: shimmer-sweep 1.4s linear infinite;
 }
 @keyframes shimmer-sweep {
   from {

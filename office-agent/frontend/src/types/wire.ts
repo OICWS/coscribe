@@ -32,6 +32,8 @@ export interface StateEvent {
   /** The folders this conversation works in, the main one first; empty
    * while it uses the default workspace. */
   folders: string[];
+  /** The connected connectors' tool names (an older server sends none). */
+  connector_tools?: string[];
   /** Only on the state sent right after connecting: whether a turn is
    * already running on this thread (typically a scheduled run executing
    * in the background), so the page can show it as running. */
