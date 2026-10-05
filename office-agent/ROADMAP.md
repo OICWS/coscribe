@@ -7197,9 +7197,23 @@ sub-agent tool is the next step. `Settings.code_module_enabled` (off) and
         first request, so the workspace path doesn't break the prefix; the
         later requests of a turn hit 92-99%, so reasoning isn't re-read.
       - Every command came back for approval, `ls -la` and
-        `cat summary.csv` included: 3-4 cards per turn. The open approval
-        decision in the Codex entry is real and comes before the
-        sub-agent tool.
+        `cat summary.csv` included: 3-4 cards per turn.
+- [x] **Plain reads of the folder run without a card** (your decision).
+      First tried with Codex's own parse of each command
+      (`commandActions`: read / listFiles / search): run live against 15
+      commands, it passed `cat x | tee y` (writes y) and
+      `find . -name '*.csv' -delete`, which deleted the scratch folder's
+      CSV. That parse is for display, not safety. The rule now is
+      coscribe's own and deliberately small: one program from `ls cat
+      head tail wc grep rg find pwd stat du`, no shell syntax at all (no
+      pipes, `;`, `&`, redirects, `$`, backticks, `~`, globs), no
+      `find -delete/-exec/-ok/-fprint/-fls`, no `rg --pre`, and every
+      path, symlinks resolved, inside the folder. Same 15 commands live:
+      the six plain reads ran, everything that writes, deletes, chains,
+      leaves the folder or runs a script asked, and nothing changed on
+      disk. `find . -name '*.csv'` asks too (the glob) -- erring that way
+      is the point. PowerShell (Windows) always asks for now; Python
+      scripts always ask, which is most of a data task's commands.
 - Not yet: Windows. `taskkill /T` reaches children through a live
   parent only, so shutdown kills the tree first there (POSIX lets Codex
   exit, then kills the group); a Codex that crashes on its own would
@@ -7856,16 +7870,13 @@ a concrete reason to prioritize a new surface.
     command, `ls -la` included -- Codex's own safe-command list didn't
     pass it (not yet known why; every command is wrapped in
     `bash -lc`). A card per command is too many for an office user, and
-    under Auto each one also costs an auto-review call. **Open decision**:
-    passing read-only commands without a card means something decides
-    a command is read-only. `exec_policy.py` deliberately never decides
-    that itself (its rules are human-authored; coscribe inferring safety
-    is what its docstring rejects), so shipping default "allow" rules
-    there would reverse that stance. The options are: user-authored
-    rules only, as today; a short built-in allow-list of read-only
-    commands, written down as a new, explicit exception; or classing
-    Codex's command approvals by risk some other way. Settle before the
-    sub-agent tool ships.
+    under Auto each one also costs an auto-review call. **Decided
+    (2026-10-05, by you): a plain read of the conversation's folder runs
+    without a card** -- the user opened that folder for the work, so
+    reading it needs no further permission. This is a new, explicit
+    exception to `exec_policy.py`'s "coscribe never decides what is safe"
+    stance, kept to the code module and to reads; see Phase 8cl for the
+    rule and why it isn't Codex's own classification.
   - **Usage stays with the run.** A Codex run's tokens go on its
     `SubAgentTask.tokens` only, never out as the parent conversation's
     `usage` WebSocket event, and none of its text reaches the parent

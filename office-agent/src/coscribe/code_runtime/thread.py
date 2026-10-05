@@ -3,9 +3,15 @@
 Every command and file change Codex wants comes back as an approval and is
 settled by the caller's `decide`; the thread runs with no sandbox
 (`danger-full-access`, by decision -- see ROADMAP), so that answer is the
-only gate. Files written are found by comparing the folder before and
-after a turn: Codex mostly writes through the shell, which reports no
-file-change item.
+only gate. The one exception: a plain read of the thread's folder runs
+without asking -- the user opened that folder for this work, so reading it
+needs no further permission. "Plain read" is decided here, from a short
+list of read-only programs and no shell syntax at all, not from Codex's own
+`commandActions`: that parse is for display, and live it called
+`find . -delete` and `cat x | tee y` reads.
+
+Files written are found by comparing the folder before and after a turn:
+Codex mostly writes through the shell, which reports no file-change item.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import shlex
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +38,15 @@ _INTERRUPT_SECONDS = 10.0
 STALL_SECONDS = 180.0
 _SNAPSHOT_LIMIT = 20000
 _SKIPPED_DIRS = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
+_READ_PROGRAMS = frozenset(
+    {"ls", "cat", "head", "tail", "wc", "grep", "rg", "find", "pwd", "stat", "du"}
+)
+# Chaining, pipes, redirects, expansion and globs all let one "read" do
+# more, or reach past the folder (`~`, `$HOME`, `.*`); a command using any
+# of them is asked about rather than parsed.
+_SHELL_SYNTAX = frozenset("|&;<>$`(){}[]*?~!\\\n\r")
+_FIND_ACTIONS = ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fls")
+_SHELLS = frozenset({"bash", "sh", "zsh"})
 _STATUSES: dict[str, Literal["completed", "interrupted", "failed"]] = {
     "completed": "completed",
     "interrupted": "interrupted",
@@ -49,7 +65,8 @@ class ApprovalRequest:
 @dataclass(frozen=True)
 class CodexEvent:
     """What a watcher sees of a turn: "text" (a piece of the reply),
-    "command_started"/"command_finished", "file_change", "usage"."""
+    "command_started"/"command_finished", "file_change", "usage", and
+    "auto_approved" for a read-only command that ran without asking."""
 
     kind: str
     data: dict[str, Any]
@@ -104,10 +121,50 @@ def changed_files(
     return sorted(path for path, state in after.items() if before.get(path) != state)
 
 
+def _script(command: str) -> str | None:
+    """The shell script inside Codex's `/bin/bash -lc '<script>'` wrapper."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if len(argv) == 3 and Path(argv[0]).name in _SHELLS and argv[1] in ("-c", "-lc"):
+        return argv[2]
+    return command
+
+
+def reads_only(command: str, cwd: str, folder: Path) -> bool:
+    """Whether `command` is one read-only program reading only inside
+    `folder`."""
+    script = _script(command)
+    if script is None or any(ch in _SHELL_SYNTAX for ch in script):
+        return False
+    try:
+        argv = shlex.split(script)
+    except ValueError:
+        return False
+    if not argv or argv[0] not in _READ_PROGRAMS:
+        return False
+    if argv[0] == "find" and any(arg.startswith(_FIND_ACTIONS) for arg in argv):
+        return False
+    if argv[0] == "rg" and any(arg.startswith("--pre") for arg in argv):
+        return False
+    root = folder.resolve()
+    base = Path(cwd) if cwd else root
+    paths = [base]
+    for arg in argv[1:]:
+        if arg.startswith("-"):
+            if "=" in arg:
+                paths.append(base / arg.split("=", 1)[1])
+            continue
+        paths.append(base / arg)
+    return all(path.resolve().is_relative_to(root) for path in paths)
+
+
 class _Turn:
     """Listener for one turn's notifications and server requests."""
 
-    def __init__(self, decide: Decide, on_event: OnEvent | None) -> None:
+    def __init__(self, decide: Decide, on_event: OnEvent | None, folder: Path) -> None:
+        self.folder = folder
         self.decide = decide
         self.on_event = on_event
         self.turn_id: str | None = None
@@ -202,6 +259,10 @@ class _Turn:
 
     async def server_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if method == "item/commandExecution/requestApproval":
+            command = str(params.get("command") or "")
+            if reads_only(command, str(params.get("cwd") or ""), self.folder):
+                await self._emit("auto_approved", {"command": command})
+                return {"decision": "accept"}
             request = ApprovalRequest(
                 kind="command",
                 item_id=str(params.get("itemId", "")),
@@ -283,7 +344,7 @@ class CodexThread:
         before = await asyncio.to_thread(_snapshot, self._cwd)
         async with self._host.use() as server:
             thread_id = await self._open(server)
-            turn = _Turn(decide, on_event)
+            turn = _Turn(decide, on_event, self._cwd)
             server.listen(thread_id, turn)
             try:
                 start = asyncio.ensure_future(

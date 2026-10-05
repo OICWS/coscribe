@@ -5,6 +5,8 @@ a real 0.160.0 session. The prompt's first word picks what the turn does:
 
     basic      streams a reply and token usage
     approve    asks to run a command; on accept writes made.txt, else declines
+    read       the same, for `ls -la`
+    readout    the same, for `cat ../x.txt`
     file       asks to apply a file change
     hang       runs until turn/interrupt, sending nothing
     slowcmd    runs a command that takes 1.5 s and prints nothing
@@ -102,9 +104,9 @@ def complete(thread_id: str, turn_id: str, status: str, error: str | None = None
     )
 
 
-def command(thread_id: str, turn_id: str, cwd: str) -> None:
+def command(thread_id: str, turn_id: str, cwd: str, script: str = "echo made > made.txt") -> None:
     base = {"threadId": thread_id, "turnId": turn_id}
-    item = {"type": "commandExecution", "id": "call-1", "command": "echo made > made.txt"}
+    item = {"type": "commandExecution", "id": "call-1", "command": f"/bin/bash -lc '{script}'"}
     notify("item/started", {**base, "item": {**item, "status": "inProgress"}})
     reply = ask(
         "item/commandExecution/requestApproval",
@@ -117,6 +119,7 @@ def command(thread_id: str, turn_id: str, cwd: str) -> None:
             "command": item["command"],
             "cwd": cwd,
             "reason": "writes made.txt",
+            "commandActions": [{"type": "unknown", "command": script}],
         },
     )
     accepted = reply.get("result", {}).get("decision") == "accept"
@@ -132,6 +135,10 @@ def run_turn(thread_id: str, turn_id: str, prompt: str, cwd: str) -> None:
     base = {"threadId": thread_id, "turnId": turn_id}
     if scenario == "approve":
         command(thread_id, turn_id, cwd)
+    elif scenario == "read":
+        command(thread_id, turn_id, cwd, "ls -la")
+    elif scenario == "readout":
+        command(thread_id, turn_id, cwd, "cat ../x.txt")
     elif scenario == "file":
         item = {"type": "fileChange", "id": "patch-1", "changes": [{"path": "notes.md"}]}
         notify("item/started", {**base, "item": {**item, "status": "inProgress"}})

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from coscribe.code_runtime.thread import (
     CodexEvent,
     CodexThread,
     changed_files,
+    reads_only,
 )
 
 FAKE = Path(__file__).with_name("fake_codex_app_server.py")
@@ -162,7 +164,7 @@ async def test_an_approved_command_runs_and_its_file_is_reported(
 
     [request] = approvals.seen
     assert request.kind == "command"
-    assert request.command == "echo made > made.txt"
+    assert request.command == "/bin/bash -lc 'echo made > made.txt'"
     assert request.cwd == str(workdir)
     assert request.reason == "writes made.txt"
     assert result.text == "ran it"
@@ -176,6 +178,90 @@ async def test_a_declined_command_does_not_run(host: CodexHost, workdir: Path) -
     assert result.text == "was declined"
     assert not (workdir / "made.txt").exists()
     assert result.files_changed == []
+
+
+async def test_a_read_inside_the_folder_runs_without_asking(host: CodexHost, workdir: Path) -> None:
+    approvals = _Approvals(False)
+    events: list[CodexEvent] = []
+
+    async def on_event(event: CodexEvent) -> None:
+        events.append(event)
+
+    result = await _thread(host, workdir).run_turn("read", approvals, on_event)
+
+    assert approvals.seen == []
+    assert result.text == "ran it"
+    assert [e.data["command"] for e in events if e.kind == "auto_approved"] == [
+        "/bin/bash -lc 'ls -la'"
+    ]
+
+
+async def test_a_read_outside_the_folder_still_asks(host: CodexHost, workdir: Path) -> None:
+    approvals = _Approvals(False)
+
+    result = await _thread(host, workdir).run_turn("readout", approvals)
+
+    assert [r.command for r in approvals.seen] == ["/bin/bash -lc 'cat ../x.txt'"]
+    assert result.text == "was declined"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "ls -la",
+        "cat summary.csv",
+        "head -n 3 sub/a.csv",
+        "grep -rn 华北 .",
+        "rg 华北",
+        "find . -name x.csv",
+        "wc -l summary.csv",
+        "cat 'my file.csv'",
+        "du -sh sub",
+    ],
+)
+def test_plain_reads_of_the_folder_pass(script: str, tmp_path: Path) -> None:
+    (tmp_path / "sub").mkdir()
+
+    assert reads_only(f"/bin/bash -lc {shlex.quote(script)}", str(tmp_path), tmp_path)
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        # Taken for reads by Codex's own commandActions, live.
+        "cat summary.csv | tee copy.csv",
+        "find . -name '*.csv' -delete",
+        "find . -exec rm {} +",
+        "cat summary.csv > copy.csv",
+        "head -n 1 summary.csv; rm -f summary.csv",
+        "sed -i s/a/b/ summary.csv",
+        "python -c 'print(1)'",
+        "cat ../../etc/hostname",
+        "ls ..",
+        "cat /etc/passwd",
+        "cat ~/.ssh/id_rsa",
+        "cat $HOME/.netrc",
+        "cat .*/secret",
+        "rg --pre=sh x .",
+        "grep -f ../patterns x .",
+        "./cat x",
+        "file -C -m magic",
+        "cat x && rm x",
+        "cat `whoami`",
+    ],
+)
+def test_anything_else_is_asked_about(script: str, tmp_path: Path) -> None:
+    assert not reads_only(f"/bin/bash -lc {shlex.quote(script)}", str(tmp_path), tmp_path)
+
+
+def test_a_read_outside_the_folder_or_from_outside_it_is_asked_about(tmp_path: Path) -> None:
+    folder = tmp_path / "work"
+    folder.mkdir()
+    (folder / "link").symlink_to(tmp_path)
+
+    assert not reads_only("/bin/bash -lc 'ls'", str(tmp_path), folder)
+    assert not reads_only("/bin/bash -lc 'cat link/secret'", str(folder), folder)
+    assert not reads_only("powershell.exe -Command Get-ChildItem", str(folder), folder)
 
 
 async def test_a_file_change_is_asked_about_too(host: CodexHost, workdir: Path) -> None:
