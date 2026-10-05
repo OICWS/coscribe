@@ -190,6 +190,15 @@ class Settings(BaseSettings):
     have no version of this problem to solve.
     """
 
+    code_module_enabled: bool = False
+    """The code module: Codex run as a second agent runtime (code_runtime/).
+    Off by default; it downloads ~111 MB on first use and only works with
+    models served over the Responses API."""
+
+    codex_wheel_url: str | None = None
+    """Where to fetch the pinned Codex wheel instead of PyPI -- a mirror of
+    the same file. Its pinned hashes still have to match."""
+
     browser_host_token: str | None = None
     """Set by the desktop app when it starts this server: the secret its
     built-in browser presents on /internal/browser-host. When set, the

@@ -7201,6 +7201,88 @@ per 1M), peak is double. n=1 per side.
       did before. With LangChain's run limit swapped back in, the new
       approval test's turn runs past its cap.
 
+## Phase 8cm -- Code module, part 1: Codex downloaded on demand, and the adapter (shipped, not wired in)
+
+The first step of the code module planned in the Codex entry under
+"Later": `code_runtime/` can install Codex 0.160.0 and drive it through
+`codex app-server`, but nothing in the app calls it yet -- the chat's
+sub-agent tool is the next step. `Settings.code_module_enabled` (off) and
+`codex_wheel_url` are there for it.
+
+- [x] **Install** (`code_runtime/install.py`): only `codex` and `rg` are
+      taken out of the PyPI wheel, by range request; each is checked
+      against a sha256 that `scripts/pin_codex.py` recorded from a wheel
+      whose full hash matched PyPI's (six platforms pinned). A host that
+      ignores ranges gets the whole wheel, checked first. The install
+      appears in one rename, so a cut download never looks installed.
+      Live from PyPI on Linux: 295 MB unpacked in 20 s, `codex-cli
+      0.160.0` runs.
+- [x] **Launch** (`launch.py`): `CODEX_HOME` under `state_dir/codex`; a
+      `config.toml` with analytics off, 21 overlapping features off, and
+      one Responses provider per coscribe custom provider (plus OpenAI
+      when `OPENAI_API_KEY` is set); keys passed as env vars, never
+      written to the file; the script env's venv and `rg` first on PATH;
+      the proxy forwarded. One shared process, started on first use,
+      stopped after 10 idle minutes or when its setup changes and nothing
+      is using it. Anthropic/Gemini models are refused with a reason.
+- [x] **Turns** (`thread.py`): `untrusted` + `danger-full-access`, so
+      every command and file change is a `decide()` call; text, commands,
+      file changes and usage stream as events; files changed come from a
+      before/after look at the folder. A cancelled turn is interrupted in
+      Codex (even if cancelled before `turn/start` answered). A turn that
+      hears nothing for 180 s with no command running and no approval
+      pending is stopped -- found by breaking the code on purpose: without
+      it a lost `turn/completed` hung the turn forever.
+- [x] Found reviewing the diff, fixed, each with a test:
+      - Every notification was handled in a task of its own, so with a
+        watcher that awaits (a socket), the turn returned before a single
+        event reached it, and pieces of a reply could swap. Each thread
+        now gets its notifications in order from one queue.
+      - `initialize` had no timeout, under the host's lock: one Codex that
+        never answered would have held every later turn. 60 s now.
+      - Codex hands its whole environment to the commands it runs -- checked
+        live by listing the variable names a command sees -- including
+        the `COSCRIBE_CODEX_KEY_*` variables this module adds for Codex.
+        Those are excluded now (`shell_environment_policy`); keys already
+        in coscribe's own environment stay visible, as they are to
+        `run_python_script` (Phase 7's decision).
+      - `app-server.log` grew across restarts; rotated at 5 MB.
+- [x] Tests against `tests/fake_codex_app_server.py` (same JSON-RPC,
+      shapes from a real session): 21 adapter, 8 install. Six deliberate
+      breakages (no interrupt, other policy, always accept, no group kill,
+      no member hash check, no early-event buffer) each fail a test, as
+      does going back to one task per notification.
+- [x] **Live, DeepSeek `deepseek-flash`, through the adapter**:
+      - Codex's commands ran on the script env's Python (pandas there).
+      - Totals matched the earlier runs to the cent.
+      - No model-metadata warning once the context window is passed.
+      - Cache, the question left open: within a thread 91-97% of input was
+        cached per turn; a new thread in another folder hit 95% on its
+        first request, so the workspace path doesn't break the prefix; the
+        later requests of a turn hit 92-99%, so reasoning isn't re-read.
+      - Every command came back for approval, `ls -la` and
+        `cat summary.csv` included: 3-4 cards per turn.
+- [x] **Plain reads of the folder run without a card** (your decision).
+      First tried with Codex's own parse of each command
+      (`commandActions`: read / listFiles / search): run live against 15
+      commands, it passed `cat x | tee y` (writes y) and
+      `find . -name '*.csv' -delete`, which deleted the scratch folder's
+      CSV. That parse is for display, not safety. The rule now is
+      coscribe's own and deliberately small: one program from `ls cat
+      head tail wc grep rg find pwd stat du`, no shell syntax at all (no
+      pipes, `;`, `&`, redirects, `$`, backticks, `~`, globs), no
+      `find -delete/-exec/-ok/-fprint/-fls`, no `rg --pre`, and every
+      path, symlinks resolved, inside the folder. Same 15 commands live:
+      the six plain reads ran, everything that writes, deletes, chains,
+      leaves the folder or runs a script asked, and nothing changed on
+      disk. `find . -name '*.csv'` asks too (the glob) -- erring that way
+      is the point. PowerShell (Windows) always asks for now; Python
+      scripts always ask, which is most of a data task's commands.
+- Not yet: Windows. `taskkill /T` reaches children through a live
+  parent only, so shutdown kills the tree first there (POSIX lets Codex
+  exit, then kills the group); a Codex that crashes on its own would
+  still leave its children. Untested on real Windows.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
@@ -7852,16 +7934,13 @@ a concrete reason to prioritize a new surface.
     command, `ls -la` included -- Codex's own safe-command list didn't
     pass it (not yet known why; every command is wrapped in
     `bash -lc`). A card per command is too many for an office user, and
-    under Auto each one also costs an auto-review call. **Open decision**:
-    passing read-only commands without a card means something decides
-    a command is read-only. `exec_policy.py` deliberately never decides
-    that itself (its rules are human-authored; coscribe inferring safety
-    is what its docstring rejects), so shipping default "allow" rules
-    there would reverse that stance. The options are: user-authored
-    rules only, as today; a short built-in allow-list of read-only
-    commands, written down as a new, explicit exception; or classing
-    Codex's command approvals by risk some other way. Settle before the
-    sub-agent tool ships.
+    under Auto each one also costs an auto-review call. **Decided
+    (2026-10-05, by you): a plain read of the conversation's folder runs
+    without a card** -- the user opened that folder for the work, so
+    reading it needs no further permission. This is a new, explicit
+    exception to `exec_policy.py`'s "coscribe never decides what is safe"
+    stance, kept to the code module and to reads; see Phase 8cm for the
+    rule and why it isn't Codex's own classification.
   - **Usage stays with the run.** A Codex run's tokens go on its
     `SubAgentTask.tokens` only, never out as the parent conversation's
     `usage` WebSocket event, and none of its text reaches the parent
