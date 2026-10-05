@@ -67,7 +67,7 @@ from langgraph.types import Command
 
 from ..cli import INIT_PROMPT
 from ..config import Settings
-from ..coordinator import CORE_TOOL_NAMES, build_coordinator_agent
+from ..coordinator import CORE_TOOL_NAMES, build_coordinator_agent, conversation_context
 from ..runtime import (
     COMPACT_INSTRUCTIONS,
     LLMClient,
@@ -101,8 +101,10 @@ from ..runtime_lg.messages import (
     AUTO_MODE_NOTE,
     NORMAL_MODE_NOTE,
     PLAN_MODE_NOTE,
+    context_note,
     current_date_note,
     language_note,
+    last_conversation_context,
     strip_mode_note,
 )
 from ..runtime_lg.providers import keeps_tool_list_fixed, with_prompt_cache_key
@@ -3330,7 +3332,17 @@ class ChatSessionLG:
         # current_date_note() lives here, not in the system prompt --
         # see its own docstring in runtime_lg/messages.py for why that
         # matters for caching across every provider, not just Anthropic.
-        model_input = current_date_note() + mode_note + language_note(text) + user_input
+        context = conversation_context(self.settings, self.workspace_root, self.extra_folders)
+        state = await self.lg_agent.aget_state(self.config)
+        history = list(state.values.get("messages", [])) if state.values else []
+        told = last_conversation_context(history) == context
+        model_input = (
+            current_date_note()
+            + mode_note
+            + language_note(text)
+            + ("" if told else context_note(context))
+            + user_input
+        )
 
         content: str | list[dict[str, Any]] = model_input
         if images:

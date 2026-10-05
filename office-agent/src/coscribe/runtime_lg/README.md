@@ -3552,3 +3552,42 @@ of the file name) -- `_stream_turn` kept adding streamed chunks across
 responses, and a later response's argument pieces (index 0, no id) were
 joined to the first response's call. Reset per response now; the
 regression test streams arguments in pieces as real providers do.
+
+
+## Prompt-cache audit across the whole app, DeepSeek (2026-10-05)
+
+Every chat-completions call in the process was recorded (main loop,
+auto-mode reviewer, `review_work`, sub-agents) with its usage, request
+bodies were captured at the HTTP layer where a miss needed explaining, and
+each hypothesis was checked with a direct API experiment before changing
+code. What DeepSeek caches, measured: the prefix in the order system
+prompt, tool list, messages. A change at the end of the system prompt
+broke the tool list's cache too (5,760 cached before, 2,304 after).
+
+Two real breaks, both fixed:
+
+- **Per-conversation text in the system prompt.** The folders and the
+  remembered facts were part of it, so a conversation in another folder
+  re-read the rest of the prompt and every tool schema uncached: a new
+  conversation's first request hit 18% (8.8k of 48.6k). Both moved to a
+  `[Conversation context]` note sent with the user's message when it
+  differs from what the conversation was last told
+  (`coordinator.conversation_context`, `messages.last_conversation_context`),
+  stripped from history like the date and mode notes. Same settings,
+  another folder: 100%.
+- **DeepSeek's `reasoning_content` never went back.** langchain-openai
+  drops it; DeepSeek's docs require it on every request that carries
+  tools. Byte-identical requests then render differently once a new user
+  message arrives, so every turn re-read the conversation uncached. Direct
+  experiment: 10,478 of 11,246 prompt tokens missed at the next turn
+  without it, 191 with it. In the app, a turn's first request missed
+  52,602 of 101,114 tokens; with `providers._deepseek_chat_model_class`
+  (keeps it on the AIMessage, sends it back), 180. Thinking on or off made
+  no difference when it was sent back.
+
+Measured and left alone: the auto-mode reviewer's calls hit only 33% (its
+prompt is mostly the action being judged, ~850 tokens each), but they were
+7% of two conversations' cost; `review_work` was 20%, at 74%. Still open:
+`review_work`'s own model calls show up in the main conversation's usage
+events, so the composer's token counter jumps down and back up during a
+review.

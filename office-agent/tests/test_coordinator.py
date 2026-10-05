@@ -199,15 +199,18 @@ def test_all_tool_schemas_are_gemini_compatible(tmp_path: Path) -> None:
             )
 
 
-def test_remembered_facts_appear_in_instructions_once_file_has_content(tmp_path: Path) -> None:
+def test_remembered_facts_go_in_the_conversation_context(tmp_path: Path) -> None:
+    from coscribe.coordinator import conversation_context
+
     memory_path = tmp_path / "MEMORY.md"
     memory_path.write_text("- The user prefers metric units.\n", encoding="utf-8")
+    settings = _settings(tmp_path, memory_path=memory_path)
 
-    agent = build_coordinator_agent(_settings(tmp_path, memory_path=memory_path), "thread-1")
+    context = conversation_context(settings)
 
-    assert agent.instructions is not None
-    assert "Remembered facts from earlier sessions:" in agent.instructions
-    assert "The user prefers metric units." in agent.instructions
+    assert "Remembered facts from earlier sessions:" in context
+    assert "The user prefers metric units." in context
+    assert "metric units" not in (build_coordinator_agent(settings, "t1").instructions or "")
 
 
 def test_no_extra_dirs_configured_adds_no_instructions_note(tmp_path: Path) -> None:
@@ -250,20 +253,38 @@ def test_writable_dir_is_not_also_listed_as_read_only(tmp_path: Path) -> None:
     assert "(read and write)" in agent.instructions
 
 
-def test_instructions_name_every_folder_attached_to_the_conversation(tmp_path: Path) -> None:
+def test_context_names_every_folder_attached_to_the_conversation(tmp_path: Path) -> None:
+    from coscribe.coordinator import conversation_context
+
     main = tmp_path / "reports"
     extra = tmp_path / "downloads"
 
-    agent = build_coordinator_agent(
-        _settings(tmp_path), "t1", workspace_root=main, extra_folders=[extra]
+    context = conversation_context(_settings(tmp_path), main, [extra])
+
+    assert f"- {main} (main folder: relative paths start inside it" in context
+    assert "never prefix them with 'reports/'" in context
+    assert f"- {extra} (read and write; pass the absolute path)" in context
+
+
+def test_context_names_the_workspace_root_when_no_folders_were_added(tmp_path: Path) -> None:
+    from coscribe.coordinator import conversation_context
+
+    context = conversation_context(_settings(tmp_path))
+
+    assert f"relative paths resolve, is {tmp_path / 'workspace'}" in context
+
+
+def test_the_system_prompt_is_the_same_for_every_conversation(tmp_path: Path) -> None:
+    """The tool list comes after the system prompt in what providers cache,
+    so a per-conversation line in it made each new conversation re-read the
+    rest of the prompt and every tool schema uncached."""
+    memory_path = tmp_path / "MEMORY.md"
+    memory_path.write_text("- a fact\n", encoding="utf-8")
+    settings = _settings(tmp_path, memory_path=memory_path)
+
+    one = build_coordinator_agent(settings, "t1", workspace_root=tmp_path / "a")
+    two = build_coordinator_agent(
+        settings, "t2", workspace_root=tmp_path / "b", extra_folders=[tmp_path / "c"]
     )
 
-    assert f"- {main} (main folder: relative paths start inside it" in agent.instructions
-    assert "never prefix them with 'reports/'" in agent.instructions
-    assert f"- {extra} (read and write; pass the absolute path)" in agent.instructions
-
-
-def test_instructions_name_the_workspace_root_when_no_folders_were_added(tmp_path: Path) -> None:
-    agent = build_coordinator_agent(_settings(tmp_path), "t1")
-
-    assert f"relative paths resolve, is {tmp_path / 'workspace'}" in agent.instructions
+    assert one.instructions == two.instructions
