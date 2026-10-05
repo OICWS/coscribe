@@ -748,7 +748,11 @@ def build_review_work_tool(
         # a real .invoke() before). Each call is one-shot, so a fresh
         # thread_id per call is correct, not a workaround.
         thread_id = uuid.uuid4().hex
-        result = reviewer.invoke(
+        # A fresh context, as spawn_agent's runner gets: the parent's run
+        # config lives in contextvars, and inheriting it streams the
+        # reviewer's tokens and usage into the parent's chat as its own.
+        result = contextvars.Context().run(
+            reviewer.invoke,
             {"messages": [{"role": "user", "content": content}]},
             config={"configurable": {"thread_id": thread_id}},
         )

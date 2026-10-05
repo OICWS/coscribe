@@ -7130,8 +7130,12 @@ direct API experiment before the fix.
 - [x] Measured what the app spends besides the main loop, two two-turn
       conversations: main ¥0.47, `review_work` ¥0.13, auto-mode reviewer
       ¥0.045 (off-peak).
-- Open: `review_work`'s model calls leak into the main conversation's usage
-  events.
+- [x] `review_work` ran its reviewer inside the parent's run context, so
+      the parent's chat stream picked the reviewer up: its reply appeared
+      in the chat as the assistant's own words, and its tokens were added
+      to the parent's response (a 50,001-token response reported 50,902).
+      It runs in a fresh context now, as `spawn_agent`'s runner already
+      did.
 
 ## Later -- real intentions, not actively scheduled
 

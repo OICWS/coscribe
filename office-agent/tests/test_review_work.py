@@ -328,6 +328,45 @@ def test_the_reviewer_sees_what_the_work_actually_observed(tmp_path: Path) -> No
     assert tool_results[-1].content == "ok"
 
 
+async def test_the_reviewer_streams_nothing_into_the_parents_chat(tmp_path: Path) -> None:
+    """The parent's chat is its "messages" stream: the reviewer's reply
+    showed there as the parent's own words, and its token count was added
+    to the parent's response, so the context counter jumped mid-review."""
+    from coscribe.runtime_lg.agent import build_langgraph_agent
+
+    reviewer_model = _FakeModel(responses=[AIMessage(content="REVIEWER VERDICT")])
+    review_work = build_review_work_tool(reviewer_model, [], tmp_path)
+    worker = _FakeModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "review_work",
+                        "args": {"original_request": "clean it", "summary_of_work": "done"},
+                        "id": "r1",
+                    }
+                ],
+            ),
+            AIMessage(content="finished"),
+        ]
+    )
+    agent = build_langgraph_agent(worker, [review_work], "work")
+
+    streamed = [
+        message
+        async for message, _metadata in agent.astream(
+            {"messages": [{"role": "user", "content": "go"}]},
+            config={"configurable": {"thread_id": "t"}},
+            stream_mode="messages",
+        )
+        if isinstance(message, AIMessage)
+    ]
+
+    assert reviewer_model.i == 1
+    assert [m.content for m in streamed if m.content] == ["finished"]
+
+
 def test_evidence_log_leaves_out_bookkeeping_and_fits_its_budget() -> None:
     from langchain_core.messages import ToolMessage
 

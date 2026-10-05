@@ -3587,7 +3587,13 @@ Two real breaks, both fixed:
 
 Measured and left alone: the auto-mode reviewer's calls hit only 33% (its
 prompt is mostly the action being judged, ~850 tokens each), but they were
-7% of two conversations' cost; `review_work` was 20%, at 74%. Still open:
-`review_work`'s own model calls show up in the main conversation's usage
-events, so the composer's token counter jumps down and back up during a
-review.
+7% of two conversations' cost; `review_work` was 20%, at 74%.
+
+Found on the way and fixed: `review_work` invoked its reviewer inside the
+parent's run context (LangChain keeps the running call's config in
+contextvars), so the parent's `stream_mode="messages"` received the
+reviewer's chunks as its own. Its reply streamed into the chat as
+`agent_delta`, and `_stream_turn`'s per-response segment summed the
+reviewer's usage onto the parent's (a fake 50,001-token response reported
+50,902). The reviewer now runs in a fresh `contextvars.Context()`, as
+`spawn_agent`'s runner already did.
