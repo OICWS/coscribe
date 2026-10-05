@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
-<title>coscribe · 一句话的背后</title>
+<title>coscribe · Behind one sentence</title>
 <link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="engine/film.css">
 <style>
@@ -31,7 +31,7 @@
   <button id="play">播放</button>
   <span id="tc">0:00.0</span>
   <input id="scrub" type="range" min="0" max="120" step="0.01" value="0">
-  <button id="lang">EN</button>
+  <button id="lang" hidden>EN</button>
 </div>
 <audio id="audio" preload="auto"></audio>
 
@@ -55,7 +55,7 @@
 (function () {
   const q = new URLSearchParams(location.search);
   const render = q.has('render');
-  let lang = q.get('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');
+  let lang = q.get('lang') || 'en';
   if (render) document.body.classList.add('render');
   const stage = document.getElementById('stage'), frame = document.getElementById('frame');
   F.build(stage, { lang, subtitles: q.get('subs') !== '0' });

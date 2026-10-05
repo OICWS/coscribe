@@ -1,8 +1,11 @@
+// On-screen narrative lines (the film has NO voiceover: Allen, 2026-10-05). "speak": false
+// tells the audio build not to synthesise any VO. Former VO lines are shown as on-screen text only.
 // Voiceover and its subtitles. Strict JSON after the "=" so the Python audio
 // build can read it too (audio/build_vo.py). Times in seconds.
 // at: VO start; in/out: subtitle visible window; bg: what the line sits on
 // ("light" surface or "dark" depth); sub: false = no subtitle (text already on screen).
 window.FILM_VO = {
+  "speak": false,
   "voices": { "zh": "zm_010", "en": "am_michael" },
   "lines": [
     { "id": "VO-01", "at": 1.5,   "in": 1.6,   "out": 4.9,   "bg": "light", "zh": "有些工作，一句话就能说清楚。", "en": "Some work can be said in one sentence." },

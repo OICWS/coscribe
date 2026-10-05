@@ -54,7 +54,7 @@
   // set many style props at once, skipping unchanged values (cheap per-frame updates)
   function css(e, props) {
     for (const [k, v] of Object.entries(props)) {
-      const s = typeof v === 'number' && !/opacity|zIndex|scale/.test(k) ? v + 'px' : String(v);
+      const s = typeof v === 'number' && !/opacity|zIndex|scale|lineHeight|fontWeight|flex$|flexGrow|flexShrink|order|zoom/.test(k) ? v + 'px' : String(v);
       if (e.style[k] !== s) e.style[k] = s;
     }
   }
@@ -78,7 +78,7 @@
   // language is known from the URL before any scene file runs, so scenes may
   // resolve copy at load time as well as in build()
   const qs = new URLSearchParams(location.search);
-  let stage, lang = qs.get('lang') || ((navigator.language || '').startsWith('zh') ? 'zh' : 'en'), built = false;
+  let stage, lang = qs.get('lang') || 'en', built = false;
   function T(key) { // localized copy lookup: content/copy.js sets window.FILM_COPY
     const all = window.FILM_COPY || {};
     const v = ((all[lang] || {})[key] ?? (all.zh || {})[key]);

@@ -55,7 +55,7 @@ def shot(page, t):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lang", default="zh")
+    ap.add_argument("--lang", default="en")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--start", type=float, default=0)
     ap.add_argument("--end", type=float)
