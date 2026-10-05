@@ -68,15 +68,19 @@ class CodeTaskContext:
     context_window: Callable[[], int | None]
 
 
-def _command_args(command: str, description: str = "") -> dict[str, Any]:
+def command_args(command: str, description: str = "") -> dict[str, Any]:
     # The shape run_python_script's approval card and transcript row show.
     return {"script": shell_script(command) or command, "description": description}
 
 
-def _approval_request(request: ApprovalRequest) -> dict[str, Any]:
+def approval_call(request: ApprovalRequest) -> dict[str, Any]:
+    """Codex's approval request as the gated call the host decides."""
     if request.kind == "command":
-        return {"name": CODE_COMMAND_TOOL, "args": _command_args(request.command, request.reason)}
-    return {"name": CODE_CHANGE_TOOL, "args": {"description": request.reason}}
+        return {"name": CODE_COMMAND_TOOL, "args": command_args(request.command, request.reason)}
+    return {
+        "name": CODE_CHANGE_TOOL,
+        "args": {"paths": list(request.paths), "description": request.reason},
+    }
 
 
 class _Run:
@@ -98,7 +102,7 @@ class _Run:
         await self.host.changed(self.record)
 
     async def decide(self, request: ApprovalRequest) -> bool:
-        decision = await self.host.decide(_approval_request(request), self.record)
+        decision = await self.host.decide(approval_call(request), self.record)
         if self.record.pending_approval is not None or self.record.status != "running":
             self.record.pending_approval = None
             self.record.status = "running"
@@ -113,7 +117,7 @@ class _Run:
             self.record.tool_uses += 1
             self.record.last_tool = {
                 "tool_name": CODE_COMMAND_TOOL,
-                "arguments": _command_args(str(data.get("command", ""))),
+                "arguments": command_args(str(data.get("command", ""))),
             }
             await self.save()
         elif event.kind == "command_finished":
@@ -122,7 +126,7 @@ class _Run:
                 {
                     "kind": "tool",
                     "tool_name": CODE_COMMAND_TOOL,
-                    "arguments": _command_args(str(data.get("command", ""))),
+                    "arguments": command_args(str(data.get("command", ""))),
                     "result": {
                         "exit_code": exit_code,
                         "output": str(data.get("output") or "")[-_OUTPUT_CHARS:],

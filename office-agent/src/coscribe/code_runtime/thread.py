@@ -22,7 +22,7 @@ import logging
 import os
 import re
 import shlex
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -67,6 +67,7 @@ class ApprovalRequest:
     command: str = ""
     cwd: str = ""
     reason: str = ""
+    paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -208,6 +209,9 @@ class _Turn:
         self._running: set[str] = set()
         self._asking = 0
         self._deciding: set[asyncio.Task[Any]] = set()
+        # A file change's approval names only the item; its files come with
+        # the item, which starts first.
+        self._change_paths: dict[str, tuple[str, ...]] = {}
 
     def stalled(self, seconds: float) -> bool:
         quiet = self._loop.time() - self._last_heard
@@ -280,6 +284,10 @@ class _Turn:
                         "output": item.get("aggregatedOutput") or "",
                     },
                 )
+        elif kind == "fileChange" and method == "item/started":
+            self._change_paths[str(item.get("id"))] = tuple(
+                str(c.get("path")) for c in item.get("changes") or []
+            )
         elif kind == "fileChange" and method == "item/completed":
             paths = [str(c.get("path")) for c in item.get("changes") or []]
             await self._emit(
@@ -300,10 +308,12 @@ class _Turn:
                 reason=str(params.get("reason") or ""),
             )
         elif method == "item/fileChange/requestApproval":
+            item_id = str(params.get("itemId", ""))
             request = ApprovalRequest(
                 kind="file_change",
-                item_id=str(params.get("itemId", "")),
+                item_id=item_id,
                 reason=str(params.get("reason") or ""),
+                paths=self._change_paths.get(item_id, ()),
             )
         else:
             # Tool calls, user-input prompts, MCP elicitations, permission
@@ -365,21 +375,33 @@ class CodexThread:
         return params
 
     async def _open(self, server: AppServer) -> str:
-        if self.thread_id is None:
+        result = None
+        if self.thread_id is not None:
+            try:
+                result = await server.request(
+                    "thread/resume", {"threadId": self.thread_id, **self._thread_params()}
+                )
+            except RequestFailed:
+                # Codex writes a thread down only once a turn of it ran; one
+                # whose first turn never got that far, or whose record is
+                # gone, can't be resumed, and carries on as a new thread.
+                logger.warning("Codex thread %s can't be resumed", self.thread_id, exc_info=True)
+        if result is None:
             params = self._thread_params()
             if self._instructions:
                 params["developerInstructions"] = self._instructions
             result = await server.request("thread/start", params)
-        else:
-            result = await server.request(
-                "thread/resume", {"threadId": self.thread_id, **self._thread_params()}
-            )
         self.thread_id = str(result["thread"]["id"])
         return self.thread_id
 
     async def run_turn(
-        self, prompt: str, decide: Decide, on_event: OnEvent | None = None
+        self,
+        prompt: str,
+        decide: Decide,
+        on_event: OnEvent | None = None,
+        images: Sequence[str] = (),
     ) -> TurnResult:
+        """`images` are URLs, data: URLs included."""
         before = await asyncio.to_thread(_snapshot, self._cwd)
         async with self._host.use() as server:
             thread_id = await self._open(server)
@@ -391,7 +413,10 @@ class CodexThread:
                         "turn/start",
                         {
                             "threadId": thread_id,
-                            "input": [{"type": "text", "text": prompt, "text_elements": []}],
+                            "input": [
+                                {"type": "text", "text": prompt, "text_elements": []},
+                                *({"type": "image", "url": url} for url in images),
+                            ],
                         },
                     )
                 )
@@ -455,3 +480,10 @@ class CodexThread:
                 _INTERRUPT_SECONDS,
             )
             await asyncio.wait_for(asyncio.shield(turn.done), _INTERRUPT_SECONDS)
+        # turn/interrupt leaves the commands the turn started running; only
+        # this ends them.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(
+                server.request("thread/backgroundTerminals/clean", {"threadId": self.thread_id}),
+                _INTERRUPT_SECONDS,
+            )

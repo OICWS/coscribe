@@ -5,6 +5,7 @@ import type { ConfigResponse } from "../../types/settings";
 import {
   BookOpenIcon,
   CloseIcon,
+  CodeIcon,
   FolderIcon,
   KeyIcon,
   LinkIcon,
@@ -14,8 +15,11 @@ import {
   ToolIcon,
 } from "../icons";
 import { ConnectorsTab } from "./ConnectorsTab";
+import { CodeTab } from "./CodeTab";
 import {
   BACKGROUND_ON_CLOSE_KEY,
+  CODE_MODEL_KEY,
+  CODE_MODULE_ENABLED_KEY,
   GENERAL_FIELDS,
   LOG_LEVEL_KEY,
   PERMISSION_MODE_KEY,
@@ -42,7 +46,8 @@ export type SettingsCategory =
   | "tools"
   | "skills"
   | "connectors"
-  | "environment";
+  | "environment"
+  | "code";
 
 interface CategoryDef {
   id: SettingsCategory;
@@ -72,6 +77,7 @@ const GROUPS: { label: string; categories: CategoryDef[] }[] = [
       { id: "providers", label: "Providers", icon: KeyIcon },
       { id: "tools", label: "Tools", icon: ToolIcon },
       { id: "environment", label: "Environment", icon: TerminalIcon },
+      { id: "code", label: "Code", icon: CodeIcon },
     ],
   },
   {
@@ -91,6 +97,8 @@ const CONFIG_KEYS = [
   ...WORKSPACE_FIELDS.map((f) => f.key),
   WORKSPACE_ROOT_KEY,
   BACKGROUND_ON_CLOSE_KEY,
+  CODE_MODEL_KEY,
+  CODE_MODULE_ENABLED_KEY,
 ];
 
 interface SettingsModalProps {
@@ -287,9 +295,10 @@ export function SettingsModal({
             )}
             {category === "connectors" && <ConnectorsTab active={category === "connectors"} />}
             {category === "environment" && <EnvironmentTab active={category === "environment"} />}
+            {category === "code" && <CodeTab values={values} onChange={(k, v) => setValues({ ...values, [k]: v })} />}
             </div>
           </div>
-          {status && (category === "general" || category === "workspace") && (
+          {status && (category === "general" || category === "workspace" || category === "code") && (
             <div
               role="status"
               className={`pointer-events-none absolute bottom-4 right-6 rounded-lg border border-[var(--border)] bg-[var(--panel-bg)] px-3 py-1.5 text-sm shadow-[var(--shadow)] ${status.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}

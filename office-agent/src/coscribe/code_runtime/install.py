@@ -74,6 +74,22 @@ def installed(state_dir: Path) -> bool:
     return codex_executable(state_dir).is_file()
 
 
+def installed_size() -> int | None:
+    """Bytes this machine's Codex takes on disk once downloaded (the
+    download itself is compressed); None where there is no build for it."""
+    try:
+        members = _wheel()["members"]
+    except CodexUnavailable:
+        return None
+    return sum(int(member["size"]) for member in members.values())
+
+
+def remove_codex(state_dir: Path) -> None:
+    """Delete the downloaded Codex. Its threads (in CODEX_HOME) stay, so
+    code conversations carry on once it's downloaded again."""
+    shutil.rmtree(install_dir(state_dir), ignore_errors=True)
+
+
 def _member_target(root: Path, name: str) -> Path:
     # codex_cli_bin/bin/codex -> <root>/bin/codex
     return root.joinpath(*name.split("/")[1:])

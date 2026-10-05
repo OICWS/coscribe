@@ -19,6 +19,9 @@ import pytest
 
 from coscribe.code_runtime import _pins, install
 from coscribe.code_runtime.install import CodexUnavailable, codex_executable, ensure_codex
+from coscribe.code_runtime.launch import CodexHost, LaunchSpec
+from coscribe.code_runtime.service import CodeService
+from coscribe.config import Settings
 
 CODEX = b"#!/bin/sh\necho fake codex\n" * 1000
 RG = b"fake rg\n" * 500
@@ -215,3 +218,40 @@ def test_every_pinned_build_has_both_members_and_full_hashes() -> None:
         for member in wheel["members"].values():
             assert re.fullmatch(r"[0-9a-f]{64}", member["sha256"])
             assert member["size"] > 0
+
+
+async def test_the_service_reports_downloads_and_removes_codex(
+    monkeypatch: pytest.MonkeyPatch, pinned: dict[str, Any], ranged: _Server, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("coscribe.code_runtime.service.ensure_script_env", lambda state_dir: None)
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None, default_model="openai:x", state_dir=tmp_path, codex_wheel_url=ranged.url
+    )
+    service = CodeService(settings)
+    fake = Path(__file__).with_name("fake_codex_app_server.py")
+    spec = LaunchSpec(
+        argv=(sys.executable, str(fake)),
+        env=dict(os.environ),
+        config="",
+        home=tmp_path / "codex" / "home",
+        log_path=tmp_path / "app-server.log",
+    )
+    service.host = CodexHost(lambda: spec)
+
+    before = service.status()
+    await service.prepare()
+    after = service.status()
+    try:
+        async with service.host.use():
+            removed_while_working = await service.remove()
+        removed = await service.remove()
+    finally:
+        await service.host.shutdown(force=True)
+
+    assert (before["installed"], before["preparing"], before["progress"]) == (False, False, None)
+    assert before["size"] == len(CODEX) + len(RG)
+    assert after["installed"] is True
+    assert (removed_while_working, removed) == (False, True)
+    assert not install.installed(tmp_path)
+    # Codex's own threads stay, so code conversations carry on afterwards.
+    assert (tmp_path / "codex" / "home" / "config.toml").exists()

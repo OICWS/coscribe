@@ -25,6 +25,7 @@ import type {
   ScriptEnvInterpreterInfo,
   ScriptEnvPackage,
   CatalogSkill,
+  CodeStatus,
   SkillFileContentResult,
   SkillFilesResponse,
   SkillsResponse,
@@ -114,6 +115,12 @@ async function putJson<T>(url: string, body: unknown): Promise<T> {
 // -- Config (General + Workspace) -------------------------------------
 
 export const getConfig = () => getJson<ConfigResponse>("/api/config");
+
+// -- The code module ----------------------------------------------------
+
+export const getCodeStatus = () => getJson<CodeStatus>("/api/code");
+export const installCode = () => sendForResult<CodeStatus>("/api/code/install", "POST", {});
+export const removeCode = () => sendForResult<CodeStatus>("/api/code/install", "DELETE", {});
 export const updateConfig = (updates: Record<string, string>) =>
   postJson<ConfigUpdateResult>("/api/config", { updates });
 export const browseDirs = (path?: string) =>

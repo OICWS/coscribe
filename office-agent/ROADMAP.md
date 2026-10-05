@@ -7345,6 +7345,77 @@ nothing changes.
   setting; Windows; and whether the chat should send a review's findings
   back to the code module rather than fix them itself.
 
+## Phase 8cp -- Code module, part 3: its own conversations and a Settings section
+
+The third mode the nav rail promised: `</>` after Chat and Scheduled, with
+its own list of code sessions. A code conversation is a conversation with
+Codex itself -- every message one Codex turn in the conversation's folder
+-- not a chat that delegates. Workflows still never use the module.
+
+- [x] **A `ChatSessionLG` in everything around the turn**
+      (`web/code_session.py`): socket, permission modes and approval cards,
+      Stop, titles, groups, archive, thread status. Only the turn differs:
+      Codex runs it and keeps the context in its own thread (id in a
+      `<thread>.codex` sidecar, deleted with the conversation), and what the
+      user saw is written into the checkpoint afterwards with
+      `aupdate_state(..., as_node="HumanInTheLoopMiddleware.after_model")`
+      (checked first: the graph's `next` stays empty), in the shape a chat
+      turn leaves -- so history, the thread list and reload need nothing
+      new. Code threads are `code-<id>`; `/api/threads` says `kind`.
+- [x] **Approvals as in a chat.** Each command and file change goes through
+      `_decide_action_request` (the code session registers the two gated
+      names itself, whatever the chat setting); plain reads run without a
+      card and show as running. A file change's card names its files
+      (Codex sends them with the item, before the request). Plan mode
+      adds a note to the prompt and declines every request; accept-edits
+      lets file changes through and asks for commands (tests).
+- [x] **Stop interrupts Codex**, also while a card waits (a declined card
+      alone doesn't end a Codex turn). Found live: `turn/interrupt` left
+      the running command alive -- a `sleep 120` outlived the stop by over
+      30 s. `thread/backgroundTerminals/clean` (an experimental app-server
+      method, per thread) now follows every interrupt: gone at once, A/B
+      checked live, and a test that fails without it. This also covers
+      Stop on a chat's `run_code_task`.
+- [x] **Resuming**: Codex keeps a thread only once a turn of it ran (live:
+      resume before that says "no rollout found"); after one, resume works
+      in the same process, after a restart and across a model switch
+      (checked live, deepseek-flash then deepseek-v4-pro remembered a word).
+      A thread that can't be resumed starts over rather than failing.
+- [x] **Images**: pasted images go to Codex as `image` inputs and stay in
+      history (live: deepseek-flash named a red square's colour).
+- [x] Edit, rewind, `/compact` and other slash commands are refused in
+      code conversations -- Codex's thread can't be cut back to an
+      earlier message. The page hides what only the chat's agent uses:
+      browser, Sub Agents, task panel, edit and rewind.
+- [x] **Settings > Code**, after going through Codex's config reference
+      for what an office user would set:
+      - *Download*: Codex's version, whether it's downloaded, size on disk
+        (pinned member sizes), Download now with progress, Remove (refused
+        while Codex is working; Codex's own threads stay, so conversations
+        carry on after a fresh download). The empty code page offers the
+        same download.
+      - *Model for code* (`COSCRIBE_CODE_MODEL`, blank = the default
+        model): set apart because Codex can't use every model the chat
+        can; the page says when the chosen one won't work.
+      - *Chats can hand tasks to Code* (`COSCRIBE_CODE_MODULE_ENABLED`;
+        conversations opened after the change get it, no restart).
+      - Left out: approval policy and sandbox (the permission modes
+        decide, by design); reasoning effort (levels differ per vendor --
+        DeepSeek takes low/high/max -- and low vs high changed little on
+        a test question); verbosity and personality (GPT-only or
+        deprecated); compaction and output limits (internal).
+      - Set in config instead: `web_search = "disabled"`. Codex's search
+        runs on OpenAI's servers yet was offered to every provider (seen
+        in the captured request); work on the user's files doesn't need it.
+- [x] **Live, deepseek-flash, off-peak, in the browser**: fresh state,
+      Download now 30 s (download plus script env); "按 region 汇总
+      orders.csv，写可复用的 totals.py 并运行" took 8 s, 2 cards (the
+      `ls` ran without one), right totals, reply in Chinese; reload
+      replayed it. Plan mode answered with a plan and no cards.
+- Not yet: Windows; whether a code conversation should see the chat's
+  memory and instructions; a chat's sub-agent run opening as a code
+  conversation.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

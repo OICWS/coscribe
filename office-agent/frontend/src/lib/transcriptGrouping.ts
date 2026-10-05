@@ -428,7 +428,10 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   // The code module's own commands carry the script in place of a
   // description, so the row names it by its first line.
   run_code_command: (a) => ({ verb: "Ran a command", object: firstLine(str(a, "description") || str(a, "script")), glue: ": " }),
-  apply_code_change: () => ({ verb: "Changed files", object: null }),
+  apply_code_change: (a) => {
+    const paths = Array.isArray(a.paths) ? a.paths.filter((p): p is string => typeof p === "string") : [];
+    return paths.length > 0 ? { verb: "Changed", object: paths.map(basename).join(", ") } : { verb: "Changed files", object: null };
+  },
   spawn_agent_background: (a) => ({
     verb: "Started a sub-agent",
     object: str(a, "description") ?? null,

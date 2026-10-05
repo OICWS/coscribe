@@ -16,6 +16,8 @@ export interface ThreadSummary {
   group: string | null;
   archived: boolean;
   status: ThreadStatus;
+  /** "code": a conversation with the code module, listed apart. */
+  kind: "chat" | "code";
 }
 
 export interface ThreadMetaResult {

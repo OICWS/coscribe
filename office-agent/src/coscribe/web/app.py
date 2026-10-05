@@ -76,7 +76,9 @@ from pydantic import BaseModel, ValidationError
 
 from .. import __version__
 from ..cli import _dotenv_path, _load_settings_or_none
-from ..code_runtime.service import shutdown_code_services
+from ..code_runtime.install import CodexUnavailable
+from ..code_runtime.launch import codex_model
+from ..code_runtime.service import code_service, shutdown_code_services
 from ..config import PermissionMode, Settings
 from ..coordinator import build_coordinator_agent
 from ..runtime import (
@@ -174,6 +176,7 @@ from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflo
 from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus, run_event
 from .browser_panel import BrowserPanelError, BrowserPanelSession
+from .code_session import CodeSession, codex_thread_path, is_code_thread
 from .session import ChatSessionLG
 from .thread_meta import ThreadMetaStore
 
@@ -786,6 +789,8 @@ COSCRIBE_ENV_VARS = [
     "COSCRIBE_EXTRA_WRITABLE_DIRS",
     "COSCRIBE_MAX_TURNS",
     "COSCRIBE_DEFAULT_PERMISSION_MODE",
+    "COSCRIBE_CODE_MODEL",
+    "COSCRIBE_CODE_MODULE_ENABLED",
 ]
 
 # Settings update_config applies to the running server as well as .env.
@@ -793,6 +798,8 @@ LIVE_SETTINGS = {
     "COSCRIBE_DEFAULT_MODEL": "default_model",
     "COSCRIBE_MAX_TURNS": "max_turns",
     "COSCRIBE_DEFAULT_PERMISSION_MODE": "default_permission_mode",
+    "COSCRIBE_CODE_MODEL": "code_model",
+    "COSCRIBE_CODE_MODULE_ENABLED": "code_module_enabled",
 }
 
 # Desktop-shell-consumed, not Settings-backed (see office-agent-desktop's
@@ -1224,7 +1231,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             for command in hooks_config["SessionStart"]:
                 run_hook(command, session_start_payload)
             folders = _resolve_folders(thread_id, workspace_param)
-            sessions[thread_id] = ChatSessionLG(
+            session_class = CodeSession if is_code_thread(thread_id) else ChatSessionLG
+            sessions[thread_id] = session_class(
                 thread_id=thread_id,
                 settings=settings,
                 context_window_client=context_window_client,
@@ -1456,6 +1464,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         (settings.state_dir / f"{thread_id}.tasks.json").unlink(missing_ok=True)
         _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
         _title_sidecar_path(thread_id).unlink(missing_ok=True)
+        codex_thread_path(settings.state_dir, thread_id).unlink(missing_ok=True)
         ThreadMetaStore(settings.state_dir).delete(thread_id)
         sessions.pop(thread_id, None)
         return existed
@@ -1722,6 +1731,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "group": meta["group"],
                     "archived": meta["archived"],
                     "status": _thread_status(thread_id, waiting, meta),
+                    "kind": "code" if is_code_thread(thread_id) else "chat",
                 }
             )
         summaries.sort(key=lambda s: s["updated_at"] or "", reverse=True)
@@ -1744,9 +1754,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     def _thread_status(thread_id: str, waiting: set[str], meta: dict[str, Any]) -> str:
         """"needs_input" | "working" | "ready" | "idle"."""
-        if thread_id in waiting:
-            return "needs_input"
         session = sessions.get(thread_id)
+        if thread_id in waiting or (isinstance(session, CodeSession) and session.asking):
+            return "needs_input"
         if session is not None and session.turn_running:
             return "working"
         return "ready" if meta["unseen"] else "idle"
@@ -2559,6 +2569,12 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             if key == "COSCRIBE_DEFAULT_MODEL" and ":" not in value:
                 rejected[key] = 'must be a "provider:model" string, e.g. "anthropic:sonnet"'
                 continue
+            if key == "COSCRIBE_CODE_MODEL" and value.strip() and ":" not in value:
+                rejected[key] = 'must be a "provider:model" string, or blank for the default model'
+                continue
+            if key == "COSCRIBE_CODE_MODULE_ENABLED" and value not in ("true", "false"):
+                rejected[key] = 'must be "true" or "false"'
+                continue
             if key == "COSCRIBE_MAX_TURNS" and not (value.strip().isdigit() and int(value) > 0):
                 rejected[key] = "must be a positive integer"
                 continue
@@ -2593,13 +2609,49 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 if key in LIVE_SETTINGS:
                     # Read afresh whenever a session starts, so the running
                     # server can take the new value without a restart.
-                    live_value: str | int = int(value) if key == "COSCRIBE_MAX_TURNS" else value
+                    live_value: str | int | bool | None = value
+                    if key == "COSCRIBE_MAX_TURNS":
+                        live_value = int(value)
+                    elif key == "COSCRIBE_CODE_MODULE_ENABLED":
+                        live_value = value == "true"
+                    elif key == "COSCRIBE_CODE_MODEL":
+                        live_value = value.strip() or None
                     setattr(settings, LIVE_SETTINGS[key], live_value)
             applied.add(key)
         restart_required = any(
             key in COSCRIBE_ENV_VARS and key not in LIVE_SETTINGS for key in applied
         )
         return {"restart_required": restart_required, "rejected": rejected}
+
+    @app.get("/api/code")
+    async def code_status() -> dict[str, Any]:
+        """The code module's download, and whether Codex can use the model
+        a new code conversation would start with."""
+        service = code_service(settings)
+        model = settings.code_model or settings.default_model
+        try:
+            codex_model(model, service.custom_providers())
+            model_problem = None
+        except CodexUnavailable as exc:
+            model_problem = str(exc)
+        return {**service.status(), "model": model, "model_problem": model_problem}
+
+    @app.post("/api/code/install")
+    async def install_code() -> Any:
+        try:
+            await code_service(settings).prepare()
+        except Exception as exc:  # noqa: BLE001 -- a failed download is reported to the page
+            return JSONResponse({"error": str(exc) or type(exc).__name__}, status_code=502)
+        return await code_status()
+
+    @app.delete("/api/code/install")
+    async def remove_code() -> Any:
+        if not await code_service(settings).remove():
+            return JSONResponse(
+                {"error": "The code module is working. Try again once it's done."},
+                status_code=409,
+            )
+        return await code_status()
 
     @app.get("/api/memory")
     async def get_memory() -> dict[str, Any]:
