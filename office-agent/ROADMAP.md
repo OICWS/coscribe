@@ -7137,6 +7137,45 @@ direct API experiment before the fix.
       It runs in a fresh context now, as `spawn_agent`'s runner already
       did.
 
+## Phase 8cl -- The two-turn office task re-measured after the cache fixes
+
+The same task as Phase 8ci (same seeded data, the same two messages: build
+the xlsx/docx/pptx, then two finance corrections plus a PDF), on `main` at
+5e4bcdd with deepseek-flash, off-peak. Every model call in the process was
+recorded with its usage; prices off-peak (hit ¥0.02, miss ¥1, output ¥4
+per 1M), peak is double. n=1 per side.
+
+- [x] **Whole task ¥1.00** (¥2.00 at peak): turn 1 ¥0.69 in 602 s, turn 2
+      ¥0.31 in 219 s. The baselines (before 812835c and 8ck) recorded only
+      the main loop's usage events, so the like-for-like figure is main
+      loop + `review_work`: ¥0.93 now against ¥2.90 (turn 1 ¥2.26, turn 2
+      ¥0.64; a second turn-1 baseline ¥1.58). Turn 1's main-loop calls
+      missed 1.4k tokens each on average, against 14.0k and 5.5k in the two
+      baselines; hit rate 98-100% against 90-96%.
+- [x] **Fewer calls too, partly real**: 61 main-loop calls in turn 1
+      against 108 and 116. The baselines called `search_tools` 13 and 7
+      times; with every built-in tool bound up front (812835c) it is never
+      called. The rest is the model working differently (27 scripts here,
+      27 and 52 in the baselines).
+- [x] **Where the ¥1.00 goes**: by caller, main loop up to the first
+      review 46%, `review_work` 26%, main loop after the first review
+      (fixes and wrap-up) 21%, auto-mode reviewer 7% (67 calls, 49-51%
+      hit). By token type, output 56%, misses 23%, cache hits 20%.
+- [x] **The reviews earned their cost in turn 1**: all four found real
+      problems -- a chart with no legend or data labels, two unsourced
+      figures in the data-problems table, chart colours clashing with the
+      template, and on re-review two of six points still not fixed. Turn
+      2's two reviews only confirmed (¥0.10, a third of that turn).
+- [x] Results: the data-problems sheet matched the injected problems
+      exactly (73 text dates, 9 text percentages, 10 padded regions, 9
+      duplicates, 21 cancelled orders), and both corrections reached all
+      three files and the PDF. Region figures differ from the truth by a
+      few cents, the same per-line `.round(2)` as Phase 8ci's rerun.
+- Next, by these numbers: off-peak runs for scheduled and background
+  work (half price, no quality cost). Capping review rounds would have
+  cut real catches in turn 1; a draft mode without visual review saves up
+  to ~45% only by dropping exactly that stage, so it stays an opt-in idea.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
