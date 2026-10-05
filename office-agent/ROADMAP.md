@@ -7644,17 +7644,38 @@ a concrete reason to prioritize a new surface.
 
   **Shape agreed after the spike: a third, independent module, not a
   second engine inside chat.** coscribe becomes three modules -- chat,
-  workflows, code -- with code reachable three ways:
+  workflows, code -- with code reachable two ways:
 
   1. its own entry in the nav rail (a full conversation with Codex);
-  2. from chat, through a `spawn_agent`-style tool that hands over a task
-     and a folder and gets back a summary plus the files written, shown
-     as a collapsible sub-task card;
-  3. from a workflow, as a "code step" run unattended, with coscribe's
-     `exec_policy` deciding which commands may run.
+  2. from chat, as a sub-agent: a tool that hands over a task and a
+     folder and gets back a summary plus the files written.
 
-  Chat and workflows see only that narrow interface; with the module not
-  enabled, the tool and the step type don't exist. Concretely:
+  **Workflows don't use it, at run time or when drafting.** A workflow
+  runs fixed steps with no model deciding anything at run time
+  (ARCHITECTURE.md §6; `workflows/spec.py`): a Codex step would put a
+  fully autonomous agent inside a fixed run. Its script steps are
+  written by the chat agent when the workflow is drafted, and run through
+  `_run_python_script` with the folder guard. Adding Codex to drafting
+  would only add uncertainty there without filling a gap. A prompt-type
+  scheduled task is the chat agent running, so it can call the tool like
+  any conversation, under the task's approval tier.
+
+  **Chat calls it through the existing sub-agent machinery** --
+  `runtime_lg/subagents.py`, `tools/subagent_tasks.py`,
+  `SubAgentsPanel.tsx`/`SubAgentReportCard.tsx`. A Codex run is a
+  `SubAgentTask` with a different driver in place of `_drive`: the task
+  record, the panel, stop, background runs and the report back to the
+  parent stay as they are. Its approvals go through `host.decide()` into
+  `ChatSession._decide_action_request` like any sub-agent's, so hooks,
+  plan mode, accept-edits, Auto and its reviewer, a scheduled task's
+  approval tier, the audit log and the approval card all apply unchanged.
+  A Codex command approval becomes a call to a synthetic EXEC-risk tool,
+  a file-change approval a WRITE_LOCAL one; `exec_policy`'s regex rules
+  work on a command string as they do on script source. Plan mode
+  rejects every request. Unlike today's sub-agents, whose transcript is
+  only in memory, a Codex run survives a restart (Codex keeps it).
+
+  With the module not enabled, the tool doesn't exist. Concretely:
 
   - **Binary on demand**, like `ensure_node_env`: downloaded from PyPI
     (`openai-codex-cli-bin`, so a corporate pip mirror works) into
@@ -7665,13 +7686,24 @@ a concrete reason to prioritize a new surface.
     Started in its own process group and killed as a group, as
     `run_soffice` does. Self-update (`in_app_updates`) off.
   - **`CODEX_HOME` under `state_dir/codex`**, so a user's own
-    `~/.codex` config, auth and `AGENTS.md` never leak in. coscribe's
-    thread metadata stores the Codex thread id; history is read back
-    from Codex. Editing/rewinding a message is not offered in code
-    threads at first.
-  - **Approvals through coscribe's cards; Codex's own model-based
-    auto-reviewer off.** Manual -> `untrusted`; Auto -> coscribe's own
-    auto review; no plan mode in code threads.
+    `~/.codex` config, auth and `AGENTS.md` never leak in.
+  - **Codex's commands use the script env.** They run whatever `python`
+    is on PATH, and an office PC often has none. The app-server starts
+    with `tools/script_env.py`'s venv first on PATH, so scripts get the
+    same openpyxl/python-docx/python-pptx/pandas/pdfplumber, and anything
+    it installs lands where the Environment tab shows it. (The spike's
+    "no pandas, pip install pytest" detour is this.)
+  - **Approvals as above; Codex's own model-based auto-reviewer off**,
+    `approvalPolicy: "untrusted"` so everything but known read-only
+    commands comes back to coscribe.
+  - **The code entry needs its own session and thread index.**
+    `app.py`'s `_get_session` builds only `ChatSessionLG`; a
+    `CodeSession` serves the same WebSocket messages (`user_message`,
+    `approval_response`, `stop`, history, `load_older_messages`; no
+    `edit_message`/`rewind_message` at first). `/api/threads` lists
+    threads straight from the LangGraph checkpoint database, so code
+    threads are recorded in `ThreadMetaStore` (kind + Codex thread id)
+    and merged into the list. `NavRail`'s `NavMode` gains `"code"`.
   - **Models**: providers that speak Responses connect directly
     (OpenAI, DeepSeek); the rest need the bridge above -- a separate
     decision after the first PR.
@@ -7687,8 +7719,8 @@ a concrete reason to prioritize a new surface.
   **Next**: first PR = on-demand download + the backend adapter behind
   a setting that is off by default, tested against a fake app-server
   that replays recorded events (`scripts/stub_llm.py` can't serve this:
-  Chat Completions only); then the Windows check; then the entry, the
-  chat tool and the workflow step.
+  Chat Completions only); then the Windows check; then chat's sub-agent
+  tool (most reuse, least new UI); then the code entry.
 
 ---
 
