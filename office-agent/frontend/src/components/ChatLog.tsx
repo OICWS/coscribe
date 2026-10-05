@@ -827,6 +827,7 @@ function ApprovalDetail({
 }) {
   const isScript =
     item.toolName === "run_python_script" ||
+    item.toolName === "run_code_command" ||
     item.toolName === "run_node_script" ||
     item.toolName === "run_background_script";
   const scriptArgs = item.arguments;

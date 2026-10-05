@@ -1,0 +1,312 @@
+"""run_code_task in a real conversation: the chat hands a task to the code
+module, Codex (tests/fake_codex_app_server.py) asks for approvals, and they
+go through the conversation's own approval path."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langgraph.checkpoint.memory import InMemorySaver
+
+import coscribe.cli  # noqa: F401 -- web.session imports cli first
+from coscribe.code_runtime.launch import CodexHost, LaunchSpec
+from coscribe.config import Settings
+from coscribe.runtime import empty_hooks_config
+from coscribe.runtime_lg.code_agent import CODE_APPROVAL_RISKS, CODE_TASK_TOOL
+from coscribe.tools.subagent_tasks import (
+    SubAgentTaskStore,
+    get_subagent_transcript,
+    stop_subagent_task,
+)
+from coscribe.web.session import ChatSessionLG
+
+FAKE = Path(__file__).with_name("fake_codex_app_server.py")
+
+
+class _Model(BaseChatModel):
+    responses: list[AIMessage]
+    i: int = 0
+
+    def bind_tools(self, tools: Any, *, tool_choice: str | None = None, **kwargs: Any) -> Any:
+        return self
+
+    def _generate(
+        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> ChatResult:
+        message = self.responses[self.i]
+        self.i += 1
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    def _stream(
+        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        message = self.responses[self.i]
+        self.i += 1
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(
+                content=message.content or "", tool_calls=message.tool_calls, id=message.id
+            )
+        )
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-code-agent-model"
+
+
+def _replies(task: str) -> list[AIMessage]:
+    # A fresh message each time: one object reused keeps one id and
+    # replaces itself in the history.
+    call = {
+        "name": CODE_TASK_TOOL,
+        "args": {"description": "Make a file", "task": task},
+        "id": "call_code",
+    }
+    return [AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+
+
+class _Socket:
+    def __init__(self, answer: Callable[[dict[str, Any]], bool] | None = None) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.answer = answer
+        self.session: ChatSessionLG | None = None
+
+    async def send_json(self, payload: dict[str, Any]) -> None:
+        self.sent.append(payload)
+        if payload.get("type") == "approval_required" and self.answer and self.session:
+            self.session.resolve_approval(payload["id"], self.answer(payload))
+
+    def of(self, kind: str) -> list[dict[str, Any]]:
+        return [p for p in self.sent if p.get("type") == kind]
+
+
+class _Service:
+    def __init__(self, host: CodexHost) -> None:
+        self.host = host
+
+    def custom_providers(self) -> dict[str, dict[str, str]]:
+        return {"fake": {"base_url": "http://127.0.0.1:9/v1", "api_key": "k"}}
+
+    async def prepare(self) -> CodexHost:
+        return self.host
+
+
+@pytest.fixture
+async def codex(tmp_path: Path) -> Any:
+    def spec() -> LaunchSpec:
+        return LaunchSpec(
+            argv=(sys.executable, str(FAKE)),
+            env={**os.environ, "FAKE_CODEX_LOG": str(tmp_path / "requests.jsonl")},
+            config="",
+            home=tmp_path / "codex-home",
+            log_path=tmp_path / "app-server.log",
+        )
+
+    host = CodexHost(spec)
+    yield host
+    await host.shutdown(force=True)
+
+
+def _session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    codex: CodexHost,
+    model: _Model,
+    *,
+    enabled: bool = True,
+    default_model: str = "fake:model",
+) -> ChatSessionLG:
+    monkeypatch.setattr(
+        "coscribe.web.session.resolve_chat_model", lambda name, custom_providers=None: model
+    )
+    monkeypatch.setattr("coscribe.web.session.code_service", lambda settings: _Service(codex))
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        default_model=default_model,
+        workspace_root=tmp_path / "workspace",
+        state_dir=tmp_path / "state",
+        skills_dir=tmp_path / "skills",
+        memory_path=tmp_path / "MEMORY.md",
+        auto_title_threads=False,
+        default_permission_mode="manual",
+        code_module_enabled=enabled,
+    )
+    folder = tmp_path / "workspace"
+    folder.mkdir(parents=True, exist_ok=True)
+    return ChatSessionLG(
+        thread_id="t1",
+        settings=settings,
+        context_window_client=_ContextWindow(),
+        custom_providers={},
+        extra_tools=[],
+        checkpointer=InMemorySaver(),
+        hooks_config=empty_hooks_config(),
+        enabled_skill_names=set(),
+        workspace_root=folder,
+    )
+
+
+class _ContextWindow:
+    def get_context_window(self, model: str) -> int:
+        return 128000
+
+
+async def _run(session: ChatSessionLG, socket: _Socket, text: str = "go") -> None:
+    socket.session = session
+    await session.handle_user_message(text, socket)  # type: ignore[arg-type]
+
+
+def _code_result(socket: _Socket) -> Any:
+    [result] = [r for r in socket.of("tool_result") if r["tool_name"] == CODE_TASK_TOOL]
+    return result["result"]
+
+
+def test_the_tool_and_its_gated_actions_come_with_the_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    on = _session(tmp_path, monkeypatch, codex, _Model(responses=[]))
+    off = _session(tmp_path / "off", monkeypatch, codex, _Model(responses=[]), enabled=False)
+
+    for name, risk in CODE_APPROVAL_RISKS.items():
+        assert on._gated_tool_risks[name] == risk
+        assert name not in off._gated_tool_risks
+
+
+async def test_an_approved_command_is_asked_on_the_card_and_then_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+    socket = _Socket(answer=lambda payload: True)
+
+    await _run(session, socket)
+
+    [card] = socket.of("approval_required")
+    assert card["tool_name"] == "run_code_command"
+    assert card["arguments"]["script"] == "echo made > made.txt"
+    assert card["subagent"] == "Make a file"
+    assert (tmp_path / "workspace" / "made.txt").exists()
+    result = _code_result(socket)
+    assert "ran it" in result and "made.txt" in result
+    [task] = SubAgentTaskStore(tmp_path / "state").list_for_thread("t1")
+    assert (task.status, task.model, task.tool_uses) == ("succeeded", "codex:model", 1)
+    kinds = [e["kind"] for e in get_subagent_transcript(task.task_id)["entries"]]  # type: ignore[index]
+    assert kinds == ["user", "tool", "agent"]
+
+
+async def test_nothing_the_run_says_or_spends_reaches_the_parents_chat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+    socket = _Socket(answer=lambda payload: True)
+
+    await _run(session, socket)
+
+    deltas = "".join(p["text"] for p in socket.of("agent_delta"))
+    assert "ran it" not in deltas
+    assert deltas == "done"
+    assert socket.of("usage") == []
+
+
+async def test_a_declined_command_does_not_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+    socket = _Socket(answer=lambda payload: False)
+
+    await _run(session, socket)
+
+    assert not (tmp_path / "workspace" / "made.txt").exists()
+    assert "was declined" in _code_result(socket)
+
+
+async def test_plan_mode_declines_the_run_without_asking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+    session._toggle_mode("plan")
+    socket = _Socket(answer=lambda payload: True)
+
+    await _run(session, socket)
+
+    assert socket.of("approval_required") == []
+    assert not (tmp_path / "workspace" / "made.txt").exists()
+
+
+async def test_a_plain_read_of_the_folder_runs_without_a_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("read")))
+    socket = _Socket(answer=lambda payload: False)
+
+    await _run(session, socket)
+
+    assert socket.of("approval_required") == []
+    assert "ran it" in _code_result(socket)
+
+
+async def test_a_model_codex_cant_use_gets_a_reason_and_no_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(
+        tmp_path,
+        monkeypatch,
+        codex,
+        _Model(responses=_replies("approve")),
+        default_model="anthropic:claude",
+    )
+    socket = _Socket(answer=lambda payload: True)
+
+    await _run(session, socket)
+
+    assert "Responses API" in _code_result(socket)
+    assert SubAgentTaskStore(tmp_path / "state").list_for_thread("t1") == []
+
+
+async def test_stop_ends_the_run_in_codex_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("hang")))
+    socket = _Socket()
+    turn = asyncio.create_task(_run(session, socket))
+    log = tmp_path / "requests.jsonl"
+    for _ in range(100):
+        if log.exists() and "turn/start" in log.read_text():
+            break
+        await asyncio.sleep(0.05)
+
+    session.request_stop()
+    await asyncio.wait_for(turn, 20)
+
+    [task] = SubAgentTaskStore(tmp_path / "state").list_for_thread("t1")
+    assert task.status == "stopped"
+    methods = [json.loads(line).get("method") for line in log.read_text().splitlines()]
+    assert "turn/interrupt" in methods
+
+
+async def test_stopping_a_run_from_the_panel_leaves_no_card_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+    socket = _Socket()
+    turn = asyncio.create_task(_run(session, socket))
+    for _ in range(100):
+        if socket.of("approval_required"):
+            break
+        await asyncio.sleep(0.05)
+    [task] = SubAgentTaskStore(tmp_path / "state").list_for_thread("t1")
+
+    stop_subagent_task(tmp_path / "state", task.task_id)
+    await asyncio.wait_for(turn, 20)
+
+    assert session._pending_approvals == {}
+    assert SubAgentTaskStore(tmp_path / "state").load(task.task_id).status == "stopped"  # type: ignore[union-attr]
+    assert not (tmp_path / "workspace" / "made.txt").exists()

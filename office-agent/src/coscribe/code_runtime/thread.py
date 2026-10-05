@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import shlex
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -47,6 +48,12 @@ _READ_PROGRAMS = frozenset(
 _SHELL_SYNTAX = frozenset("|&;<>$`(){}[]*?~!\\\n\r")
 _FIND_ACTIONS = ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fls")
 _SHELLS = frozenset({"bash", "sh", "zsh"})
+# One `cd <dir> &&` in front; the directory is a plain word or a quoted
+# string with nothing in it the shell would expand.
+_CD_PREFIX = re.compile(
+    r"cd\s+(?P<dir>\"[^\"$`\\]*\"|'[^']*'|[^\s\"'$`\\;&|<>()]+)\s*&&\s*(?P<rest>.+)",
+    re.DOTALL,
+)
 _STATUSES: dict[str, Literal["completed", "interrupted", "failed"]] = {
     "completed": "completed",
     "interrupted": "interrupted",
@@ -64,8 +71,9 @@ class ApprovalRequest:
 
 @dataclass(frozen=True)
 class CodexEvent:
-    """What a watcher sees of a turn: "text" (a piece of the reply),
-    "command_started"/"command_finished", "file_change", "usage", and
+    """What a watcher sees of a turn: "text" (a piece of a reply),
+    "message" (a reply, whole), "command_started"/"command_finished",
+    "file_change", "usage", and
     "auto_approved" for a read-only command that ran without asking."""
 
     kind: str
@@ -121,7 +129,7 @@ def changed_files(
     return sorted(path for path, state in after.items() if before.get(path) != state)
 
 
-def _script(command: str) -> str | None:
+def shell_script(command: str) -> str | None:
     """The shell script inside Codex's `/bin/bash -lc '<script>'` wrapper."""
     try:
         argv = shlex.split(command)
@@ -132,11 +140,8 @@ def _script(command: str) -> str | None:
     return command
 
 
-def reads_only(command: str, cwd: str, folder: Path) -> bool:
-    """Whether `command` is one read-only program reading only inside
-    `folder`."""
-    script = _script(command)
-    if script is None or any(ch in _SHELL_SYNTAX for ch in script):
+def _plain_read(script: str, base: Path, root: Path) -> bool:
+    if any(ch in _SHELL_SYNTAX for ch in script):
         return False
     try:
         argv = shlex.split(script)
@@ -148,8 +153,6 @@ def reads_only(command: str, cwd: str, folder: Path) -> bool:
         return False
     if argv[0] == "rg" and any(arg.startswith("--pre") for arg in argv):
         return False
-    root = folder.resolve()
-    base = Path(cwd) if cwd else root
     paths = [base]
     for arg in argv[1:]:
         if arg.startswith("-"):
@@ -158,6 +161,29 @@ def reads_only(command: str, cwd: str, folder: Path) -> bool:
             continue
         paths.append(base / arg)
     return all(path.resolve().is_relative_to(root) for path in paths)
+
+
+def reads_only(command: str, cwd: str, folder: Path) -> bool:
+    """Whether `command` is one read-only program reading only inside
+    `folder` -- optionally after one `cd <dir> &&` into a folder inside it,
+    the prefix Codex puts on nearly every command."""
+    script = shell_script(command)
+    if script is None:
+        return False
+    root = folder.resolve()
+    base = Path(cwd) if cwd else root
+    prefix = _CD_PREFIX.fullmatch(script)
+    if prefix is not None:
+        word = prefix["dir"]
+        if word[0] not in "\"'" and any(ch in _SHELL_SYNTAX for ch in word):
+            return False
+        try:
+            [target] = shlex.split(word)
+        except ValueError:
+            return False
+        base = base / target
+        script = prefix["rest"]
+    return _plain_read(script, base, root)
 
 
 class _Turn:
@@ -181,6 +207,7 @@ class _Turn:
         self._last_heard = self._loop.time()
         self._running: set[str] = set()
         self._asking = 0
+        self._deciding: set[asyncio.Task[Any]] = set()
 
     def stalled(self, seconds: float) -> bool:
         quiet = self._loop.time() - self._last_heard
@@ -231,7 +258,9 @@ class _Turn:
     async def _item(self, method: str, item: dict[str, Any]) -> None:
         kind = item.get("type")
         if kind == "agentMessage" and method == "item/completed":
-            self.messages.append(str(item.get("text") or ""))
+            text = str(item.get("text") or "")
+            self.messages.append(text)
+            await self._emit("message", {"text": text})
         elif kind == "commandExecution":
             if method == "item/started":
                 self.commands += 1
@@ -281,12 +310,22 @@ class _Turn:
             # grants: none is offered to this thread yet.
             raise RequestFailed(method, {"message": f"coscribe doesn't handle {method}"})
         self._asking += 1
+        task = asyncio.current_task()
+        if task is not None:
+            self._deciding.add(task)
         try:
             approved = await self.decide(request)
         finally:
             self._asking -= 1
+            self._deciding.discard(task)
             self._last_heard = self._loop.time()
         return {"decision": "accept" if approved else "decline"}
+
+    def abandon_requests(self) -> None:
+        """The turn is over: an approval still waiting on a person has
+        nothing left to approve, and must not stay asking."""
+        for task in list(self._deciding):
+            task.cancel()
 
     def closed(self, error: AppServerClosed) -> None:
         if not self.done.done():
@@ -377,6 +416,7 @@ class CodexThread:
                     usage=turn.usage,
                 )
             finally:
+                turn.abandon_requests()
                 server.unlisten(thread_id)
         after = await asyncio.to_thread(_snapshot, self._cwd)
         status = _STATUSES.get(str(final.get("status")), "failed")

@@ -41,7 +41,7 @@ from ..tools.subagent_tasks import (
 )
 from .agent import build_langgraph_agent
 from .agent import tool_name as _tool_name
-from .messages import extract_text, render_transcript_lg
+from .messages import extract_text, render_transcript_lg, serialize_history_for_ws_lg
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,7 @@ _NOT_FOR_SUBAGENTS = frozenset(
     {
         "spawn_agent",
         "spawn_agent_background",
+        "run_code_task",
         "draft_workflow",
         "revise_workflow",
         "test_workflow",
@@ -329,7 +330,7 @@ def subagent_report(task: SubAgentTask, reasons: Sequence[str] = ()) -> str:
     return body
 
 
-def _outcome(task: SubAgentTask) -> str:
+def subagent_outcome(task: SubAgentTask) -> str:
     if task.status == "succeeded":
         return task.result or "(the sub-agent gave no reply)"
     if task.status == "stopped":
@@ -337,6 +338,12 @@ def _outcome(task: SubAgentTask) -> str:
             return "(the user stopped this sub-agent before it finished)"
         return "(this sub-agent was stopped before it finished)"
     return f"(the sub-agent failed: {task.error or 'unknown error'})"
+
+
+def _graph_transcript(sub_agent: Any, child_config: dict[str, Any]) -> list[dict[str, Any]]:
+    state = sub_agent.get_state(child_config)
+    messages = list(state.values.get("messages", [])) if state.values else []
+    return serialize_history_for_ws_lg(messages)
 
 
 def build_delegation_tools(
@@ -402,7 +409,9 @@ def build_delegation_tools(
             _drive(host, store, task, sub_agent, child_config, chat_model, system_prompt),
             context=contextvars.Context(),
         )
-        register_subagent_run(task.task_id, runner, sub_agent, child_config)
+        register_subagent_run(
+            task.task_id, runner, lambda: _graph_transcript(sub_agent, child_config)
+        )
         # Saved only once registered: a record with no live runner reads as
         # cut off by a restart.
         store.save(task)
@@ -441,7 +450,7 @@ def build_delegation_tools(
             if current is None or not current.cancelling():
                 # Only the sub-agent was stopped (from the panel): the parent
                 # carries on with that as its report.
-                return _outcome(task)
+                return subagent_outcome(task)
             # The parent's turn is ending. A Stop stops the sub-agent too (the
             # session cancels it); a dropped connection leaves it running as a
             # background run whose report waits in the panel.
@@ -449,7 +458,7 @@ def build_delegation_tools(
                 task.background = True
                 store.save(task)
             raise
-        return _outcome(task)
+        return subagent_outcome(task)
 
     async def spawn_agent_background(
         description: str,

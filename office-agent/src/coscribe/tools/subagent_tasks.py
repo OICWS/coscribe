@@ -186,16 +186,19 @@ _RUNNING: dict[str, asyncio.Task[Any]] = {}
 # task_id -> who asked for the stop, picked up by the runner as it unwinds.
 _STOP_REQUESTED_BY: dict[str, str] = {}
 
-# task_id -> (its compiled graph, its child thread config), kept after it
-# finishes: the only copy of what it did lives in that graph's checkpointer.
-_TRANSCRIPTS: dict[str, tuple[Any, dict[str, Any]]] = {}
+# task_id -> what reads back its transcript, as the main chat's history
+# entries; kept after it finishes, since the run's own record is the only
+# copy of what it did.
+_TRANSCRIPTS: dict[str, Callable[[], list[dict[str, Any]]]] = {}
 
 
 def register_subagent_run(
-    task_id: str, runner: asyncio.Task[Any], sub_agent: Any, child_config: dict[str, Any]
+    task_id: str,
+    runner: asyncio.Task[Any],
+    transcript: Callable[[], list[dict[str, Any]]],
 ) -> None:
     _RUNNING[task_id] = runner
-    _TRANSCRIPTS[task_id] = (sub_agent, child_config)
+    _TRANSCRIPTS[task_id] = transcript
     runner.add_done_callback(lambda _: _RUNNING.pop(task_id, None))
 
 
@@ -236,15 +239,10 @@ def get_subagent_transcript(task_id: str) -> dict[str, Any] | None:
     """The run's own conversation, in the same shape the main chat's
     history uses, so the panel renders it with the same components. None
     when this process has no record of it (see the module docstring)."""
-    from ..runtime_lg.messages import serialize_history_for_ws_lg
-
-    live = _TRANSCRIPTS.get(task_id)
-    if live is None:
+    reader = _TRANSCRIPTS.get(task_id)
+    if reader is None:
         return None
-    sub_agent, child_config = live
-    state = sub_agent.get_state(child_config)
-    messages = list(state.values.get("messages", [])) if state.values else []
-    return {"entries": serialize_history_for_ws_lg(messages)}
+    return {"entries": reader()}
 
 
 def build_subagent_task_tools(thread_id: str, state_dir: str | Path) -> list[Callable[..., Any]]:

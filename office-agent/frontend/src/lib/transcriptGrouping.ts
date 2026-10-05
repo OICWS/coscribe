@@ -281,6 +281,11 @@ function str(args: ArgRecord, key: string): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
+function firstLine(text: string | undefined): string | null {
+  const line = text?.split("\n").find((l) => l.trim());
+  return line ? line.trim() : null;
+}
+
 function basename(path: string): string {
   return path.split(/[/\\]/).pop() || path;
 }
@@ -340,7 +345,7 @@ export function isFailure(item: ToolOrApprovalItem): boolean {
  * "running a command" in the Claude-Code-web sense the reference UI this
  * matches uses -- run_background_script/check_background_task have their
  * own distinct "started"/"checked" semantics and aren't folded in here. */
-const COMMAND_TOOL_NAMES = new Set(["run_python_script", "run_node_script"]);
+const COMMAND_TOOL_NAMES = new Set(["run_python_script", "run_node_script", "run_code_command"]);
 
 /** Pulls `{lines_added, lines_removed}` off a tool result if present --
  * only write_file/edit_file/edit_file_batch's results carry these fields
@@ -419,6 +424,11 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   remember: () => ({ verb: "Saved a memory", object: null }),
   ask_user_question: (a) => ({ verb: "Asked", object: str(a, "question") ?? "a question", glue: ": " }),
   spawn_agent: (a) => ({ verb: "Delegated to a sub-agent", object: str(a, "description") ?? null, glue: ": " }),
+  run_code_task: (a) => ({ verb: "Handed a coding task to the code module", object: str(a, "description") ?? null, glue: ": " }),
+  // The code module's own commands carry the script in place of a
+  // description, so the row names it by its first line.
+  run_code_command: (a) => ({ verb: "Ran a command", object: firstLine(str(a, "description") || str(a, "script")), glue: ": " }),
+  apply_code_change: () => ({ verb: "Changed files", object: null }),
   spawn_agent_background: (a) => ({
     verb: "Started a sub-agent",
     object: str(a, "description") ?? null,

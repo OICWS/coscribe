@@ -66,6 +66,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from ..cli import INIT_PROMPT
+from ..code_runtime.service import code_service
 from ..config import Settings
 from ..coordinator import CORE_TOOL_NAMES, build_coordinator_agent, conversation_context
 from ..runtime import (
@@ -95,6 +96,12 @@ from ..runtime_lg import render_transcript_lg as _render_transcript_lg
 from ..runtime_lg import tool_result_value as _tool_result_value
 from ..runtime_lg.audit import AuditLog, AutoApproveReason, record_decision
 from ..runtime_lg.auto_review import Verdict, recent_user_requests, review_action
+from ..runtime_lg.code_agent import (
+    CODE_APPROVAL_RISKS,
+    CODE_TASK_TOOL,
+    CodeTaskContext,
+    build_code_task_tool,
+)
 from ..runtime_lg.exec_policy import EXEC_POLICY_TOOL_NAMES, load_exec_policy
 from ..runtime_lg.messages import (
     ACCEPT_EDITS_MODE_NOTE,
@@ -317,6 +324,10 @@ def _risks_of_gated_tools(lg_tools: list[Any]) -> dict[str, str]:
         metadata = get_tool_metadata(cast(Any, t))
         if metadata.requires_approval:
             risks[tool_name(t)] = metadata.risk_category
+        # The code module's commands and file changes are asked about under
+        # these names; a name missing here would be approved without asking.
+        if tool_name(t) == CODE_TASK_TOOL:
+            risks.update(CODE_APPROVAL_RISKS)
     return risks
 
 
@@ -669,9 +680,25 @@ class ChatSessionLG:
         # an approval.
         reviewer_tools = select_reviewer_tools(combined_tools)
         review_work_tool = build_review_work_tool(model, reviewer_tools, self.settings.state_dir)
+        code_tools: list[Callable[..., Any]] = []
+        if self.settings.code_module_enabled:
+            code_tools.append(
+                build_code_task_tool(
+                    self._subagent_host(model),
+                    CodeTaskContext(
+                        service=lambda: code_service(self.settings),
+                        model=lambda: self._model_string,
+                        folder=lambda: Path(self.workspace_root),
+                        context_window=lambda: self._context_window_client.get_context_window(
+                            self._model_string
+                        ),
+                    ),
+                )
+            )
         return [
             *combined_tools,
             *delegation_tools,
+            *code_tools,
             review_work_tool,
             self._build_draft_workflow_tool(),
             self._build_revise_workflow_tool(),
