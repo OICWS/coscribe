@@ -103,12 +103,42 @@ def current_date_note() -> str:
     )
 
 
+_LANGUAGE_NOTE_RE = re.compile(r"^\[The user writes in [^:\]]+: [^\]]*\] ")
+
+
+def language_note(text: str) -> str:
+    """Names the user's language when it isn't one written in Latin letters.
+
+    The system prompt asks for the user's language everywhere, but at the
+    start of a conversation -- everything the model has seen so far is that
+    English prompt, this English note's neighbours and English tool output
+    -- models still narrate their steps in English and only answer in the
+    user's language. A concrete note next to the message itself holds."""
+    latin = len(re.findall(r"[A-Za-z]", text))
+    kana = len(re.findall(r"[\u3040-\u30ff]", text))
+    hangul = len(re.findall(r"[\uac00-\ud7af]", text))
+    han = len(re.findall(r"[\u4e00-\u9fff]", text))
+    if kana >= 2:
+        name = "Japanese"
+    elif hangul >= 2 and hangul * 2 >= latin:
+        name = "Korean"
+    elif han >= 2 and han * 2 >= latin:
+        name = "Chinese"
+    else:
+        return ""
+    return (
+        f"[The user writes in {name}: write the short notes between your steps in "
+        f"{name} too, not only the final reply.] "
+    )
+
+
 def strip_mode_note(text: str) -> str:
     text = _DATE_NOTE_RE.sub("", text, count=1)
     for note in _MODE_NOTES:
         if text.startswith(note):
-            return text[len(note) :]
-    return text
+            text = text[len(note) :]
+            break
+    return _LANGUAGE_NOTE_RE.sub("", text, count=1)
 
 
 def extract_text(content: Any) -> str:

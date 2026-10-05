@@ -883,13 +883,122 @@ def test_write_pdf_keeps_helvetica_for_text_without_chinese(tmp_path: Path) -> N
     assert _fonts_in(tmp_path / "plain.pdf") <= {"Helvetica", "Helvetica-Bold", "ZapfDingbats"}
 
 
-def test_pdf_column_widths_give_a_short_label_column_room_beside_a_long_one() -> None:
-    from coscribe.tools.documents import _pdf_column_widths
+def test_table_layout_keeps_a_short_label_on_one_line_beside_long_text() -> None:
+    from coscribe.tools.documents import _table_layout, _text_width_em
 
-    widths = _pdf_column_widths([["地区", "这是一个很长很长很长的说明文字" * 3]], 450)
+    rows = [["地区", "这是一个很长很长很长的说明文字" * 3]]
+    _, widths = _table_layout(rows, 450, [9], padding=12)
 
     assert abs(sum(widths) - 450) < 0.01
-    assert widths[0] >= 450 * 6 / (6 + 60) - 0.01
+    assert widths[0] >= _text_width_em("地区") * 9 + 12
+
+
+def test_table_layout_keeps_a_three_character_label_whole_beside_a_paragraph() -> None:
+    from coscribe.tools.documents import _table_layout, _text_width_em
+
+    note = "毛利率仅 31.52%，未达到上季度提出的回升到 33% 以上的要求" * 2
+    rows = [["品类", "说明"], ["控制器", note]]
+    _, widths = _table_layout(rows, 432, [11], padding=12)
+
+    assert widths[0] >= _text_width_em("控制器") * 11 + 12
+
+
+def test_table_layout_steps_the_font_down_before_breaking_numbers() -> None:
+    from coscribe.tools.documents import _table_layout
+
+    rows = [["a", "23,457,888.42", "8,505,822.62", "24,350,000.00", "11,111,111.11"]]
+
+    assert _table_layout(rows, 1000, [11, 10, 9], padding=12)[0] == 11
+    assert _table_layout(rows, 380, [11, 10, 9], padding=12)[0] == 10
+    assert _table_layout(rows, 350, [11, 10, 9], padding=12)[0] == 9
+
+
+_REGION_TABLE = """\
+| 区域 | 有效订单数 | 净收入(元) | 毛利(元) | 毛利率 | Q3 目标(元) | 达成率 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 华东 | 258 | 6,985,328.30 | 2,573,966.99 | 36.85% | 7,500,000.00 | 93.14% |
+| 华南 | 126 | 4,035,249.67 | 1,427,260.97 | 35.37% | 3,600,000.00 | 112.09% |
+| **合计** | **773** | **23,457,888.42** | **8,505,822.62** | **36.26%** \
+| **24,350,000.00** | **96.34%** |
+"""
+
+
+def test_write_docx_table_gives_amounts_their_width_and_aligns_them_right(
+    tmp_path: Path,
+) -> None:
+    """A 7-column money table came out with equal columns: every amount
+    broke in two ("6,985,328." / "30") while the region column sat empty."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    from coscribe.tools.documents import _cell_width_em
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="r.docx", content=f"# 区域\n\n{_REGION_TABLE}")
+
+    table = Document(str(tmp_path / "r.docx")).tables[0]
+    widths = [column.width.pt for column in table.columns]
+    font_size = table.rows[1].cells[2].paragraphs[0].runs[0].font.size.pt
+    assert font_size < 11
+    assert abs(sum(widths) - 432) < 1
+    assert widths[2] >= _cell_width_em("**23,457,888.42**") * font_size + 12 - 0.5
+    assert widths[0] < widths[2]
+    assert [cell.width.pt for cell in table.rows[1].cells] == pytest.approx(widths, abs=0.05)
+
+    alignments = [cell.paragraphs[0].alignment for cell in table.rows[1].cells]
+    assert alignments[0] is None
+    assert all(a == WD_ALIGN_PARAGRAPH.RIGHT for a in alignments[1:])
+    assert all(run.bold for cell in table.rows[0].cells for run in cell.paragraphs[0].runs)
+    assert not any(run.bold for run in table.rows[1].cells[0].paragraphs[0].runs)
+    assert table.rows[0]._tr.trPr.find(  # noqa: SLF001
+        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tblHeader"
+    ) is not None
+
+
+def test_write_docx_keeps_two_tables_in_a_row_apart(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="t.docx", content="| a | b |\n\n| c | d | e |\n")
+
+    body = Document(str(tmp_path / "t.docx")).element.body
+    assert [child.tag.rsplit("}", 1)[1] for child in body][:3] == ["tbl", "p", "tbl"]
+
+
+def test_write_docx_table_without_a_separator_row_has_no_header(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="t.docx", content="| a | 1 |\n| b | 2 |\n")
+
+    table = Document(str(tmp_path / "t.docx")).tables[0]
+    assert not any(run.bold for run in table.rows[0].cells[0].paragraphs[0].runs)
+    assert table.rows[0]._tr.trPr is None  # noqa: SLF001
+
+
+def test_write_docx_sizes_tables_for_the_page_it_sets(tmp_path: Path) -> None:
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](
+        path="l.docx", content=_REGION_TABLE, page_size="a4", orientation="landscape"
+    )
+
+    document = Document(str(tmp_path / "l.docx"))
+    section = document.sections[0]
+    text_width = (section.page_width - section.left_margin - section.right_margin) / 12700
+    assert sum(c.width.pt for c in document.tables[0].columns) == pytest.approx(text_width, abs=1)
+
+
+@pytest.mark.real_libreoffice
+@pytest.mark.skipif(not _libreoffice_actually_works(), reason="LibreOffice not usable here")
+def test_write_docx_amounts_stay_on_one_line_when_rendered(tmp_path: Path) -> None:
+    import subprocess
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="r.docx", content=_REGION_TABLE)
+    subprocess.run(
+        ["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(tmp_path),
+         str(tmp_path / "r.docx")],
+        check=True, capture_output=True, timeout=120,
+    )
+    text = tools["read_pdf"](path="r.pdf")
+
+    for amount in ("6,985,328.30", "23,457,888.42", "24,350,000.00", "112.09%"):
+        assert amount in text
 
 
 _CHART_DATA = "| Month | Revenue |\n| --- | --- |\n| Jan | 120 |\n| Feb | 135 |"
@@ -973,6 +1082,26 @@ def test_add_docx_chart_accepts_thousands_separators(tmp_path: Path) -> None:
     )
 
     assert "1200" in zipfile.ZipFile(tmp_path / "r.docx").read("word/charts/chart1.xml").decode()
+
+
+def test_add_docx_chart_writes_large_axis_values_with_separators(tmp_path: Path) -> None:
+    """A revenue chart's axis read 8000000 / 6000000; the values keep their
+    decimals, only the axis labels are formatted."""
+    import re
+
+    tools = _tools_by_name(tmp_path)
+    tools["write_docx"](path="r.docx", content="Intro.")
+    tools["add_docx_chart"](
+        path="r.docx", chart_type="bar", data="| 区域 | 净收入 |\n|--|--|\n| 华东 | 6985328.30 |"
+    )
+    tools["add_docx_chart"](path="r.docx", chart_type="bar", data="| M | V |\n|--|--|\n| a | 12 |")
+
+    with zipfile.ZipFile(tmp_path / "r.docx") as z:
+        large, small = (z.read(f"word/charts/chart{i}.xml").decode() for i in (1, 2))
+    value_axis = re.search(r"<c:valAx>.*</c:valAx>", large, re.S)
+    assert value_axis and '<c:numFmt formatCode="#,##0" sourceLinked="0"/>' in value_axis.group()
+    assert "<c:v>6985328.3</c:v>" in large
+    assert "c:numFmt" not in re.search(r"<c:valAx>.*</c:valAx>", small, re.S).group()  # type: ignore[union-attr]
 
 
 def test_add_docx_image_puts_a_picture_after_the_named_paragraph(tmp_path: Path) -> None:

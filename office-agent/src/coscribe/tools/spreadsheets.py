@@ -107,7 +107,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from ..runtime.types import tool_metadata
 from ._file_locks import locked_by_path
-from ._office_bins import find_soffice
+from ._office_bins import find_soffice, run_soffice
 from ._output_truncation import cap_read_output
 from ._thumbnail import render_thumbnail
 from ._workspace import WorkspaceScope
@@ -292,16 +292,14 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
     try:
         profile_url = profile_dir.as_uri()
         try:
-            subprocess.run(
+            run_soffice(
                 [
                     soffice,
                     "--headless",
                     "--terminate_after_init",
                     f"-env:UserInstallation={profile_url}",
                 ],
-                capture_output=True,
-                timeout=timeout,
-                check=True,
+                timeout,
             )
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError) as exc:
             return {
@@ -317,8 +315,12 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
             }
         (macro_dir / "Module1.xba").write_text(_XLSX_RECALC_MACRO, encoding="utf-8")
 
+        # A run that times out is killed, so it works on a copy: the
+        # workbook is never left half-saved.
+        work_copy = profile_dir / f"recalc{file_path.suffix}"
+        shutil.copyfile(file_path, work_copy)
         try:
-            subprocess.run(
+            run_soffice(
                 [
                     soffice,
                     "--headless",
@@ -326,17 +328,16 @@ def _recalc_xlsx(file_path: Path, timeout: float = _XLSX_RECALC_TIMEOUT) -> dict
                     f"-env:UserInstallation={profile_url}",
                     "vnd.sun.star.script:Standard.Module1.RecalculateAndSave"
                     "?language=Basic&location=application",
-                    str(file_path),
+                    str(work_copy),
                 ],
-                capture_output=True,
-                timeout=timeout,
-                check=True,
+                timeout,
             )
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError) as exc:
             return {
                 "status": "skipped",
                 "skipped_reason": f"LibreOffice failed to recalculate: {exc}",
             }
+        shutil.copyfile(work_copy, file_path)
     finally:
         shutil.rmtree(profile_dir, ignore_errors=True)
 

@@ -91,7 +91,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from ..runtime.types import tool_metadata
 from ._chart_data import CHART_TYPES, parse_chart_table
 from ._file_locks import locked_by_path
-from ._office_bins import find_soffice
+from ._office_bins import find_soffice, run_soffice, soffice_profile
 from ._ooxml_validate import assert_ooxml_valid
 from ._output_truncation import cap_read_output
 from ._svg_slide import add_svg_slide
@@ -1305,20 +1305,20 @@ def _render_to_pdf(pptx_path: Path) -> Path | None:
         return None
     out_dir = Path(tempfile.mkdtemp(prefix="coscribe_pptx_qa_"))
     try:
-        subprocess.run(
-            [
-                soffice,
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(out_dir),
-                str(pptx_path),
-            ],
-            capture_output=True,
-            timeout=SOFFICE_TIMEOUT,
-            check=True,
-        )
+        with soffice_profile() as profile:
+            run_soffice(
+                [
+                    soffice,
+                    "--headless",
+                    profile,
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(out_dir),
+                    str(pptx_path),
+                ],
+                SOFFICE_TIMEOUT,
+            )
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
         return None
     pdf_path = out_dir / f"{pptx_path.stem}.pdf"

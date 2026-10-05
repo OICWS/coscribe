@@ -5610,6 +5610,32 @@ def test_date_note_is_per_turn_message_content_not_baked_into_the_system_prompt(
     assert human_messages[-1].content.startswith(f"Today's real date is {today} (")
 
 
+def test_a_chinese_message_tells_the_model_to_narrate_in_chinese_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Asked in Chinese, deepseek-flash wrote every between-step note of a
+    fresh conversation in English; the note is what the model sees, never
+    what the history or the sidebar show."""
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="好的")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_zh") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "帮我做 Q3 经营回顾"})
+            _receive_until(ws, "tasks_changed")
+        with client.websocket_connect("/ws/t_zh") as ws:
+            ws.receive_json()  # state
+            history = ws.receive_json()
+        threads = client.get("/api/threads").json()
+
+    human = [m for m in fake_model.received[0] if isinstance(m, HumanMessage)][-1]
+    assert "[The user writes in Chinese:" in human.content
+    assert human.content.endswith("帮我做 Q3 经营回顾")
+    user_entries = [e for e in history["entries"] if e["kind"] == "user"]
+    assert [e["text"] for e in user_entries] == ["帮我做 Q3 经营回顾"]
+    assert threads[0]["preview"].startswith("帮我做")
+
+
 def test_delete_thread_endpoint_removes_checkpoints_and_tasks_sidecar_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

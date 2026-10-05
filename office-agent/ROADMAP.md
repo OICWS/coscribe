@@ -6979,6 +6979,92 @@ The numbers were right; the bugs were in the edges.
 - Still not done, deliberately: the reference menu's keyboard
   shortcuts and projects.
 
+## Phase 8ci -- Cross-format quarterly review, run live (shipped)
+
+A harder job than 8cg, on deepseek-flash (id checked against DeepSeek's
+`/models`): a Q3 business review built from six inputs in five formats --
+an ERP order export (1,429 rows; title rows above the header, 9 duplicated
+rows, 34 cancelled lines, 73 dates typed as text in two styles, 10 regions
+with a trailing space, 9 discounts written "12%"), monthly FX rates (CSV), a
+GBK-encoded customer list (CSV), unit costs in a Word table, returns in a
+PDF and the region targets in last quarter's deck -- into a five-sheet
+workbook, a Word report with a chart and a five-slide deck; then a second
+turn with two corrections from finance (one target, one voided return)
+applied in place to all three files plus a PDF export. Every figure was
+checked against totals computed separately from the generator's clean
+records: region net revenue, gross profit, margin, order counts, targets and
+attainment, all 12 month x category cells, the top-10 customers and their
+order, in all three files and both turns. All matched to the cent, the
+second turn's deltas too (net +3,895.00, gross profit +1,204.50, 华北
+86.22% -> 83.97%), with no stale figure left in any file. The bugs were in
+the tools around the numbers.
+
+- [x] `read_file` called a GBK CSV (what Chinese-locale Excel saves) "not a
+      text file" and pointed at read_docx/read_xlsx; `search_files` skipped
+      such files silently, `edit_file` crashed on them. Text that isn't UTF-8
+      is now read as GB18030 with a note saying so (scripts need
+      `encoding='gb18030'`), searched, and edited back in its own encoding;
+      a NUL byte or a zip/PDF/OLE signature still means binary.
+- [x] `write_docx` tables had equal columns: in the report's 7-column money
+      table every amount broke in two ("6,985,328." / "30") while the region
+      column sat half empty -- the model noticed in the corrections turn and
+      patched widths with its own script. Columns are now sized from their
+      content: no narrower than the longest unbreakable piece (an amount, a
+      word), short labels and headers kept on one line when there's room,
+      the rest to long text. Widths are measured on DejaVu Sans (what
+      LibreOffice falls back to without Calibri, and wider than Calibri,
+      Arial or YaHei); when the amounts can't fit at body size the table
+      steps down to 10 then 9 pt (五号/小五) before anything wraps. Numeric
+      columns are right-aligned, a Markdown header row is bold and repeats
+      on each page, and page size/orientation is applied before the
+      tables are laid out. `write_pdf` uses the same sizing. Two tables
+      separated only by a blank line no longer touch (Word merges them).
+      Checked by rendering through LibreOffice: every amount on one line.
+- [x] `add_docx_chart`'s value axis read 8000000; axes of values in the
+      thousands now use `#,##0` (the data keeps its decimals).
+- [x] Previews and the deck's rendered-layout check ran `soffice` on
+      LibreOffice's default profile: of four parallel conversions two came
+      back with nothing (a second instance on one profile hands off to the
+      first and exits), so parallel tool calls -- or LibreOffice open on the
+      desktop -- silently lost previews and overflow checks; the same
+      collision failed this suite once while the live run was rendering.
+      Each concurrent run now gets a profile of its own from a small reused
+      pool (`soffice_profile()`); four in parallel all render. The claim on
+      a profile is an OS file lock (`flock` / `msvcrt.locking`): with only
+      in-process locks, the rerun below and the test suite -- two processes
+      -- both took `slot0` and 12 of the rerun's previews failed. A file
+      lock also holds between the web server and a `--check-wakes` run,
+      and lapses if its holder dies.
+- [x] A LibreOffice run that timed out was never stopped: `soffice` is a
+      launcher, and the timeout killed only it, leaving `soffice.bin`
+      running and holding its profile. One hung that way during the suite
+      (18 minutes on a test's xlsx) and every later preview on its profile
+      failed -- four approval-preview tests went red. `run_soffice` now
+      starts LibreOffice in its own process group and kills the group on
+      timeout (`taskkill /T` on Windows), for previews, layout checks,
+      conversion and recalculation alike; recalculation works on a copy,
+      so a killed run can't leave the workbook half-saved (an orphan used
+      to finish rewriting it after the tool had already said "skipped").
+- [x] Between-step notes came out in English in a fresh conversation (6 of
+      6 in the first turn; the tasks, the question and the reply were
+      Chinese), despite the system prompt's rule. A Chinese, Japanese or
+      Korean message now carries a per-turn note naming the language next
+      to the date and mode notes, stripped from history and the sidebar
+      like them. Short task on fresh threads: without the note one of two
+      English and one Chinese; with it 3 of 3 Chinese, 13 notes, 0 English.
+- [x] Turn 1 rerun from scratch with everything above in place: 49
+      between-step notes, all Chinese; the report's tables and chart came
+      out with whole amounts and a formatted axis. Its figures differ from
+      the first run's by a few cents (华北 -0.04, total -0.06): it rounded
+      every line to cents with pandas `.round(2)` before summing -- a
+      defensible method, used consistently in all three files.
+- Seen, not changed: the model's 数据问题 sheet claimed the customer list's
+  region field had trailing spaces (it had none; no script of its own had
+  found any) -- a fabricated detail its own review pass didn't catch. It
+  rewrote the whole report three times to fit two pages, re-adding the
+  chart each time. Turn 1 took 14 min, the corrections 6, the rerun 28 (the
+  test suite was running beside it).
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

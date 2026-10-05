@@ -569,10 +569,12 @@ first):
   complete without checking `truncated`; narrow `path`/`pattern` and call
   again for the rest.
 - `read_file(path, head=None, tail=None)` / `write_file(path, content, overwrite=True)`
-  -- whole-file UTF-8 text read/write (same write contract as
-  `write_docx`/`write_pdf`). `read_file`'s `head`/`tail` (mutually
-  exclusive) read only a large file's first/last N lines instead of the
-  whole thing.
+  -- whole-file text read/write (same write contract as
+  `write_docx`/`write_pdf`). Writes are UTF-8; reads also take GBK/GB18030
+  (what Chinese-locale Excel and Notepad save), with a note saying so, and
+  `edit_file` writes such a file back in its own encoding. `read_file`'s
+  `head`/`tail` (mutually exclusive) read only a large file's first/last N
+  lines instead of the whole thing.
 - `get_file_info(path)` -- a file or directory's size and last-modified
   time (`{"path", "is_directory", "size_bytes", "modified"}`, `size_bytes`
   is `null` for a directory), without reading its contents -- check before
@@ -608,7 +610,7 @@ first):
   `overwrite=True` -- merging into vs. replacing it is ambiguous either
   way, so this doesn't guess; use `run_python_script` for that case.
 - `copy_file(source, destination, overwrite=False)` -- unlike
-  `read_file`/`write_file`'s UTF-8-text-only shape, this copies bytes
+  `read_file`/`write_file`'s text-only shape, this copies bytes
   directly, so it works on binary files too (images, PDFs, `.pptx`, any
   format) without corrupting them. Single files only, same directory
   restriction as `delete_file`.

@@ -642,3 +642,47 @@ def test_read_file_on_an_office_file_points_to_the_right_reader(tmp_path: Path) 
 
     with pytest.raises(ValueError, match="read_docx"):
         tools["read_file"](path="report.docx", tail=60)
+
+
+def test_read_file_reads_a_gbk_csv_and_says_which_encoding(tmp_path: Path) -> None:
+    """Chinese-locale Excel saves "CSV (逗号分隔)" as GBK; read_file used to
+    call it "not a text file" and point at read_docx/read_xlsx."""
+    gbk = "客户编号,客户名称\r\nC001,瑞精机电有限公司\r\n".encode("gbk")
+    (tmp_path / "客户.csv").write_bytes(gbk)
+    tools = _tools_by_name(tmp_path)
+
+    text = tools["read_file"](path="客户.csv")
+
+    assert "GB18030" in text and "encoding='gb18030'" in text
+    assert text.endswith("客户编号,客户名称\nC001,瑞精机电有限公司\n")
+    assert tools["read_file"](path="客户.csv", tail=1).endswith("C001,瑞精机电有限公司\n")
+
+
+def test_read_file_still_refuses_real_binary_files(tmp_path: Path) -> None:
+    (tmp_path / "blob.bin").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe")
+    (tmp_path / "doc.pdf").write_bytes(b"%PDF-1.7\n\xb5\xb6\xb7\xb8")
+    tools = _tools_by_name(tmp_path)
+
+    for name in ("blob.bin", "doc.pdf"):
+        with pytest.raises(ValueError, match="not a text file"):
+            tools["read_file"](path=name)
+
+
+def test_search_files_finds_text_in_a_gbk_file(tmp_path: Path) -> None:
+    (tmp_path / "customers.csv").write_bytes("C001,瑞精机电有限公司\n".encode("gbk"))
+    tools = _tools_by_name(tmp_path)
+
+    result = tools["search_files"](query="瑞精机电")
+
+    assert [m["path"] for m in result["matches"]] == ["customers.csv"]  # type: ignore[index]
+
+
+def test_edit_file_keeps_a_gbk_file_in_gbk(tmp_path: Path) -> None:
+    target = tmp_path / "rates.csv"
+    target.write_bytes("月份,汇率\r\n2026-07,7.18\r\n".encode("gbk"))
+    tools = _tools_by_name(tmp_path)
+
+    tools["edit_file"](path="rates.csv", old_text="2026-07,7.18\n", new_text="2026-07,7.20\n")
+    tools["edit_file_batch"](path="rates.csv", edits="月份\n---\n月")
+
+    assert target.read_bytes().decode("gbk").replace("\r\n", "\n") == "月,汇率\n2026-07,7.20\n"

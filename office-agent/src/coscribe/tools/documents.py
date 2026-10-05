@@ -140,6 +140,7 @@ class Block:
     level: int = 1
     ordinal: int = 1
     rows: list[list[str]] = field(default_factory=list)
+    header: bool = False
     comment: str | None = None
 
 
@@ -190,6 +191,7 @@ def parse_blocks(content: str) -> list[Block]:
     blocks: list[Block] = []
     paragraph_lines: list[str] = []
     table_rows: list[list[str]] = []
+    table_header = False
     number_counter = 0
 
     def flush_paragraph() -> None:
@@ -200,9 +202,13 @@ def parse_blocks(content: str) -> list[Block]:
         paragraph_lines.clear()
 
     def flush_table() -> None:
+        nonlocal table_header
         if table_rows:
-            blocks.append(Block(kind="table", rows=[list(row) for row in table_rows]))
+            blocks.append(
+                Block(kind="table", rows=[list(row) for row in table_rows], header=table_header)
+            )
             table_rows.clear()
+        table_header = False
 
     for raw_line in content.splitlines():
         line = raw_line.strip()
@@ -212,6 +218,8 @@ def parse_blocks(content: str) -> list[Block]:
             flush_paragraph()
             if not _is_separator_row(cells):
                 table_rows.append(cells)
+            elif len(table_rows) == 1:
+                table_header = True
             continue
         flush_table()
 
@@ -261,7 +269,8 @@ def parse_blocks(content: str) -> list[Block]:
     return blocks
 
 
-_CJK_RE = re.compile("[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]")
+_CJK_CHARS = "\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef"
+_CJK_RE = re.compile(f"[{_CJK_CHARS}]")
 
 # Where a font with Chinese glyphs usually lives, best looking first. A
 # TrueType file or collection: reportlab can't use PostScript-outline
@@ -282,21 +291,182 @@ _CJK_FONT_FILES = (
 _pdf_cjk_font_name: str | None = None
 
 
-def _pdf_column_widths(rows: list[list[str]], total: float) -> list[float]:
-    """Column widths in proportion to their longest cell (a CJK character
-    counts double), none thinner than a few characters, so a short label
-    column doesn't wrap letter by letter beside a long text column."""
+_NUMBER_CELL_RE = re.compile(r"^[+\-\u2212]?[¥$€£]?\d[\d,]*(?:\.\d+)?\s*[%‰]?$")
+# Breaking a line is allowed between CJK characters and at spaces, so these
+# runs are the pieces a cell can never be narrower than.
+_UNBREAKABLE_RE = re.compile(f"[{_CJK_CHARS}]|[^\\s{_CJK_CHARS}]+")
+_SHORT_CELL_EM = 6.0
+
+
+def _text_width_em(text: str) -> float:
+    """Rendered width in ems, measured on DejaVu Sans -- what LibreOffice
+    falls back to without Calibri, and wider than Calibri, Arial or YaHei --
+    so a cell measured here fits in any of them."""
+    width = 0.0
+    for ch in text:
+        if _CJK_RE.match(ch):
+            width += 1.0
+        elif ch.isdigit():
+            width += 0.64
+        elif ch in ",.:;'|!ilj ":
+            width += 0.32
+        elif ch in "%@mwMW":
+            width += 0.95
+        elif ch.isupper():
+            width += 0.72
+        else:
+            width += 0.58
+    return width
+
+
+def _cell_width_em(cell: str, pieces: bool = False) -> float:
+    """The cell's full width in ems, or with `pieces` its widest unbreakable
+    piece; bold text runs about a tenth wider."""
+    runs = parse_inline_runs(cell)
+    text = "".join(run_text for run_text, _, _ in runs)
+    scale = 1.1 if any(bold for _, bold, _ in runs) else 1.0
+    if pieces:
+        return scale * max((_text_width_em(p) for p in _UNBREAKABLE_RE.findall(text)), default=0)
+    return scale * _text_width_em(text)
+
+
+def _plain_cell_text(cell: str) -> str:
+    return "".join(run_text for run_text, _, _ in parse_inline_runs(cell))
+
+
+def _is_number_cell(cell: str) -> bool:
+    return bool(_NUMBER_CELL_RE.match(_plain_cell_text(cell).strip()))
+
+
+def _numeric_columns(rows: list[list[str]], header: bool) -> list[bool]:
+    """A column whose every filled body cell is a number (amounts, counts,
+    percentages) -- right-aligned, so the digits line up."""
     columns = max(len(row) for row in rows)
-    weights = []
+    body = rows[1:] if header else rows
+    result = []
     for index in range(columns):
-        lengths = [
-            sum(2 if _CJK_RE.match(ch) else 1 for ch in str(row[index]))
-            for row in rows
-            if index < len(row)
+        cells = [row[index] for row in body if index < len(row) and row[index].strip()]
+        result.append(bool(cells) and all(_is_number_cell(cell) for cell in cells))
+    return result
+
+
+def _share_out(total: float, low: list[float], high: list[float]) -> list[float]:
+    """`low` plus whatever of `total` is left, given in proportion to how
+    far each column is below `high`."""
+    spare = total - sum(low)
+    wants = [h - lo for h, lo in zip(high, low, strict=True)]
+    if sum(wants) <= 0:
+        return [total * width / sum(low) for width in low]
+    return [lo + spare * want / sum(wants) for lo, want in zip(low, wants, strict=True)]
+
+
+def _table_layout(
+    rows: list[list[str]],
+    total: float,
+    font_sizes: Sequence[float],
+    padding: float,
+) -> tuple[float, list[float]]:
+    """(font size, column widths in points adding up to `total`).
+
+    In order of what gives way last: no column narrower than its longest
+    unbreakable piece (an amount like 23,457,888.42, a word), so no number
+    wraps mid-way; then short cells (a label like 控制器, a header) kept on
+    one line; the rest goes to the columns whose long text wraps anyway.
+    Uses the first of `font_sizes` (largest first) at which the short cells
+    fit, else the first at which the pieces fit, else the last."""
+    columns = max(len(row) for row in rows)
+    piece_em, full_em = [], []
+    for index in range(columns):
+        cells = [row[index] for row in rows if index < len(row)]
+        piece_em.append(max((_cell_width_em(c, pieces=True) for c in cells), default=0.0))
+        full_em.append(max((_cell_width_em(c) for c in cells), default=0.0))
+
+    def widths_at(font_size: float) -> tuple[list[float], list[float], list[float]]:
+        floor = 2 * font_size + padding
+        hard = [max(em * font_size + padding, floor) for em in piece_em]
+        natural = [max(em * font_size + padding, floor) for em in full_em]
+        short = [
+            max(h, min(n, _SHORT_CELL_EM * font_size + padding))
+            for h, n in zip(hard, natural, strict=True)
         ]
-        longest = max(lengths, default=1)
-        weights.append(min(max(longest, 6), 60))
-    return [total * weight / sum(weights) for weight in weights]
+        return hard, short, natural
+
+    font_size = next(
+        (size for size in font_sizes if sum(widths_at(size)[1]) <= total),
+        next((size for size in font_sizes if sum(widths_at(size)[0]) <= total), font_sizes[-1]),
+    )
+    hard, short, natural = widths_at(font_size)
+    if sum(natural) <= total:
+        return font_size, [total * width / sum(natural) for width in natural]
+    if sum(short) <= total:
+        return font_size, _share_out(total, short, natural)
+    if sum(hard) <= total:
+        return font_size, _share_out(total, hard, short)
+    return font_size, [total * width / sum(hard) for width in hard]
+
+
+def _docx_text_width_pt(document: Any) -> float:
+    section = document.sections[-1]
+    if section.page_width is None or section.left_margin is None or section.right_margin is None:
+        return 432.0
+    return float((section.page_width - section.left_margin - section.right_margin) / 12700)
+
+
+def _docx_body_font_pt(document: Any) -> float:
+    from docx.oxml.ns import qn
+
+    size = document.styles["Normal"].font.size
+    if size is not None:
+        return float(size.pt)
+    defaults = document.styles.element.find(qn("w:docDefaults"))
+    if defaults is not None:
+        for element in defaults.iter(qn("w:sz")):
+            value = element.get(qn("w:val"))
+            if value and value.isdigit():
+                return int(value) / 2
+    return 11.0
+
+
+def _fill_docx_table(document: Any, block: Block) -> None:
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.shared import Pt
+
+    rows = block.rows
+    n_cols = max(len(row) for row in rows)
+    table = document.add_table(rows=len(rows), cols=n_cols)
+    table.style = "Table Grid"
+    body_size = _docx_body_font_pt(document)
+    # 10 and 9 pt are 五号/小五, the usual sizes of a Chinese report's tables.
+    sizes = [body_size] + [size for size in (10.0, 9.0) if size < body_size]
+    font_size, widths = _table_layout(rows, _docx_text_width_pt(document), sizes, padding=12.0)
+    numeric = _numeric_columns(rows, block.header)
+    for column, width in zip(table.columns, widths, strict=True):
+        column.width = Pt(width)
+    # table.cell(r, c) rebuilds the whole cell grid on every call, so
+    # filling a table that way is quadratic: 400 rows took 36 s and 1,500
+    # never finished. Build the grid once.
+    cells = table._cells  # noqa: SLF001
+    for row_index, row in enumerate(rows):
+        is_header = block.header and row_index == 0
+        for col_index in range(n_cols):
+            cell_text = row[col_index] if col_index < len(row) else ""
+            cell = cells[row_index * n_cols + col_index]
+            # Word lays a table out from each cell's own width, LibreOffice
+            # from the grid's; both are set so the two agree.
+            cell.width = Pt(widths[col_index])
+            paragraph = cell.paragraphs[0]
+            _add_inline_runs(paragraph, cell_text)
+            for run in paragraph.runs:
+                if is_header:
+                    run.bold = True
+                if font_size != body_size:
+                    run.font.size = Pt(font_size)
+            if numeric[col_index]:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    if block.header:
+        tr_pr = table.rows[0]._tr.get_or_add_trPr()  # noqa: SLF001
+        tr_pr.append(OxmlElement("w:tblHeader"))
 
 
 def _pdf_cjk_font() -> str | None:
@@ -914,8 +1084,11 @@ class DocumentToolkit:
         else:
             document = Document()
 
+        if page_size or orientation:
+            _apply_page_setup(document, page_size, orientation)
         has_toc = False
         pending_comments: list[tuple[Any, str]] = []
+        previous_kind = ""
         for block in parse_blocks(content):
             paragraph = None
             if block.kind == "heading":
@@ -931,22 +1104,17 @@ class DocumentToolkit:
                 paragraph = _add_toc(document)
                 has_toc = True
             elif block.kind == "table" and block.rows:
-                n_cols = max(len(row) for row in block.rows)
-                table = document.add_table(rows=len(block.rows), cols=n_cols)
-                table.style = "Table Grid"
-                # table.cell(r, c) rebuilds the whole cell grid on every
-                # call, so filling a table that way is quadratic: 400 rows
-                # took 36 s and 1,500 never finished. Build the grid once.
-                cells = table._cells  # noqa: SLF001
-                for row_index, row in enumerate(block.rows):
-                    for col_index in range(n_cols):
-                        cell_text = row[col_index] if col_index < len(row) else ""
-                        cell = cells[row_index * n_cols + col_index]
-                        _add_inline_runs(cell.paragraphs[0], cell_text)
+                if previous_kind == "table":
+                    # Word joins back-to-back tables into one.
+                    spacer = document.add_paragraph()
+                    if track_changes:
+                        _mark_paragraph_inserted(spacer._p, change_author, change_ids)
+                _fill_docx_table(document, block)
             else:
                 paragraph = document.add_paragraph()
                 _add_inline_runs(paragraph, block.text)
 
+            previous_kind = block.kind
             if paragraph is None:
                 continue
             if track_changes:
@@ -956,8 +1124,6 @@ class DocumentToolkit:
 
         if has_toc:
             _enable_update_fields(document)
-        if page_size or orientation:
-            _apply_page_setup(document, page_size, orientation)
         for index, (paragraph_element, _) in enumerate(pending_comments):
             _new_comment_anchor(paragraph_element, str(index))
 
@@ -1318,7 +1484,7 @@ class DocumentToolkit:
                 # Paragraph cells wrap; a plain string cell runs off the page.
                 table = Table(
                     [[Paragraph(rich(str(c)), cell_style) for c in row] for row in block.rows],
-                    colWidths=_pdf_column_widths(block.rows, 451),
+                    colWidths=_table_layout(block.rows, 451, [9], padding=12)[1],
                 )
                 table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, colors.grey)]))
                 flowables.append(table)

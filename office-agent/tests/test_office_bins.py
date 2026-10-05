@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -97,3 +99,95 @@ def test_render_pdf_pages_makes_one_png_per_page_and_clips_the_range(tmp_path: P
     assert all(f.read_bytes().startswith(b"\x89PNG") for f in files)
     assert _render_pdf_pages(pdf, out, 2, 2)[0].name == "page-0002.png"
     assert _render_pdf_pages(pdf, out, 5, 5) == []
+
+
+def test_concurrent_soffice_runs_get_their_own_profiles_and_reuse_them() -> None:
+    from coscribe.tools._office_bins import soffice_profile
+
+    with soffice_profile() as first, soffice_profile() as second:
+        assert first.startswith("-env:UserInstallation=file:")
+        assert first != second
+    with soffice_profile() as again:
+        assert again == first
+
+
+def test_a_profile_held_by_another_process_is_not_handed_out() -> None:
+    """The live run and the test suite both took slot0 -- the claim on a
+    profile has to hold across processes, not only threads."""
+    import subprocess
+
+    from coscribe.tools._office_bins import soffice_profile
+
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, time\n"
+            "from coscribe.tools._office_bins import soffice_profile\n"
+            "with soffice_profile() as p:\n"
+            "    print(p, flush=True)\n"
+            "    sys.stdin.readline()\n",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        held = holder.stdout.readline().strip()  # type: ignore[union-attr]
+        with soffice_profile() as mine:
+            assert held.startswith("-env:UserInstallation=")
+            assert mine != held
+    finally:
+        holder.communicate("done\n", timeout=10)
+
+
+@pytest.mark.real_libreoffice
+@pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice not installed")
+def test_parallel_previews_all_render(tmp_path: Path) -> None:
+    """Two of four parallel conversions on LibreOffice's default profile came
+    back with nothing -- the deck and report checks of a parallel tool call
+    were silently skipped."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from coscribe.tools._thumbnail import render_thumbnail
+    from coscribe.tools.documents import DocumentToolkit
+
+    toolkit = DocumentToolkit(tmp_path, state_dir=tmp_path / "state")
+    for index in range(4):
+        toolkit.write_pdf(path=f"p{index}.pdf", content=f"# Page {index}")
+    with ThreadPoolExecutor(4) as pool:
+        results = list(
+            pool.map(
+                lambda i: render_thumbnail(tmp_path / f"p{i}.pdf", tmp_path / "state"), range(4)
+            )
+        )
+
+    assert [reason for _, reason in results] == [None] * 4
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+def test_run_soffice_timeout_kills_what_the_launcher_started(tmp_path: Path) -> None:
+    """`soffice` is a launcher; after a plain subprocess timeout the
+    soffice.bin it started kept running, holding its profile."""
+    import subprocess
+    import time
+
+    from coscribe.tools._office_bins import run_soffice
+
+    marker = tmp_path / "still-running"
+    launcher = f"(sleep 2; touch {marker}) & wait"
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_soffice(["sh", "-c", launcher], 0.5)
+    time.sleep(2.5)
+
+    assert not marker.exists()
+
+
+def test_run_soffice_reports_a_failed_run() -> None:
+    import subprocess
+
+    from coscribe.tools._office_bins import run_soffice
+
+    with pytest.raises(subprocess.CalledProcessError):
+        run_soffice([sys.executable, "-c", "raise SystemExit(3)"], 10)
+    assert run_soffice([sys.executable, "-c", "print('ok')"], 10).stdout.strip() == b"ok"

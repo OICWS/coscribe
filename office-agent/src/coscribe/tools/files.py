@@ -22,6 +22,38 @@ from ._workspace import WorkspaceScope
 
 DEFAULT_IGNORES = {".git", "__pycache__", ".venv", "node_modules"}
 
+# What Chinese-locale Excel ("CSV (逗号分隔)") and Notepad save text as.
+# GB18030 is a superset of GBK/GB2312, so it reads all three.
+LEGACY_TEXT_ENCODING = "gb18030"
+# zip (OOXML), PDF, OLE (legacy .doc/.xls/.ppt)
+_BINARY_MAGIC = (b"PK\x03\x04", b"%PDF", b"\xd0\xcf\x11\xe0")
+
+
+def _decode_text(raw: bytes) -> tuple[str, str] | None:
+    """(text, encoding) for UTF-8 or legacy Chinese text, None for binary.
+    Newlines are normalized the way `Path.read_text` does, so a multi-line
+    `old_text` matches a CRLF file.
+
+    GB18030 accepts most byte pairs, so a binary file would "decode" into
+    noise; a NUL byte (never in either encoding's text) or a known file
+    signature rules that out."""
+    for encoding in ("utf-8", LEGACY_TEXT_ENCODING):
+        if encoding != "utf-8" and (b"\x00" in raw or raw.startswith(_BINARY_MAGIC)):
+            return None
+        try:
+            text = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        return text.replace("\r\n", "\n").replace("\r", "\n"), encoding
+    return None
+
+
+def _legacy_encoding_note(path: str) -> str:
+    return (
+        f"[{path} is not UTF-8; decoded as GB18030 (GBK). A script reading it needs "
+        "encoding='gb18030'.]\n"
+    )
+
 
 def _line_diff_stat(old_text: str, new_text: str) -> tuple[int, int]:
     """Line-level (added, removed) counts between two text blobs, via
@@ -100,9 +132,10 @@ class FileToolkit:
         tail: Optional[int] = None,  # noqa: UP045
         start_line: int = 1,
     ) -> str:
-        """Read the UTF-8 text contents of a file under the workspace, in
-        full or (via head/tail) just its first/last N lines; `start_line`
-        (1-based) moves where `head` begins."""
+        """Read the text contents (UTF-8, or GBK/GB18030 with a note
+        saying so) of a file under the workspace, in full or (via
+        head/tail) just its first/last N lines; `start_line` (1-based)
+        moves where `head` begins."""
         if head is not None and tail is not None:
             raise ValueError("head and tail cannot both be given -- pick one.")
         if start_line < 1:
@@ -114,19 +147,20 @@ class FileToolkit:
             raise ValueError(f"File does not exist: {path}")
         if not file_path.is_file():
             raise ValueError(f"Path is not a file: {path}")
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
+        decoded = _decode_text(file_path.read_bytes())
+        if decoded is None:
             raise ValueError(
                 f"{path} is not a text file, so read_file can't show it. "
                 "Use read_docx, read_xlsx, read_pptx or read_pdf for an Office/PDF file."
-            ) from None
+            )
+        content, encoding = decoded
+        note = "" if encoding == "utf-8" else _legacy_encoding_note(path)
         if head is not None or start_line > 1:
             lines = content.splitlines(keepends=True)[start_line - 1 :]
-            return "".join(lines if head is None else lines[:head])
+            return note + "".join(lines if head is None else lines[:head])
         if tail is not None:
-            return "".join(content.splitlines(keepends=True)[-tail:] if tail > 0 else [])
-        return content
+            return note + "".join(content.splitlines(keepends=True)[-tail:] if tail > 0 else [])
+        return note + content
 
     def get_file_info(self, path: str) -> dict[str, object]:
         """Metadata for one file or directory under the workspace -- size
@@ -167,9 +201,12 @@ class FileToolkit:
             if not item.is_file() or self._ignored(item):
                 continue
             try:
-                text = item.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
+                decoded = _decode_text(item.read_bytes())
+            except OSError:
                 continue
+            if decoded is None:
+                continue
+            text = decoded[0]
             for line_number, line in enumerate(text.splitlines(), start=1):
                 hit = compiled.search(line) if compiled else query in line
                 if hit:
@@ -212,6 +249,16 @@ class FileToolkit:
             "lines_removed": removed,
         }
 
+    @staticmethod
+    def _read_for_edit(path: str, file_path: Path) -> tuple[str, str]:
+        """The text and the encoding to write it back in, so editing a GBK
+        file doesn't silently turn it into UTF-8 the program that made it
+        can't read."""
+        decoded = _decode_text(file_path.read_bytes())
+        if decoded is None:
+            raise ValueError(f"{path} is not a text file, so it can't be edited as text.")
+        return decoded
+
     def edit_file(
         self, path: str, old_text: str, new_text: str, replace_all: bool = False
     ) -> dict[str, object]:
@@ -226,7 +273,7 @@ class FileToolkit:
             raise ValueError(f"File does not exist: {path}")
         if not file_path.is_file():
             raise ValueError(f"Path is not a file: {path}")
-        content = file_path.read_text(encoding="utf-8")
+        content, encoding = self._read_for_edit(path, file_path)
         occurrences = content.count(old_text)
         if occurrences == 0:
             raise ValueError(f"old_text not found in {path}.")
@@ -237,7 +284,7 @@ class FileToolkit:
                 "or pass replace_all=True to replace every occurrence."
             )
         new_content = content.replace(old_text, new_text)
-        file_path.write_text(new_content, encoding="utf-8")
+        file_path.write_text(new_content, encoding=encoding)
         added, removed = _line_diff_stat(content, new_content)
         return {
             "path": self._relative(file_path),
@@ -292,7 +339,7 @@ class FileToolkit:
             raise ValueError(f"File does not exist: {path}")
         if not file_path.is_file():
             raise ValueError(f"Path is not a file: {path}")
-        original_content = file_path.read_text(encoding="utf-8")
+        original_content, encoding = self._read_for_edit(path, file_path)
         content = original_content
 
         pairs = list(zip(chunks[0::2], chunks[1::2], strict=True))
@@ -316,7 +363,7 @@ class FileToolkit:
                 )
             content = content.replace(old_text, new_text)
 
-        file_path.write_text(content, encoding="utf-8")
+        file_path.write_text(content, encoding=encoding)
         added, removed = _line_diff_stat(original_content, content)
         return {
             "path": self._relative(file_path),

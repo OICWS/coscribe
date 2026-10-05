@@ -5,7 +5,9 @@ full WS-round-trip regression test this complements."""
 from langchain_core.messages import AIMessage, HumanMessage
 
 from coscribe.runtime_lg.messages import (
+    AUTO_MODE_NOTE,
     extract_images,
+    language_note,
     serialize_history_for_ws_lg,
     strip_mode_note,
 )
@@ -69,3 +71,18 @@ def test_strip_mode_note_removes_current_and_old_date_note_formats() -> None:
     assert strip_mode_note("Today's real date is 2026-09-26. hello") == "hello"
     new_format = "Today's real date is 2026-09-26 (Saturday); local time 14:05 (UTC+08:00). hello"
     assert strip_mode_note(new_format) == "hello"
+
+
+def test_language_note_names_the_language_of_a_cjk_message() -> None:
+    assert "Chinese" in language_note("看一下 Q3资料 里的 客户主数据.csv 和 汇率_2026Q3.csv")
+    assert "Japanese" in language_note("この資料をまとめてください")
+    assert "Korean" in language_note("이 파일을 요약해 주세요")
+    assert language_note("Summarize the Q3 sales file") == ""
+    assert language_note("Summarize 客户主数据.csv and the exchange rates for Q3 please") == ""
+
+
+def test_strip_mode_note_also_removes_the_language_note() -> None:
+    sent = "Today's real date is 2026-10-05 (Monday); local time 09:00 (UTC+08:00). "
+    sent += AUTO_MODE_NOTE + language_note("帮我做 Q3 经营回顾") + "帮我做 Q3 经营回顾"
+
+    assert strip_mode_note(sent) == "帮我做 Q3 经营回顾"

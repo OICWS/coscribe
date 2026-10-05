@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ..runtime.types import tool_metadata
-from ._office_bins import find_soffice
+from ._office_bins import find_soffice, run_soffice
 from ._workspace import WorkspaceScope
 
 # What each source type can become. Legacy and OpenDocument files can be
@@ -101,7 +101,7 @@ class ConvertToolkit:
             with _PROFILE_LOCK:
                 self._profile_dir.mkdir(parents=True, exist_ok=True)
                 try:
-                    subprocess.run(
+                    run_soffice(
                         [
                             soffice,
                             "--headless",
@@ -113,9 +113,7 @@ class ConvertToolkit:
                             str(work),
                             str(source),
                         ],
-                        capture_output=True,
-                        timeout=_CONVERT_TIMEOUT,
-                        check=True,
+                        _CONVERT_TIMEOUT,
                     )
                 except subprocess.TimeoutExpired:
                     raise ValueError("LibreOffice took too long to convert this file.") from None

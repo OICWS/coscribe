@@ -102,6 +102,7 @@ from ..runtime_lg.messages import (
     NORMAL_MODE_NOTE,
     PLAN_MODE_NOTE,
     current_date_note,
+    language_note,
     strip_mode_note,
 )
 from ..runtime_lg.providers import with_prompt_cache_key
@@ -3318,7 +3319,7 @@ class ChatSessionLG:
         # current_date_note() lives here, not in the system prompt --
         # see its own docstring in runtime_lg/messages.py for why that
         # matters for caching across every provider, not just Anthropic.
-        model_input = current_date_note() + mode_note + user_input
+        model_input = current_date_note() + mode_note + language_note(text) + user_input
 
         content: str | list[dict[str, Any]] = model_input
         if images:

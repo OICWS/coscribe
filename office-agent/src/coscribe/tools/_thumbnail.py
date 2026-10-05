@@ -30,7 +30,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ._office_bins import find_soffice
+from ._office_bins import find_soffice, run_soffice, soffice_profile
 
 # The first launch on a fresh Windows profile builds LibreOffice's user
 # profile and can take half a minute; killing it at 20s left every later
@@ -49,20 +49,20 @@ def _convert_to_pdf(file_path: Path, out_dir: Path) -> Path | None:
     if soffice is None:
         return None
     try:
-        subprocess.run(
-            [
-                soffice,
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(out_dir),
-                str(file_path),
-            ],
-            capture_output=True,
-            timeout=SOFFICE_TIMEOUT,
-            check=True,
-        )
+        with soffice_profile() as profile:
+            run_soffice(
+                [
+                    soffice,
+                    "--headless",
+                    profile,
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(out_dir),
+                    str(file_path),
+                ],
+                SOFFICE_TIMEOUT,
+            )
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
         return None
     pdf_path = out_dir / f"{file_path.stem}.pdf"
@@ -85,20 +85,20 @@ def render_thumbnail(file_path: Path, state_dir: Path | None) -> tuple[str | Non
     out_dir = Path(tempfile.mkdtemp(prefix="coscribe_thumbnail_"))
     try:
         try:
-            subprocess.run(
-                [
-                    soffice,
-                    "--headless",
-                    "--convert-to",
-                    "png",
-                    "--outdir",
-                    str(out_dir),
-                    str(file_path),
-                ],
-                capture_output=True,
-                timeout=SOFFICE_TIMEOUT,
-                check=True,
-            )
+            with soffice_profile() as profile:
+                run_soffice(
+                    [
+                        soffice,
+                        "--headless",
+                        profile,
+                        "--convert-to",
+                        "png",
+                        "--outdir",
+                        str(out_dir),
+                        str(file_path),
+                    ],
+                    SOFFICE_TIMEOUT,
+                )
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
             return None, "LibreOffice conversion failed"
         png_path = out_dir / f"{file_path.stem}.png"

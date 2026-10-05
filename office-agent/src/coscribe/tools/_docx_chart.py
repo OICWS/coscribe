@@ -63,6 +63,15 @@ def _chart_xml(
     else:
         chart.find("c:autoTitleDeleted", ns).set("val", "1")
 
+    # Axis labels only; the values themselves keep every decimal.
+    values = [abs(v) for vs in series.values() for v in vs]
+    value_axis = chart.find("c:plotArea/c:valAx", ns)
+    if value_axis is not None and values and max(values) >= 1000:
+        number_format = etree.fromstring(
+            f'<c:numFmt xmlns:c="{_C}" formatCode="#,##0" sourceLinked="0"/>'
+        )
+        value_axis.find("c:majorTickMark", ns).addprevious(number_format)
+
     # One series needs no legend (the title names it); a pie always does,
     # since the slices are identified by category.
     if len(series) > 1 or chart_type == "pie":
