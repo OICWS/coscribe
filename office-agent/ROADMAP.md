@@ -7760,6 +7760,13 @@ a concrete reason to prioritize a new surface.
     (`openai-codex-cli-bin`, so a corporate pip mirror works) into
     `state_dir` the first time the module is switched on; only `codex`
     and `rg` kept. The installer grows only by the adapter's own code.
+    files.pythonhosted.org answers range requests (206), so the wheel's
+    zip index and just those two members can be fetched: 110.7 MB of the
+    149.4 MB win_amd64 wheel (checked by pulling `rg.exe` alone, ~2 MB
+    fetched, valid PE, CRC ok). A mirror without range support falls back
+    to the whole wheel. Version pinned, the download checked against
+    PyPI's published sha256; upgrades are manual only (app-server and
+    `dynamicTools` are experimental), each one ~111 MB again.
   - **One process, started on first use, stopped when idle**; several
     threads share it (the protocol supports many threads per process).
     Started in its own process group and killed as a group, as
@@ -7773,8 +7780,38 @@ a concrete reason to prioritize a new surface.
     it installs lands where the Environment tab shows it. (The spike's
     "no pandas, pip install pytest" detour is this.)
   - **Approvals as above; Codex's own model-based auto-reviewer off**,
-    `approvalPolicy: "untrusted"` so everything but known read-only
-    commands comes back to coscribe.
+    `approvalPolicy: "untrusted"`. In the spike that sent back every
+    command, `ls -la` included -- Codex's own safe-command list didn't
+    pass it (not yet known why; every command is wrapped in
+    `bash -lc`). A card per command is too many for an office user, and
+    under Auto each one also costs an auto-review call. **Open decision**:
+    passing read-only commands without a card means something decides
+    a command is read-only. `exec_policy.py` deliberately never decides
+    that itself (its rules are human-authored; coscribe inferring safety
+    is what its docstring rejects), so shipping default "allow" rules
+    there would reverse that stance. The options are: user-authored
+    rules only, as today; a short built-in allow-list of read-only
+    commands, written down as a new, explicit exception; or classing
+    Codex's command approvals by risk some other way. Settle before the
+    sub-agent tool ships.
+  - **Usage stays with the run.** A Codex run's tokens go on its
+    `SubAgentTask.tokens` only, never out as the parent conversation's
+    `usage` WebSocket event, and none of its text reaches the parent
+    chat as `agent_delta` -- the same leak review_work had (the reviewer's
+    reply showing as the assistant's words, its tokens added to the
+    parent's counter). A test pins that the parent's socket gets neither
+    from a run.
+  - **Measure the cache before claiming savings.** The spike compared
+    time and call counts, not caching. DeepSeek caches the prefix
+    instructions -> tools -> messages (Phase 8ck, `runtime_lg/README.md`'s
+    "Prompt-cache audit"). Two things could break it on this path: Codex
+    sends `client_metadata` with the workspace path (if that reaches the
+    prefix, every folder change misses), and `include:
+    ["reasoning.encrypted_content"]`, which DeepSeek's `/v1/responses`
+    documents as stateless -- if reasoning isn't carried back, each turn
+    rereads the conversation. The adapter records `cachedInputTokens`
+    from `thread/tokenUsage/updated`; measure several turns in one
+    folder and a folder change before drawing conclusions.
   - **The code entry needs its own session and thread index.**
     `app.py`'s `_get_session` builds only `ChatSessionLG`; a
     `CodeSession` serves the same WebSocket messages (`user_message`,
