@@ -289,3 +289,100 @@ async def test_defer_tools_false_binds_every_tool_from_the_start() -> None:
     (first_call_tools,) = model.bound_tool_names
     assert "write_pptx_chart" in first_call_tools
     assert SEARCH_TOOLS_NAME not in first_call_tools
+
+
+# -- Which tools a session binds up front, per provider -------------------
+
+_DEEPSEEK = {"deepseek": {"base_url": "https://api.deepseek.com/v1", "api_key": "k"}}
+
+
+def test_keeps_tool_list_fixed_only_for_deepseeks_own_host() -> None:
+    from coscribe.runtime_lg.providers import keeps_tool_list_fixed
+
+    assert keeps_tool_list_fixed("deepseek:deepseek-flash", _DEEPSEEK)
+    renamed = {"ds": {"base_url": "https://api.deepseek.com", "api_key": "k"}}
+    assert keeps_tool_list_fixed("ds:deepseek-v4-pro", renamed)
+    for host in ("https://deepseek.com.example.org/v1", "https://notdeepseek.com/v1"):
+        assert not keeps_tool_list_fixed("x:m", {"x": {"base_url": host, "api_key": "k"}})
+    assert not keeps_tool_list_fixed("anthropic:claude-opus-5-5", _DEEPSEEK)
+
+
+class _Socket:
+    async def send_json(self, data: dict[str, Any]) -> None:
+        pass
+
+
+class _ContextWindow:
+    def get_context_window(self, model: str) -> int:
+        return 1_000_000
+
+
+def _connector_tool() -> str:
+    """A tool from an MCP connector."""
+    return "ok"
+
+
+async def _first_request_tools(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, model_string: str, extra_tools: list[Any]
+) -> list[str]:
+    import coscribe.cli  # noqa: F401 -- web.session imports cli first
+    from coscribe.config import Settings
+    from coscribe.runtime import empty_hooks_config
+    from coscribe.web.session import ChatSessionLG
+
+    model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
+    monkeypatch.setattr(
+        "coscribe.web.session.resolve_chat_model", lambda name, custom_providers=None: model
+    )
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        default_model=model_string,
+        workspace_root=tmp_path / "workspace",
+        state_dir=tmp_path / "state",
+        skills_dir=tmp_path / "skills",
+        memory_path=tmp_path / "MEMORY.md",
+        auto_title_threads=False,
+    )
+    session = ChatSessionLG(
+        thread_id="t",
+        settings=settings,
+        context_window_client=_ContextWindow(),
+        custom_providers=_DEEPSEEK,
+        extra_tools=extra_tools,
+        checkpointer=InMemorySaver(),
+        hooks_config=empty_hooks_config(),
+        enabled_skill_names=set(),
+    )
+    await session.handle_user_message("hello", _Socket())  # type: ignore[arg-type]
+    return model.bound_tool_names[0]
+
+
+async def test_deepseek_binds_every_built_in_tool_from_the_first_request(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding a tool changes the tool list, which is sent before the
+    conversation: on DeepSeek each discovery re-read the whole conversation
+    uncached -- 22-56% of a long task's cost."""
+    tools = await _first_request_tools(tmp_path, monkeypatch, "deepseek:deepseek-flash", [])
+
+    assert {"write_pptx", "add_pptx_chart", "run_python_script", "write_docx"} <= set(tools)
+    assert SEARCH_TOOLS_NAME not in tools
+
+
+async def test_deepseek_still_defers_connector_tools(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = await _first_request_tools(
+        tmp_path, monkeypatch, "deepseek:deepseek-flash", [_connector_tool]
+    )
+
+    assert "write_pptx" in tools and SEARCH_TOOLS_NAME in tools
+    assert "_connector_tool" not in tools
+
+
+async def test_other_providers_keep_deferring_built_in_tools(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tools = await _first_request_tools(tmp_path, monkeypatch, "anthropic:claude-opus-5-5", [])
+
+    assert "write_pptx" not in tools and SEARCH_TOOLS_NAME in tools

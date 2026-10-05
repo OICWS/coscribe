@@ -43,7 +43,7 @@ import time
 import uuid
 from asyncio import Future, get_running_loop
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -105,7 +105,7 @@ from ..runtime_lg.messages import (
     language_note,
     strip_mode_note,
 )
-from ..runtime_lg.providers import with_prompt_cache_key
+from ..runtime_lg.providers import keeps_tool_list_fixed, with_prompt_cache_key
 from ..runtime_lg.selfwake import SilentSocket
 from ..runtime_lg.subagents import subagent_report
 from ..runtime_lg.tool_calls import ORPHANED_TOOL_CALL_NOTE, answer_every_tool_call
@@ -223,13 +223,11 @@ async def _close_orphaned_tool_calls(agent: Any, config: dict[str, Any]) -> bool
 
 
 def _build_instructions(agent_instructions: str | None, *, defer_tools: bool) -> str:
-    """Appends _SEARCH_TOOLS_NOTE (only when defer_tools is on) to
-    whatever build_coordinator_agent already
-    assembled -- shared by every one of this class's own call sites that
-    (re)build self._instructions (__init__, set_folders,
-    set_enabled_skills -- switch_model doesn't, since it never rebuilds
-    the coordinator Agent itself), so the search_tools note can never
-    end up added in one place and forgotten in another."""
+    """Appends _SEARCH_TOOLS_NOTE (only when some tools are actually left
+    for search_tools to find) to whatever build_coordinator_agent
+    assembled. Called where the agent is built and where its context is
+    measured, from the same _tool_binding answer, so the note and the
+    tool can't disagree."""
     notes: list[str] = []
     if defer_tools:
         notes.append(_SEARCH_TOOLS_NOTE)
@@ -599,9 +597,7 @@ class ChatSessionLG:
         # spawn_agent/review_work already get).
         self._extra_tools: list[Callable[..., Any] | BaseTool] = list(extra_tools)
         self._title_task: asyncio.Task[None] | None = None
-        self._instructions = _build_instructions(
-            agent.instructions, defer_tools=settings.defer_tools
-        )
+        self._instructions = agent.instructions or ""
         self._model_string = settings.default_model
 
         self.model = with_prompt_cache_key(
@@ -704,6 +700,10 @@ class ChatSessionLG:
             changed=self._subagent_changed,
             defer_tools=self.settings.defer_tools,
             core_tool_names=CORE_TOOL_NAMES,
+            fixed_tool_names=frozenset(tool_name(t) for t in self._base_tools),
+            keeps_tool_list_fixed=lambda child_model: keeps_tool_list_fixed(
+                child_model, self._custom_providers
+            ),
             interrupt_all=bool(self.hooks_config["PreToolUse"]),
             max_turns=self.settings.max_turns,
         )
@@ -1086,18 +1086,32 @@ class ChatSessionLG:
                 * self.settings.auto_compact_threshold
             ),
         )
+        core_names, defer = self._tool_binding(model_string, lg_tools)
         return build_langgraph_agent(
             model,
             lg_tools,
-            self._instructions,
+            _build_instructions(self._instructions, defer_tools=defer),
             checkpointer=self._checkpointer,
             extra_interrupt_tool_names=extra_interrupt_names,
             question_tool_names=QUESTION_TOOL_NAMES | TASK_DRAFT_TOOL_NAMES,
             max_turns=self.settings.max_turns,
             auto_compact_tokens=auto_compact_tokens,
-            defer_tools=self.settings.defer_tools,
-            core_tool_names=CORE_TOOL_NAMES,
+            defer_tools=defer,
+            core_tool_names=core_names,
         )
+
+    def _tool_binding(
+        self, model_string: str, tools: Sequence[Callable[..., Any] | BaseTool]
+    ) -> tuple[frozenset[str], bool]:
+        """(the tools bound from the first request, whether any are left
+        for search_tools). Connector tools stay deferred everywhere: four
+        connectors were 394k tokens of schemas."""
+        core = CORE_TOOL_NAMES
+        if keeps_tool_list_fixed(model_string, self._custom_providers):
+            connector_names = {tool_name(t) for t in self._extra_tools}
+            core = core | {tool_name(t) for t in tools if tool_name(t) not in connector_names}
+        defer = self.settings.defer_tools and any(tool_name(t) not in core for t in tools)
+        return core, defer
 
     def resolve_approval(self, request_id: str, approved: bool) -> None:
         future = self._pending_approvals.get(request_id)
@@ -1385,9 +1399,7 @@ class ChatSessionLG:
             self.extra_folders = chosen[1:]
             self._workspace_explicit = bool(chosen)
             agent = self._build_agent()
-            self._instructions = _build_instructions(
-                agent.instructions, defer_tools=self.settings.defer_tools
-            )
+            self._instructions = agent.instructions or ""
             self._base_tools = list(agent.tools)
             lg_tools = self._build_lg_tools(self.model)
             new_gated_tool_risks = _risks_of_gated_tools(lg_tools)
@@ -1433,9 +1445,7 @@ class ChatSessionLG:
         previous_enabled_skill_names = self.enabled_skill_names
         self.enabled_skill_names = set(skill_names)
         agent = self._build_agent()
-        self._instructions = _build_instructions(
-            agent.instructions, defer_tools=self.settings.defer_tools
-        )
+        self._instructions = agent.instructions or ""
         self._base_tools = list(agent.tools)
         self._context_window = None
         try:
@@ -1602,19 +1612,20 @@ class ChatSessionLG:
         )
         base_tools = list(self._base_tools)
         mcp_tools = list(self._extra_tools)
-        if self.settings.defer_tools:
+        core_names, defer = self._tool_binding(self._model_string, [*base_tools, *mcp_tools])
+        if defer:
             # Only what a request sends counts; the rest waits behind
             # search_tools.
             state = await self.lg_agent.aget_state(self.config)
             messages = list(state.values.get("messages", [])) if state.values else []
-            bound = bound_tool_names(CORE_TOOL_NAMES, messages)
+            bound = bound_tool_names(core_names, messages)
             deferred = [t for t in [*base_tools, *mcp_tools] if tool_name(t) not in bound]
             base_tools = [t for t in base_tools if tool_name(t) in bound]
             base_tools.append(build_search_tools_tool(deferred))
             mcp_tools = [t for t in mcp_tools if tool_name(t) in bound]
         return await asyncio.to_thread(
             build_context_breakdown,
-            instructions=self._instructions,
+            instructions=_build_instructions(self._instructions, defer_tools=defer),
             skills_listing=skills_listing,
             base_tools=base_tools,
             mcp_tools=mcp_tools,

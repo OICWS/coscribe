@@ -133,3 +133,23 @@ def with_prompt_cache_key(model: Any, key: str) -> Any:
     return model.model_copy(
         update={"model_kwargs": {**model.model_kwargs, "prompt_cache_key": key}}
     )
+
+
+def keeps_tool_list_fixed(model: str, custom_providers: dict[str, dict[str, str]]) -> bool:
+    """Whether every built-in tool should be bound from the first request
+    instead of found through search_tools.
+
+    The tool list is sent before the conversation, so binding a found tool
+    makes the provider re-read the whole conversation uncached: on DeepSeek
+    that was 22-56% of what a long task cost (ROADMAP Phase 8cj). Binding
+    all ~115 built-ins up front costs ~35k more tokens per request instead,
+    which only pays off where a cache hit is nearly free and the window is
+    large: DeepSeek charges 2% of a miss for a hit (deepseek-flash, ¥0.02
+    vs ¥1 per 1M, checked 2026-10-05) and has a 1M-token window. Other
+    providers keep deferral until their numbers are checked the same way."""
+    from urllib.parse import urlparse
+
+    provider_key = model.split(":", 1)[0]
+    base_url = custom_providers.get(provider_key, {}).get("base_url", "")
+    host = urlparse(base_url).hostname or ""
+    return host == "deepseek.com" or host.endswith(".deepseek.com")
