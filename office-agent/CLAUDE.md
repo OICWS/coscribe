@@ -117,6 +117,29 @@ mistake this session made once already (see `test_web.py`'s own
 `test_post_provider_persists_an_absolute_path_not_a_cwd_relative_one`
 for the established pattern to copy).
 
+## Cloud sessions: environment and live testing
+
+`.claude/hooks/session-start.sh` installs everything (venv, frontend
+`node_modules`, `ocr`, LibreOffice, poppler). In this container
+`NO_PROXY` sends pypi/npm direct and apt's sources are `http://` -- both
+get 403; the hook routes them through `HTTPS_PROXY`. A command you run
+yourself that installs packages needs the same: export
+`NO_PROXY=localhost,127.0.0.1` (and `npm_config_noproxy` to match) first.
+
+Model keys come from the environment settings and reach only sessions
+started after they were added -- never ask for one in chat. With
+`DEEPSEEK_API_KEY` set, register it as a custom provider
+(`COSCRIBE_PROVIDERS_CONFIG_PATH`, base_url `https://api.deepseek.com/v1`)
+and confirm the model id from `GET https://api.deepseek.com/models`
+before using it. Without a key, `scripts/stub_llm.py` is a local
+OpenAI-compatible model that always answers "OK": enough for UI e2e
+(e.g. `sidebar.spec.ts`), not for specs that check what the model says
+(`chat.spec.ts` looks for "4").
+
+Live runs: `coscribe-web` (port 8000) started from a scratch directory
+holding its own `.env` and workspace, `npx vite --host 127.0.0.1` in
+`frontend/` (port 5173), then `npx playwright test <spec>`.
+
 ## Model-name / provider facts: verify, don't guess
 
 This session repeatedly found stale/wrong model names and provider
