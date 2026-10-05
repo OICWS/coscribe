@@ -7675,6 +7675,34 @@ a concrete reason to prioritize a new surface.
   rejects every request. Unlike today's sub-agents, whose transcript is
   only in memory, a Codex run survives a restart (Codex keeps it).
 
+  Three places where the existing code assumes a LangGraph sub-agent or
+  a real tool, and the Codex driver must not slip through:
+
+  - **The synthetic tools must be registered as gated.**
+    `_decide_action_request` approves outright any name missing from
+    `_gated_tool_risks`, which `_risks_of_gated_tools` builds from the
+    session's real tool list. A Codex request under an unregistered name
+    would be approved silently with no card -- so the delegation tool
+    brings its two synthetic tools (command: EXEC, file change:
+    WRITE_LOCAL) with `requires_approval` metadata, and a test pins that
+    one reaches the card.
+  - **The registry and transcript are graph-shaped.**
+    `register_subagent_run` keeps `(sub_agent, child_config)` and
+    `get_subagent_transcript` reads the graph's state; `_record_progress`
+    folds LangGraph updates. The Codex driver registers a transcript
+    reader of its own (Codex's `thread/read`), and folds `item/started`
+    and `thread/tokenUsage/updated` into `tool_uses`/`last_tool`/`tokens`.
+    Stop cancels the runner as today; the driver's `CancelledError` path
+    has to send `turn/interrupt`, or Codex keeps running after the panel
+    says stopped.
+  - **The approval card only shows code for three tool names.**
+    `ChatLog.tsx`'s `ApprovalDetail` (and `transcriptGrouping.ts`'s
+    `COMMAND_TOOL_NAMES`/verb table) special-case `run_python_script`,
+    `run_node_script` and `run_background_script`; any other name gets
+    the generic arguments dump. The synthetic command tool takes the same
+    `description` + command shape and joins those lists, so a Codex
+    command is reviewed the way a script is.
+
   With the module not enabled, the tool doesn't exist. Concretely:
 
   - **Binary on demand**, like `ensure_node_env`: downloaded from PyPI
