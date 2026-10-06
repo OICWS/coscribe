@@ -3276,7 +3276,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # user_message handling is: it can block on a future that only
             # resolves via an approval_response arriving through the loop
             # below, so awaiting it inline here would deadlock.
-            asyncio.create_task(session.resume_after_reconnect(websocket))
+            # Tracked, so shutdown stops it before the checkpointer it reads
+            # closes.
+            _track_background(asyncio.create_task(session.resume_after_reconnect(websocket)))
             while True:
                 data = await websocket.receive_json()
                 message_type = data.get("type")
