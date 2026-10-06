@@ -6,8 +6,8 @@ existing conversation. A ScheduledTrigger is the opposite shape: global,
 named, persisted, creatable either mid-conversation (create_scheduled_task)
 or from the Settings > Scheduled Tasks panel with no conversation needed
 at all -- global, named, and persisted, so it's its own concept rather
-than a new WakeRequest kind. See ARCHITECTURE.md's 范围边界 section
-for the fuller reasoning.
+than a new WakeRequest kind. See ARCHITECTURE.md's "Repeated work becomes fixed
+steps" section for the fuller reasoning.
 
 Split the same way tools/selfwake.py splits its own data model/storage/
 tools from the runtime-specific resume logic: this

@@ -1,7 +1,7 @@
 """Skill loading: SKILL.md discovery and progressive-disclosure tools.
 
-Same convention as Claude Code's own skills (see ARCHITECTURE.md's "Skill
-加载机制"): a Skill is a directory with a SKILL.md (YAML frontmatter
+Same convention as Claude Code's own skills (see ARCHITECTURE.md's
+"Extension points"): a Skill is a directory with a SKILL.md (YAML frontmatter
 name+description, then markdown instructions), plus optional
 scripts/references/assets. Metadata (name+description) is always visible to
 the Coordinator via its instructions; the full body is loaded on demand via

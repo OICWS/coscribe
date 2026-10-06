@@ -1,7 +1,7 @@
 """Task tracking: a lightweight, per-thread todo list the Coordinator can use
 to plan and track progress on multi-step requests.
 
-This is Coordinator-native behavior (see ARCHITECTURE.md's "Task 追踪工具",
+This is Coordinator-native behavior (see ARCHITECTURE.md's "One coordinator",
 modeled on claude-code's TaskCreate/TaskUpdate tools), not something borrowed
 via MCP/Skill, so it ships as a built-in tool family alongside the file tools.
 """

@@ -717,7 +717,7 @@ built around have since been removed entirely -- a product-direction
 correction, not a bug fix: coscribe's target user is a general file/task
 automation assistant for a broad, not-necessarily-technical audience, not
 a developer coding tool, and neither connector fit that audience (see
-ARCHITECTURE.md's "目标" section for the explicit positioning note this
+ARCHITECTURE.md's "What it is" section for the explicit positioning note this
 prompted). Whether this phase's *next* concrete step should be Slack/Asana
 directly (skipping a GitHub-shaped proving ground entirely) instead of the
 git/github-first sequencing originally described below is still an open
@@ -8102,7 +8102,7 @@ a concrete reason to prioritize a new surface.
 
   **Workflows don't use it, at run time or when drafting.** A workflow
   runs fixed steps with no model deciding anything at run time
-  (ARCHITECTURE.md §6; `workflows/spec.py`): a Codex step would put a
+  (ARCHITECTURE.md, "Repeated work becomes fixed steps"; `workflows/spec.py`): a Codex step would put a
   fully autonomous agent inside a fixed run. Its script steps are
   written by the chat agent when the workflow is drafted, and run through
   `_run_python_script` with the folder guard. Adding Codex to drafting

@@ -1,7 +1,7 @@
 """Hook execution: run a shell command as a lifecycle-event hook and
 interpret its exit status.
 
-See ARCHITECTURE.md's "精简版 Hooks" -- originally PreToolUse/PostToolUse/
+See ARCHITECTURE.md's "Approvals instead of a sandbox" -- originally PreToolUse/PostToolUse/
 SessionStart only, reusing ToolPolicy's own event point for PreToolUse (see
 HookToolPolicy in policies.py) rather than inventing a separate mechanism.
 ROADMAP.md's Phase 7 item 3 (comparing against openai/codex's own 12-event
