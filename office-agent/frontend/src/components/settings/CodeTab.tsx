@@ -3,7 +3,7 @@ import { useCodeStatus } from "../../lib/useCodeStatus";
 import { useConfiguredModels } from "../../lib/useConfiguredModels";
 import { CodeDownload } from "../CodeModuleStatus";
 import { ToggleSwitch } from "../ToggleSwitch";
-import { CODE_MODEL_KEY, CODE_MODULE_ENABLED_KEY } from "./fields";
+import { CODE_MODEL_KEY, CODE_MODULE_ENABLED_KEY, CODE_SEES_MEMORY_KEY } from "./fields";
 import { SettingRow, SettingRows, SettingsSection, fieldClass } from "./SettingRow";
 
 interface CodeTabProps {
@@ -50,7 +50,7 @@ export function CodeTab({ values, onChange }: CodeTabProps) {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Model">
+      <SettingsSection title="Code conversations">
         <SettingRows>
           <SettingRow
             label="Model for code"
@@ -62,6 +62,17 @@ export function CodeTab({ values, onChange }: CodeTabProps) {
               </>
             }
             control={<CodeModelSelect value={model} onChange={(v) => onChange(CODE_MODEL_KEY, v)} />}
+          />
+          <SettingRow
+            label="Use your instructions and memory"
+            description="A new code conversation is told your instructions and what coscribe remembers, as a chat is. A change reaches code conversations started after it."
+            control={
+              <ToggleSwitch
+                label="Use your instructions and memory"
+                on={values[CODE_SEES_MEMORY_KEY] !== "false"}
+                onClick={() => onChange(CODE_SEES_MEMORY_KEY, values[CODE_SEES_MEMORY_KEY] === "false" ? "true" : "false")}
+              />
+            }
           />
         </SettingRows>
       </SettingsSection>

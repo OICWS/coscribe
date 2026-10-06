@@ -7444,6 +7444,35 @@ Codex itself -- every message one Codex turn in the conversation's folder
   memory and instructions; a chat's sub-agent run opening as a code
   conversation.
 
+## Phase 8cr -- Code conversations see the user's instructions and memory
+
+The open question from 8cq, decided: yes. A chat is told the memory file
+(the user's instructions plus what `remember` kept) with its messages; a
+code conversation hadn't been, so a preference the user had stated once
+("amounts keep two decimals", a column's other name) held in chats and not
+in code.
+
+- [x] **Once, when the Codex thread starts**: appended to Codex's
+      developer instructions, which Codex takes only then. An edit to the
+      memory reaches code conversations started after it; sending it with
+      every message instead would cost tokens and the prompt cache on
+      every turn.
+- [x] **Framed for Codex**: the memory is written for the chat's agent and
+      names its tools (`write_docx`, `read_xlsx`, ...), so a note before it
+      says these are the user's standing instructions and facts, and that
+      tool names in them belong to the office assistant -- ignore those.
+- [x] Read-only: a code conversation has no `remember`.
+- [x] **Settings > Code > Use your instructions and memory**
+      (`COSCRIBE_CODE_SEES_MEMORY`, on by default, no restart).
+- [x] Tests: told once (a later memory edit doesn't reach the running
+      thread), left out when switched off or when there is no memory.
+- [x] **Live, deepseek-flash, one call each**: memory saying "amounts keep
+      two decimals and 元; the user likes short answers", asked North's
+      total in `orders.csv`. On: "North 的 amount 合计是 **150.00 元**
+      （120 + 30）。" Off: "…合计是 **150**。" plus a paragraph explaining it.
+- Not yet: a chat's `run_code_task` doesn't get it -- the chat writes that
+  task, memory in view, and hands over everything the run needs.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

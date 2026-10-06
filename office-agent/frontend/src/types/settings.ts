@@ -37,6 +37,7 @@ export interface ConfigResponse {
   COSCRIBE_MAX_TURNS: string | null;
   COSCRIBE_CODE_MODEL: string | null;
   COSCRIBE_CODE_MODULE_ENABLED: string | null;
+  COSCRIBE_CODE_SEES_MEMORY: string | null;
   /** Desktop-shell-only, Rust-consumed (see office-agent-desktop's
    * lib.rs) -- "false" opts out of the default hide-on-close/keep-
    * running-in-background behavior. Absent/null/anything but exactly

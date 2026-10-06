@@ -7967,6 +7967,7 @@ def test_the_code_settings_are_checked_and_apply_live_lg(
                 "updates": {
                     "COSCRIBE_CODE_MODEL": "deepseek-flash",
                     "COSCRIBE_CODE_MODULE_ENABLED": "yes",
+                    "COSCRIBE_CODE_SEES_MEMORY": "maybe",
                 }
             },
         )
@@ -7976,6 +7977,7 @@ def test_the_code_settings_are_checked_and_apply_live_lg(
                 "updates": {
                     "COSCRIBE_CODE_MODEL": "deepseek:deepseek-flash",
                     "COSCRIBE_CODE_MODULE_ENABLED": "true",
+                    "COSCRIBE_CODE_SEES_MEMORY": "false",
                 }
             },
         )
@@ -7983,7 +7985,11 @@ def test_the_code_settings_are_checked_and_apply_live_lg(
         client.post("/api/config", json={"updates": {"COSCRIBE_CODE_MODEL": ""}})
         default = client.get("/api/code").json()
 
-    assert set(bad.json()["rejected"]) == {"COSCRIBE_CODE_MODEL", "COSCRIBE_CODE_MODULE_ENABLED"}
+    assert set(bad.json()["rejected"]) == {
+        "COSCRIBE_CODE_MODEL",
+        "COSCRIBE_CODE_MODULE_ENABLED",
+        "COSCRIBE_CODE_SEES_MEMORY",
+    }
     assert good.json() == {"restart_required": False, "rejected": {}}
     assert chosen["model"] == "deepseek:deepseek-flash"
     assert "deepseek" in chosen["model_problem"]

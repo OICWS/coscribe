@@ -286,7 +286,14 @@ async def test_stop_ends_the_run_in_codex_too(
     session.request_stop()
     await asyncio.wait_for(turn, 20)
 
-    [task] = SubAgentTaskStore(tmp_path / "state").list_for_thread("t1")
+    # The run finishes stopping on its own -- Codex is interrupted and its
+    # commands ended -- after the parent's turn has already returned.
+    store = SubAgentTaskStore(tmp_path / "state")
+    for _ in range(100):
+        [task] = store.list_for_thread("t1")
+        if task.status != "running":
+            break
+        await asyncio.sleep(0.05)
     assert task.status == "stopped"
     methods = [json.loads(line).get("method") for line in log.read_text().splitlines()]
     assert "turn/interrupt" in methods
