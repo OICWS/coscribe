@@ -64,62 +64,78 @@
   }
 
   // ---------- the protagonist: the coscribe input box ----------
-  // Mirrors Composer.tsx: rounded-2xl card, 0.9rem text, return-key button
-  // bottom right, + button bottom left, model name chip.
-  function inputBox(parent, { x = 960, y = 540, w = 880, placeholder = '', model = 'deepseek-chat', dark = false } = {}) {
+  // Measured from the real app (Composer.tsx, empty state, 2026-10-06):
+  // 848x54 card, rounded-2xl (16px), p-3, 1px --border, --bg fill, shadow-sm;
+  // 14.4px/21.6px IBM Plex Sans text; 28px return button inside on the right;
+  // below the card: "+  Add folder" on the left, "deepseek-chat ⌄" on the
+  // right, both 14px muted. Attachment chips: rounded-full, --card-bg, text-xs,
+  // name + ×. Optional serif greeting above (Georgia 40px, as in EmptyState).
+  // Everything is drawn at Z x the real size so it reads at video resolution.
+  const Z = 1.45;
+  function inputBox(parent, { x = 960, y = 540, placeholder = '', model = 'deepseek-chat', greeting = null } = {}) {
+    const W = 848 * Z;
     const root = h('div', { class: 'abs' });
-    css(root, { left: x - w / 2, top: y - 70, width: w, transformOrigin: '50% 50%' });
+    css(root, { left: x - W / 2, top: y - 27 * Z, width: W, transformOrigin: '50% 50%' });
+    const greet = h('div', { text: greeting || '' });
+    css(greet, { position: 'absolute', left: 0, right: 0, bottom: '100%', marginBottom: 38 * Z, textAlign: 'center',
+      fontFamily: 'Georgia, "Times New Roman", var(--serif)', fontSize: 40 * Z, lineHeight: 1.25, color: 'var(--fg)', display: greeting ? '' : 'none' });
     const card = h('div');
-    css(card, { position: 'relative', borderRadius: 18, padding: '20px 22px 14px', minHeight: 140,
-      background: dark ? 'var(--d-card)' : '#ffffff', border: `1px solid ${dark ? 'var(--d-border)' : 'var(--border)'}`,
-      boxShadow: dark ? 'none' : '0 1px 2px rgba(0,0,0,.04), 0 8px 40px rgba(32,30,29,.06)', color: dark ? 'var(--d-fg)' : 'var(--fg)' });
+    css(card, { position: 'relative', borderRadius: 16 * Z, padding: 12 * Z, background: 'var(--bg)', border: '1px solid var(--border)',
+      boxShadow: `0 ${1 * Z}px ${3 * Z}px rgba(0,0,0,.1), 0 ${1 * Z}px ${2 * Z}px rgba(0,0,0,.06)`, color: 'var(--fg)' });
+    const chips = h('div'); css(chips, { display: 'flex', gap: 8 * Z, flexWrap: 'wrap' });
     const text = h('div');
-    css(text, { fontSize: 26, lineHeight: 1.5, minHeight: 78, whiteSpace: 'pre-wrap', fontFamily: 'var(--sans)', letterSpacing: '0.01em' });
+    css(text, { fontSize: 14.4 * Z, lineHeight: 1.5, minHeight: 21.6 * Z, whiteSpace: 'pre-wrap', fontFamily: 'var(--sans)', padding: `0 ${36 * Z}px 0 ${2 * Z}px` });
     const words = h('span'), caret = h('span');
-    css(caret, { display: 'inline-block', width: 2, height: 30, marginLeft: 2, verticalAlign: -5, background: 'var(--accent)' });
+    css(caret, { display: 'inline-block', width: Math.max(2, 1.4 * Z), height: 18 * Z, marginLeft: 1, verticalAlign: -3 * Z, background: 'var(--fg)' });
     const ph = h('span', { text: placeholder });
     css(ph, { color: 'var(--muted)' });
     text.append(words, caret, ph);
+    const send = h('span', { html: `<svg width="${15 * Z}" height="${15 * Z}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10l-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>` });
+    css(send, { position: 'absolute', right: 12 * Z, bottom: 12 * Z, width: 28 * Z, height: 28 * Z, borderRadius: 8 * Z, display: 'grid', placeItems: 'center', color: 'var(--muted)' });
+    card.append(chips, text, send);
     const bar = h('div');
-    css(bar, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, fontSize: 15, color: 'var(--muted)' });
-    const plus = h('span', { text: '+' });
-    css(plus, { width: 30, height: 30, borderRadius: 15, display: 'grid', placeItems: 'center', fontSize: 22, color: 'var(--muted)' });
-    const right = h('div'); css(right, { display: 'flex', gap: 14, alignItems: 'center' });
-    const timer = h('span'); css(timer, { fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', marginRight: 6 });
-    const modelChip = h('span', { text: model }); css(modelChip, { fontFamily: 'var(--mono)', fontSize: 14 });
-    const send = h('span', { html: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10l-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>' });
-    css(send, { width: 34, height: 34, borderRadius: 9, display: 'grid', placeItems: 'center', color: 'var(--muted)' });
-    right.append(timer, modelChip, send); bar.append(plus, right);
-    const chips = h('div'); css(chips, { display: 'flex', gap: 8, flexWrap: 'wrap' });
-    card.append(chips, text, bar); root.append(card); parent.append(root);
+    css(bar, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 * Z, fontSize: 14 * Z, color: 'var(--muted)', padding: `0 ${2 * Z}px` });
+    const left = h('div'); css(left, { display: 'flex', alignItems: 'center', gap: 4 * Z });
+    const plus = h('span', { html: `<svg width="${18 * Z}" height="${18 * Z}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>` });
+    css(plus, { width: 28 * Z, height: 28 * Z, display: 'grid', placeItems: 'center' });
+    left.append(plus, h('span', { text: 'Add folder' }));
+    const right = h('div'); css(right, { display: 'flex', gap: 14 * Z, alignItems: 'center' });
+    const timer = h('span'); css(timer, { fontFamily: 'var(--sans)', fontVariantNumeric: 'tabular-nums' });
+    const modelChip = h('span', { html: `${model}<svg width="${12 * Z}" height="${12 * Z}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="margin-left:${6 * Z}px;vertical-align:middle"><path d="M6 9l6 6 6-6"/></svg>` });
+    css(modelChip, { paddingRight: 8 * Z });
+    right.append(timer, modelChip);
+    bar.append(left, right);
+    root.append(greet, card, bar); parent.append(root);
     return {
-      root, card, text, chips, modelChip,
+      root, card, text, chips, modelChip, greet, bar,
       // str typed up to progress k (0..1); t drives the caret blink; sent=0..1 animates the send key
       // elapsed: seconds since send (null hides the run timer + token count)
       update({ str = '', k = 1, t = 0, caretOn = true, sent = 0, elapsed = null }) {
-        const tm = elapsed == null ? '' : `${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, '0')} · ${(elapsed * 0.9 + 0.4).toFixed(1)}k`;
+        const tm = elapsed == null ? '' : `${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, '0')} · ${(elapsed * 0.9 + 0.4).toFixed(1)}k tokens`;
         if (timer.textContent !== tm) timer.textContent = tm;
         const s = typed(str, k);
         if (words.textContent !== s) words.textContent = s;
         ph.style.display = s ? 'none' : '';
         const typing = k > 0 && k < 1;
-        caret.style.opacity = !caretOn ? 0 : typing ? 1 : (Math.floor(t * 1.8) % 2 ? 0.15 : 1);
-        css(send, { background: sent > 0 ? 'var(--fg)' : (s ? 'var(--card-bg)' : 'transparent'), color: sent > 0 ? 'var(--bg)' : (s ? 'var(--fg)' : 'var(--muted)'), transform: `scale(${1 - 0.12 * Math.sin(Math.PI * clamp(sent))})` });
+        caret.style.opacity = !caretOn ? 0 : typing ? 1 : (Math.floor(t * 1.8) % 2 ? 0 : 1);
+        css(send, { background: sent > 0 ? 'var(--fg)' : 'transparent', color: sent > 0 ? 'var(--bg)' : (s ? 'var(--fg)' : 'var(--muted)'), transform: `scale(${1 - 0.12 * Math.sin(Math.PI * clamp(sent))})` });
       },
-      addChip(label, kind = 'sheet') { const c = fileChip(label, kind); chips.append(c); css(chips, { marginBottom: 12 }); return c; },
+      addChip(label, kind = 'sheet') { const c = fileChip(label, kind); chips.append(c); css(chips, { marginBottom: 8 * Z }); return c; },
     };
   }
 
   // ---------- file chip (attachment / deliverable) ----------
+  // As in Composer.tsx: rounded-full, --border, --card-bg, text-xs, name then ×.
+  // kind is kept so scenes can colour things that belong to a file type.
   const KIND = { sheet: ['var(--file-sheet)', 'XLSX'], doc: ['var(--file-doc)', 'DOCX'], slides: ['var(--file-slides)', 'PPTX'], pdf: ['var(--file-pdf)', 'PDF'], code: ['var(--kind-script)', 'PY'], folder: ['var(--kind-tool)', 'DIR'] };
-  function fileChip(label, kind = 'sheet', { dark = false } = {}) {
-    const [color, ext] = KIND[kind] || KIND.sheet;
+  function fileChip(label, kind = 'sheet', { dark = false, z = Z } = {}) {
     const c = h('span');
-    css(c, { display: 'inline-flex', alignItems: 'center', gap: 10, padding: '7px 14px 7px 8px', borderRadius: 999,
-      border: `1px solid ${dark ? 'var(--d-border)' : 'var(--border)'}`, background: dark ? 'var(--d-card)' : 'var(--card-bg)', fontSize: 15, color: dark ? 'var(--d-fg)' : 'var(--fg)' });
-    const b = h('span', { text: ext });
-    css(b, { fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, color: '#fff', background: color, borderRadius: 5, padding: '3px 5px', letterSpacing: '.04em' });
-    c.append(b, h('span', { text: label }));
+    c.dataset.kind = kind;
+    css(c, { display: 'inline-flex', alignItems: 'center', gap: 8 * z, padding: `${6 * z}px ${6 * z}px ${6 * z}px ${12 * z}px`, borderRadius: 999,
+      border: `1px solid ${dark ? 'var(--d-border)' : 'var(--border)'}`, background: dark ? 'var(--d-card)' : 'var(--card-bg)', fontSize: 12 * z, lineHeight: 1.33, color: dark ? 'var(--d-fg)' : 'var(--fg)', whiteSpace: 'nowrap' });
+    const x = h('span', { text: '×' });
+    css(x, { width: 16 * z, height: 16 * z, display: 'grid', placeItems: 'center', color: 'var(--muted)', fontSize: 12 * z });
+    c.append(h('span', { text: label }), x);
     return c;
   }
 
@@ -212,7 +228,7 @@
   // monospace number that rolls/counts (for figures)
   const fmt = (v, d = 0) => v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 
-  window.K = { camera, camPath, surface, depth, grain, inputBox, fileChip, card, rise, checklist, thread, line, fmt, KIND };
+  window.K = { Z, camera, camPath, surface, depth, grain, inputBox, fileChip, card, rise, checklist, thread, line, fmt, KIND };
 })();
 
 // ---------- typing schedule ----------

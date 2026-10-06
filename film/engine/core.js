@@ -54,7 +54,7 @@
   // set many style props at once, skipping unchanged values (cheap per-frame updates)
   function css(e, props) {
     for (const [k, v] of Object.entries(props)) {
-      const s = typeof v === 'number' && !/opacity|zIndex|scale|lineHeight|fontWeight|flex$|flexGrow|flexShrink|order|zoom/.test(k) ? v + 'px' : String(v);
+      const s = typeof v === 'number' && !/^(opacity|zIndex|scale|lineHeight|fontWeight|flex|flexGrow|flexShrink|order|zoom)$/.test(k) ? v + 'px' : String(v);
       if (e.style[k] !== s) e.style[k] = s;
     }
   }

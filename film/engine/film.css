@@ -27,3 +27,17 @@ html, body { margin: 0; height: 100%; background: #0b0a0a; color: var(--fg); }
 .layer * { box-sizing: border-box; }
 .abs { position: absolute; }
 svg.full { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: visible; }
+
+/* ---- v2 art direction (Allen, 2026-10-06): bright and vivid, no dark worlds ----
+   Each sentence's world is a saturated colour field; the work floats on it as
+   white cards with soft coloured shadows. Ink text on cards, white text on fields. */
+:root {
+  --field-sheet: linear-gradient(135deg, #18a05e 0%, #12b5a4 55%, #3b82f6 100%);
+  --field-slides: linear-gradient(135deg, #ff8a3d 0%, #f4511e 50%, #e8457c 100%);
+  --field-doc: linear-gradient(135deg, #2563eb 0%, #1d9bf0 55%, #22c1d6 100%);
+  --field-code: linear-gradient(135deg, #312e81 0%, #4f46e5 50%, #0891b2 100%);
+  --field-flow: linear-gradient(120deg, #3b5bfd 0%, #6d4cf5 55%, #a855f7 100%);
+  --field-ink: #ffffff;                 /* text placed directly on a field */
+  --card-shadow: 0 30px 80px rgba(16, 24, 64, .22), 0 2px 8px rgba(16, 24, 64, .10);
+  --brand-1: #3b5bfd; --brand-2: #8b5cf6;   /* the landing page's "agentic" gradient */
+}

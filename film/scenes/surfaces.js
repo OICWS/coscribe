@@ -7,7 +7,7 @@
   // chip positions inside the box (approx), exported for depth scenes that
   // fly their deliverable up into the next box: first chip's centre-left.
   // (screen coordinates while the surface camera sits at its resting 1.2 zoom)
-  K.CHIP_SLOT = { x: 595, y: 502 };
+  K.CHIP_SLOT = { x: 400, y: 541 };
 
   function sentenceScene(o) {
     // o: { id, start, end, fadeIn:[a,b] | null, fromBlack, key, type:[t0,dur], enter, dive:[a,b], target:{glyph:i}|{chip:i}|{text:'..'},
@@ -17,7 +17,7 @@
       build(layer, { T }) {
         const bg = K.surface(layer);
         const cam = K.camera(layer);
-        const box = K.inputBox(cam.world, { y: 540, placeholder: T('placeholder') });
+        const box = K.inputBox(cam.world, { y: o.greeting ? 600 : 540, placeholder: T('placeholder'), greeting: o.greeting || null });
         const chips = (o.chips || []).map((c) => {
           const el = box.addChip(c.label || T(c.key), c.kind);
           return { el, at: c.at };
@@ -93,7 +93,7 @@
   K.sentenceScene = sentenceScene;
 
   // Sentence 1 (also the film's opening: empty box, then typing at 8.0)
-  sentenceScene({ id: 'surf1', start: 0, end: 13.0, fromBlack: true, fadeIn: [0.6, 2.0], key: 's1', type: [8.0, 3.0], enter: 11.1,
+  sentenceScene({ id: 'surf1', start: 0, end: 13.0, fromBlack: true, greeting: 'Good morning!', fadeIn: [0.6, 2.0], key: 's1', type: [8.0, 3.0], enter: 11.1,
     dive: [11.2, 13.0], target: { text: L('。', 'months.') }, chips: [{ key: 's1_chip', kind: 'sheet', at: 9.2 }], seed: 11 });
   // Sentence 2
   sentenceScene({ id: 'surf2', start: 28.5, end: 34.5, fadeIn: [28.5, 29.5], key: 's2', type: [30.0, 2.8], enter: 32.9,
