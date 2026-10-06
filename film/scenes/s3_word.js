@@ -260,7 +260,12 @@
   F.scene({
     id: 's3_word', start: S, end: E, z: 10,
     build(layer, { T }) {
-      K.depth(layer);
+      // v2: the Word world is a bright blue colour field with one soft,
+      // slowly drifting light; the work floats on it as white paper
+      const field = div({ position: 'absolute', inset: 0, background: 'var(--field-doc)' });
+      const sheen = div({ position: 'absolute', left: 0, top: 0, width: 1500, height: 1500, borderRadius: '50%', pointerEvents: 'none',
+        background: 'radial-gradient(closest-side, rgba(255,255,255,.22), rgba(255,255,255,.07) 55%, rgba(255,255,255,0))' });
+      layer.append(field, sheen);
 
       // ---------- canvas: page tunnel + flowing tender columns ----------
       const cv = h('canvas', { width: 1920, height: 1080 });

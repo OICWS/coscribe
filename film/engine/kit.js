@@ -45,7 +45,7 @@
   // The SURFACE: the app's light canvas.
   function surface(parent) {
     const e = h('div', { class: 'abs' });
-    css(e, { inset: 0, background: 'var(--bg)' });
+    css(e, { inset: 0, background: 'radial-gradient(55% 45% at 50% 62%, rgba(59,91,253,.09), transparent 70%), radial-gradient(40% 40% at 78% 28%, rgba(139,92,246,.08), transparent 70%), radial-gradient(35% 35% at 20% 30%, rgba(18,181,164,.06), transparent 70%), var(--bg)' });
     parent.append(e); return e;
   }
   // The DEPTH: warm near-black with a faint vignette. Scenes fill it with work.
