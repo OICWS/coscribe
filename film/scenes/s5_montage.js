@@ -1,6 +1,9 @@
 // Montage (94.0–100.0): four hard cuts on the music hits, 1.5 s each.
 // S5-01 the desktop Browser panel, S5-02 Connectors settings, S5-03 the
 // ModelPicker, S5-04 a corner of the surface; then the surface empties out.
+// v2: each cut floats the app's light UI as white cards on a vivid colour field
+// (browser → --field-doc, connectors → --field-flow, model picker → --field-slides);
+// the last cut is the light surface itself, emptying out for 100.0.
 // All UI is the app's light theme, rebuilt 1:1 from the real components
 // (DesktopBrowserPanel.tsx, settings/SettingsModal.tsx + ConnectorsTab.tsx,
 // ModelPicker.tsx) and framed by a slow 2.5D camera.
@@ -57,13 +60,25 @@
     id: 's5_montage', start: S0, end: S1, z: 20,
     build(layer) {
       K.surface(layer);
-      const shots = [0, 1, 2, 3].map(() => { const e = h('div', { class: 'abs' }); css(e, { inset: 0, display: 'none' }); layer.append(e); return e; });
+      const SHADOW = '0 30px 80px rgba(16,24,64,.22), 0 2px 8px rgba(16,24,64,.10)';
+      const FIELD = ['var(--field-doc)', 'var(--field-flow)', 'var(--field-slides)', null];
+      const glows = [];
+      const shots = [0, 1, 2, 3].map((i) => {
+        const e = h('div', { class: 'abs' }); css(e, { inset: 0, display: 'none' }); layer.append(e);
+        if (FIELD[i]) {
+          const f = h('div', { class: 'abs' }); css(f, { inset: 0, background: FIELD[i] });
+          const g = h('div', { class: 'abs' });
+          css(g, { left: -600, top: -700, width: 1800, height: 1800, borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(255,255,255,.26), rgba(255,255,255,.08) 55%, rgba(255,255,255,0))' });
+          e.append(f, g); glows[i] = g;
+        }
+        return e;
+      });
       const grainU = K.grain(layer, 0.035);
       const toStage = (r) => { const st = layer.getBoundingClientRect(), sc = st.width / 1920; return { x: (r.left - st.left) / sc, y: (r.top - st.top) / sc, w: r.width / sc, h: r.height / sc }; };
       // a corner caption per shot (bottom-left; no VO runs in the montage)
       function caption(parent, text) {
         const c = h('div', { class: 'abs', text });
-        css(c, { left: 96, top: 984, fontFamily: 'var(--sans)', fontSize: 22, fontWeight: 500, color: 'var(--fg)', letterSpacing: '.02em', whiteSpace: 'nowrap' });
+        css(c, { left: 96, top: 984, fontFamily: 'var(--sans)', fontSize: 24, fontWeight: 500, color: 'var(--field-ink)', letterSpacing: '.02em', whiteSpace: 'nowrap', textShadow: '0 2px 16px rgba(16,24,64,.25)' });
         parent.append(c); return c;
       }
 
@@ -74,11 +89,11 @@
       const chatBg = h('div', { class: 'abs' });
       css(chatBg, { left: 150, top: 230, width: 440, filter: 'blur(3px)', opacity: 0.55 });
       [[0.92, 'var(--card-bg)', 54], [0.7, null, 14], [0.86, null, 14], [0.6, null, 14], [0.8, null, 14], [0.4, null, 14], [0.72, 'var(--card-bg)', 40], [0.9, null, 14], [0.66, null, 14]].forEach(([w, bgc, hh], i) => {
-        const r = h('div'); css(r, { width: `${w * 100}%`, height: hh, margin: bgc ? '26px 0 26px auto' : '12px 0', borderRadius: bgc ? 16 : 4, background: bgc || 'rgba(32,30,29,.12)' }); chatBg.append(r);
+        const r = h('div'); css(r, { width: `${w * 100}%`, height: hh, margin: bgc ? '26px 0 26px auto' : '12px 0', borderRadius: bgc ? 16 : 4, background: bgc ? 'rgba(255,255,255,.85)' : 'rgba(255,255,255,.45)' }); chatBg.append(r);
       });
       bcam.world.append(chatBg);
       const panel = h('div', { class: 'abs' });
-      css(panel, { left: 640, top: 150, width: 820, height: 780, borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg)', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 70px rgba(32,30,29,.10)', fontFamily: 'var(--sans)', color: 'var(--fg)' });
+      css(panel, { left: 640, top: 150, width: 820, height: 780, borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg)', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: SHADOW, fontFamily: 'var(--sans)', color: 'var(--fg)' });
       const tabs = h('div');
       css(tabs, { display: 'flex', height: 44, alignItems: 'center', gap: 4, padding: '0 8px', flex: 'none' });
       const tab = (title, active) => `<div style="display:flex;height:28px;max-width:200px;flex:1 1 200px;align-items:center;gap:6px;border-radius:8px;padding:0 6px;font-size:13px;border:1px solid ${active ? 'rgba(32,30,29,.26)' : 'transparent'};background:${active ? 'var(--bg)' : 'transparent'};color:${active ? 'var(--fg)' : 'var(--muted)'}">${icon('globe', 14)}<span style="flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${title}</span>${active ? `<span style="display:flex;width:20px;height:20px;align-items:center;justify-content:center;color:var(--muted)">${icon('close', 12)}</span>` : ''}</div>`;
@@ -128,7 +143,7 @@
         `<div style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;color:var(--muted)">${icon('globe', 13)}retail-report.example/2026-09 · ${L('表 3', 'Table 3')}</div>`;
       b.append(cite);
       const bCap = caption(b, L('内置浏览器 · 查资料', 'Built-in browser · look things up'));
-      const bEx = h('div', { class: 'abs', text: T('example') }); css(bEx, { right: 56, bottom: 40, fontSize: 13, color: 'var(--muted)', letterSpacing: '.08em' }); b.append(bEx);
+      const bEx = h('div', { class: 'abs', text: T('example') }); css(bEx, { right: 56, bottom: 40, fontSize: 13, color: 'var(--field-ink)', opacity: 0.8, letterSpacing: '.08em' }); b.append(bEx);
 
       // ================= S5-02 · Connectors =================
       const c = shots[1];
@@ -149,10 +164,9 @@
           app.append(e); y += user ? 92 : 30;
         }
       }
-      ccam.world.append(app);
-      const dim = h('div', { class: 'abs' }); css(dim, { left: -400, top: -400, width: 2720, height: 1880, background: 'rgba(0,0,0,.6)' }); ccam.world.append(dim);
+      // v2: the settings modal floats on the field by itself (no dimmed app behind it)
       const modal = h('div', { class: 'abs' });
-      css(modal, { left: 410, top: 120, width: 1100, height: 840, borderRadius: 16, border: '1px solid var(--border)', background: 'var(--bg)', boxShadow: '0 4px 24px rgba(0,0,0,.06)', display: 'flex', overflow: 'hidden', fontFamily: 'var(--sans)', color: 'var(--fg)' });
+      css(modal, { left: 410, top: 210, width: 1100, height: 480, borderRadius: 16, border: '1px solid var(--border)', background: 'var(--bg)', boxShadow: SHADOW, display: 'flex', overflow: 'hidden', fontFamily: 'var(--sans)', color: 'var(--fg)' });
       const navItem = (ic, label, active) => `<div style="display:flex;height:36px;align-items:center;gap:12px;border-radius:8px;padding:0 12px;font-size:15px;${active ? 'background:var(--card-bg);font-weight:500' : 'color:rgba(32,30,29,.8)'}">${icon(ic, 18)}${label}</div>`;
       const nav = h('div');
       css(nav, { width: 240, flex: 'none', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column' });
@@ -193,22 +207,26 @@
       // ================= S5-03 · ModelPicker =================
       const m = shots[2];
       const mcam = K.camera(m, { perspective: 2600 });
-      const mbox = K.inputBox(mcam.world, { y: 540, placeholder: T('placeholder') });
+      const Z = K.Z;
+      const mbox = K.inputBox(mcam.world, { y: 420, placeholder: T('placeholder') });
+      css(mbox.bar, { color: 'var(--field-ink)' });   // the bar below the card sits on the field
+      css(mbox.card, { boxShadow: SHADOW });
       const pill = mbox.modelChip;
-      css(pill, { display: 'inline-flex', alignItems: 'center', gap: 4, height: 32, padding: '0 8px', borderRadius: 8, fontFamily: 'var(--sans)', fontSize: 14 });
+      // ModelPicker.tsx trigger: the model name + chevron below the box, a ghost button
+      css(pill, { display: 'inline-flex', alignItems: 'center', gap: 4 * Z, height: 32 * Z, padding: `0 ${8 * Z}px`, borderRadius: 8 * Z, fontFamily: 'var(--sans)', fontSize: 14 * Z });
       const pillTx = h('span', { text: 'deepseek-chat' });
-      pill.textContent = ''; pill.append(pillTx); pill.insertAdjacentHTML('beforeend', icon('chevD', 14));
+      pill.textContent = ''; pill.append(pillTx); pill.insertAdjacentHTML('beforeend', icon('chevD', 14 * Z));
       const MODELS = ['deepseek-chat', 'kimi-k2', 'glm-4.6', 'qwen3:14b', 'claude-sonnet-4-5'];
       const menu = h('div', { class: 'abs' });
-      css(menu, { minWidth: 192, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', boxShadow: '0 4px 24px rgba(0,0,0,.06)', fontFamily: 'var(--sans)', overflow: 'hidden', transformOrigin: '0 100%', opacity: 0 });
+      css(menu, { minWidth: 192 * Z, padding: `${4 * Z}px 0`, borderRadius: 10 * Z, border: '1px solid var(--border)', background: 'var(--bg)', boxShadow: SHADOW, fontFamily: 'var(--sans)', overflow: 'hidden', transformOrigin: '100% 0', opacity: 0 });
       const mrows = MODELS.map((name, i) => {
-        const r = h('div'); css(r, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '8px 12px', fontSize: 14, color: 'var(--fg)' });
-        const lab = h('span'); const num = h('span', { text: String(i + 1) }); css(num, { fontSize: 12, color: 'var(--muted)' });
+        const r = h('div'); css(r, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 * Z, padding: `${8 * Z}px ${12 * Z}px`, fontSize: 14 * Z, color: 'var(--fg)', margin: `0 ${4 * Z}px`, borderRadius: 6 * Z });
+        const lab = h('span'); const num = h('span', { text: String(i + 1) }); css(num, { fontSize: 12 * Z, color: 'var(--muted)' });
         r.append(lab, num); menu.append(r); return { r, lab, name };
       });
       mcam.world.append(menu);
       const keycap = h('div', { class: 'abs', text: '3' });
-      css(keycap, { width: 46, height: 46, borderRadius: 9, border: '1px solid rgba(32,30,29,.18)', background: '#fff', boxShadow: '0 3px 0 rgba(32,30,29,.16)', display: 'grid', placeItems: 'center', fontFamily: MONO, fontSize: 20, color: 'var(--fg)', opacity: 0 });
+      css(keycap, { width: 60, height: 60, borderRadius: 11, border: '1px solid rgba(32,30,29,.18)', background: '#fff', boxShadow: '0 3px 0 rgba(32,30,29,.16)', display: 'grid', placeItems: 'center', fontFamily: MONO, fontSize: 26, color: 'var(--fg)', opacity: 0 });
       mcam.world.append(keycap);
       const mptr = h('div', { class: 'abs', html: POINTER('#201e1d', '#fff') }); css(mptr, { left: 0, top: 0, opacity: 0, filter: 'drop-shadow(0 2px 3px rgba(0,0,0,.25))' });
       m.append(mptr);
@@ -240,9 +258,10 @@
         const idx = t < CUTS[1] ? 0 : t < CUTS[2] ? 1 : t < CUTS[3] ? 2 : 3;
         if (idx !== shown) { shots.forEach((e, i) => { e.style.display = i === idx ? '' : 'none'; }); shown = idx; }
         const u = t - CUTS[idx];
+        if (glows[idx]) css(glows[idx], { transform: `translate(${(420 + 260 * Math.sin(t * 0.4 + idx)).toFixed(1)}px,${(80 + 90 * Math.cos(t * 0.33 + idx)).toFixed(1)}px)` });
 
         if (idx === 0) {
-          bcam.set({ x: lerp(1010, 1060, ease.outQuad(prog(u, 0, 1.5))), y: lerp(500, 530, ease.inOutQuad(prog(u, 0, 1.5))), s: lerp(1.32, 1.45, ease.outCubic(prog(u, 0, 1.5))), ry: lerp(-6, -3.5, prog(u, 0, 1.5)), rx: 1.5 });
+          bcam.set({ x: lerp(880, 930, ease.outQuad(prog(u, 0, 1.5))), y: lerp(500, 530, ease.inOutQuad(prog(u, 0, 1.5))), s: lerp(1.32, 1.45, ease.outCubic(prog(u, 0, 1.5))), ry: lerp(-6, -3.5, prog(u, 0, 1.5)), rx: 1.5 });
           css(chatBg, { transform: `translateX(${(-u * 30).toFixed(1)}px)` });
           css(page, { transform: `translateY(${((1 - ease.outCubic(prog(u, 0, 0.5))) * 190).toFixed(1)}px)` });
           css(pulse, { opacity: 0.45 + 0.55 * (0.5 + 0.5 * Math.cos(u * 6)) });
@@ -261,17 +280,22 @@
           const d = `M -40 ${ey + 210} C 300 ${ey + 200} ${ex - 260} ${ey} ${ex} ${ey}`;
           if (!bThread || Math.abs(ex - bThread.ex) > 0.5 || Math.abs(ey - bThread.ey) > 0.5) {
             bsvg.textContent = '';
-            bThread = K.thread(bsvg, d, { color: 'var(--accent)', width: 2.4 }); bThread.ex = ex; bThread.ey = ey; bThreadD = d;
+            // a white halo under the brand-blue core reads on the field and on the page alike
+            const halo = K.thread(bsvg, d, { color: '#fff', width: 7, glow: false });
+            bThread = K.thread(bsvg, d, { color: '#3b5bfd', width: 2.8, glow: false }); bThread.halo = halo; bThread.ex = ex; bThread.ey = ey; bThreadD = d;
           }
-          bThread.update(ease.inOutCubic(prog(u, 0.3, 0.76)));
-          bThread.g.style.opacity = 1 - tw(u, 1.0, 1.4);
+          const kth = ease.inOutCubic(prog(u, 0.3, 0.76));
+          bThread.halo.update(kth, { headOn: false }); bThread.update(kth);
+          bThread.g.style.opacity = bThread.halo.g.style.opacity = 1 - tw(u, 1.0, 1.4);
           // citation flies out toward the viewer, back along the thread
           const kf = tw(u, 0.95, 1.45, 'inOutCubic');
           const x0 = R.x, y0 = R.y - 10, x1 = 120, y1 = 600;
           css(cite, { opacity: tw(u, 0.95, 1.08, 'outQuad'), transform: `translate(${lerp(x0, x1, kf).toFixed(1)}px, ${(lerp(y0, y1, kf) - Math.sin(Math.PI * kf) * 60).toFixed(1)}px) scale(${lerp(0.82, 1.12, kf).toFixed(4)}) rotate(${(-1.5 * Math.sin(Math.PI * kf)).toFixed(2)}deg)` });
           css(bCap, { opacity: tw(u, 0.05, 0.3, 'outQuad') });
         } else if (idx === 1) {
-          ccam.set({ x: lerp(1040, 1090, ease.outQuad(prog(u, 0, 1.5))), y: lerp(338, 326, prog(u, 0, 1.5)), s: lerp(1.74, 1.88, ease.outCubic(prog(u, 0, 1.5))), ry: lerp(4, 2.5, prog(u, 0, 1.5)), rx: -1.5 });
+          // the whole modal in frame, settling in with a small 2.5D turn
+          const kc = ease.outExpo(prog(u, 0, 0.6));
+          ccam.set({ x: lerp(985, 970, ease.outQuad(prog(u, 0, 1.5))), y: 470, s: lerp(1.2, 1.3, kc) + 0.03 * prog(u, 0.6, 1.5), ry: lerp(7, 2.5, kc), rx: -1.5 });
           // Microsoft 365: Connecting… then the check
           const connected = u >= 0.42;
           ms.conn.style.display = connected ? 'none' : '';
@@ -287,18 +311,18 @@
         } else if (idx === 2) {
           // anchor the menu to the pill (in world coordinates, camera-independent)
           // pill.offsetParent is the card (position: relative), the card's is the box root
-          const boxEl = mbox.root;
-          const pillX = boxEl.offsetLeft + mbox.card.offsetLeft + pill.offsetLeft;
-          const pillY = boxEl.offsetTop + mbox.card.offsetTop + pill.offsetTop;
-          // the camera frames the pill as first laid out (the label width changes on switch)
-          // (anchored on the pill's right edge, which does not move when the label changes)
-          const camAnchor = { x: pillX + pill.offsetWidth - 130, y: pillY };
-          mcam.set({ x: lerp(camAnchor.x + 40, camAnchor.x + 70, ease.outQuad(prog(u, 0, 1.5))), y: camAnchor.y - 70, s: lerp(2.0, 2.15, ease.outCubic(prog(u, 0, 1.5))), ry: -3, rx: 2 });
+          // pill position in camera-world px (layout only): it sits in the bar below the card
+          let pillX = 0, pillY = 0;
+          for (let e = pill; e && e !== mcam.world; e = e.offsetParent) { pillX += e.offsetLeft; pillY += e.offsetTop; }
+          const pillR = pillX + pill.offsetWidth, pillB = pillY + pill.offsetHeight;
+          // frame the box's right half and the space below it, where the menu opens
+          const kc = ease.outExpo(prog(u, 0, 0.6));
+          mcam.set({ x: lerp(1180, 1210, ease.outQuad(prog(u, 0, 1.5))), y: lerp(560, 575, kc), s: lerp(1.28, 1.36, kc) + 0.03 * prog(u, 0.6, 1.5), ry: lerp(-6, -3, kc), rx: 2 });
           // as in ModelPicker.tsx: a digit key picks that entry and closes the menu at once
           const PRESS = 0.78;
           const open = u >= 0.12 && u < PRESS + 0.1;
           const ko = tw(u, 0.12, 0.3, 'outBack') * (1 - tw(u, PRESS + 0.02, PRESS + 0.12, 'inQuad'));
-          css(menu, { left: pillX, top: pillY - 4 - menu.offsetHeight, opacity: clamp(ko * 1.5), transform: `translateY(${((1 - ko) * 8).toFixed(1)}px) scale(${(0.97 + 0.03 * clamp(ko)).toFixed(4)})` });
+          css(menu, { left: pillR - menu.offsetWidth, top: pillB + 6 * Z, opacity: clamp(ko * 1.5), transform: `translateY(${((1 - ko) * -8).toFixed(1)}px) scale(${(0.96 + 0.04 * ko).toFixed(4)})` });
           mrows.forEach((r, i) => {
             const txt = (i === 0 ? '✓ ' : '') + r.name;
             if (r.lab.textContent !== txt) r.lab.textContent = txt;
@@ -308,12 +332,12 @@
           if (pillTx.textContent !== label) pillTx.textContent = label;
           const kl = tw(u, PRESS + 0.04, PRESS + 0.3, 'outCubic');
           css(pillTx, { display: 'inline-block', transform: `translateY(${u >= PRESS + 0.04 ? ((1 - kl) * 6).toFixed(1) : 0}px)`, opacity: u >= PRESS + 0.04 ? kl : 1 });
-          css(pill, { background: open ? 'var(--card-bg)' : 'transparent', color: open || u >= PRESS ? 'var(--fg)' : 'var(--muted)' });
+          css(pill, { background: open ? 'rgba(255,255,255,.22)' : 'transparent', color: 'var(--field-ink)' });
           mbox.update({ str: '', k: 1, t, caretOn: true });
           // the number key
           const kk = tw(u, 0.42, 0.6, 'outCubic') * (1 - tw(u, 0.98, 1.2));
           const press = u >= PRESS && u < PRESS + 0.1;
-          css(keycap, { left: pillX + menu.offsetWidth + 22, top: pillY - 4 - menu.offsetHeight + mrows[2].r.offsetTop + mrows[2].r.offsetHeight / 2 - 23, opacity: kk, transform: `translateY(${press ? 3 : (1 - kk) * 8}px)`, boxShadow: press ? '0 0 0 rgba(32,30,29,.16)' : '0 3px 0 rgba(32,30,29,.16)' });
+          css(keycap, { left: pillR - menu.offsetWidth - 60 - 28, top: pillB + 6 * Z + mrows[2].r.offsetTop + mrows[2].r.offsetHeight / 2 - 30, opacity: kk, transform: `translateY(${press ? 3 : (1 - kk) * 8}px)`, boxShadow: press ? '0 0 0 rgba(32,30,29,.16)' : '0 3px 0 rgba(32,30,29,.16)' });
           // pointer clicks the pill, then drifts away
           const pp = toStage(pill.getBoundingClientRect());
           const km = ease.outCubic(prog(u, -0.15, 0.1));

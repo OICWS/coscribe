@@ -80,14 +80,17 @@
   const T_THEME = 39.95;                           // swatches converge, accents unify
   const TOOLS = [39.0, 39.7, 40.4];
   const A0 = 42.0, B0 = 44.6;                      // quality shots
-  const tDrop = (i) => 45.95 + 0.27 * RANK[i];
+  const tDrop = (i) => 45.7 + 0.25 * RANK[i];          // v2: overlaps the lift, no empty frame at ~46 s
   const T_FOLD = 48.95, T_FLY = 49.35, T_LAND = 50.2;
 
   F.scene({
     id: 's2_ppt', start: T0, end: T1, z: 10,
     build(layer) {
       // warm depth (a hint of slides orange in the near-black)
-      const bg = div(layer, { inset: 0, background: 'radial-gradient(120% 95% at 50% 42%, #201b18 0%, #161311 52%, #0d0b0a 100%)' });
+      // v2: the slides colour field (orange -> coral -> pink) with one slow, soft highlight
+      const bg = div(layer, { inset: 0, background: 'var(--field-slides)' });
+      const bgHi = div(layer, { left: -400, top: -400, width: 2720, height: 1880, background: 'radial-gradient(closest-side, rgba(255,255,255,.24), rgba(255,255,255,.07) 55%, transparent)' });
+      div(layer, { inset: 0, background: 'radial-gradient(130% 100% at 50% 40%, transparent 55%, rgba(90,20,40,.16) 100%)' });
       const view = div(layer, { left: 0, top: 0, width: 1920, height: 1080, perspective: P + 'px', perspectiveOrigin: '960px 540px' });
       const world = div(view, { left: 0, top: 0, width: 1920, height: 1080, transformOrigin: '0 0', transformStyle: 'preserve-3d' });
       const place = (e, X, Y, Z, extra = '') => { e.style.transform = `translate3d(${X}px,${Y}px,${Z}px)${extra}`; };
@@ -117,25 +120,25 @@
       document.fonts.ready.then(drawAll);
 
       // C4 highlight + reference tag (in the workbook plane, just in front)
-      const c4box = div(world, { left: 0, top: 0, width: C4.w, height: C4.h, border: '2px solid var(--d-sheet)', borderRadius: 2, opacity: 0 });
+      const c4box = div(world, { left: 0, top: 0, width: C4.w, height: C4.h, border: '3px solid var(--file-sheet)', borderRadius: 3, background: 'rgba(47,125,74,.08)', opacity: 0 });
       place(c4box, C4.x, C4.y, ZW + 2);
-      const c4tag = div(world, { left: 0, top: 0, padding: '5px 10px', borderRadius: 6, background: '#1d2a21', border: '1px solid rgba(127,207,152,.45)',
-        color: 'var(--d-sheet)', fontFamily: 'var(--mono)', fontSize: 17, whiteSpace: 'nowrap', opacity: 0 }, L('结论!C4 = −6.8%', 'Summary!C4 = −6.8%'));
+      const c4tag = div(world, { left: 0, top: 0, padding: '7px 14px', borderRadius: 10, background: '#fff', boxShadow: 'var(--card-shadow)', fontWeight: 500,
+        color: 'var(--file-sheet)', fontFamily: 'var(--mono)', fontSize: 20, whiteSpace: 'nowrap', opacity: 0 }, L('结论!C4 = −6.8%', 'Summary!C4 = −6.8%'));
       place(c4tag, C4.x + C4.w + 18, C4.y - 2, ZW + 4);
       const c4anchor = div(world, { left: 0, top: 0, width: 2, height: 2 }); place(c4anchor, C4.cx - 1, C4.y - 1, ZW + 2);
 
       // evidence: the reviewer's log, drawn like an opened tool row (ChatLog ToolCallRow)
       const EV = { x: 960, y: 1790, w: 660 };
-      const ev = div(world, { left: 0, top: 0, width: EV.w, borderRadius: 15, border: '1px solid var(--d-border)', background: 'var(--d-card)',
-        padding: '12px 15px 14px', color: 'var(--d-fg)', fontSize: 17, opacity: 0 });
+      const ev = div(world, { left: 0, top: 0, width: EV.w, borderRadius: 18, border: '1px solid var(--border)', background: 'var(--bg)', boxShadow: 'var(--card-shadow)',
+        padding: '14px 17px 16px', color: 'var(--muted)', fontSize: 17, opacity: 0 });
       place(ev, EV.x, EV.y, ZW + 120);
       const evHead = div(ev, { position: 'relative', display: 'flex', alignItems: 'center', gap: 7 });
       evHead.append(h('span', { text: 'Asked a reviewer to check the work' }));
       const chev = h('span', { html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>' });
-      st(chev, { color: 'var(--d-muted)', display: 'inline-flex', transform: 'rotate(90deg)' });
+      st(chev, { color: 'var(--muted)', display: 'inline-flex', transform: 'rotate(90deg)' });
       evHead.append(chev);
-      const pre = div(ev, { position: 'relative', marginTop: 10, borderRadius: 8, background: 'rgba(247,245,243,.07)', padding: '10px 13px',
-        fontFamily: 'var(--mono)', fontSize: 15, lineHeight: 1.75, color: 'var(--d-muted)', whiteSpace: 'pre' });
+      const pre = div(ev, { position: 'relative', marginTop: 10, borderRadius: 8, background: 'var(--card-bg)', padding: '10px 13px',
+        fontFamily: 'var(--mono)', fontSize: 15, lineHeight: 1.75, color: 'var(--muted)', whiteSpace: 'pre' });
       const evLines = [
         'evidence:',
         '  run_python_script #2 → duplicate_rows = 2316',
@@ -156,24 +159,24 @@
         const zz = fr(), Z = zz < 0.62 ? -950 + zz / 0.62 * 650 : 260 + (zz - 0.62) / 0.38 * 440;
         const X = -300 + fr() * 2600, Y = -250 + fr() * 1500;
         const e = div(world, { left: 0, top: 0, whiteSpace: 'nowrap', fontFamily: /[一-鿿]/.test(s) && s.length < 4 ? 'var(--serif)' : 'var(--mono)',
-          fontSize: 15 + fr() * 6, color: 'var(--d-muted)' }, s);
+          fontSize: 15 + fr() * 6, color: 'rgba(255,255,255,.9)' }, s);
         // depth of field without a filter layer per fragment: a text-shadow blur is far cheaper to paint
         const blur = Math.abs(Z + 150) / 200;
-        if (blur > 0.6) st(e, { color: 'transparent', textShadow: `0 0 ${blur.toFixed(1)}px rgba(161,157,155,.95)` });
+        if (blur > 0.6) st(e, { color: 'transparent', textShadow: `0 0 ${blur.toFixed(1)}px rgba(255,255,255,.95)` });
         place(e, X, Y, Z);
-        return { e, Z, base: 0.14 + 0.18 * (1 - Math.abs(Z + 150) / 900), ph: fr() * 6.28 };
+        return { e, Z, base: 0.22 + 0.26 * (1 - Math.abs(Z + 150) / 900), ph: fr() * 6.28 };
       });
 
       // ===== storyline (z 0) =====
       const svgW = h('svg', { class: 'full' }); world.append(svgW);
-      const thread = K.thread(svgW, `M 40 ${RULE_Y} L 1890 ${RULE_Y}`, { width: 2.5 });
+      const thread = K.thread(svgW, `M 40 ${RULE_Y} L 1890 ${RULE_Y}`, { width: 3, color: '#fff' });
       const headX = (t) => 40 + 1850 * threadK(t);
       function threadK(t) { const k = prog(t, TH[0], TH[1]); return 0.55 * ease.inOutQuad(k) + 0.45 * k; }
       const wordT = COL.map((x) => { let t = TH[0]; while (t < TH[1] && headX(t) < x + 10) t += 0.005; return t; });
-      const words = WORDS.map((w, c) => K.line(world, { x: COL[c] + 600, y: WORD_Y, size: 62, color: 'var(--d-fg)', maxW: 1200, align: 'left' }));
+      const words = WORDS.map((w, c) => K.line(world, { x: COL[c] + 600, y: WORD_Y, size: 68, color: 'var(--field-ink)', maxW: 1200, align: 'left' }));
       const arrows = [0, 1].map((c) => {
         const x0 = COL[c] + (ZH ? 190 : 300), x1 = COL[c + 1] - 70, y = WORD_Y + 2;
-        const sty = { fill: 'none', stroke: 'rgba(247,245,243,.42)', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+        const sty = { fill: 'none', stroke: 'rgba(255,255,255,.7)', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
         const p = h('path', { d: `M ${x0} ${y} L ${x1} ${y}`, ...sty });
         const hd = h('path', { d: `M ${x1 - 11} ${y - 7} L ${x1} ${y} L ${x1 - 11} ${y + 7}`, ...sty, opacity: 0 });
         svgW.append(p, hd);
@@ -187,7 +190,7 @@
         const ti = wordT[c] + 0.42 + r * 0.36;
         tocT.push(ti);
         F.event(ti, 'softkey', { i: i + 1 });
-        const n = div(world, { left: 0, top: 0, fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--d-muted)', opacity: 0 }, String(i + 1).padStart(2, '0'));
+        const n = div(world, { left: 0, top: 0, fontFamily: 'var(--mono)', fontSize: 15, color: 'rgba(255,255,255,.8)', opacity: 0 }, String(i + 1).padStart(2, '0'));
         place(n, COL[c], TOC_Y + r * TOC_PITCH + 3, 0);
         tocNums.push(n);
       }
@@ -206,53 +209,53 @@
       const over = div(layer, { inset: 0, pointerEvents: 'none' });
       // A: thread pulled from the figure down through the layers
       const svgA = h('svg', { class: 'full' }); over.append(svgA);
-      const pullHalo = h('path', { fill: 'none', stroke: 'var(--d-accent)', 'stroke-width': 12, 'stroke-linecap': 'round', opacity: 0.12 });
-      const pull = h('path', { fill: 'none', stroke: 'var(--d-accent)', 'stroke-width': 2.5, 'stroke-linecap': 'round' });
-      const pullHead = h('circle', { r: 5.5, fill: '#fff' });
+      const pullHalo = h('path', { fill: 'none', stroke: '#fff', 'stroke-width': 14, 'stroke-linecap': 'round', opacity: 0.12 });
+      const pull = h('path', { fill: 'none', stroke: 'var(--accent)', 'stroke-width': 3.2, 'stroke-linecap': 'round' });
+      const pullHead = h('circle', { r: 7, fill: '#fff', stroke: 'var(--accent)', 'stroke-width': 3 });
       svgA.append(pullHalo, pull, pullHead);
       F.event(A0 + 0.12, 'silk'); F.event(42.9, 'cell'); F.event(43.3, 'silk'); F.event(43.9, 'tick');
       F.event(44.0, 'whoosh', { dur: 0.6 });
       F.event(B0 + 0.55, 'roll', { dur: 0.45 }); F.event(B0 + 1.0, 'check');
-      F.event(45.62, 'lift');
+      F.event(45.5, 'lift');
       DROP_ORDER.forEach((s, r) => F.event(tDrop(s) + 0.42, 'paper', { gain: +(1 - r * 0.07).toFixed(2), i: r + 1 }));
       F.event(T_FOLD, 'collapse'); F.event(T_FLY + 0.1, 'slide', { dur: T_LAND - T_FLY }); F.event(T_LAND, 'drop');
 
       // type scale readout (top-left) and template palette (top-right)
-      const panel = (o) => div(over, { borderRadius: 12, border: '1px solid var(--d-border)', background: 'rgba(35,33,32,.94)', boxShadow: '0 18px 50px rgba(0,0,0,.4)', opacity: 0, ...o });
+      const panel = (o) => div(over, { borderRadius: 16, border: '1px solid rgba(255,255,255,.8)', background: '#fff', boxShadow: 'var(--card-shadow)', opacity: 0, ...o });
       const specP = panel({ left: 22, top: 136, width: 214, height: 140 });
       const palP = panel({ left: 1548, top: 134, width: 352, height: 102 });
-      const spec = div(over, { left: 34, top: 150, fontFamily: 'var(--mono)', fontSize: 15, color: 'var(--d-muted)', lineHeight: 1.9, opacity: 0 });
+      const spec = div(over, { left: 34, top: 150, fontFamily: 'var(--mono)', fontSize: 15, color: 'var(--muted)', lineHeight: 1.9, opacity: 0 });
       const SPEC = [[40, L('标题页', 'Cover')], [28, L('页标题', 'Title')], [18, L('正文', 'Body')], [12, L('注释', 'Caption')]];
       const specRows = SPEC.map(([n, lab]) => {
         const r = div(spec, { position: 'relative', display: 'flex', gap: 14 });
-        const num = h('span'); st(num, { color: 'var(--d-fg)', width: 64, textAlign: 'right' });
+        const num = h('span'); st(num, { color: 'var(--fg)', width: 64, textAlign: 'right' });
         const lb = h('span', { text: lab });
         r.append(num, lb); return { num, n };
       });
       const pal = div(over, { left: 1566, top: 150, width: 330, height: 110, opacity: 0 });
       const swR = F.rng(77);
       const sw = MESSY.map((c, i) => {
-        const e = div(pal, { left: 0, top: 0, width: 26, height: 26, borderRadius: 4, background: c, boxShadow: '0 0 0 1px rgba(247,245,243,.12)' });
+        const e = div(pal, { left: 0, top: 0, width: 26, height: 26, borderRadius: 4, background: c, boxShadow: '0 0 0 1px rgba(32,30,29,.12)' });
         return { e, c, sx: swR() * 300, sy: swR() * 60, sr: (swR() - 0.5) * 50, to: [0, 1, 1, 2, 3, 3][i] };
       });
-      const palLabels = PALETTE.map((c, j) => div(pal, { left: j * 82 * 0.9, top: 40, fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--d-muted)', opacity: 0 }, c));
+      const palLabels = PALETTE.map((c, j) => div(pal, { left: j * 82 * 0.9, top: 40, fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)', opacity: 0 }, c));
 
       // tool rows: an opened run (ChatLog ToolRunGroupView, dark theme)
-      const tools = div(over, { left: 1560, top: 700, width: 336, borderRadius: 15, border: '1px solid var(--d-border)', overflow: 'hidden',
-        background: 'rgba(35,33,32,.92)', fontSize: 15.5, color: 'var(--d-fg)', opacity: 0 });
+      const tools = div(over, { left: 1560, top: 700, width: 336, borderRadius: 16, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: 'var(--card-shadow)',
+        background: 'var(--bg)', fontSize: 15.5, color: 'var(--fg)', opacity: 0 });
       const TOOL_ROWS = [['Write PowerPoint', L('管理层汇报.pptx', 'management-briefing.pptx')], ['Add PowerPoint chart', null], ['Render PowerPoint preview', null]];
       const toolRows = TOOL_ROWS.map(([lab, obj], i) => {
-        const r = div(tools, { position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 15px', borderTop: i ? '1px solid var(--d-border)' : 'none' });
+        const r = div(tools, { position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 15px', borderTop: i ? '1px solid var(--border)' : 'none' });
         const label = h('span'); st(label, { flex: '1', whiteSpace: 'nowrap', overflow: 'hidden' });
         const lt = h('span', { text: lab }); label.append(lt);
-        if (obj) { const code = h('code', { text: obj }); st(code, { marginLeft: '6px', fontFamily: 'var(--mono)', fontSize: '0.85em', background: 'rgba(247,245,243,.12)', borderRadius: '4px', padding: '2px 5px' }); label.append(code); }
+        if (obj) { const code = h('code', { text: obj }); st(code, { marginLeft: '6px', fontFamily: 'var(--mono)', fontSize: '0.85em', background: 'var(--card-bg)', borderRadius: '4px', padding: '2px 5px' }); label.append(code); }
         const ch = h('span', { html: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>' });
-        st(ch, { color: 'var(--d-muted)', display: 'inline-flex' });
+        st(ch, { color: 'var(--muted)', display: 'inline-flex' });
         r.append(label, ch);
         return { r, label, state: '' };
       });
-      const toolOut = div(tools, { position: 'relative', borderTop: '1px solid var(--d-border)', background: 'rgba(247,245,243,.07)', padding: '9px 15px',
-        fontFamily: 'var(--mono)', fontSize: 13.5, lineHeight: 1.7, color: 'var(--d-muted)', whiteSpace: 'pre', height: 0, overflow: 'hidden' });
+      const toolOut = div(tools, { position: 'relative', borderTop: '1px solid var(--border)', background: 'var(--card-bg)', padding: '9px 15px',
+        fontFamily: 'var(--mono)', fontSize: 13.5, lineHeight: 1.7, color: 'var(--muted)', whiteSpace: 'pre', height: 0, overflow: 'hidden' });
       toolOut.textContent = 'slides: 9\ntext_overlap_warnings: 0\nlow_contrast_warnings: 1';
       TOOLS.forEach((t, i) => F.event(t, 'row', { i }));
 
@@ -264,12 +267,13 @@
       // centre of the folded deck / chip on its way to sentence 3's box (the surface camera sits at ~1.2)
       const flyPos = (t) => {
         const sc3 = lerp(1.2, 1.23, prog(t, 49.5, 55.2)), k = tw(t, T_FLY, T_LAND, 'inOutCubic');
-        const gx = 960 + (543 - 960) * sc3 + (chipW || 220) * sc3 / 2, gy = 540 + (509.5 - 540) * sc3;
+        // first chip in the rebuilt box: top-left world (364, 519.5), centre y 540.75 (kit inputBox, K.CHIP_SLOT)
+        const gx = 960 + (364 - 960) * sc3 + (chipW || 220) * sc3 / 2, gy = 540 + (540.75 - 540) * sc3;
         return { x: lerp(960, gx, k), y: lerp(452, gy, k) - Math.sin(Math.PI * k) * 46, k, sc3 };
       };
 
       // example tag
-      const tag = div(over, { left: 44, top: 1024, fontFamily: 'var(--mono)', fontSize: 12.5, color: 'var(--d-muted)', border: '1px solid var(--d-border)',
+      const tag = div(over, { left: 44, top: 1024, fontFamily: 'var(--mono)', fontSize: 12.5, color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.45)',
         borderRadius: 999, padding: '3px 10px', letterSpacing: '.04em', opacity: 0 }, T('example'));
 
       const grainU = K.grain(layer, 0.04);
@@ -311,7 +315,7 @@
 
         // workbook: far (pre-blurred) always, near (sharp) only in shot A
         const focusA = env(t, 42.35, 44.25, 0.55, 0.35);
-        const wbO = lerp(0.42, 0.95, focusA) * (1 - 0.45 * tw(t, 45.8, 46.8));
+        const wbO = lerp(0.3, 0.95, focusA) * (1 - 0.45 * tw(t, 45.8, 46.8));
         css(farC, { opacity: wbO * (1 - 0.6 * focusA) });
         css(nearC, { opacity: focusA * 0.98, display: focusA > 0.001 ? '' : 'none' });
 
@@ -355,6 +359,7 @@
           pull.setAttribute('d', d1 + d2); const LL = pull.getTotalLength();
           const drawnL = k1 * L1 + k2 * (LL - L1);
           for (const e of [pull, pullHalo]) { e.setAttribute('d', d1 + d2); e.setAttribute('stroke-dasharray', `${drawnL} ${LL + 10}`); }
+          pullHalo.setAttribute('opacity', '0.35');
           const hp = pull.getPointAtLength(drawnL);
           F.attr(pullHead, { cx: hp.x, cy: hp.y, opacity: (k1 > 0 && k1 < 1) || (k2 > 0 && k2 < 1) ? 1 : 0 });
           css(svgA, { opacity: pullO, display: '' });
@@ -365,7 +370,7 @@
         const evK = tw(t, 43.0, 43.45, 'outCubic') * (1 - tw(t, 44.1, 44.45));
         css(ev, { opacity: evK });
         const hit = tw(t, 43.85, 44.05);
-        css(evHit, { color: hit > 0.5 ? 'var(--d-fg)' : 'var(--d-muted)', background: `rgba(75,143,227,${(0.22 * hit).toFixed(3)})`, borderRadius: '4px', margin: '0 -6px', padding: '0 6px' });
+        css(evHit, { color: hit > 0.5 ? 'var(--accent-ink)' : 'var(--muted)', background: `rgba(42,120,214,${(0.16 * hit).toFixed(3)})`, borderRadius: '4px', margin: '0 -6px', padding: '0 6px' });
 
         // shot B: the low-contrast subtitle, measured and fixed
         S5.contrast(t);
@@ -379,7 +384,7 @@
           const jit = settle < 1 ? Math.round((F.hash(Math.floor(t * 18) + i * 31) - 0.5) * 16 * (1 - settle)) : 0;
           const s = `${r.n + jit} pt`;
           if (r.num.textContent !== s) r.num.textContent = s;
-          r.num.style.color = settle < 1 ? 'var(--d-muted)' : 'var(--d-fg)';
+          r.num.style.color = settle < 1 ? 'var(--muted)' : 'var(--fg)';
         });
         css(pal, { opacity: ovO * 0.95, display: ovO > 0 ? '' : 'none' });
         const kc = tw(t, T_THEME - 0.75, T_THEME, 'inOutCubic');
@@ -398,8 +403,8 @@
           const stt = running ? 'run' : 'done';
           if (on && r.state !== stt) {
             r.state = stt;
-            if (running) st(r.label, { background: 'linear-gradient(90deg, #a19d9b 0%, #a19d9b 35%, #f7f5f3 50%, #a19d9b 65%, #a19d9b 100%) 0 0 / 250% 100%', webkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' });
-            else st(r.label, { background: 'none', color: 'var(--d-fg)' });
+            if (running) st(r.label, { background: 'linear-gradient(90deg, #7d7979 0%, #7d7979 35%, #201e1d 50%, #7d7979 65%, #7d7979 100%) 0 0 / 250% 100%', webkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' });
+            else st(r.label, { background: 'none', color: 'var(--fg)' });
           }
           if (running) r.label.style.backgroundPosition = `${100 - ((t - TOOLS[i]) / 0.8) * 100 * 1.3}% 0`;
         });
@@ -414,7 +419,8 @@
           css(chip, { opacity: chipO, display: '', transform: `translate(${fp.x - chipW / 2}px,${fp.y - chipH / 2}px) scale(${s})` });
         } else css(chip, { display: 'none' });
 
-        css(tag, { opacity: 0.75 * env(t, 34.6, 49.3, 0.6, 0.4) });
+        css(tag, { opacity: 0.85 * env(t, 34.6, 49.3, 0.6, 0.4) });
+        css(bgHi, { transform: `translate(${Math.sin(t * 0.21 + 1) * 260 - 300}px,${Math.cos(t * 0.17 + 2) * 160 - 120}px) scale(0.62)` });
         grainU(t);
       };
 
@@ -431,7 +437,7 @@
         root.append(edge);
         // layout guides (blue: the agent's construction lines)
         const gl = [];
-        const gLine = (x1, y1, x2, y2, w = 1) => { const l = h('line', { x1, y1, x2, y2, stroke: '#4b8fe3', 'stroke-width': w, 'stroke-dasharray': '1000', 'stroke-dashoffset': 1000 }); guides.append(l); gl.push(l); };
+        const gLine = (x1, y1, x2, y2, w = 1) => { const l = h('line', { x1, y1, x2, y2, stroke: '#2a78d6', 'stroke-width': w, 'stroke-dasharray': '1000', 'stroke-dashoffset': 1000 }); guides.append(l); gl.push(l); };
         gLine(56, 0, 56, 540, 1.4); gLine(904, 0, 904, 540, 1.4); gLine(0, 44, 960, 44, 1.4); gLine(0, 500, 960, 500, 1.4);
         for (let k = 1; k < 12; k++) { const x = 56 + k * (848 / 12); gLine(x, 44, x, 500, 0.6); }
         const blocks = [], bars = [], accents = [];
@@ -467,13 +473,13 @@
           let p, morph = { m: 0 };
           const kg = tw(t, tGrid(i), tGrid(i) + 0.9, 'inOutCubic');
           const td = tDrop(i);
-          const liftA = 45.62 + 0.025 * RANK[i], liftB = liftA + 0.3;
-          if (t < 45.62) p = mixPose(toc, grid, kg);
+          const liftA = 45.5 + 0.02 * RANK[i], liftB = liftA + 0.22;
+          if (t < 45.5) p = mixPose(toc, grid, kg);
           else if (t < td) { const kl = ease.inCubic(prog(t, liftA, liftB)); p = { ...grid, y: grid.y - 1700 * kl, z: grid.z + 200 * kl }; }
           else {
-            const kd = prog(t, td, td + 0.52);
+            const kd = prog(t, td, td + 0.48);
             const above = { x: fan.x + fanA * 8, y: -560, z: fan.z, s: S_FAN, rot: fanA * 2.4 + (RANK[i] % 2 ? 7 : -7) };
-            p = { x: lerp(above.x, fan.x, ease.outCubic(kd)), y: lerp(above.y, fan.y, ease.outCubic(kd)), z: fan.z, s: S_FAN, rot: lerp(above.rot, fan.rot, ease.outQuart(kd)) };
+            p = { x: lerp(above.x, fan.x, ease.outCubic(kd)), y: lerp(above.y, fan.y, ease.outBack(kd)), z: fan.z, s: S_FAN, rot: lerp(above.rot, fan.rot, ease.outBack(kd)) };
             const breathe = 1 + 0.012 * tw(t, 46.6, 49.1, 'inOutQuad');
             p.s *= breathe; p.x = 960 + (p.x - 960) * breathe; p.y = 452 + (p.y - 452) * breathe;
             // fold the fan into a stack, then fly the stack into the chip
@@ -496,7 +502,7 @@
             if (pc !== cache.pc) { cache.pc = pc; paper.style.background = pc; }
             css(content, { opacity: (1 - tw(t, T_FLY, T_FLY + 0.25)).toFixed(3) });
           }
-          const vis = t < 45.62 || t >= td ? 1 - prog(t, T_FLY + 0.42, T_FLY + 0.58) : (t < liftB ? 1 : 0);
+          const vis = t < 45.5 || t >= td ? 1 - prog(t, T_FLY + 0.42, T_FLY + 0.58) : (t < liftB ? 1 : 0);
           const sy = p.sy ?? 1;
           const key = `${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(1)},${p.s.toFixed(4)},${sy.toFixed(4)},${p.rot.toFixed(2)}`;
           if (key !== cache.key) { cache.key = key; root.style.transform = `translate3d(${p.x - 480}px,${p.y - 270}px,${p.z}px) rotate(${p.rot}deg) scale(${p.s},${p.s * sy})`; }
@@ -530,7 +536,7 @@
           const kd2 = t >= td ? tw(t, td + 0.1, td + 0.4) : 0;
           const eo = kd2 > 0 ? `1.5px solid ${mix('#e4e1dd', TPL.accent, kd2)}` : '1px solid rgba(0,0,0,0)';
           if (eo !== cache.eo) { cache.eo = eo; edge.style.border = eo; }
-          const sh = t >= td ? (t > T_FOLD + 0.3 && RANK[i] < 8 ? 'none' : t > T_FLY ? '0 14px 40px rgba(0,0,0,.4)' : '0 26px 70px rgba(0,0,0,.5)') : (kp >= 1 ? '0 10px 28px rgba(0,0,0,.35)' : 'none');
+          const sh = t >= td ? (t > T_FOLD + 0.3 && RANK[i] < 8 ? 'none' : t > T_FLY ? '0 14px 40px rgba(110,25,30,.25)' : '0 30px 80px rgba(110,25,30,.28), 0 2px 8px rgba(110,25,30,.12)') : (kp >= 1 ? '0 18px 44px rgba(110,25,30,.24)' : 'none');
           if (sh !== cache.sh) { cache.sh = sh; root.style.boxShadow = sh; }
           const kT = tw(t, tocT[i], tocT[i] + 0.45, 'outCubic');
           const kc = cover ? tw(t, tGrid(i) + 0.2, tGrid(i) + 0.9, 'inOutCubic') : 0;
@@ -608,7 +614,7 @@
         if (j === 1) {
           ret.numAnchor = div(card, { left: 60, top: 93, width: 2, height: 2 });
           const ring = h('svg', { width: 200, height: 90 }); st(ring, { position: 'absolute', left: 6, top: 32, overflow: 'visible' });
-          const rr = h('rect', { x: 0, y: 0, width: 168, height: 64, rx: 8, fill: 'none', stroke: '#4b8fe3', 'stroke-width': 2.5, 'stroke-dasharray': 520, 'stroke-dashoffset': 520 });
+          const rr = h('rect', { x: 0, y: 0, width: 168, height: 64, rx: 8, fill: 'none', stroke: '#2a78d6', 'stroke-width': 3, 'stroke-dasharray': 520, 'stroke-dashoffset': 520 });
           ring.append(rr); card.append(ring); ret.ring = rr;
         }
       });
@@ -693,13 +699,13 @@
       // shot B overlay: ring + contrast readout (the agent's annotation, dark UI)
       const ringSvg = h('svg', { width: 960, height: 540 }); st(ringSvg, { position: 'absolute', left: 0, top: 0, overflow: 'visible' });
       const subW = ZH ? 300 : 420;
-      const rr = h('rect', { x: 48, y: 98, width: subW + 18, height: 30, rx: 6, fill: 'none', stroke: '#4b8fe3', 'stroke-width': 2, 'stroke-dasharray': 1000, 'stroke-dashoffset': 1000 });
+      const rr = h('rect', { x: 48, y: 98, width: subW + 18, height: 30, rx: 6, fill: 'none', stroke: '#2a78d6', 'stroke-width': 2.5, 'stroke-dasharray': 1000, 'stroke-dashoffset': 1000 });
       ringSvg.append(rr); p.append(ringSvg);
-      const read = div(p, { left: subW + 82, top: 96, display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderRadius: 7, background: '#232120',
-        color: '#f7f5f3', fontFamily: 'var(--mono)', fontSize: 14, whiteSpace: 'nowrap', opacity: 0, boxShadow: '0 6px 18px rgba(0,0,0,.18)' });
+      const read = div(p, { left: subW + 82, top: 96, display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderRadius: 7, background: '#2a78d6',
+        color: '#fff', fontFamily: 'var(--mono)', fontSize: 14, whiteSpace: 'nowrap', opacity: 0, boxShadow: '0 6px 18px rgba(42,120,214,.3)' });
       const sw1 = h('span'); st(sw1, { width: 12, height: 12, borderRadius: 3, background: '#9a9a9a', boxShadow: '0 0 0 1px rgba(255,255,255,.25)' });
       const ratio = h('span', { text: '2.8 : 1' });
-      const mark = h('span', { text: '✓' }); st(mark, { color: '#8fd19f', display: 'none' });
+      const mark = h('span', { text: '✓' }); st(mark, { color: '#fff', fontWeight: 600, display: 'none' });
       read.append(sw1, ratio, mark);
       const warn = div(p, { left: subW + 82, top: 132, fontFamily: 'var(--mono)', fontSize: 11.5, color: '#3d3936', whiteSpace: 'nowrap', opacity: 0, padding: '3px 8px',
         background: 'rgba(32,30,29,.06)', borderRadius: 5 }, 'low_contrast_warnings: 1');
@@ -844,15 +850,15 @@
     g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
     g.setTransform(R.k, 0, 0, R.k, -R.x0 * R.k, -R.y0 * R.k);
     const MONO = '"IBM Plex Mono", "Noto Sans SC", monospace', SANS = '"IBM Plex Sans", "Noto Sans SC", sans-serif';
-    const grid = 'rgba(247,245,243,0.075)', txt = 'rgba(161,157,155,0.8)', head = 'rgba(161,157,155,0.55)';
+    const grid = 'rgba(32,30,29,0.08)', txt = '#5f5a57', head = '#a29e9b';   // v2: paper sheets on the field
     function sheet(x, y, name, cols, rows, o = {}) {
       const rowH = o.rowH || 30, W = 44 + cols.reduce((a, c) => a + c.w, 0), H = 28 + (rows.length + 1) * rowH;
-      g.fillStyle = 'rgba(247,245,243,0.028)'; g.fillRect(x, y, W, H);
-      g.strokeStyle = 'rgba(247,245,243,0.13)'; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, W, H);
+      g.fillStyle = 'rgba(255,255,255,0.94)'; g.fillRect(x, y, W, H);
+      g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, W, H);
       // tab
-      g.font = `500 17px ${SANS}`; g.fillStyle = '#7fcf98'; g.textBaseline = 'alphabetic'; g.textAlign = 'left';
+      g.font = `500 17px ${SANS}`; g.fillStyle = '#ffffff'; g.textBaseline = 'alphabetic'; g.textAlign = 'left';
       g.fillText(name, x + 2, y - 14); g.fillRect(x, y - 6, g.measureText(name).width + 4, 2);
-      if (o.formula) { g.font = `14px ${MONO}`; g.fillStyle = 'rgba(161,157,155,0.6)'; g.fillText(o.formula, x + g.measureText(name).width + 40, y - 14); }
+      if (o.formula) { g.font = `14px ${MONO}`; g.fillStyle = 'rgba(255,255,255,0.75)'; g.fillText(o.formula, x + g.measureText(name).width + 40, y - 14); }
       // column letters + row numbers
       g.font = `12px ${MONO}`; g.fillStyle = head; g.textAlign = 'center';
       let cx = x + 44;
@@ -872,7 +878,7 @@
         row.forEach((v, j) => {
           const c = cols[j], num = /^[−\-+¥]?[\d,.]+%?$/.test(v) || /^−/.test(v);
           g.font = k === 0 ? `500 13px ${SANS}` : `${o.big ? 16 : 14}px ${MONO}`;
-          g.fillStyle = k === 0 ? 'rgba(201,197,194,0.75)' : (o.color && o.color(k, j, v)) || txt;
+          g.fillStyle = k === 0 ? '#3d3936' : (o.color && o.color(k, j, v)) || txt;
           if (num && k > 0) { g.textAlign = 'right'; g.fillText(v, xx + c.w - 10, yy); } else { g.textAlign = 'left'; g.fillText(v, xx + 10, yy); }
           xx += c.w;
         });
@@ -907,7 +913,7 @@
       [L('家居品类销售同比', 'Home sales YoY'), L('品类×月份', 'Category×Month'), '−18.4%', ''],
     ];
     sheet(520, 1250, L('结论', 'Summary'), [{ h: L('结论', 'Summary'), w: 240 }, { h: '', w: 300 }, { h: '', w: 180 }, { h: '', w: 160 }], concl.slice(1).map((r) => r), { rowH: 36, big: true,
-      color: (k, j) => (j === 2 ? 'rgba(232,228,225,0.92)' : null) });
+      color: (k, j) => (j === 2 ? '#201e1d' : null) });
     g.setTransform(1, 0, 0, 1, 0, 0);
     if (off) {
       ctx.clearRect(0, 0, cv.width, cv.height);

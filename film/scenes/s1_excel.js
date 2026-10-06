@@ -502,9 +502,10 @@
         const c = cam(t);
         world.style.transform = `translate3d(960px,540px,0) rotateX(${c.rx}deg) rotateY(${c.ry}deg) scale3d(${c.s},${c.s},${c.s}) translate3d(${-c.cx}px,${-c.cy}px,${c.cZ}px)`;
         // dim under the hypotheses; sink away when the workbook rises
-        const dim = 1 - 0.78 * tw(t, 16.9, 17.6, 'inOutQuad') * (1 - tw(t, 20.85, 21.4, 'inOutQuad'));
-        const sink = tw(t, 25.0, 25.9, 'inCubic');
-        css(layer, { opacity: dim * (1 - sink), transform: `translateY(${sink * 220}px)` });
+        const kdim = tw(t, 16.9, 17.6, 'inOutQuad') * (1 - tw(t, 20.85, 21.4, 'inOutQuad'));
+        const dim = 1 - 0.88 * kdim;
+        const sink = tw(t, 24.95, 25.45, 'inCubic');
+        css(layer, { opacity: dim * (1 - sink), transform: `translateY(${sink * 260}px)`, filter: kdim > 0.01 ? `blur(${(kdim * 5).toFixed(1)}px)` : 'none' });
 
         // focus plane: on the hero while it is the subject, on the stack between
         const hp = heroPose(t);
@@ -862,7 +863,7 @@
     'Not footfall (−1.2%), not new stores (still −6.1% without them).',
     'Concentrated in 8 South China stores; East China March double entries removed.',
   ]);
-  const BOOK = { rise: [25.0, 25.3], trace: [25.3, 25.72], pane: [25.38, 25.62], tabs: 25.7, table: [25.5, 26.05], line: [25.95, 26.8], bars: 26.1, kpi: 26.3, front: [26.7, 27.15], find: 26.9,
+  const BOOK = { rise: [24.95, 25.2], trace: [25.2, 25.55], pane: [25.22, 25.4], tabs: 25.55, table: [25.35, 25.9], line: [25.75, 26.6], bars: 25.95, kpi: 26.15, front: [26.7, 27.15], find: 26.9,
     collapse: [28.3, 28.6], morph: [28.4, 29.35] };
   F.event(BOOK.rise[0], 'thread', { dur: BOOK.trace[1] - BOOK.rise[0], what: 'thread pulls the workbook up' });
   TABS.forEach((_, i) => F.event(BOOK.tabs + i * 0.09, 'tick', { kind: 'tab' }));
@@ -1035,7 +1036,7 @@
       return (lt, t) => {
         // thread: rise, then both halves round the window at once
         const kr = tw(t, BOOK.rise[0], BOOK.rise[1], 'inQuad'), kt = tw(t, BOOK.trace[0], BOOK.trace[1], 'outCubic');
-        const fadeT = 1 - tw(t, 25.75, 26.15, 'inOutQuad');
+        const fadeT = 1 - tw(t, 25.55, 25.9, 'inOutQuad');
         css(svg, { opacity: fadeT, display: fadeT > 0 ? '' : 'none' });
         if (fadeT > 0) {
           F.attr(paths[0], { 'stroke-dashoffset': lens[0] * (1 - kr) });
@@ -1051,15 +1052,15 @@
         // slow orbit while it hangs there; settles flat for the shrink
         const flat = tw(t, BOOK.morph[0], BOOK.morph[0] + 0.45, 'inOutCubic');
         const ry = lerp(-7, 3, tw(t, 25.4, 28.4, 'inOutQuad')) * (1 - flat), rx = lerp(5, 1.5, tw(t, 25.4, 28.4, 'inOutQuad')) * (1 - flat);
-        const kup = tw(t, 25.3, 25.95, 'outBack');
+        const kup = tw(t, 25.2, 25.85, 'outBack');
         css(group, { transform: `translateY(${(1 - kup) * 90}px) scale(${0.92 + 0.08 * kup}) rotateX(${rx}deg) rotateY(${ry}deg)` });
         css(back, { opacity: kp });
-        css(tb, { opacity: tw(t, 25.42, 25.7) });
-        const nf = Array.from(formula).length, kf = prog(t, 25.5, 25.95);
+        css(tb, { opacity: tw(t, 25.25, 25.45) });
+        const nf = Array.from(formula).length, kf = prog(t, 25.3, 25.75);
         const ftxt = Array.from(formula).slice(0, Math.round(nf * kf)).join('');
         if (fxt.textContent !== ftxt) fxt.textContent = ftxt;
-        css(fx, { opacity: tw(t, 25.42, 25.7) });
-        css(grid, { opacity: tw(t, 25.38, 25.6) });
+        css(fx, { opacity: tw(t, 25.25, 25.45) });
+        css(grid, { opacity: tw(t, 25.22, 25.4) });
         // the SUMIFS results write themselves in, column by column, as the formula lands
         const ktab = tw(t, BOOK.table[0], BOOK.table[1], 'inOutQuad');
         css(tableCv, { opacity: ktab > 0 ? 1 : 0, clipPath: `inset(0 ${((1 - ktab) * BK.w).toFixed(1)}px 0 0)` });

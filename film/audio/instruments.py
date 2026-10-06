@@ -15,16 +15,17 @@ from dsp import (SR, bandpass, butter_lp, db, fade, filt, highpass, lowpass, mid
 
 # ---------------------------------------------------------------- felt piano
 @functools.lru_cache(maxsize=512)
-def _piano_cached(m, vel_q, ring_q, seed):
-    return _piano(m, vel_q / 100.0, ring_q / 100.0, seed)
+def _piano_cached(m, vel_q, ring_q, seed, bright_q=100):
+    return _piano(m, vel_q / 100.0, ring_q / 100.0, seed, bright_q / 100.0)
 
 
-def piano(m, vel=0.5, ring=4.0, seed=0):
-    """Felt piano note. m: midi, vel 0..1, ring: seconds until the damper falls (key/pedal up)."""
-    return _piano_cached(int(m), int(round(vel * 100)), int(round(ring * 100)), seed)
+def piano(m, vel=0.5, ring=4.0, seed=0, bright=1.0):
+    """Piano note. m: midi, vel 0..1, ring: seconds until the damper falls (key/pedal up).
+    bright 1.0 = felt piano; ~1.8 = a bright grand (harder hammer: higher cut-off, flatter spectrum)."""
+    return _piano_cached(int(m), int(round(vel * 100)), int(round(ring * 100)), seed, int(round(bright * 100)))
 
 
-def _piano(m, vel, ring, seed):
+def _piano(m, vel, ring, seed, bright=1.0):
     r = rng(1000 + m * 7 + seed)
     f0 = float(midi_hz(m))
     # inharmonicity: wound bass strings ~1e-4, rising towards the treble
@@ -37,8 +38,8 @@ def _piano(m, vel, ring, seed):
     t = np.arange(L) / SR
     out = np.zeros(L)
     nstr = 1 if m < 30 else (2 if m < 42 else 3)
-    slope = 2.9 - 1.3 * vel                    # soft hammer -> steep spectral roll-off
-    fc = 450 + 2600 * vel ** 1.6 + 2.0 * f0    # felt low-pass on the strike spectrum
+    slope = 2.9 - 1.3 * vel - 0.45 * (bright - 1)   # soft hammer -> steep spectral roll-off
+    fc = (450 + 2600 * vel ** 1.6 + 2.0 * f0) * bright  # felt low-pass on the strike spectrum
     x0 = 1 / 7.6 + r.uniform(-0.004, 0.004)    # strike position (comb)
     nmax = 64
     for k in range(1, nmax + 1):
@@ -333,10 +334,10 @@ def bass_note(m, dur=0.25, bright=1.0):
     sub = np.sin(2 * np.pi * f0 * t)
     saw = polyblep_saw(np.full(L, f0), 0.25) + 0.6 * polyblep_saw(np.full(L, f0 * 1.004), 0.6)
     # filter envelope approximated by mixing two fixed low-passes (no zipper)
-    lo = butter_lp(saw, 260, 2)
-    hi = butter_lp(saw, 900 * bright, 2)
+    lo = butter_lp(saw, 420, 2)
+    hi = butter_lp(saw, 1500 * bright, 2)
     k = np.exp(-t / 0.07)
-    y = 0.9 * sub + 0.45 * (lo * (1 - k) + hi * k)
+    y = 0.6 * sub + 0.6 * (lo * (1 - k) + hi * k)
     e = (1 - np.exp(-t / 0.004))
     g = int(dur * SR)
     e[g:] *= np.exp(-(t[g:] - dur) / 0.025)
@@ -349,12 +350,12 @@ def kick(variant=0):
     """Clean, round kick: pitch-swept sine body, soft beater click (band-limited), gentle saturation."""
     L = int(0.45 * SR)
     t = np.arange(L) / SR
-    f = 47 + 95 * np.exp(-t / 0.032) + 40 * np.exp(-t / 0.004)
-    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (0.16 if variant == 0 else 0.26))
+    f = 51 + 95 * np.exp(-t / 0.03) + 40 * np.exp(-t / 0.004)
+    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (0.13 if variant == 0 else 0.24))
     r = rng(23000 + variant)
     nz = r.standard_normal(L) * np.exp(-t / 0.0025)
     click = filt(nz, bandpass(3200, 0.9), lowpass(7000))
-    y = body + 0.25 * click / (np.max(np.abs(click)) + 1e-9)
+    y = body + 0.35 * click / (np.max(np.abs(click)) + 1e-9)
     y = np.tanh(1.6 * y) / np.tanh(1.6)
     y *= 1 - np.exp(-t / 0.0007)
     y = filt(y, highpass(32), lowpass(9000))

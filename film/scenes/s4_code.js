@@ -1,5 +1,7 @@
 // Sentence 4 · code (77.4–94.0). S4-02..S4-07.
-// The dive lands in the code depth (#232120): ten lines of Python grow along
+// v2: the dive lands on the code field (var(--field-code)); the work is a light code editor,
+// a light terminal, a real light approval card and a white results card floating on it.
+// Ten lines of Python grow along
 // the blue thread, four edge-case rows light up and settle as the code that
 // handles them is written, pytest goes red then green, the approval card asks
 // before the script runs, the run surfaces three anomalies, and the table
@@ -8,11 +10,13 @@
   const { h, css, clamp, lerp, tw, ease, prog, T, L } = F;
   const S0 = 77.4, S1 = 94.0;
 
-  // ---------- palette (app dark tokens) ----------
+  // ---------- palette (app LIGHT tokens; INK = text placed directly on the field) ----------
   const COL = {
-    fg: '#f7f5f3', text: '#e4e0dd', muted: '#a19d9b', kw: '#8cb4f0', fn: '#a9cbf5', str: '#7fcf98', num: '#f0a076',
-    com: 'rgba(161,157,155,.85)', accent: '#4b8fe3', ok: '#8fd19f', bad: '#f09a9a', warn: '#e8b85c',
+    fg: '#201e1d', text: '#2b2826', muted: '#7d7979', kw: '#6a4db3', fn: '#2d62b8', str: '#2f7d4a', num: '#c4561f',
+    com: '#8a8686', accent: '#2a78d6', ok: '#3d8f56', bad: '#c93a3a', warn: '#b87a14',
   };
+  const INK = '#ffffff', BRAND1 = '#3b5bfd';
+  const SHADOW = '0 30px 80px rgba(16,24,64,.22), 0 2px 8px rgba(16,24,64,.10)';
   const MONO = '"IBM Plex Mono", "Noto Sans SC", ui-monospace, monospace';
   const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -38,7 +42,7 @@
     return out;
   }
   const TOKSTYLE = {
-    p: `color:${COL.text};opacity:.72`, id: `color:${COL.text}`, kw: `color:${COL.kw}`, fn: `color:${COL.fn};font-weight:500`,
+    p: `color:${COL.text};opacity:.8`, id: `color:${COL.text}`, kw: `color:${COL.kw}`, fn: `color:${COL.fn};font-weight:500`,
     str: `color:${COL.str}`, num: `color:${COL.num}`, com: `color:${COL.com}`,
   };
   // HTML for a code line; mark = [a,b] diff range; caret = index or null
@@ -54,7 +58,7 @@
       const a = pts[i];
       if (mark && ma > 0 && a === mark[1] && a > mark[0]) html += '</span>';
       if (caret === a) html += '<span class="s4caret"></span>';
-      if (mark && ma > 0 && a === mark[0] && mark[1] > a) html += `<span style="background:rgba(143,209,159,${ma});border-radius:3px;box-shadow:0 0 0 2px rgba(143,209,159,${ma})">`;
+      if (mark && ma > 0 && a === mark[0] && mark[1] > a) html += `<span style="background:rgba(61,143,86,${ma});border-radius:3px;box-shadow:0 0 0 2px rgba(61,143,86,${ma})">`;
       const b = pts[i + 1];
       if (b == null || b <= a) continue;
       const tk = toks.find((x) => x.a <= a && x.b > a);
@@ -184,8 +188,11 @@
       // per-scene style (caret)
       layer.append(h('style', { text: `.s4caret{display:inline-block;width:2px;height:21px;margin-right:-2px;vertical-align:-5px;background:${COL.accent}}` }));
       const bg = h('div', { class: 'abs' });
-      css(bg, { inset: 0, background: 'radial-gradient(130% 100% at 50% 42%, #282624 0%, #232120 50%, #1a1918 100%)' });
-      layer.append(bg);
+      css(bg, { inset: 0, background: 'var(--field-code)' });
+      const glow = h('div', { class: 'abs' });
+      css(glow, { left: -700, top: -700, width: 1900, height: 1900, borderRadius: '50%', pointerEvents: 'none',
+        background: 'radial-gradient(closest-side, rgba(255,255,255,.22), rgba(255,255,255,.07) 55%, rgba(255,255,255,0))' });
+      layer.append(bg, glow);
 
       // ---------- planes ----------
       const view = h('div', { class: 'abs' }); css(view, { inset: 0, transformOrigin: '960px 540px' }); layer.append(view);
@@ -209,7 +216,7 @@
         g.clearRect(0, 0, 3200, 2100);
         g.filter = 'blur(1.6px)';
         g.font = '15px "IBM Plex Mono"';
-        g.fillStyle = 'rgba(247,245,243,.55)';
+        g.fillStyle = 'rgba(255,255,255,.6)';
         const stores = ['SZ-NS-014', 'BJ-CY-002', 'SH-PD-031', 'GZ-TH-008', 'CD-JJ-019', 'HZ-XH-011', 'WH-WC-006', 'NJ-GL-022'];
         for (let col = 0; col < 5; col++) {
           for (let row = 0; row < 86; row++) {
@@ -236,7 +243,7 @@
           ['def test_dates_in_two_formats_align():', 'def'], ['    merged = merge_daily(*load_fixture("mixed_dates"))', ''], ['    assert merged["date"].nunique() == 1', ''], ['', ''],
           ['def test_empty_amount_is_dropped_not_zero():', 'def'], ['    merged = merge_daily(*load_fixture("blank_amount"))', ''], ['    assert 0 not in merged["amount"].tolist()', ''],
         ];
-        test.forEach(([s, k], i) => { m.fillStyle = k === 'def' ? COL.fn : k === 'kw' ? COL.kw : COL.text; m.fillText(s, 30, 40 + i * 30); });
+        test.forEach(([s, k], i) => { m.fillStyle = k ? '#ffffff' : 'rgba(255,255,255,.75)'; m.fillText(s, 30, 40 + i * 30); });
         drawn = true;
       }
 
@@ -244,18 +251,25 @@
       const NEAR = [['4,812', -120, 140, 120], ['2026/10/3', 1500, 930, 96], ['order_id', 1720, 120, 84], ['−2,980.00', 120, 1010, 90]];
       const nearEls = NEAR.map(([s, x, y, size]) => {
         const e = h('div', { class: 'abs', text: s });
-        css(e, { left: x, top: y, fontFamily: MONO, fontSize: size, color: COL.fg, opacity: 0.06, filter: 'blur(7px)', whiteSpace: 'pre' });
+        css(e, { left: x, top: y, fontFamily: MONO, fontSize: size, color: INK, opacity: 0.14, filter: 'blur(7px)', whiteSpace: 'pre' });
         nearP.append(e); return e;
       });
 
       // ---------- main plane: the code ----------
       const LY0 = 236, LH = 31, CODE_X = 178, GUT_X = 158;
+      // the light editor: a white card with a tab strip
+      const editor = h('div', { class: 'abs' });
+      css(editor, { left: 92, top: 158, width: 1196, height: 440, borderRadius: 16, background: '#ffffff', border: '1px solid rgba(32,30,29,.10)', boxShadow: SHADOW });
+      const gutterBg = h('div', { class: 'abs' });
+      css(gutterBg, { left: 0, top: 46, width: 60, bottom: 0, background: '#f7f7f6', borderRadius: '0 0 0 16px' });
+      editor.append(gutterBg);
+      world.append(editor);
       const file = h('div', { class: 'abs' });
       css(file, { left: CODE_X, top: 176, fontFamily: MONO, fontSize: 14, color: COL.muted, letterSpacing: '.02em', display: 'flex', gap: 14, alignItems: 'center' });
-      file.innerHTML = `<span style="color:${COL.text}">daily_check.py</span><span style="opacity:.55">reports/ · ERP_export/ · POS_export/ · ${esc(T('s4_chips')[2])}</span>`;
+      file.innerHTML = `<span style="color:${COL.fg};font-weight:500">daily_check.py</span><span style="opacity:.8">reports/ · ERP_export/ · POS_export/ · ${esc(T('s4_chips')[2])}</span>`;
       world.append(file);
-      const rule = h('div', { class: 'abs' }); css(rule, { left: 110, top: 204, width: 1120, height: 1, background: 'rgba(247,245,243,.08)' }); world.append(rule);
-      const curLine = h('div', { class: 'abs' }); css(curLine, { left: 110, width: 1120, height: LH, background: 'rgba(247,245,243,.035)', borderRadius: 4 }); world.append(curLine);
+      const rule = h('div', { class: 'abs' }); css(rule, { left: 93, top: 204, width: 1194, height: 1, background: 'rgba(32,30,29,.09)' }); world.append(rule);
+      const curLine = h('div', { class: 'abs' }); css(curLine, { left: 110, width: 1120, height: LH, background: 'rgba(42,120,214,.07)', borderRadius: 4 }); world.append(curLine);
       const lineEls = LINES.map((ln, i) => {
         const y = LY0 + i * LH;
         const num = h('div', { class: 'abs', text: String(i + 1) });
@@ -271,9 +285,9 @@
       const ARRIVE = `M 640 470 C 520 450 ${GUT_X} 360 ${GUT_X} ${LY0 + 4}`;
       const TERM_Y = 612;
       const thrD = `${ARRIVE} L ${GUT_X} ${TERM_Y - 6}`;
-      const thrHalo = h('path', { d: thrD, fill: 'none', stroke: COL.accent, 'stroke-width': 11, 'stroke-linecap': 'round', opacity: 0.1 });
-      const thrP = h('path', { d: thrD, fill: 'none', stroke: COL.accent, 'stroke-width': 2.2, 'stroke-linecap': 'round' });
-      const thrHead = h('circle', { r: 4.6, fill: '#fff' });
+      const thrHalo = h('path', { d: thrD, fill: 'none', stroke: '#fff', 'stroke-width': 8, 'stroke-linecap': 'round', opacity: 0.9 });
+      const thrP = h('path', { d: thrD, fill: 'none', stroke: BRAND1, 'stroke-width': 3, 'stroke-linecap': 'round' });
+      const thrHead = h('circle', { r: 6, fill: '#fff', stroke: BRAND1, 'stroke-width': 2.2 });
       svg.append(thrHalo, thrP, thrHead);
       const thr = { length: thrP.getTotalLength(), g: svg };
       // draw the segment [a, b] (fractions of the length) with a head at b
@@ -287,13 +301,13 @@
       const threadLen = (y) => (LA + Math.max(0, y - (LY0 + 4))) / thr.length;
 
       // ghost rows: edge cases floating out of focus until handled
-      const GX = 1270;
+      const GX = 1316;
       const GY = [250, 336, 446, 526];
       const ghostEls = GHOSTS.map((g, i) => {
         const e = h('div', { class: 'abs' });
-        css(e, { left: GX, top: GY[i], width: 470, transformOrigin: '0 50%' });
+        css(e, { left: GX, top: GY[i] - 14 + i * 12, width: 480, padding: '10px 16px 12px', borderRadius: 12, background: '#fff', boxShadow: SHADOW, transformOrigin: '0 50%' });
         const lab = h('div', { text: g.label });
-        css(lab, { fontFamily: 'var(--sans)', fontSize: 14, color: COL.muted, marginBottom: 5, letterSpacing: '.02em' });
+        css(lab, { fontFamily: 'var(--sans)', fontSize: 14, fontWeight: '500', color: COL.muted, marginBottom: 5, letterSpacing: '.02em' });
         e.append(lab);
         const rowsWrap = h('div'); css(rowsWrap, { position: 'relative', paddingLeft: 14 });
         const barEl = h('div'); css(barEl, { position: 'absolute', left: 0, top: 3, bottom: 3, width: 2, borderRadius: 1, background: COL.accent });
@@ -321,7 +335,7 @@
       // scrolls away as a whole before the green run prints, so the two never
       // share the box (and the box tightens to the short green result).
       const termBox = h('div', { class: 'abs' });
-      css(termBox, { left: 110, top: TERM_Y, width: 1120, height: 0, overflow: 'hidden', webkitMaskImage: 'linear-gradient(transparent 0, #000 11px)', maskImage: 'linear-gradient(transparent 0, #000 11px)', borderRadius: 10, background: 'rgba(10,9,9,.42)', border: '1px solid rgba(247,245,243,.08)' });
+      css(termBox, { left: 110, top: TERM_Y, width: 1120, height: 0, overflow: 'hidden', webkitMaskImage: 'linear-gradient(transparent 0, #000 11px)', maskImage: 'linear-gradient(transparent 0, #000 11px)', borderRadius: 12, background: '#ffffff', border: '1px solid rgba(32,30,29,.10)', boxShadow: SHADOW });
       const run1 = h('div', { class: 'abs' }); css(run1, { left: 18, top: 0, width: 1090 });
       const run2 = h('div', { class: 'abs' }); css(run2, { left: 18, top: 0, width: 1090 });
       termBox.append(run1, run2); world.append(termBox);
@@ -337,22 +351,22 @@
 
       // corner labels (screen space)
       const rt = h('div', { class: 'abs', text: 'Codex runtime' });
-      css(rt, { left: 56, top: 46, fontFamily: MONO, fontSize: 13, color: COL.muted, letterSpacing: '.06em', opacity: 0 });
+      css(rt, { left: 56, top: 46, fontFamily: MONO, fontSize: 13, color: INK, letterSpacing: '.06em', opacity: 0 });
       const ex = h('div', { class: 'abs', text: T('example') });
-      css(ex, { right: 56, bottom: 40, fontFamily: 'var(--sans)', fontSize: 13, color: COL.muted, letterSpacing: '.08em', opacity: 0 });
+      css(ex, { right: 56, bottom: 40, fontFamily: 'var(--sans)', fontSize: 13, color: INK, letterSpacing: '.08em', opacity: 0 });
       layer.append(rt, ex);
 
-      const scrim = h('div', { class: 'abs' }); css(scrim, { inset: 0, background: '#1a1918', opacity: 0 }); layer.append(scrim);
-      // ---------- approval card (S4-05), dark app theme, ToolCallRow + ApprovalDetail ----------
+      const scrim = h('div', { class: 'abs' }); css(scrim, { inset: 0, background: '#4338ca', opacity: 0 }); layer.append(scrim);
+      // ---------- approval card (S4-05), the app's light theme, ToolCallRow + ApprovalDetail ----------
       const cardWrap = h('div', { class: 'abs' });
       css(cardWrap, { left: 960, top: 470, width: 0, height: 0 });
       const card = h('div');
-      css(card, { position: 'absolute', left: -380, width: 760, top: -150, borderRadius: 12, border: `1px solid ${COL.accent}`, background: '#322f2e',
-        padding: '8px 12px', fontSize: 14, lineHeight: '1.45', color: COL.fg, fontFamily: 'var(--sans)', boxShadow: '0 30px 80px rgba(0,0,0,.45)', transformOrigin: '50% 50%' });
+      css(card, { position: 'absolute', left: -380, width: 760, top: -150, borderRadius: 12, border: `1px solid ${COL.accent}`, background: '#fcfcfb',
+        padding: '8px 12px', fontSize: 14, lineHeight: '1.45', color: COL.fg, fontFamily: 'var(--sans)', boxShadow: SHADOW, transformOrigin: '50% 50%' });
       const desc = L('合并并校验三个系统的日报', 'Merge and check the three daily exports');
       const head = h('div');
       css(head, { display: 'flex', alignItems: 'center', gap: 6 });
-      head.innerHTML = `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Approve: Ran a command: <code style="border-radius:4px;background:rgba(247,245,243,.12);padding:2px 4px;font-family:${MONO};font-size:.85em">${esc(desc)}</code></span>` +
+      head.innerHTML = `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Approve: Ran a command: <code style="border-radius:4px;background:rgba(32,30,29,.06);padding:2px 4px;font-family:${MONO};font-size:.85em">${esc(desc)}</code></span>` +
         `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${COL.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none;transform:rotate(90deg)"><path d="M9 6l6 6-6 6"/></svg>`;
       const det = h('div'); css(det, { marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 });
       const dline = h('div', { text: desc }); css(dline, { fontSize: 12, color: COL.muted });
@@ -367,7 +381,7 @@
         `print(f"${L('合并 3 个来源 · ', 'Merged 3 sources · ')}{len(erp) + len(pos) + len(shop):,}${L(' 行 → ', ' rows → ')}{len(daily):,}${L(' 行', ' rows')}")`,
       ];
       const pre = h('pre');
-      css(pre, { margin: 0, borderRadius: 6, background: 'rgba(0,0,0,.2)', padding: '6px 8px', fontFamily: MONO, fontSize: 12, lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' });
+      css(pre, { margin: 0, borderRadius: 6, background: '#f0f0ef', padding: '6px 8px', fontFamily: MONO, fontSize: 12, lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-all' });
       pre.innerHTML = RUNNER.map((s) => hl(s, null, null) || ' ').join('\n');
       const guard = h('div', { text: L('写入仅限工作区 reports/', 'Writes limited to workspace reports/') }); css(guard, { fontSize: 12, color: COL.muted });
       det.append(dline, pre, guard);
@@ -375,7 +389,7 @@
       const approve = h('span', { text: 'Approve' });
       css(approve, { borderRadius: 6, background: COL.accent, color: '#fff', padding: '4px 12px', fontSize: 14, display: 'inline-block' });
       const deny = h('span', { text: 'Deny' });
-      css(deny, { borderRadius: 6, border: '1px solid rgba(247,245,243,.14)', padding: '3px 11px', fontSize: 14, display: 'inline-block' });
+      css(deny, { borderRadius: 6, border: '1px solid rgba(32,30,29,.14)', padding: '3px 11px', fontSize: 14, display: 'inline-block' });
       btns.append(approve, deny);
       const approved = h('div', { text: 'Approved' }); css(approved, { marginTop: 4, fontSize: 12, color: COL.muted, display: 'none' });
       card.append(head, det, btns, approved);
@@ -387,7 +401,7 @@
 
       // ---------- run output (S4-06) ----------
       const out = h('div', { class: 'abs' });
-      css(out, { left: 270, top: 250, width: 1380, transformOrigin: '0 0', opacity: 0 });
+      css(out, { left: 270, top: 250, width: 1380, padding: '30px 36px 22px', borderRadius: 18, background: '#ffffff', boxShadow: SHADOW, transformOrigin: '0 0', opacity: 0 });
       const outPath = h('div', { text: `reports/${L('日报异常', 'daily-anomalies')}_2026-10-03.xlsx` });
       css(outPath, { fontFamily: MONO, fontSize: 14, color: COL.muted, letterSpacing: '.02em', marginBottom: 14 });
       const prog1 = h('div'); css(prog1, { fontFamily: 'var(--sans)', fontSize: 27, color: COL.fg, marginBottom: 34, fontVariantNumeric: 'tabular-nums' });
@@ -396,7 +410,7 @@
       const progB = h('span', { text: L(' 行', ' rows') });
       prog1.append(progA, progN, progB);
       const GRID = '120px 330px 170px 1fr';
-      const hdr = h('div'); css(hdr, { display: 'grid', gridTemplateColumns: GRID, gap: 0, padding: '0 0 10px 22px', fontSize: 14, color: COL.muted, letterSpacing: '.04em', borderBottom: '1px solid rgba(247,245,243,.14)' });
+      const hdr = h('div'); css(hdr, { display: 'grid', gridTemplateColumns: GRID, gap: 0, padding: '0 0 10px 22px', fontSize: 14, color: COL.muted, letterSpacing: '.04em', borderBottom: '1px solid rgba(32,30,29,.14)' });
       [L('来源', 'Source'), L('门店 / 订单', 'Store / order'), L('日期', 'Date'), L('现象', 'What it found')].forEach((s) => hdr.append(h('span', { text: s })));
       const ROWS = [
         ['POS', L('华南 · 深圳南山店', 'South · Shenzhen Nanshan'), '2026-10-03', L('金额 <b>¥186,420</b>，为 28 日中位数 <b>4.1</b> 倍，疑似重复上传', '<b>¥186,420</b>, <b>4.1×</b> the 28-day median; likely a duplicate upload')],
@@ -404,7 +418,7 @@
         [L('电商', 'Webshop'), 'EC-20261003-00871', '2026-10-03', L('金额 <b>−¥2,980</b>，退款未标记', '<b>−¥2,980</b>, a refund nobody flagged')],
       ];
       const rowEls = ROWS.map(([src, store, date, what]) => {
-        const r = h('div'); css(r, { display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', padding: '17px 0 17px 22px', fontSize: 20, color: COL.text, borderBottom: '1px solid rgba(247,245,243,.08)', position: 'relative' });
+        const r = h('div'); css(r, { display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', padding: '17px 0 17px 22px', fontSize: 20, color: COL.text, borderBottom: '1px solid rgba(32,30,29,.08)', position: 'relative' });
         const dot = h('span'); css(dot, { position: 'absolute', left: 2, top: '50%', width: 7, height: 7, marginTop: -3.5, borderRadius: 4, background: COL.warn });
         const a = h('span', { text: src }); css(a, { fontFamily: MONO, fontSize: 16, color: COL.muted });
         const b = h('span', { text: store }); css(b, { fontFamily: /^EC-/.test(store) ? MONO : 'var(--sans)', fontSize: /^EC-/.test(store) ? 17 : 20 });
@@ -424,14 +438,13 @@
       const box = K.inputBox(scam.world, { y: 540, placeholder: T('placeholder') });
       const chipDefs = [['s1_out', 'sheet'], ['s2_out', 'slides'], ['s3_out', 'doc'], ['s4_out', 'code']];
       const chips = chipDefs.map(([k, kind]) => box.addChip(T(k), kind));
-      // four chips on one row, exactly as s6_workflow sets them (Composer.tsx chips: max-w 220px, names truncate)
+      // the four chips exactly as s6_workflow sets them (Composer.tsx chips: max-w 220px x Z, the name truncates)
       const tighten = (c) => {
-        css(c, { fontSize: 14, padding: '6px 12px 6px 7px', gap: 8, maxWidth: 220, minWidth: 0, flex: '0 1 auto', whiteSpace: 'nowrap' });
-        css(c.firstChild, { flex: 'none' });
-        css(c.lastChild, { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' });
+        css(c, { maxWidth: 220 * K.Z, minWidth: 0 });
+        css(c.firstChild, { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' });
+        css(c.lastChild, { flex: 'none' });
       };
       chips.forEach(tighten);
-      css(box.chips, { flexWrap: 'nowrap', gap: 7 });
       const sgrain = K.grain(surf, 0.035);
       // the flying deliverable: a chip that grows out of the shrinking table
       const flyer = K.fileChip(T('s4_out'), 'code');
@@ -470,9 +483,9 @@
         const back = tw(t, 85.7, 86.3, 'inOutCubic');
         const back2 = tw(t, 88.4, 89.0, 'inOutCubic');
         const recede = Math.max(back * 0.75, back2 * 1.25);
-        css(view, { transform: `scale(${1 - 0.04 * recede})`, filter: recede > 0.01 ? `blur(${(recede * 3.6).toFixed(2)}px) brightness(${(1 - 0.48 * recede).toFixed(3)})` : 'none' });
-
-        css(scrim, { opacity: (Math.max(back * 0.25, back2 * 0.62)).toFixed(3) });
+                css(view, { transform: `scale(${1 - 0.04 * recede})`, filter: recede > 0.01 ? `blur(${(recede * 3.6).toFixed(2)}px)` : 'none' });
+        css(scrim, { opacity: (Math.max(back * 0.12, back2 * 0.3)).toFixed(3) });
+        css(glow, { transform: `translate(${(500 + 480 * Math.sin((t - S0) * 0.23)).toFixed(1)}px,${(120 + 150 * Math.cos((t - S0) * 0.19)).toFixed(1)}px)` });
         // corner labels
         css(rt, { opacity: 0.85 * tw(t, 78.0, 78.7, 'outQuad') * (1 - tw(t, 92.3, 92.8)) });
         css(ex, { opacity: 0.55 * tw(t, 78.4, 79.0, 'outQuad') * (1 - tw(t, 92.3, 92.8)) });
@@ -558,7 +571,7 @@
         const isApproved = t >= 87.9;
         btns.style.display = isApproved ? 'none' : 'flex';
         approved.style.display = isApproved ? '' : 'none';
-        css(card, { borderColor: isApproved ? 'rgba(247,245,243,.14)' : COL.accent });
+        css(card, { borderColor: isApproved ? 'rgba(32,30,29,.14)' : COL.accent });
         css(cardWrap, {
           opacity: (kc * (1 - kOut)).toFixed(3), display: kc > 0 && kOut < 1 ? '' : 'none',
           transform: `translateY(${((1 - kc) * 40 - kOut * 30).toFixed(1)}px) scale(${(1.5 * (0.97 + 0.03 * kc) * (1 - 0.06 * kOut)).toFixed(4)})`,
@@ -573,7 +586,7 @@
           const press = t >= 87.85 && t < 87.97;
           css(cursor, { opacity: tw(t, 86.5, 86.75) * (1 - tw(t, 88.15, 88.45)), transform: `translate(${(sx - 3).toFixed(1)}px, ${(sy - 3).toFixed(1)}px) scale(${press ? 0.92 : 1})` });
           const hover = t >= 87.4;
-          css(approve, { background: hover ? '#66a3ec' : COL.accent, transform: `scale(${press ? 0.95 : 1})` });
+          css(approve, { background: hover ? '#1d5fb0' : COL.accent, transform: `scale(${press ? 0.95 : 1})` });
         } else css(cursor, { opacity: 0 });
 
         // ---- run output ----
@@ -622,7 +635,7 @@
           const cx = lerp(cx0, cx1, kS), cy = lerp(cy0, cy1, kS) - Math.sin(Math.PI * kS) * 40;
           const kc2 = tw(t, 92.4, 92.65, 'outQuad');
           css(out, { transformOrigin: '50% 50%', left: cx - outBase.w / 2, top: cy - outBase.h / 2, transform: `scale(${sc2.toFixed(4)})`, opacity: (ko * (1 - tw(t, 93.0, 93.2))).toFixed(3),
-            background: `rgba(42,40,39,${kc2.toFixed(3)})`, borderRadius: 18, boxShadow: `0 0 0 34px rgba(42,40,39,${kc2.toFixed(3)}), 0 40px 90px 30px rgba(0,0,0,${(0.35 * kc2).toFixed(3)})` });
+            background: '#ffffff', borderRadius: 18, boxShadow: SHADOW });
           // the chip grows out of it and lands
           // the chip resolves out of the shrinking card: same width, cross-dissolve
           const kf = tw(t, 92.98, 93.14, 'outQuad');
@@ -631,7 +644,7 @@
           css(flyer, { width: chips[3].offsetWidth || 200, opacity: t < 93.4 ? kf : 0, transform: `translate(${(cx - slot.w * fs / 2).toFixed(1)}px, ${(cy - slot.h * fs / 2).toFixed(1)}px) scale(${(fs * slot.w / Math.max(1, flyerW())).toFixed(4)})` });
           css(chips[3], { opacity: t >= 93.35 ? 1 : 0, transform: `scale(${t >= 93.35 ? 1 + 0.04 * Math.sin(Math.PI * prog(t, 93.35, 93.6)) : 1})` });
         } else {
-          css(out, { transformOrigin: '0 0', left: outBase.x, top: outBase.y, transform: `translateY(${((1 - ko) * 24).toFixed(1)}px)`, opacity: ko.toFixed(3), background: 'transparent', boxShadow: 'none' });
+          css(out, { transformOrigin: '0 0', left: outBase.x, top: outBase.y, transform: `translateY(${((1 - ko) * 24).toFixed(1)}px)`, opacity: ko.toFixed(3), background: '#ffffff', boxShadow: SHADOW });
           css(flyer, { opacity: 0 });
           css(chips[3], { opacity: 0 });
         }
