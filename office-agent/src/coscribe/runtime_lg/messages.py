@@ -12,6 +12,8 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
+from langchain_core.messages import HumanMessage
+
 # The exact mode_note prefixes session.py's _handle_user_message_locked
 # prepends to every turn's user text before it becomes a checkpointed
 # HumanMessage (for the model's benefit, so it always knows the active
@@ -167,7 +169,35 @@ def _strip_turn_notes(text: str) -> str:
 
 
 def strip_mode_note(text: str) -> str:
+    text = text.removeprefix(STEER_NOTE)
     return _CONTEXT_NOTE_RE.sub("", _strip_turn_notes(text), count=1)
+
+
+STEER_NOTE = (
+    "[The user added this while you were working. Take it into account from "
+    "here on; it doesn't replace the request you're working on.]\n"
+)
+_STEER_MARK = "coscribe_steer"
+
+
+def steer_message(text: str) -> HumanMessage:
+    """A note the user sent mid-turn, read before the model's next step.
+    Marked so the per-turn counts don't take it for a new request."""
+    return HumanMessage(content=STEER_NOTE + text, additional_kwargs={_STEER_MARK: True})
+
+
+def is_steer(message: Any) -> bool:
+    return bool((getattr(message, "additional_kwargs", None) or {}).get(_STEER_MARK))
+
+
+def starts_a_turn(message: Any) -> bool:
+    """A user's request: not a note added mid-turn, and not an
+    auto-compact summary (a HumanMessage too)."""
+    return (
+        getattr(message, "type", None) == "human"
+        and not is_steer(message)
+        and (getattr(message, "additional_kwargs", None) or {}).get("lc_source") != "summarization"
+    )
 
 
 def extract_text(content: Any) -> str:
@@ -324,7 +354,8 @@ def serialize_history_for_ws_lg(messages: list[Any]) -> list[dict[str, Any]]:
             images = extract_images(message.content)
             if not text and not images:
                 continue
-            entry: dict[str, Any] = {"kind": "user", "text": strip_mode_note(text)}
+            kind = "steer" if is_steer(message) else "user"
+            entry: dict[str, Any] = {"kind": kind, "text": strip_mode_note(text)}
             if images:
                 entry["images"] = images
             entries.append(entry)

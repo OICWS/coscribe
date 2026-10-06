@@ -155,9 +155,7 @@ def test_write_file_requires_approval_and_executes_when_approved(
     assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
 
 
-def test_write_file_denied_is_not_executed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_write_file_denied_is_not_executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})
     fake_model = FakeToolCallingChatModel(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="ok, skipped")]
@@ -255,9 +253,7 @@ def test_reconnecting_with_the_same_thread_replays_history(
     _patch_model(monkeypatch, fake_model)
     runner = CliRunner()
 
-    first = runner.invoke(
-        app, ["--thread", "t11"], input="hello\nexit\n", env=_env(tmp_path)
-    )
+    first = runner.invoke(app, ["--thread", "t11"], input="hello\nexit\n", env=_env(tmp_path))
     assert first.exit_code == 0, first.output
 
     second = runner.invoke(app, ["--thread", "t11"], input="exit\n", env=_env(tmp_path))
@@ -416,3 +412,24 @@ def test_check_wakes_also_fires_a_due_scheduled_task(
     resolved = ScheduledTriggerStore(state_dir).load("trig-1")
     assert resolved is not None
     assert resolved.last_run_status == "completed"
+
+
+def test_a_question_is_answered_at_the_terminal_by_number_text_or_enter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from coscribe.cli import _ask
+
+    question = {
+        "question": "Which sheets?",
+        "options": [
+            {"label": "Orders", "description": ""},
+            {"label": "Returns", "description": ""},
+        ],
+        "multi_select": True,
+    }
+    replies = iter(["1, 2", "only the summary", ""])
+    monkeypatch.setattr("coscribe.cli.typer.prompt", lambda *a, **k: next(replies))
+
+    assert _ask(question) == "Orders, Returns"
+    assert _ask(question) == "only the summary"
+    assert _ask(question) is None

@@ -10,7 +10,7 @@ plan file this Phase came from) for what this is and isn't proving yet.
 from __future__ import annotations
 
 import errno
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,12 +22,13 @@ from langchain.agents.middleware import (
     hook_config,
 )
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphBubbleUp
 
 from ..runtime.types import get_tool_metadata
+from .messages import starts_a_turn, steer_message
 from .tool_calls import answer_every_tool_call
 from .tool_deferral import DeferredToolMiddleware, build_search_tools_tool
 
@@ -213,16 +214,13 @@ class _AnswerEveryToolCallMiddleware(AgentMiddleware):
 
 
 def model_calls_this_turn(messages: Sequence[Any]) -> int:
-    """The model's replies since the user's last message. An auto-compact
-    summary is a HumanMessage too, but not a new request."""
+    """The model's replies since the user's last request -- a note added
+    mid-turn or an auto-compact summary is a HumanMessage too, not one."""
     count = 0
     for message in reversed(messages):
         if isinstance(message, AIMessage):
             count += 1
-        elif (
-            isinstance(message, HumanMessage)
-            and message.additional_kwargs.get("lc_source") != "summarization"
-        ):
+        elif starts_a_turn(message):
             break
     return count
 
@@ -251,6 +249,20 @@ class _TurnModelCallLimitMiddleware(AgentMiddleware):
         return self.before_model(state, runtime)
 
 
+class _SteerMiddleware(AgentMiddleware):
+    """Puts the notes the user sent during the turn into the conversation
+    just before the model's next step, so it reads them without waiting
+    for the reply to finish."""
+
+    def __init__(self, take_steers: Callable[[], Awaitable[list[str]]]) -> None:
+        super().__init__()
+        self.take_steers = take_steers
+
+    async def abefore_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        notes = await self.take_steers()
+        return {"messages": [steer_message(note) for note in notes]} if notes else None
+
+
 def build_langgraph_agent(
     model: Any,
     tools: Sequence[Callable[..., Any] | BaseTool],
@@ -263,6 +275,7 @@ def build_langgraph_agent(
     auto_compact_tokens: int | None = None,
     defer_tools: bool = False,
     core_tool_names: Iterable[str] = (),
+    take_steers: Callable[[], Awaitable[list[str]]] | None = None,
 ) -> Any:
     """Build a LangGraph agent reusing coscribe's own ToolMetadata.
 
@@ -410,6 +423,8 @@ def build_langgraph_agent(
             dict.fromkeys(question_tool_names_set, {"allowed_decisions": ["respond"]})
         )
         middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
+    if take_steers is not None:
+        middleware.append(_SteerMiddleware(take_steers))
     if max_turns is not None:
         middleware.append(_TurnModelCallLimitMiddleware(max_turns))
     if auto_compact_tokens is not None:

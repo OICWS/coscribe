@@ -7444,9 +7444,68 @@ Codex itself -- every message one Codex turn in the conversation's folder
   memory and instructions; a chat's sub-agent run opening as a code
   conversation.
 
-## Phase 8cr -- Code conversations see the user's instructions and memory
+## Phase 8cr -- ask_user_question: several questions, option descriptions, docked above the composer (shipped)
 
-The open question from 8cq, decided: yes. A chat is told the memory file
+- [x] One call now asks 1-4 questions (`questions: [{question, options:
+      [{label, description}], multi_select, header}]`), each option with an
+      optional one-line description. A conversation saved with the old
+      single-question arguments still shows (`normalize_questions`).
+- [x] The page shows them in a panel docked above the composer at its
+      width, not as a card in the log: a pager ("1 of 3") and a close
+      button at the top right; a single-choice question answers on the
+      click and moves to the next unanswered one; a multi-choice one has
+      checkboxes, "N selected", Skip and an arrow; every question has
+      "Something else" (own words) and Skip. The answers go back together
+      once each question has one; the log keeps a record of each question
+      and its answer.
+- [x] The server words the result: the answer alone for one question,
+      "1. question -> answer" lines for several, "(skipped)" for a skipped
+      one, and a "closed without answering -- go on with the most
+      sensible choice and say which" note when the panel is closed.
+- [x] The CLI had no handler for questions at all (a question there
+      waited forever); it now asks each one at the terminal.
+- [x] The prompt no longer tells the model to describe a deck template's
+      options in its reply text: they go in the options' descriptions.
+- [x] Checked live on deepseek-flash, light and dark: asked for three
+      questions it made one call with descriptions on every option;
+      answered by click, two ticks and a skip, the model got "Excel 表格 /
+      清洗整理, 筛选排序 / (skipped)" and went on from there.
+
+## Phase 8cs -- Notes added while a reply is being worked on (shipped)
+
+- [x] While a turn runs, the composer sends what you type as a note to
+      that turn instead of refusing it: an empty box shows Stop, typing
+      turns it into Send. The note is put into the conversation before the
+      model's next step (`agent._SteerMiddleware`, `HumanMessage` marked
+      `coscribe_steer`, prefixed "[The user added this while you were
+      working ...]"), so it changes the work in progress instead of
+      waiting for the reply.
+- [x] In the log a note is a bubble inside the turn, "Will be read at the
+      next step" until the model reads it (`steers_delivered`), then
+      "Added while working"; history replays it the same way (kind
+      `steer`). It isn't a turn of its own: the per-turn step cap, the
+      review cap and edit/rewind all skip it (`messages.starts_a_turn`),
+      or each note would hand the turn a fresh budget.
+- [x] A note the turn ended before reading is sent as the next message
+      (`steers_requeued`); Stop drops unread notes and puts their text back
+      in the composer. Attachments can't go on a note -- they wait for the
+      reply.
+- [x] Checked in the UI against a local fake model (peak hours; the
+      behaviour checked is the page's): Stop with an empty box, Send once
+      typed, the note pending during an 8-second script, then read --
+      the model's next reply quoted it -- and the same after a reload.
+- [x] Live on deepseek-flash: asked for valid orders per region, then,
+      while its first script ran, "also count by month and write both
+      tables to 资料/订单统计.xlsx". The note was read 4.3 s later, at the
+      next step; the model's next line took it up ("收到，我把区域和月份
+      两张表都写进 ...") and the file has both sheets. Region counts match
+      the independent truth (258/126/194/195, 773). 17 model calls, ¥0.11
+      at peak prices; the main loop hit the cache at 99% with the note in
+      the middle of the turn.
+
+## Phase 8ct -- Code conversations see the user's instructions and memory
+
+The open question from 8cq (the code module's part 3), decided: yes. A chat is told the memory file
 (the user's instructions plus what `remember` kept) with its messages; a
 code conversation hadn't been, so a preference the user had stated once
 ("amounts keep two decimals", a column's other name) held in chats and not

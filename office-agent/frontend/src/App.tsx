@@ -64,6 +64,7 @@ import { EMPTY_WORKFLOW } from "./lib/workflowEdit";
 import { recordKey, workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState, TASK_DRAFT_SAVED_PREFIX, type LogItem } from "./state/reducer";
+import { QuestionPanel } from "./components/QuestionCard";
 import type { CommandInfo, ThreadSummary } from "./types/session";
 import type { ScheduledRun, ScheduledTask } from "./types/settings";
 import type { StepRecord, Workflow } from "./types/workflow";
@@ -626,7 +627,7 @@ function App() {
       // running for /stop to mean anything, which itself requires
       // history to have long since arrived.
       dispatch({ type: "local_user_message", text: payload.displayText, instant: true });
-      socketRef.current?.send({ type: "stop" });
+      onStop();
       return;
     }
     runOrQueueSend(() => {
@@ -640,7 +641,24 @@ function App() {
     });
   };
 
-  const onStop = () => socketRef.current?.send({ type: "stop" });
+  const onSteer = (text: string) => {
+    const id = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    dispatch({ type: "local_steer", id, text });
+    socketRef.current?.send({ type: "steer", id, text });
+  };
+
+  // A stop drops the notes the model hasn't read yet; their text goes back
+  // into the composer rather than being lost.
+  const onStop = () => {
+    const unread = state.items.filter(
+      (item): item is Extract<LogItem, { kind: "steer" }> => item.kind === "steer" && item.status === "pending",
+    );
+    if (unread.length > 0) {
+      dispatch({ type: "local_steers_withdrawn", ids: unread.map((item) => item.id) });
+      setPendingComposerText(unread.map((item) => item.text).join("\n\n"));
+    }
+    socketRef.current?.send({ type: "stop" });
+  };
 
   const onEditMessage = (turnIndex: number, text: string) => {
     dispatch({ type: "local_edit_message", turnIndex, text });
@@ -674,10 +692,15 @@ function App() {
     });
   };
 
-  const onAnswerQuestion = (id: string, answer: string) => {
-    dispatch({ type: "local_question_answered", id, answer });
-    socketRef.current?.send({ type: "question_response", id, answer });
+  const onAnswerQuestion = (id: string, answers: (string | null)[] | null) => {
+    dispatch({ type: "local_question_answered", id, answers });
+    socketRef.current?.send(
+      answers ? { type: "question_response", id, answers } : { type: "question_response", id, dismissed: true },
+    );
   };
+  const pendingQuestion = state.items.findLast(
+    (item): item is Extract<LogItem, { kind: "question" }> => item.kind === "question" && item.status === "pending",
+  );
 
   const onSwitchModel = (model: string) => socketRef.current?.send({ type: "switch_model", model });
 
@@ -740,6 +763,7 @@ function App() {
         )
       }
       onSend={onSend}
+      onSteer={onSteer}
       onStop={onStop}
       onLocalError={onLocalError}
       externalImage={pendingBrowserCapture}
@@ -935,7 +959,6 @@ function App() {
               turnInFlight={state.turnInFlight}
               connectorTools={state.connectorTools}
               onApprove={onApprove}
-              onAnswerQuestion={onAnswerQuestion}
               onAnswerPlan={onAnswerPlan}
               onEditMessage={state.turnInFlight || isCode ? undefined : onEditMessage}
               onRewindMessage={state.turnInFlight || isCode ? undefined : onRewindMessage}
@@ -965,6 +988,9 @@ function App() {
              * ChatLog.tsx's own wrapper and Composer's root exactly. */}
             {state.error && (
               <div className="mx-auto w-full max-w-[880px] px-4 py-1 text-sm text-red-500">{state.error}</div>
+            )}
+            {pendingQuestion && (
+              <QuestionPanel key={pendingQuestion.id} item={pendingQuestion} onAnswer={onAnswerQuestion} />
             )}
             {composer}
           </>

@@ -211,6 +211,27 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver  # noqa: E402
 from .web.session import ChatSessionLG  # noqa: E402
 
 
+def _ask(question: dict[str, Any]) -> str | None:
+    """One of ask_user_question's questions at the terminal: a number (or
+    several, comma-separated, for a multi-select one) picks options, any
+    other text is the answer itself, and nothing skips it."""
+    typer.echo(f"\n[question] {question['question']}")
+    labels = [option["label"] for option in question["options"]]
+    for number, option in enumerate(question["options"], 1):
+        hint = f" -- {option['description']}" if option.get("description") else ""
+        typer.echo(f"  {number}) {option['label']}{hint}")
+    prompt = "Numbers, comma-separated" if question.get("multi_select") else "Number"
+    raw = str(
+        typer.prompt(f"{prompt}, your own answer, or Enter to skip", default="", show_default=False)
+    )
+    picks = [part.strip() for part in raw.split(",") if part.strip()]
+    if not picks:
+        return None
+    if all(pick.isdigit() and 1 <= int(pick) <= len(labels) for pick in picks):
+        return ", ".join(labels[int(pick) - 1] for pick in picks)
+    return raw.strip()
+
+
 class _CliSocket:
     """Duck-typed WebSocket stand-in -- see this module's docstring."""
 
@@ -286,6 +307,8 @@ class _CliSocket:
             typer.echo(f"\n[approval required] {data['tool_name']}({data['arguments']})")
             approved = typer.confirm("Allow this action?", default=False)
             self._session.resolve_approval(data["id"], approved)
+        elif kind == "question_required":
+            self._session.resolve_question(data["id"], [_ask(q) for q in data["questions"]])
         elif kind == "plan_ready":
             typer.echo(f"\n[plan]\n{data['plan']}\n")
             choice = typer.prompt(

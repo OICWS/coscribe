@@ -157,6 +157,18 @@ def test_a_turn_starts_at_the_users_message_not_at_a_compact_summary() -> None:
     assert model_calls_this_turn([*history, HumanMessage("third")]) == 0
 
 
+def test_a_note_added_mid_turn_neither_starts_a_turn_nor_reads_as_one() -> None:
+    """Counted as a new request, each note would hand the turn a fresh
+    budget; shown as one, it would split the turn in the log."""
+    from coscribe.runtime_lg.agent import model_calls_this_turn
+    from coscribe.runtime_lg.messages import serialize_history_for_ws_lg, steer_message
+
+    history = [HumanMessage("go"), AIMessage("a"), steer_message("also b"), AIMessage("b")]
+
+    assert model_calls_this_turn(history) == 2
+    assert serialize_history_for_ws_lg(history)[2] == {"kind": "steer", "text": "also b"}
+
+
 def test_auto_compact_tokens_collapses_a_long_thread_once_past_the_keep_floor() -> None:
     """SummarizationMiddleware's own default keep=("messages", 20) means a
     thread shorter than 20 messages is never touched even once the token

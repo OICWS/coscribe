@@ -45,6 +45,8 @@ export interface StateEvent {
 
 export type HistoryEntry =
   | { kind: "user"; text: string; images?: string[] }
+  /** A note the user added while a reply was being worked on. */
+  | { kind: "steer"; text: string }
   | { kind: "agent"; text: string }
   | {
       kind: "tool";
@@ -160,13 +162,24 @@ export interface PlanReadyEvent {
   plan: string;
 }
 
+export interface QuestionOption {
+  label: string;
+  /** "" when the option has none. */
+  description: string;
+}
+
+export interface QuestionSpec {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multi_select: boolean;
+}
+
+/** ask_user_question: one or more questions, answered together. */
 export interface QuestionRequiredEvent {
   type: "question_required";
   id: string;
-  question: string;
-  header: string;
-  options: string[];
-  multi_select: boolean;
+  questions: QuestionSpec[];
 }
 
 /** A scheduled run just started on this thread; `text` is the run's
@@ -293,8 +306,23 @@ export interface SkillSavedEvent {
   slug: string;
 }
 
+/** Notes the user added mid-turn, now read by the model. */
+export interface SteersDeliveredEvent {
+  type: "steers_delivered";
+  ids: string[];
+}
+
+/** Notes the turn ended before reading: sent as the next message, `text`. */
+export interface SteersRequeuedEvent {
+  type: "steers_requeued";
+  ids: string[];
+  text: string;
+}
+
 export type WsServerEvent =
   | StateEvent
+  | SteersDeliveredEvent
+  | SteersRequeuedEvent
   | HistoryEvent
   | OlderMessagesEvent
   | AgentDeltaEvent
@@ -370,15 +398,14 @@ export interface ApprovalResponseOut {
   approved: boolean;
 }
 
-/** `answer` is always plain text -- for a multi_select question, the
- * client joins the chosen options into one string (comma-separated)
- * before sending; the server never parses it back apart, it's delivered
- * to the model as-is. */
-export interface QuestionResponseOut {
-  type: "question_response";
-  id: string;
-  answer: string;
-}
+/** A plan or task draft answers with `answer`. ask_user_question answers
+ * with `answers`, one per question (a multi-select one's choices joined
+ * by ", ", null for a skipped one), or `dismissed` when the user closed
+ * the questions; the server words them for the model. */
+export type QuestionResponseOut =
+  | { type: "question_response"; id: string; answer: string }
+  | { type: "question_response"; id: string; answers: (string | null)[] }
+  | { type: "question_response"; id: string; dismissed: true };
 
 /** Cooperative stop -- also immediately denies any pending approval so a
  * stop isn't blocked behind an unanswered approval prompt. Distinct from
@@ -421,8 +448,17 @@ export interface LoadOlderMessagesOut {
   type: "load_older_messages";
 }
 
+/** A note for the turn in progress: the model reads it before its next
+ * step instead of after the reply. */
+export interface SteerOut {
+  type: "steer";
+  id: string;
+  text: string;
+}
+
 export type WsClientMessage =
   | UserMessageOut
+  | SteerOut
   | EditMessageOut
   | RewindMessageOut
   | ApprovalResponseOut

@@ -110,6 +110,7 @@ from ..runtime_lg.messages import (
     PLAN_MODE_NOTE,
     context_note,
     current_date_note,
+    is_steer,
     language_note,
     last_conversation_context,
     strip_mode_note,
@@ -130,7 +131,13 @@ from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
 from ..tools.browser import BROWSER_HOST, page_screenshot
 from ..tools.documents import DocumentToolkit
-from ..tools.interaction import PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL, PLAN_CHOICE_REVISE
+from ..tools.interaction import (
+    PLAN_CHOICE_AUTO,
+    PLAN_CHOICE_MANUAL,
+    PLAN_CHOICE_REVISE,
+    format_question_answers,
+    normalize_questions,
+)
 from ..tools.presentations import PresentationToolkit
 from ..tools.scheduled_tasks import (
     TASK_DRAFT_TOOL_NAMES,
@@ -509,7 +516,10 @@ class ChatSessionLG:
         self._context_window_client = context_window_client
         self._context_window: int | None = None
         self._pending_approvals: dict[str, Future[bool]] = {}
-        self._pending_questions: dict[str, Future[str]] = {}
+        # A question's answer is one entry per question, or None when the
+        # user closed them; the other requests (plans, drafts) and a stop
+        # answer with a string.
+        self._pending_questions: dict[str, Future[Any]] = {}
         self.hooks_config: dict[str, list[str]] = hooks_config or empty_hooks_config()
         self.plan_mode = False
         self.accept_edits = False
@@ -557,7 +567,10 @@ class ChatSessionLG:
         # NOT gated by this lock, same as ChatSession's identical methods
         # -- they have to be able to reach whichever turn is *currently*
         # in flight, not queue behind it.
-        self._turn_lock = TurnLock(lambda active: BROWSER_HOST.set_active(thread_id, active))
+        self._turn_lock = TurnLock(self._turn_lock_changed)
+        # Notes the user sent during a turn, (id, text), not yet read by
+        # the model.
+        self._steers: list[tuple[str, str]] = []
         # The task currently holding _turn_lock (handle_user_message or
         # resume_after_reconnect), if any -- see abandon_orphaned_turn's
         # docstring for why this exists: a turn lock alone would let an
@@ -1128,6 +1141,7 @@ class ChatSessionLG:
             auto_compact_tokens=auto_compact_tokens,
             defer_tools=defer,
             core_tool_names=core_names,
+            take_steers=self._take_steers,
         )
 
     def _tool_binding(
@@ -1148,10 +1162,52 @@ class ChatSessionLG:
         if future is not None and not future.done():
             future.set_result(approved)
 
-    def resolve_question(self, request_id: str, answer: str) -> None:
+    def resolve_question(self, request_id: str, answer: str | list[str | None] | None) -> None:
         future = self._pending_questions.get(request_id)
         if future is not None and not future.done():
             future.set_result(answer)
+
+    def add_steer(self, steer_id: str, text: str) -> None:
+        """A note for the turn in progress, read before the model's next
+        step. With no turn running (it ended as the note was sent), it is
+        sent as a message instead."""
+        self._steers.append((steer_id, text))
+        if not self._turn_lock.locked():
+            asyncio.get_running_loop().create_task(self._send_unread_steers())
+
+    async def _take_steers(self) -> list[str]:
+        if not self._steers:
+            return []
+        steers, self._steers = self._steers, []
+        socket = self._live_websocket or self._turn_websocket
+        if socket is not None:
+            try:
+                await socket.send_json({"type": "steers_delivered", "ids": [i for i, _ in steers]})
+            except Exception:  # noqa: BLE001 -- the tab went away; the model still has them
+                pass
+        return [text for _, text in steers]
+
+    def _turn_lock_changed(self, active: bool) -> None:
+        BROWSER_HOST.set_active(self.thread_id, active)
+        # The turn ended before its next model step could read them.
+        if not active and self._steers:
+            asyncio.get_running_loop().create_task(self._send_unread_steers())
+
+    async def _send_unread_steers(self) -> None:
+        if not self._steers or self._turn_lock.locked():
+            return
+        steers, self._steers = self._steers, []
+        text = "\n\n".join(note for _, note in steers)
+        websocket: Any = self._live_websocket
+        if websocket is not None:
+            try:
+                await websocket.send_json(
+                    {"type": "steers_requeued", "ids": [i for i, _ in steers], "text": text}
+                )
+            except Exception:  # noqa: BLE001 -- the tab went away; run unwatched
+                websocket = None
+        socket: Any = websocket or SilentSocket()
+        await self.handle_user_message(text, socket)
 
     def request_stop(self) -> None:
         """Called directly from ws_endpoint on a "stop" message, not
@@ -1192,6 +1248,8 @@ class ChatSessionLG:
         which reasons through exactly this for the WebSocket-disconnect
         case and deliberately avoids it there too."""
         self._stop_requested = True
+        # The page puts the unread notes back in the composer.
+        self._steers.clear()
         self._stop_waited_on_subagents()
         # A browser step can be waiting out a slow page for an hour, in the
         # desktop app where cancelling this turn doesn't reach.
@@ -2637,24 +2695,17 @@ class ChatSessionLG:
         free-text answer, not a bool) and request_stop/reconnect need to
         treat the two independently."""
         request_id = uuid.uuid4().hex
-        future: Future[str] = get_running_loop().create_future()
+        future: Future[Any] = get_running_loop().create_future()
         self._pending_questions[request_id] = future
-        options = [line for line in args.get("options", "").split("\n") if line.strip()]
+        questions = normalize_questions(args)
         await websocket.send_json(
-            {
-                "type": "question_required",
-                "id": request_id,
-                "question": args.get("question", ""),
-                "header": args.get("header", ""),
-                "options": options,
-                "multi_select": bool(args.get("multi_select", False)),
-            }
+            {"type": "question_required", "id": request_id, "questions": questions}
         )
         try:
-            answer = await future
+            reply = await future
         finally:
             self._pending_questions.pop(request_id, None)
-        return {"type": "respond", "message": answer}
+        return {"type": "respond", "message": format_question_answers(questions, reply)}
 
     async def _decide_plan_request(
         self, args: dict[str, Any], websocket: WebSocket
@@ -3028,7 +3079,9 @@ class ChatSessionLG:
             )
             return
 
-        human_positions = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+        human_positions = [
+            i for i, m in enumerate(messages) if isinstance(m, HumanMessage) and not is_steer(m)
+        ]
         if index < 0 or index >= len(human_positions):
             await websocket.send_json(
                 {"type": "error", "message": f"No such message to edit (index {index})."}
@@ -3078,7 +3131,9 @@ class ChatSessionLG:
             )
             return
 
-        human_positions = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+        human_positions = [
+            i for i, m in enumerate(messages) if isinstance(m, HumanMessage) and not is_steer(m)
+        ]
         if index < 0 or index >= len(human_positions):
             await websocket.send_json(
                 {"type": "error", "message": f"No such message to rewind (index {index})."}

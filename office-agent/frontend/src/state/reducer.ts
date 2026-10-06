@@ -1,4 +1,4 @@
-import type { HistoryEntry, TaskDraft, WsServerEvent } from "../types/wire";
+import type { HistoryEntry, QuestionSpec, TaskDraft, WsServerEvent } from "../types/wire";
 
 /** The answer the frontend sends for a saved draft starts with this --
  * also how a replayed create_scheduled_task call tells "saved" apart
@@ -13,6 +13,9 @@ export type LogItem =
   // handle_edit_message). Assigned once at creation (below), not derived
   // at render time, so it stays stable even as later items are appended.
   | { id: string; kind: "user"; text: string; turnIndex: number; images?: string[] }
+  /** A note added while a reply was being worked on; part of that turn,
+   * not a turn of its own. Pending until the model reads it. */
+  | { id: string; kind: "steer"; text: string; status: "pending" | "delivered" }
   | { id: string; kind: "agent"; text: string; streaming: boolean }
   | {
       id: string;
@@ -52,12 +55,11 @@ export type LogItem =
   | {
       id: string;
       kind: "question";
-      question: string;
-      header: string;
-      options: string[];
-      multiSelect: boolean;
+      questions: QuestionSpec[];
       status: "pending" | "answered";
-      answer?: string;
+      /** One per question, null for a skipped one; null as a whole when
+       * the user closed the questions. */
+      answers?: (string | null)[] | null;
     }
   | {
       id: string;
@@ -178,10 +180,12 @@ export const initialChatState: ChatState = {
  * server round-trip completes). */
 export type LocalAction =
   | { type: "local_user_message"; text: string; instant: boolean; images?: string[] }
+  | { type: "local_steer"; id: string; text: string }
+  | { type: "local_steers_withdrawn"; ids: string[] }
   | { type: "local_edit_message"; turnIndex: number; text: string }
   | { type: "local_rewind_message"; turnIndex: number }
   | { type: "local_approval_resolved"; id: string; approved: boolean }
-  | { type: "local_question_answered"; id: string; answer: string }
+  | { type: "local_question_answered"; id: string; answers: (string | null)[] | null }
   | { type: "local_plan_answered"; id: string; status: "auto" | "manual" | "revise" }
   | { type: "local_task_draft_resolved"; id: string; status: "saved" | "dismissed"; savedName?: string }
   | { type: "local_connection_reset" }
@@ -243,6 +247,9 @@ export function historyToItems(entries: HistoryEntry[]): LogItem[] {
     }
     if (entry.kind === "agent") {
       return { id: genId(), kind: "agent", text: entry.text, streaming: false };
+    }
+    if (entry.kind === "steer") {
+      return { id: genId(), kind: "steer", text: entry.text, status: "delivered" };
     }
     if (entry.tool_name === "exit_plan_mode") {
       const status = planStatusOf(typeof entry.result === "string" ? entry.result : "");
@@ -363,7 +370,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         items: state.items.map((item) =>
           item.kind === "question" && item.id === action.id
-            ? { ...item, status: "answered", answer: action.answer }
+            ? { ...item, status: "answered", answers: action.answers }
             : item,
         ),
       };
@@ -433,6 +440,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const revealed: LogItem[] = action.entries.map((entry) => {
         if (entry.kind === "user") {
           return { id: genId(), kind: "user", text: entry.text, turnIndex: -1, images: entry.images } as const;
+        }
+        if (entry.kind === "steer") {
+          return { id: genId(), kind: "steer", text: entry.text, status: "delivered" } as const;
         }
         if (entry.kind === "agent") {
           return { id: genId(), kind: "agent", text: entry.text, streaming: false } as const;
@@ -588,10 +598,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           {
             id: action.id,
             kind: "question",
-            question: action.question,
-            header: action.header,
-            options: action.options,
-            multiSelect: action.multi_select,
+            questions: action.questions,
             status: "pending",
           },
         ],
@@ -678,6 +685,30 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "workflow_test_progress":
       return { ...state, workflowTest: { done: action.done, total: action.total } };
+
+    case "local_steer":
+      return { ...state, items: [...state.items, { id: action.id, kind: "steer", text: action.text, status: "pending" }] };
+
+    case "local_steers_withdrawn":
+      return { ...state, items: state.items.filter((item) => !(item.kind === "steer" && action.ids.includes(item.id))) };
+
+    case "steers_delivered":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.kind === "steer" && action.ids.includes(item.id) ? { ...item, status: "delivered" } : item,
+        ),
+      };
+
+    case "steers_requeued":
+      return {
+        ...state,
+        turnInFlight: true,
+        items: [
+          ...state.items.filter((item) => !(item.kind === "steer" && action.ids.includes(item.id))),
+          { id: genId(), kind: "user", text: action.text, turnIndex: countUserItems(state.items) },
+        ],
+      };
 
     case "turn_started":
       return {
