@@ -316,7 +316,7 @@ def synth_pad(m, dur, env_pts, bright=1.0, seed=0, voices=6):
         det = (v - (voices - 1) / 2) / ((voices - 1) / 2) * 11 + r.uniform(-2, 2)
         drift = 3 * smooth_noise(L, 0.3, int(r.integers(1 << 30)))
         y = polyblep_saw(f0 * 2 ** ((det + drift) / 1200), r.random())
-        acc += pan(y, (v - (voices - 1) / 2) / ((voices - 1) / 2) * 0.85)
+        acc += pan(y, (v - (voices - 1) / 2) / ((voices - 1) / 2) * 0.65)
     acc /= voices
     fc = min((1400 + 2.2 * f0) * bright, 7000)
     acc = butter_lp(acc, fc, 2)

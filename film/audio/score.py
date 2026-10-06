@@ -125,7 +125,7 @@ def nm(name):
 # ---------------------------------------------------------------- score / buses
 BUSES = ["piano", "pianoverb", "pluck", "pad", "bass", "kick", "drums", "perc", "fx", "bell"]
 GROOVE = ["pluck", "pad", "bass", "kick", "drums"]       # these follow the breakdown / build filter
-HALL_SEND = {"piano": 0.22, "pianoverb": 0.6, "pluck": 0.25, "pad": 0.3, "bass": 0.0, "kick": 0.0, "drums": 0.06,
+HALL_SEND = {"piano": 0.22, "pianoverb": 0.45, "pluck": 0.25, "pad": 0.3, "bass": 0.0, "kick": 0.0, "drums": 0.06,
              "perc": 0.35, "fx": 0.25, "bell": 0.4}
 ROOM_SEND = {"piano": 0.08, "pianoverb": 0.0, "pluck": 0.0, "pad": 0.0, "bass": 0.0, "kick": 0.05, "drums": 0.22,
              "perc": 0.15, "fx": 0.05, "bell": 0.0}
@@ -779,7 +779,8 @@ def echo(x, delay=0.409, fb=0.32, mix=0.22, lp=4500.0):
 
 
 RIDES = [  # (t0, t1, dB)
-    (13.0, 21.0, -1.5), (25.0, 28.5, -1.0), (34.5, 42.0, -1.0), (46.0, 49.5, -0.5), (56.6, 65.0, -0.5),
+    (13.0, 21.0, -1.5), (21.15, 24.0, -2.0), (42.15, 45.0, -1.5), (65.15, 68.4, -1.0), (86.15, 87.75, -1.5),
+    (25.0, 28.5, -1.0), (34.5, 42.0, -1.0), (46.0, 49.5, -0.5), (56.6, 65.0, -0.5),
     (103.2, 110.0, -0.5), (110.0, 113.6, 2.0)]
 
 
@@ -814,6 +815,7 @@ def render(events=None, lines=None):
     # side-chain pump (kick -> pad, bass, pluck)
     for name, depth in (("pad", 0.55), ("bass", 0.65), ("pluck", 0.3)):
         B[name] = B[name] * pump_curve(S.kicks, depth)[None]
+    B["bass"] *= db(-1.5)
 
     # groove filter (breakdowns / builds / riser dips)
     fc = cutoff_curve(S.cut)
@@ -834,7 +836,7 @@ def render(events=None, lines=None):
                 fl = int(0.006 * SR)
                 w[:, -fl:] *= np.cos(np.linspace(0, np.pi / 2, fl)) ** 2
             wet[:, ia:ib] += g * w
-    wet = filt(ms_width(wet, 1.3), highpass(150))
+    wet = filt(ms_width(wet, 1.05), highpass(150))
     x = dry + wet
 
     # fader rides: each sentence's groove a little bigger than the last; the peak clearly the biggest
@@ -844,7 +846,7 @@ def render(events=None, lines=None):
     m, s = 0.5 * (x[0] + x[1]), 0.5 * (x[0] - x[1])
     s = filt(s, highpass(120))
     x = np.stack([m + s, m - s])
-    x = filt(x, highpass(32), shelf(110, -2.5, False), peak(320, -2.5, 0.8), shelf(2600, 3.0, True, 0.7),
+    x = filt(x, highpass(32), shelf(110, -3.5, False), peak(320, -2.5, 0.8), shelf(2600, 3.0, True, 0.7),
              peak(4200, -1.0, 1.2), shelf(10500, -2.5, True))
     from dsp import compress
     x = compress(x, thresh_db=20 * np.log10(np.max(np.abs(x)) + 1e-9) - 14, ratio=2.0, attack=0.02, release=0.2, knee=8)

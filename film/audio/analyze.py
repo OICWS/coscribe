@@ -2,6 +2,7 @@
 
   python3 audio/analyze.py spec  <wav> [t0 t1] [-o out.png]   spectrogram + RMS envelope
   python3 audio/analyze.py report [--lang en]                  stems vs cue sheet: hits, drops, clicks, peaks, loudness
+  python3 audio/analyze.py grid [<wav>]                         per-section tempo measured from the audio vs the tempo map
 """
 import argparse
 import json
@@ -16,9 +17,9 @@ import dsp  # noqa: E402
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
 
-HITS = [0.6, 5.0, 11.1, 13.0, 17.0, 21.0, 24.0, 25.0, 28.5, 32.9, 34.5, 38.0, 42.0, 44.0, 46.0, 49.5, 55.1, 56.6, 61.0,
-        65.0, 67.0, 68.0, 69.5, 72.5, 77.3, 78.6, 82.5, 84.0, 86.0, 88.5, 92.5, 94.0, 95.5, 97.0, 98.5, 100.0, 100.4,
-        103.2, 105.2, 106.0, 110.0, 113.6, 114.5, 117.5]
+HITS = [0, 8.0, 11.2, 13.0, 21.0, 25.0, 28.5, 30.0, 33.0, 34.5, 42.0, 46.0, 49.5, 52.0, 55.2, 56.6, 65.0, 69.5, 72.5,
+        74.0, 77.4, 78.6, 86.0, 88.5, 92.5, 94.0, 95.5, 97.0, 98.5, 100.0, 100.4, 103.2, 106.0, 110.0, 113.6, 114.0,
+        117.5]
 
 
 def load(p):
@@ -61,11 +62,12 @@ def spec_plot(x, t0, t1, out, title="", marks=HITS):
     print(out)
 
 
-DROPS = [  # (label, quiet window, reference window before it) -- the cue sheet's drops and stops
-    ("M1-d 21.0", (21.3, 23.8), (18.5, 20.8)), ("M2-d 42.0", (42.3, 43.8), (39.5, 41.8)),
-    ("M3-d 65.0", (65.3, 66.9), (62.5, 64.8)), ("M4-d 86.0", (86.4, 88.3), (83.5, 85.8)),
-    ("vacuum 100.0", (100.03, 100.36), (98.0, 99.9)), ("cut 113.6", (113.63, 114.38), (111.5, 113.5))]
-CUE_HITS = [13.0, 28.5, 34.5, 49.5, 56.6, 72.5, 78.6, 82.5, 92.5, 94.0, 95.5, 97.0, 98.5, 110.0]
+DROPS = [  # (label, window, reference window before it) -- v2: quality-shot breakdowns (filtered, half-time,
+    # expected a few dB down, not silent), the 100.0 stop (silent) and the 113.6 cut (one piano chord left)
+    ("breakdown 21.0", (21.3, 23.8), (18.5, 20.8)), ("breakdown 42.0", (42.3, 43.8), (39.5, 41.8)),
+    ("breakdown 65.0", (65.3, 66.9), (62.5, 64.8)), ("breakdown 86.0", (86.4, 87.8), (83.5, 85.8)),
+    ("stop 100.0", (100.03, 100.36), (98.0, 99.9)), ("cut 113.6", (113.63, 114.38), (111.5, 113.5))]
+CUE_HITS = [13.0, 25.0, 28.5, 34.5, 46.0, 49.5, 56.6, 69.5, 72.5, 78.6, 88.5, 92.5, 94.0, 95.5, 97.0, 98.5, 110.0]
 
 
 def _rms_db(x, a, b):
@@ -116,6 +118,30 @@ def report(lang):
         print(f"  {lab:11s} {a:6.1f}-{b:6.1f}  max {L[m].max():6.1f}  median {np.median(L[m]):6.1f} LUFS")
 
 
+def grid(path):
+    """Tempo of each section measured from the audio (onset-flux autocorrelation) vs the score's tempo map."""
+    import score
+    from scipy import signal
+    x = load(path).mean(0)
+    hop, nfft = 128, 1024
+    _, t, Z = signal.stft(x, dsp.SR, nperseg=nfft, noverlap=nfft - hop, boundary=None)
+    M = np.log1p(100 * np.abs(Z))
+    d = np.maximum(np.diff(M, axis=1), 0).sum(0)
+    t = t[1:]
+    fr = 1 / (t[1] - t[0])
+    print("section tempo: map vs measured (onset autocorrelation)")
+    for a, b, beats, what in score.SEGS:
+        if b - a < 3.4:
+            continue
+        m = (t >= a + 0.1) & (t < b - 0.1)
+        e = d[m] - d[m].mean()
+        ac = np.correlate(e, e, "full")[len(e) - 1:]
+        lags = np.arange(len(ac)) / fr
+        r = (lags > 60 / 140) & (lags < 60 / 90)
+        L = lags[r][np.argmax(ac[r])]
+        print(f"  {a:6.1f}-{b:6.1f}  map {60 * beats / (b - a):6.1f}  measured {60 / L:6.1f} BPM   {what}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd")
@@ -129,6 +155,8 @@ def main():
         spec_plot(x, t0, t1, a.o or str(Path(a.args[0]).with_suffix(".png")), Path(a.args[0]).name)
     elif a.cmd == "report":
         report(a.args[0] if a.args else "en")
+    elif a.cmd == "grid":
+        grid(a.args[0] if a.args else str(OUT / "music.wav"))
 
 
 if __name__ == "__main__":

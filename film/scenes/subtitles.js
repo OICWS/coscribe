@@ -8,7 +8,7 @@ F.scene({ id: 'subtitles', start: 0, end: 1e9, z: 200, build(layer) {
     const l = lines.find((x) => t >= x.in && t < x.out);
     if (!l) { el.e.style.display = 'none'; return; }
     el.e.style.display = '';
-    F.css(el.e, { color: l.bg === 'dark' ? 'rgba(247,245,243,.94)' : 'var(--fg)', textShadow: l.bg === 'dark' ? '0 2px 24px rgba(0,0,0,.6)' : 'none' });
+    F.css(el.e, { color: l.bg === 'dark' ? '#fff' : 'var(--fg)', textShadow: l.bg === 'dark' ? '0 1px 2px rgba(20,24,60,.25), 0 4px 18px rgba(20,24,60,.22)' : 'none' });
     el.update(l[F.lang] || l.zh, F.prog(t, l.in, l.in + 0.9), F.prog(t, l.out - 0.45, l.out));
   };
 } });

@@ -514,6 +514,10 @@ GUESS = [("whoosh", "whoosh"), ("swish", "whoosh"), ("dive", "dive"), ("key", "k
 # events that belong to the score (montage hits, the riser, the stops): no SFX for them
 SKIP_GROUP = {"ticks": "tick", "tap": "tick"}  # for fallback skipping: these families count as one
 
+# v2 score is denser and brighter than v1 (which the per-family levels below were set against): lift the
+# whole SFX stem a little so the keys / ticks keep the same (subtle) presence over it.
+SFX_TRIM_DB = 3.0
+
 GLASS_NOTES = ["D6", "A5", "F#6", "E6", "A6", "B5", "D6", "E6", "F#6", "A5", "E6", "D6", "B5", "A5", "F#5", "D5"]
 
 
@@ -749,6 +753,7 @@ def render(events):
     g = uniform_filter1d(g, int(0.004 * SR))
     x *= g[None]
     x = filt(x, highpass(35), lowpass(12000))
+    x *= db(SFX_TRIM_DB)
     names = sorted({e["name"] for e in events})
     explicit = lambda nm: nm in FAMILY or nm.lower() in FAMILY or nm.lower().split("_")[0] in FAMILY
     guessed = {nm: family({"name": nm}) for nm in names if not explicit(nm) and nm not in unknown}
