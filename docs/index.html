@@ -340,7 +340,17 @@ html[lang="zh-CN"] .hero h1 { font-weight: 700; font-size: clamp(38px, 5vw, 68px
 .home.on { opacity: 1; pointer-events: auto; }
 .main:has(.home.on) .ttl { visibility: hidden; }
 .home h3 { font: 400 34px/1.1 var(--display); letter-spacing: -.01em; }
-.home .cbox { width: min(560px, 100%); }
+/* The home composer is a single wide line, with the folder and model controls below it. */
+.home { justify-content: stretch; padding-inline: 7%; }
+.home h3 { text-align: center; font-size: 38px; margin-bottom: 4px; }
+.hc { width: 100%; max-width: 820px; margin: 0 auto; }
+.hbox { display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 14px 0 16px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface); box-shadow: 0 2px 10px -6px rgba(0, 0, 0, .12); }
+.hbox .ph { flex: 1; color: var(--muted); font-size: 14px; }
+.hbox svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
+.hrow { display: flex; justify-content: space-between; align-items: center; padding: 12px 6px 0; font-size: 13.5px; color: var(--fg-2); }
+.hrow span { display: inline-flex; align-items: center; gap: 10px; }
+.hrow svg { width: 15px; height: 15px; color: var(--muted); }
+.hrow span:last-child { gap: 6px; }
 
 /* ---------- side panes ---------- */
 .side { position: relative; min-width: 0; overflow: hidden; }
@@ -1097,7 +1107,7 @@ footer a:hover { color: var(--fg); }
             </div>
             <div class="home" id="home">
               <h3>Good morning!</h3>
-              <div class="cbox"><div class="ctext"><span class="ph">Type / for commands</span></div><div class="crow"><span class="cb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add folder</span><span class="cb mode"><i></i>Auto</span><span class="sp"></span><span class="cb">deepseek-v4-pro</span><span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></span></div></div>
+              <div class="hc"><div class="hbox"><span class="ph">Type / for commands</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></div><div class="hrow"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add folder</span><span>deepseek-v4-pro<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></div></div>
             </div>
           </div>
 
