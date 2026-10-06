@@ -1278,10 +1278,22 @@ def test_ask_user_question_sends_question_required_and_feeds_answer_back_lg(
         "call_1",
         "ask_user_question",
         {
-            "question": "What kind of plan?",
-            "header": "Plan type",
-            "options": "Travel\nStudy\nFitness",
-            "multi_select": False,
+            "questions": [
+                {
+                    "question": "What kind of plan?",
+                    "header": "Plan type",
+                    "options": [
+                        {"label": "Travel", "description": "Flights, hotels, a route"},
+                        {"label": "Study"},
+                    ],
+                },
+                {
+                    "question": "Which days?",
+                    "options": [{"label": "Weekdays"}, {"label": "Weekends"}],
+                    "multi_select": True,
+                },
+                {"question": "Budget?", "options": [{"label": "Low"}, {"label": "High"}]},
+            ]
         },
     )
     fake_model = FakeToolCallingChatModel(
@@ -1295,12 +1307,25 @@ def test_ask_user_question_sends_question_required_and_feeds_answer_back_lg(
 
             question = ws.receive_json()
             assert question["type"] == "question_required"
-            assert question["question"] == "What kind of plan?"
-            assert question["header"] == "Plan type"
-            assert question["options"] == ["Travel", "Study", "Fitness"]
-            assert question["multi_select"] is False
+            assert [q["question"] for q in question["questions"]] == [
+                "What kind of plan?",
+                "Which days?",
+                "Budget?",
+            ]
+            assert question["questions"][0]["header"] == "Plan type"
+            assert question["questions"][0]["options"] == [
+                {"label": "Travel", "description": "Flights, hotels, a route"},
+                {"label": "Study", "description": ""},
+            ]
+            assert [q["multi_select"] for q in question["questions"]] == [False, True, False]
 
-            ws.send_json({"type": "question_response", "id": question["id"], "answer": "Travel"})
+            ws.send_json(
+                {
+                    "type": "question_response",
+                    "id": question["id"],
+                    "answers": ["Travel", "Weekdays, Weekends", None],
+                }
+            )
             messages = _receive_until(ws, "tasks_changed")
 
     types = [m["type"] for m in messages]
@@ -1314,9 +1339,37 @@ def test_ask_user_question_sends_question_required_and_feeds_answer_back_lg(
     assert "tool_result" not in types
     tool_messages = [m for m in fake_model.received[-1] if isinstance(m, ToolMessage)]
     assert tool_messages[-1].name == "ask_user_question"
-    assert "Travel" in json.dumps(tool_messages[-1].content)
+    assert tool_messages[-1].content == (
+        "1. What kind of plan? -> Travel\n"
+        "2. Which days? -> Weekdays, Weekends\n"
+        "3. Budget? -> (skipped)"
+    )
     agent_message = next(m for m in messages if m["type"] == "agent_message")
     assert agent_message["text"] == "done"
+
+
+def test_closing_the_questions_tells_the_model_to_go_on_without_asking_again_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    call = _tool_call(
+        "call_1",
+        "ask_user_question",
+        {"questions": [{"question": "Which one?", "options": [{"label": "A"}, {"label": "B"}]}]},
+    )
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_q1b") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "ask me something"})
+            question = ws.receive_json()
+            ws.send_json({"type": "question_response", "id": question["id"], "dismissed": True})
+            _receive_until(ws, "tasks_changed")
+
+    tool_messages = [m for m in fake_model.received[-1] if isinstance(m, ToolMessage)]
+    assert "closed the questions without answering" in str(tool_messages[-1].content)
 
 
 def test_ask_user_question_free_text_answer_works_too_lg(
@@ -1452,7 +1505,7 @@ def test_stop_resolves_a_pending_question_with_a_placeholder_answer_lg(
     assert agent_message["text"] == "[stopped]"
 
 
-def test_ask_user_question_multi_select_flag_and_option_parsing_lg(
+def test_ask_user_question_still_reads_a_single_question_with_line_options_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     call = _tool_call(
@@ -1473,11 +1526,12 @@ def test_ask_user_question_multi_select_flag_and_option_parsing_lg(
             ws.receive_json()  # history
             ws.send_json({"type": "user_message", "text": "ask me something"})
             question = ws.receive_json()
-            assert question["multi_select"] is True
-            # Blank lines in the newline-separated options string are
-            # dropped, same as the non-empty-lines filter every other
-            # newline/`---`-separated tool argument in this codebase uses.
-            assert question["options"] == ["A", "B", "C"]
+            # A call saved in a conversation from before questions came in
+            # lists still shows: one question, its options one per line,
+            # blank lines dropped.
+            (only,) = question["questions"]
+            assert only["multi_select"] is True
+            assert [option["label"] for option in only["options"]] == ["A", "B", "C"]
 
             ws.send_json({"type": "question_response", "id": question["id"], "answer": "A, C"})
             _receive_until(ws, "tasks_changed")

@@ -7444,6 +7444,33 @@ Codex itself -- every message one Codex turn in the conversation's folder
   memory and instructions; a chat's sub-agent run opening as a code
   conversation.
 
+## Phase 8cr -- ask_user_question: several questions, option descriptions, docked above the composer (shipped)
+
+- [x] One call now asks 1-4 questions (`questions: [{question, options:
+      [{label, description}], multi_select, header}]`), each option with an
+      optional one-line description. A conversation saved with the old
+      single-question arguments still shows (`normalize_questions`).
+- [x] The page shows them in a panel docked above the composer at its
+      width, not as a card in the log: a pager ("1 of 3") and a close
+      button at the top right; a single-choice question answers on the
+      click and moves to the next unanswered one; a multi-choice one has
+      checkboxes, "N selected", Skip and an arrow; every question has
+      "Something else" (own words) and Skip. The answers go back together
+      once each question has one; the log keeps a record of each question
+      and its answer.
+- [x] The server words the result: the answer alone for one question,
+      "1. question -> answer" lines for several, "(skipped)" for a skipped
+      one, and a "closed without answering -- go on with the most
+      sensible choice and say which" note when the panel is closed.
+- [x] The CLI had no handler for questions at all (a question there
+      waited forever); it now asks each one at the terminal.
+- [x] The prompt no longer tells the model to describe a deck template's
+      options in its reply text: they go in the options' descriptions.
+- [x] Checked live on deepseek-flash, light and dark: asked for three
+      questions it made one call with descriptions on every option;
+      answered by click, two ticks and a skip, the model got "Excel 表格 /
+      清洗整理, 筛选排序 / (skipped)" and went on from there.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

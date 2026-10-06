@@ -1,4 +1,4 @@
-import type { HistoryEntry, TaskDraft, WsServerEvent } from "../types/wire";
+import type { HistoryEntry, QuestionSpec, TaskDraft, WsServerEvent } from "../types/wire";
 
 /** The answer the frontend sends for a saved draft starts with this --
  * also how a replayed create_scheduled_task call tells "saved" apart
@@ -52,12 +52,11 @@ export type LogItem =
   | {
       id: string;
       kind: "question";
-      question: string;
-      header: string;
-      options: string[];
-      multiSelect: boolean;
+      questions: QuestionSpec[];
       status: "pending" | "answered";
-      answer?: string;
+      /** One per question, null for a skipped one; null as a whole when
+       * the user closed the questions. */
+      answers?: (string | null)[] | null;
     }
   | {
       id: string;
@@ -181,7 +180,7 @@ export type LocalAction =
   | { type: "local_edit_message"; turnIndex: number; text: string }
   | { type: "local_rewind_message"; turnIndex: number }
   | { type: "local_approval_resolved"; id: string; approved: boolean }
-  | { type: "local_question_answered"; id: string; answer: string }
+  | { type: "local_question_answered"; id: string; answers: (string | null)[] | null }
   | { type: "local_plan_answered"; id: string; status: "auto" | "manual" | "revise" }
   | { type: "local_task_draft_resolved"; id: string; status: "saved" | "dismissed"; savedName?: string }
   | { type: "local_connection_reset" }
@@ -363,7 +362,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         items: state.items.map((item) =>
           item.kind === "question" && item.id === action.id
-            ? { ...item, status: "answered", answer: action.answer }
+            ? { ...item, status: "answered", answers: action.answers }
             : item,
         ),
       };
@@ -588,10 +587,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           {
             id: action.id,
             kind: "question",
-            question: action.question,
-            header: action.header,
-            options: action.options,
-            multiSelect: action.multi_select,
+            questions: action.questions,
             status: "pending",
           },
         ],

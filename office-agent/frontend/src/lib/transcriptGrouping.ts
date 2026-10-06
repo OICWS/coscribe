@@ -286,6 +286,16 @@ function firstLine(text: string | undefined): string | null {
   return line ? line.trim() : null;
 }
 
+/** ask_user_question's first question; an older call asked one directly. */
+function firstQuestion(args: ArgRecord): string | undefined {
+  const questions = args.questions;
+  if (!Array.isArray(questions)) return str(args, "question");
+  const first: unknown = questions[0];
+  const text = first && typeof first === "object" ? (first as Record<string, unknown>).question : undefined;
+  if (typeof text !== "string" || !text) return undefined;
+  return questions.length > 1 ? `${text} (+${questions.length - 1} more)` : text;
+}
+
 function basename(path: string): string {
   return path.split(/[/\\]/).pop() || path;
 }
@@ -422,7 +432,7 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   task_update: () => ({ verb: "Updated a task", object: null }),
   task_list: () => ({ verb: "Listed tasks", object: null }),
   remember: () => ({ verb: "Saved a memory", object: null }),
-  ask_user_question: (a) => ({ verb: "Asked", object: str(a, "question") ?? "a question", glue: ": " }),
+  ask_user_question: (a) => ({ verb: "Asked", object: firstQuestion(a) ?? "a question", glue: ": " }),
   spawn_agent: (a) => ({ verb: "Delegated to a sub-agent", object: str(a, "description") ?? null, glue: ": " }),
   run_code_task: (a) => ({ verb: "Handed a coding task to the code module", object: str(a, "description") ?? null, glue: ": " }),
   // The code module's own commands carry the script in place of a

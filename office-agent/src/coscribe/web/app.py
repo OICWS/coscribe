@@ -3301,7 +3301,15 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 elif message_type == "approval_response":
                     session.resolve_approval(data["id"], bool(data.get("approved")))
                 elif message_type == "question_response":
-                    session.resolve_question(data["id"], str(data.get("answer", "")))
+                    answers = data.get("answers")
+                    if data.get("dismissed"):
+                        session.resolve_question(data["id"], None)
+                    elif isinstance(answers, list):
+                        session.resolve_question(
+                            data["id"], [None if a is None else str(a) for a in answers]
+                        )
+                    else:
+                        session.resolve_question(data["id"], str(data.get("answer", "")))
                 elif message_type == "stop":
                     session.request_stop()
                     await session.run_interrupt_hooks()

@@ -64,6 +64,7 @@ import { EMPTY_WORKFLOW } from "./lib/workflowEdit";
 import { recordKey, workflowProgress, workflowRunLabel } from "./lib/workflowProgress";
 import { connect, resolveThreadId, type AgentSocket, type ConnectionStatus } from "./lib/ws";
 import { chatReducer, initialChatState, TASK_DRAFT_SAVED_PREFIX, type LogItem } from "./state/reducer";
+import { QuestionPanel } from "./components/QuestionCard";
 import type { CommandInfo, ThreadSummary } from "./types/session";
 import type { ScheduledRun, ScheduledTask } from "./types/settings";
 import type { StepRecord, Workflow } from "./types/workflow";
@@ -674,10 +675,15 @@ function App() {
     });
   };
 
-  const onAnswerQuestion = (id: string, answer: string) => {
-    dispatch({ type: "local_question_answered", id, answer });
-    socketRef.current?.send({ type: "question_response", id, answer });
+  const onAnswerQuestion = (id: string, answers: (string | null)[] | null) => {
+    dispatch({ type: "local_question_answered", id, answers });
+    socketRef.current?.send(
+      answers ? { type: "question_response", id, answers } : { type: "question_response", id, dismissed: true },
+    );
   };
+  const pendingQuestion = state.items.findLast(
+    (item): item is Extract<LogItem, { kind: "question" }> => item.kind === "question" && item.status === "pending",
+  );
 
   const onSwitchModel = (model: string) => socketRef.current?.send({ type: "switch_model", model });
 
@@ -935,7 +941,6 @@ function App() {
               turnInFlight={state.turnInFlight}
               connectorTools={state.connectorTools}
               onApprove={onApprove}
-              onAnswerQuestion={onAnswerQuestion}
               onAnswerPlan={onAnswerPlan}
               onEditMessage={state.turnInFlight || isCode ? undefined : onEditMessage}
               onRewindMessage={state.turnInFlight || isCode ? undefined : onRewindMessage}
@@ -965,6 +970,9 @@ function App() {
              * ChatLog.tsx's own wrapper and Composer's root exactly. */}
             {state.error && (
               <div className="mx-auto w-full max-w-[880px] px-4 py-1 text-sm text-red-500">{state.error}</div>
+            )}
+            {pendingQuestion && (
+              <QuestionPanel key={pendingQuestion.id} item={pendingQuestion} onAnswer={onAnswerQuestion} />
             )}
             {composer}
           </>

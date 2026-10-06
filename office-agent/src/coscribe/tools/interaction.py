@@ -22,10 +22,14 @@ a question belongs to the person talking to the parent, not to a
 delegated run.
 """
 
-from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Annotated, Any, NotRequired
+
+from pydantic import Field
+
+# pydantic needs typing_extensions' TypedDict before Python 3.12.
+from typing_extensions import TypedDict
 
 from ..runtime.types import tool_metadata
 
@@ -37,13 +41,32 @@ PLAN_CHOICE_MANUAL = "manual"
 PLAN_CHOICE_REVISE = "revise:"
 
 
-def ask_user_question(
-    question: str,
-    options: str,
-    header: str = "",
-    multi_select: bool = False,
-) -> str:
-    """Ask the user a clarifying question with clickable choices, instead
+class QuestionOption(TypedDict):
+    label: Annotated[str, Field(description="a few words -- what the user clicks")]
+    description: NotRequired[
+        Annotated[str, Field(description="one short line under the label: what picking it means")]
+    ]
+
+
+class UserQuestion(TypedDict):
+    question: Annotated[str, Field(description="the question, one sentence")]
+    options: Annotated[list[QuestionOption], Field(description="2-6 choices")]
+    multi_select: NotRequired[
+        Annotated[
+            bool,
+            Field(
+                description='true when several can apply ("which sheets should I include?"); '
+                'false when exactly one makes sense ("which format?")'
+            ),
+        ]
+    ]
+    header: NotRequired[
+        Annotated[str, Field(description='a label of a few words for the question, e.g. "Style"')]
+    ]
+
+
+def ask_user_question(questions: list[UserQuestion]) -> str:
+    """Ask the user clarifying questions with clickable choices, instead
     of only asking in a normal reply. Use this when you're about to guess
     at a genuinely ambiguous requirement, when there's a real fork in how
     to proceed you'd otherwise describe in prose, or whenever picking
@@ -53,30 +76,95 @@ def ask_user_question(
     fully specifies what to do -- this is for decisions only the user can
     make, not a substitute for actually reading what they already said.
 
-    The user can always ignore every listed option and type a custom
-    answer instead ("Something else") -- `options` narrows the likely
-    answers to make deciding fast, it doesn't have to be exhaustive.
+    Ask everything you need at once (1-4 questions): the user steps
+    through them one by one and answers them together. Each option has a
+    short label and, when the label alone doesn't say enough, a one-line
+    description. The user can always type their own answer instead
+    ("Something else") or skip a question, so the options narrow the
+    likely answers without having to be exhaustive.
+
+    The answer comes back as the chosen label(s) -- several joined by
+    ", " for a multi-select question -- one line per question when you
+    asked more than one, "(skipped)" for a question the user skipped.
 
     This call always pauses for a real person to answer; there's no
     approval step and no auto-answer.
 
     Args:
-        question: the question to ask, one sentence
-        header: a short (a few words) label shown above the question,
-            e.g. "Priority" -- pass "" for no header
-        options: the clickable choices, one per line (2-6 short labels,
-            each a few words -- these render as clickable rows, not
-            paragraphs)
-        multi_select: true when the options aren't mutually exclusive and
-            the user may want several ("which sheets should I include?",
-            "which sections need changes?"); false when exactly one
-            answer makes sense ("which format?"). With true, the answer
-            comes back as the chosen labels joined by ", ".
+        questions: the questions, in the order to ask them
     """
     raise RuntimeError(
         "ask_user_question must be resolved via HumanInTheLoopMiddleware's "
         "'respond' decision -- reaching this body means the graph that "
         "called it never registered it in question_tool_names."
+    )
+
+
+def normalize_questions(args: dict[str, Any]) -> list[dict[str, Any]]:
+    """The call's questions as the page shows them. A conversation saved
+    before questions came in lists asked one question with its options as
+    lines of text; it can still be resumed."""
+    raw = args.get("questions")
+    if not isinstance(raw, list):
+        raw = [
+            {
+                "question": args.get("question", ""),
+                "header": args.get("header", ""),
+                "options": str(args.get("options", "")).split("\n"),
+                "multi_select": args.get("multi_select", False),
+            }
+        ]
+    questions = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        options = []
+        for option in item.get("options") or []:
+            if isinstance(option, dict):
+                label, description = (
+                    str(option.get("label", "")),
+                    str(option.get("description", "")),
+                )
+            else:
+                label, description = str(option), ""
+            if label.strip():
+                options.append({"label": label.strip(), "description": description.strip()})
+        questions.append(
+            {
+                "question": str(item.get("question", "")),
+                "header": str(item.get("header", "")),
+                "options": options,
+                "multi_select": bool(item.get("multi_select", False)),
+            }
+        )
+    return questions
+
+
+QUESTIONS_DISMISSED = (
+    "The user closed the questions without answering. Don't ask them again; go "
+    "on with the most sensible choice and say which you made, or ask in your reply "
+    "if you can't go on without an answer."
+)
+
+
+def format_question_answers(
+    questions: Sequence[dict[str, Any]], reply: str | Sequence[str | None] | None
+) -> str:
+    """The tool result the model reads. `reply` is one answer per question
+    (None for a skipped one), None when the user closed the questions, or
+    a plain string -- a stop's placeholder, or an older page's single
+    answer -- passed through as is."""
+    if reply is None:
+        return QUESTIONS_DISMISSED
+    if isinstance(reply, str):
+        return reply
+    answers = [answer.strip() if answer and answer.strip() else "(skipped)" for answer in reply]
+    answers += ["(skipped)"] * (len(questions) - len(answers))
+    if len(questions) <= 1:
+        return answers[0] if answers else "(skipped)"
+    return "\n".join(
+        f"{index}. {question['question']} -> {answer}"
+        for index, (question, answer) in enumerate(zip(questions, answers, strict=False), 1)
     )
 
 

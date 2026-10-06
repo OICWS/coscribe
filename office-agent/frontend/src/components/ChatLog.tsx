@@ -22,7 +22,7 @@ import { ChevronRightIcon, PencilIcon, RetryIcon, RewindIcon } from "./icons";
 import { ImageLightbox } from "./ImageLightbox";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { type PlanChoice, PlanCard, type PlanItem } from "./PlanCard";
-import { QuestionCard } from "./QuestionCard";
+import { QuestionRecord } from "./QuestionCard";
 import { INVESTIGATION_PREFIX, InvestigationCard, RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
 import { SUBAGENT_REPORT_PREFIX, SubAgentReportCard } from "./SubAgentReportCard";
 import { TaskDraftCard } from "./TaskDraftCard";
@@ -74,7 +74,6 @@ interface ChatLogProps {
   /** The connected connectors' tool names, counted as "used N tools". */
   connectorTools?: ReadonlySet<string>;
   onApprove: (id: string, approved: boolean) => void;
-  onAnswerQuestion: (id: string, answer: string) => void;
   onAnswerPlan?: (item: PlanItem, choice: PlanChoice, feedback: string) => void;
   /** Undefined while a turn is in flight -- editing mid-turn would race
    * the very history the edit is about to truncate, so the affordance is
@@ -122,7 +121,6 @@ const SCROLL_LOAD_OLDER_THRESHOLD_PX = 150;
 export function ChatLog({
   items,
   onApprove,
-  onAnswerQuestion,
   onAnswerPlan,
   onEditMessage,
   onRewindMessage,
@@ -267,7 +265,6 @@ export function ChatLog({
             key={turn.id}
             turn={turn}
             onApprove={onApprove}
-            onAnswerQuestion={onAnswerQuestion}
             onPptxShapePicked={() => {}}
           />
         ))}
@@ -278,7 +275,6 @@ export function ChatLog({
             turn={turn}
             isLastTurn={i === turns.length - 1}
             onApprove={onApprove}
-            onAnswerQuestion={onAnswerQuestion}
             onAnswerPlan={onAnswerPlan}
             onEditMessage={onEditMessage}
             onRewindMessage={onRewindMessage}
@@ -337,7 +333,6 @@ function TurnView({
   turn,
   isLastTurn = false,
   onApprove,
-  onAnswerQuestion,
   onAnswerPlan,
   onEditMessage,
   onRewindMessage,
@@ -351,7 +346,6 @@ function TurnView({
   /** This turn is the one a reply is still being generated for. */
   live?: boolean;
   onApprove: (id: string, approved: boolean) => void;
-  onAnswerQuestion: (id: string, answer: string) => void;
   onAnswerPlan?: (item: PlanItem, choice: PlanChoice, feedback: string) => void;
   onEditMessage?: (turnIndex: number, text: string) => void;
   onRewindMessage?: (turnIndex: number, text: string) => void;
@@ -381,7 +375,7 @@ function TurnView({
             onPptxShapePicked={onPptxShapePicked}
           />
         ) : entry.kind === "question" ? (
-          <QuestionCard key={entry.id} item={entry} onAnswer={onAnswerQuestion} />
+          entry.status === "answered" ? <QuestionRecord key={entry.id} item={entry} /> : null
         ) : entry.kind === "plan" ? (
           <PlanCard key={entry.id} item={entry} onAnswer={onAnswerPlan} />
         ) : entry.kind === "task_draft" ? (

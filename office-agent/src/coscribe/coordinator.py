@@ -238,12 +238,10 @@ themselves, ask_user_question them through it rather than silently \
 picking on their behalf -- options being each available template's own \
 name (e.g. "Bold Statement", "Minimal Light"), header "Style", question \
 naming the deck's actual subject so the choice reads as concrete rather \
-than abstract. ask_user_question's own options render as short clickable \
-labels with no room for a description, so say a brief one-line hint per \
-option (drawn from that template's own description below) in your \
-ordinary reply text immediately before the call, not just the bare \
-names -- picking blind between "Bold Statement" and "Minimal Light" by \
-name alone isn't a real choice. Silently picking based on tone match \
+than abstract. Give each option a one-line description drawn from that \
+template's own description below -- picking blind between "Bold \
+Statement" and "Minimal Light" by name alone isn't a real choice. \
+Silently picking based on tone match \
 (below) is still the \
 right call once the user already has picked, said a preference in their \
 own message, or you're producing a small ancillary deck that isn't the \

@@ -130,7 +130,13 @@ from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
 from ..tools.browser import BROWSER_HOST, page_screenshot
 from ..tools.documents import DocumentToolkit
-from ..tools.interaction import PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL, PLAN_CHOICE_REVISE
+from ..tools.interaction import (
+    PLAN_CHOICE_AUTO,
+    PLAN_CHOICE_MANUAL,
+    PLAN_CHOICE_REVISE,
+    format_question_answers,
+    normalize_questions,
+)
 from ..tools.presentations import PresentationToolkit
 from ..tools.scheduled_tasks import (
     TASK_DRAFT_TOOL_NAMES,
@@ -509,7 +515,10 @@ class ChatSessionLG:
         self._context_window_client = context_window_client
         self._context_window: int | None = None
         self._pending_approvals: dict[str, Future[bool]] = {}
-        self._pending_questions: dict[str, Future[str]] = {}
+        # A question's answer is one entry per question, or None when the
+        # user closed them; the other requests (plans, drafts) and a stop
+        # answer with a string.
+        self._pending_questions: dict[str, Future[Any]] = {}
         self.hooks_config: dict[str, list[str]] = hooks_config or empty_hooks_config()
         self.plan_mode = False
         self.accept_edits = False
@@ -1148,7 +1157,7 @@ class ChatSessionLG:
         if future is not None and not future.done():
             future.set_result(approved)
 
-    def resolve_question(self, request_id: str, answer: str) -> None:
+    def resolve_question(self, request_id: str, answer: str | list[str | None] | None) -> None:
         future = self._pending_questions.get(request_id)
         if future is not None and not future.done():
             future.set_result(answer)
@@ -2637,24 +2646,17 @@ class ChatSessionLG:
         free-text answer, not a bool) and request_stop/reconnect need to
         treat the two independently."""
         request_id = uuid.uuid4().hex
-        future: Future[str] = get_running_loop().create_future()
+        future: Future[Any] = get_running_loop().create_future()
         self._pending_questions[request_id] = future
-        options = [line for line in args.get("options", "").split("\n") if line.strip()]
+        questions = normalize_questions(args)
         await websocket.send_json(
-            {
-                "type": "question_required",
-                "id": request_id,
-                "question": args.get("question", ""),
-                "header": args.get("header", ""),
-                "options": options,
-                "multi_select": bool(args.get("multi_select", False)),
-            }
+            {"type": "question_required", "id": request_id, "questions": questions}
         )
         try:
-            answer = await future
+            reply = await future
         finally:
             self._pending_questions.pop(request_id, None)
-        return {"type": "respond", "message": answer}
+        return {"type": "respond", "message": format_question_answers(questions, reply)}
 
     async def _decide_plan_request(
         self, args: dict[str, Any], websocket: WebSocket
