@@ -57,6 +57,7 @@ from coscribe.code_runtime.service import CodeService
 from coscribe.config import Settings
 from coscribe.runtime import secrets as secrets_module
 from coscribe.runtime_lg.audit import AuditLog
+from coscribe.runtime_lg.messages import is_steer
 from coscribe.tools.presentations import PresentationToolkit
 from coscribe.tools.subagent_tasks import SubAgentTaskStore
 from coscribe.web.app import ScriptEnvPackageInstall, create_app_lg
@@ -682,6 +683,74 @@ def test_write_file_requires_approval_and_executes_when_approved(
     assert entries[0].tool_name == "write_file"
     assert entries[0].decision == "approve"
     assert entries[0].reason == "human"
+
+
+def test_a_note_sent_mid_turn_reaches_the_model_at_its_next_step_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.runtime_lg.messages import STEER_NOTE
+
+    call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_steer1") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "write hi to note.txt"})
+            approval = ws.receive_json()
+            assert approval["type"] == "approval_required"
+
+            ws.send_json({"type": "steer", "id": "s1", "text": "and make it a list"})
+            ws.send_json({"type": "approval_response", "id": approval["id"], "approved": True})
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert {"type": "steers_delivered", "ids": ["s1"]} in messages
+    assert not any(m["type"] == "steers_requeued" for m in messages)
+    last = fake_model.received[-1][-1]
+    assert isinstance(last, HumanMessage)
+    assert last.content == STEER_NOTE + "and make it a list"
+    assert next(m for m in messages if m["type"] == "agent_message")["text"] == "done"
+
+
+def test_a_note_no_turn_was_left_to_read_is_sent_as_the_next_message_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="noted")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_steer2") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "steer", "id": "s1", "text": "one more thing"})
+            requeued = ws.receive_json()
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert requeued == {"type": "steers_requeued", "ids": ["s1"], "text": "one more thing"}
+    sent = fake_model.received[-1][-1]
+    assert isinstance(sent, HumanMessage) and "one more thing" in str(sent.content)
+    assert not is_steer(sent)
+    assert next(m for m in messages if m["type"] == "agent_message")["text"] == "noted"
+
+
+def test_stop_drops_the_notes_the_model_has_not_read_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    call = _tool_call("call_1", "write_file", {"path": "note.txt", "content": "hi"})
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="", tool_calls=[call])])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_steer3") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "write hi to note.txt"})
+            assert ws.receive_json()["type"] == "approval_required"
+            ws.send_json({"type": "steer", "id": "s1", "text": "never mind the list"})
+            ws.send_json({"type": "stop"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    types = [m["type"] for m in messages]
+    assert "steers_requeued" not in types and "steers_delivered" not in types
+    assert len(fake_model.received) == 1
 
 
 def test_the_sidebar_status_follows_a_conversation_from_waiting_to_ready_to_seen_lg(

@@ -382,6 +382,8 @@ function TurnView({
           <TaskDraftCard key={entry.id} item={entry} onReview={onReviewTaskDraft} onDismiss={onDismissTaskDraft} />
         ) : entry.kind === "workflow_draft" ? (
           <WorkflowDraftCard key={entry.id} entry={entry} />
+        ) : entry.kind === "steer" ? (
+          <SteerView key={entry.id} item={entry} />
         ) : (
           <LogItemView key={entry.id} item={entry} onEditMessage={isLastTurn ? onEditMessage : undefined} />
         ),
@@ -918,6 +920,25 @@ function ApprovalDetail({
 // screen. Same magnitude as Composer's own PASTE_CARD_MIN_CHARS, so "long
 // enough to collapse" means the same thing on both sides of a send.
 const LONG_MESSAGE_COLLAPSE_CHARS = 1000;
+
+/** A note added while the reply was being worked on: a user bubble, with
+ * whether the model has read it yet. */
+function SteerView({ item }: { item: Extract<LogItem, { kind: "steer" }> }) {
+  return (
+    <div className="ml-auto flex max-w-[96%] flex-col items-end gap-1">
+      <div
+        className={`rounded-2xl bg-[var(--user-bubble)] px-4 py-2 text-[var(--user-bubble-fg)] whitespace-pre-wrap ${
+          item.status === "pending" ? "opacity-60" : ""
+        }`}
+      >
+        {item.text}
+      </div>
+      <span className="text-xs text-[var(--muted)]">
+        {item.status === "pending" ? "Will be read at the next step" : "Added while working"}
+      </span>
+    </div>
+  );
+}
 
 function UserMessageView({
   item,

@@ -45,6 +45,8 @@ export interface StateEvent {
 
 export type HistoryEntry =
   | { kind: "user"; text: string; images?: string[] }
+  /** A note the user added while a reply was being worked on. */
+  | { kind: "steer"; text: string }
   | { kind: "agent"; text: string }
   | {
       kind: "tool";
@@ -304,8 +306,23 @@ export interface SkillSavedEvent {
   slug: string;
 }
 
+/** Notes the user added mid-turn, now read by the model. */
+export interface SteersDeliveredEvent {
+  type: "steers_delivered";
+  ids: string[];
+}
+
+/** Notes the turn ended before reading: sent as the next message, `text`. */
+export interface SteersRequeuedEvent {
+  type: "steers_requeued";
+  ids: string[];
+  text: string;
+}
+
 export type WsServerEvent =
   | StateEvent
+  | SteersDeliveredEvent
+  | SteersRequeuedEvent
   | HistoryEvent
   | OlderMessagesEvent
   | AgentDeltaEvent
@@ -431,8 +448,17 @@ export interface LoadOlderMessagesOut {
   type: "load_older_messages";
 }
 
+/** A note for the turn in progress: the model reads it before its next
+ * step instead of after the reply. */
+export interface SteerOut {
+  type: "steer";
+  id: string;
+  text: string;
+}
+
 export type WsClientMessage =
   | UserMessageOut
+  | SteerOut
   | EditMessageOut
   | RewindMessageOut
   | ApprovalResponseOut

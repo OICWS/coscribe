@@ -83,6 +83,9 @@ interface ComposerProps {
   modelPicker: ReactNode;
   usageRing: ReactNode;
   onSend: (payload: ComposerSendPayload) => void;
+  /** Text sent while a reply is being worked on: a note the model reads
+   * before its next step, instead of a message waiting for the reply. */
+  onSteer: (text: string) => void;
   onStop: () => void;
   onLocalError: (message: string) => void;
   /** Set by BrowserPanel's "Add to chat" -- an element it picked, handed
@@ -119,6 +122,7 @@ export function Composer({
   modelPicker,
   usageRing,
   onSend,
+  onSteer,
   onStop,
   onLocalError,
   externalImage,
@@ -212,6 +216,8 @@ export function Composer({
     });
   };
 
+  const hasAttachments = pendingImages.length > 0 || pendingFiles.length > 0 || pendingPastes.length > 0;
+
   const submit = () => {
     const text = value;
     if (
@@ -221,21 +227,17 @@ export function Composer({
       pendingPastes.length === 0
     )
       return;
-    // Real, user-reported bug: nothing gated a new message while a turn
-    // was already in flight -- the Send button visually swaps to Stop in
-    // that state (see the turnInFlight ? ... below), but Enter still ran
-    // this function directly, so typing and hitting Enter sent a second
-    // message anyway. The backend doesn't reject it either (a second
-    // handle_user_message call just queues behind the running turn's
-    // _turn_lock) -- so it wasn't unsafe, just silently confusing: the
-    // bubble appears immediately (the optimistic local echo below) with
-    // no sign it's not actually being worked on yet. "/stop" is the one
-    // deliberate exception -- App.tsx's onSend special-cases that exact
-    // text to reach the running turn directly instead of queuing, so it
-    // must stay sendable regardless of turnInFlight or it would have no
-    // way to reach a turn stuck deep enough that the Stop button itself
-    // isn't rendering the way the user expects.
-    if (turnInFlight && text.trim().toLowerCase() !== "/stop") return;
+    // While a reply is being worked on, text goes to it as a note rather
+    // than queuing as a message behind it. Attachments can't ride along
+    // on a note, so they wait for the reply. "/stop" still reaches the
+    // running turn as a stop (App.tsx's onSend).
+    if (turnInFlight && text.trim().toLowerCase() !== "/stop") {
+      if (!text.trim() || hasAttachments) return;
+      onSteer(text.trim());
+      setValue("");
+      requestAnimationFrame(resize);
+      return;
+    }
 
     // "/stop" reaches the currently-running turn directly (a dedicated WS
     // "stop" message, not "user_message") -- App.tsx's onSend special-cases
@@ -421,11 +423,13 @@ export function Composer({
     setPendingFiles((prev) => [...prev, { name: file.name, path: result.path }]);
   };
 
-  const canSend =
-    value.trim().length > 0 ||
-    pendingImages.length > 0 ||
-    pendingFiles.length > 0 ||
-    pendingPastes.length > 0;
+  let sendTitle = "Send";
+  if (turnInFlight) {
+    sendTitle = hasAttachments ? "Attachments can be sent once this reply is done" : "Add to the reply in progress";
+  }
+  const canSend = turnInFlight
+    ? value.trim().length > 0 && !hasAttachments
+    : value.trim().length > 0 || hasAttachments;
 
   return (
     <>
@@ -562,7 +566,7 @@ export function Composer({
          * a small bordered icon button (feather's corner-down-left
          * "return" glyph) instead of the old large filled-accent circle
          * sitting in its own row below. */}
-        {turnInFlight ? (
+        {turnInFlight && !value.trim() ? (
           <button
             type="button"
             title="Stop"
@@ -574,7 +578,7 @@ export function Composer({
         ) : (
           <button
             type="button"
-            title="Send"
+            title={sendTitle}
             className="absolute bottom-3 right-3 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-40 disabled:hover:bg-transparent"
             onClick={performSend}
             disabled={!canSend}

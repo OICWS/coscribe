@@ -110,6 +110,7 @@ from ..runtime_lg.messages import (
     PLAN_MODE_NOTE,
     context_note,
     current_date_note,
+    is_steer,
     language_note,
     last_conversation_context,
     strip_mode_note,
@@ -566,7 +567,10 @@ class ChatSessionLG:
         # NOT gated by this lock, same as ChatSession's identical methods
         # -- they have to be able to reach whichever turn is *currently*
         # in flight, not queue behind it.
-        self._turn_lock = TurnLock(lambda active: BROWSER_HOST.set_active(thread_id, active))
+        self._turn_lock = TurnLock(self._turn_lock_changed)
+        # Notes the user sent during a turn, (id, text), not yet read by
+        # the model.
+        self._steers: list[tuple[str, str]] = []
         # The task currently holding _turn_lock (handle_user_message or
         # resume_after_reconnect), if any -- see abandon_orphaned_turn's
         # docstring for why this exists: a turn lock alone would let an
@@ -1137,6 +1141,7 @@ class ChatSessionLG:
             auto_compact_tokens=auto_compact_tokens,
             defer_tools=defer,
             core_tool_names=core_names,
+            take_steers=self._take_steers,
         )
 
     def _tool_binding(
@@ -1161,6 +1166,48 @@ class ChatSessionLG:
         future = self._pending_questions.get(request_id)
         if future is not None and not future.done():
             future.set_result(answer)
+
+    def add_steer(self, steer_id: str, text: str) -> None:
+        """A note for the turn in progress, read before the model's next
+        step. With no turn running (it ended as the note was sent), it is
+        sent as a message instead."""
+        self._steers.append((steer_id, text))
+        if not self._turn_lock.locked():
+            asyncio.get_running_loop().create_task(self._send_unread_steers())
+
+    async def _take_steers(self) -> list[str]:
+        if not self._steers:
+            return []
+        steers, self._steers = self._steers, []
+        socket = self._live_websocket or self._turn_websocket
+        if socket is not None:
+            try:
+                await socket.send_json({"type": "steers_delivered", "ids": [i for i, _ in steers]})
+            except Exception:  # noqa: BLE001 -- the tab went away; the model still has them
+                pass
+        return [text for _, text in steers]
+
+    def _turn_lock_changed(self, active: bool) -> None:
+        BROWSER_HOST.set_active(self.thread_id, active)
+        # The turn ended before its next model step could read them.
+        if not active and self._steers:
+            asyncio.get_running_loop().create_task(self._send_unread_steers())
+
+    async def _send_unread_steers(self) -> None:
+        if not self._steers or self._turn_lock.locked():
+            return
+        steers, self._steers = self._steers, []
+        text = "\n\n".join(note for _, note in steers)
+        websocket: Any = self._live_websocket
+        if websocket is not None:
+            try:
+                await websocket.send_json(
+                    {"type": "steers_requeued", "ids": [i for i, _ in steers], "text": text}
+                )
+            except Exception:  # noqa: BLE001 -- the tab went away; run unwatched
+                websocket = None
+        socket: Any = websocket or SilentSocket()
+        await self.handle_user_message(text, socket)
 
     def request_stop(self) -> None:
         """Called directly from ws_endpoint on a "stop" message, not
@@ -1201,6 +1248,8 @@ class ChatSessionLG:
         which reasons through exactly this for the WebSocket-disconnect
         case and deliberately avoids it there too."""
         self._stop_requested = True
+        # The page puts the unread notes back in the composer.
+        self._steers.clear()
         self._stop_waited_on_subagents()
         # A browser step can be waiting out a slow page for an hour, in the
         # desktop app where cancelling this turn doesn't reach.
@@ -3030,7 +3079,9 @@ class ChatSessionLG:
             )
             return
 
-        human_positions = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+        human_positions = [
+            i for i, m in enumerate(messages) if isinstance(m, HumanMessage) and not is_steer(m)
+        ]
         if index < 0 or index >= len(human_positions):
             await websocket.send_json(
                 {"type": "error", "message": f"No such message to edit (index {index})."}
@@ -3080,7 +3131,9 @@ class ChatSessionLG:
             )
             return
 
-        human_positions = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+        human_positions = [
+            i for i, m in enumerate(messages) if isinstance(m, HumanMessage) and not is_steer(m)
+        ]
         if index < 0 or index >= len(human_positions):
             await websocket.send_json(
                 {"type": "error", "message": f"No such message to rewind (index {index})."}

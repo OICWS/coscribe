@@ -7471,6 +7471,38 @@ Codex itself -- every message one Codex turn in the conversation's folder
       answered by click, two ticks and a skip, the model got "Excel 表格 /
       清洗整理, 筛选排序 / (skipped)" and went on from there.
 
+## Phase 8cs -- Notes added while a reply is being worked on (shipped)
+
+- [x] While a turn runs, the composer sends what you type as a note to
+      that turn instead of refusing it: an empty box shows Stop, typing
+      turns it into Send. The note is put into the conversation before the
+      model's next step (`agent._SteerMiddleware`, `HumanMessage` marked
+      `coscribe_steer`, prefixed "[The user added this while you were
+      working ...]"), so it changes the work in progress instead of
+      waiting for the reply.
+- [x] In the log a note is a bubble inside the turn, "Will be read at the
+      next step" until the model reads it (`steers_delivered`), then
+      "Added while working"; history replays it the same way (kind
+      `steer`). It isn't a turn of its own: the per-turn step cap, the
+      review cap and edit/rewind all skip it (`messages.starts_a_turn`),
+      or each note would hand the turn a fresh budget.
+- [x] A note the turn ended before reading is sent as the next message
+      (`steers_requeued`); Stop drops unread notes and puts their text back
+      in the composer. Attachments can't go on a note -- they wait for the
+      reply.
+- [x] Checked in the UI against a local fake model (peak hours; the
+      behaviour checked is the page's): Stop with an empty box, Send once
+      typed, the note pending during an 8-second script, then read --
+      the model's next reply quoted it -- and the same after a reload.
+- [x] Live on deepseek-flash: asked for valid orders per region, then,
+      while its first script ran, "also count by month and write both
+      tables to 资料/订单统计.xlsx". The note was read 4.3 s later, at the
+      next step; the model's next line took it up ("收到，我把区域和月份
+      两张表都写进 ...") and the file has both sheets. Region counts match
+      the independent truth (258/126/194/195, 773). 17 model calls, ¥0.11
+      at peak prices; the main loop hit the cache at 99% with the note in
+      the middle of the turn.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

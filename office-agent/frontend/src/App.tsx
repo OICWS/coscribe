@@ -627,7 +627,7 @@ function App() {
       // running for /stop to mean anything, which itself requires
       // history to have long since arrived.
       dispatch({ type: "local_user_message", text: payload.displayText, instant: true });
-      socketRef.current?.send({ type: "stop" });
+      onStop();
       return;
     }
     runOrQueueSend(() => {
@@ -641,7 +641,24 @@ function App() {
     });
   };
 
-  const onStop = () => socketRef.current?.send({ type: "stop" });
+  const onSteer = (text: string) => {
+    const id = `steer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    dispatch({ type: "local_steer", id, text });
+    socketRef.current?.send({ type: "steer", id, text });
+  };
+
+  // A stop drops the notes the model hasn't read yet; their text goes back
+  // into the composer rather than being lost.
+  const onStop = () => {
+    const unread = state.items.filter(
+      (item): item is Extract<LogItem, { kind: "steer" }> => item.kind === "steer" && item.status === "pending",
+    );
+    if (unread.length > 0) {
+      dispatch({ type: "local_steers_withdrawn", ids: unread.map((item) => item.id) });
+      setPendingComposerText(unread.map((item) => item.text).join("\n\n"));
+    }
+    socketRef.current?.send({ type: "stop" });
+  };
 
   const onEditMessage = (turnIndex: number, text: string) => {
     dispatch({ type: "local_edit_message", turnIndex, text });
@@ -746,6 +763,7 @@ function App() {
         )
       }
       onSend={onSend}
+      onSteer={onSteer}
       onStop={onStop}
       onLocalError={onLocalError}
       externalImage={pendingBrowserCapture}

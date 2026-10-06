@@ -41,7 +41,12 @@ from ..tools.subagent_tasks import (
 )
 from .agent import build_langgraph_agent
 from .agent import tool_name as _tool_name
-from .messages import extract_text, render_transcript_lg, serialize_history_for_ws_lg
+from .messages import (
+    extract_text,
+    render_transcript_lg,
+    serialize_history_for_ws_lg,
+    starts_a_turn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -574,9 +579,9 @@ def _review_key(file_path: str) -> str:
 
 def reviews_this_turn(messages: Sequence[Any]) -> list[str]:
     """The file each finished review_work call since the user's last
-    message checked ("" for none), oldest first."""
+    request checked ("" for none), oldest first."""
     start = next(
-        (i + 1 for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)),
+        (i + 1 for i in range(len(messages) - 1, -1, -1) if starts_a_turn(messages[i])),
         0,
     )
     turn = messages[start:]

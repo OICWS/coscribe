@@ -3310,6 +3310,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                         )
                     else:
                         session.resolve_question(data["id"], str(data.get("answer", "")))
+                elif message_type == "steer":
+                    session.add_steer(str(data.get("id", "")), str(data.get("text", "")))
                 elif message_type == "stop":
                     session.request_stop()
                     await session.run_interrupt_hooks()
