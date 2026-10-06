@@ -1,24 +1,10 @@
-"""The score (v2, bright launch track), written against the film's map (script §5.2 gives WHERE things
-happen; the mood is new: D major, ~110 BPM, uplifting and confident).
+"""The score (v3): one bright D-major track at a steady 120 BPM for the whole film.
 
-Orchestration: bright grand piano (8th-note ostinato + the hook), plucked synth arpeggios (16ths, with a
-dotted-8th ping-pong echo), warm detuned-saw pad and synth bass (both side-chained to the kick), a clean
-kick / clap / shaker / hat groove that enters progressively, glockenspiel doubling the hook at the peaks,
-noise risers, snare-roll builds, downlifters and impacts (kick + sub boom + soft crash) on section changes.
-
-The hook: F#5 E5 D5 · E5 A4 | D5 F#5 A5 -> (hit on D). Teased on the piano while sentence 1 is typed,
-stated in half-time over each "quality shot" breakdown, then in full after it (25.0 / 46.0 / 69.5 / 88.5),
-gaining a layer every time; alone and quiet on the piano at 100.4; in octaves with everything at 110.0,
-where it now leaps UP to A5-B5; and once more, gently, in the outro over G - A - D (117.5).
-
-Timing: a tempo map. Each section of the film is a segment with a whole (or half) number of beats, so
-every landing, hit and section change falls on the beat grid (local tempi 106-120 BPM, mostly 108-113;
-the montage runs at 120 so its four cuts 94.0/95.5/97.0/98.5 are three beats apart). Hits marked
-".5" in the map are anticipations (a push on the "and").
-
-The music is rendered in three "takes" split at the two hard stops (100.0 the montage stops dead,
-113.6 the scissor cut onto a single bright piano chord); a note never rings over its take's end and each
-take has its own reverb tails, so nothing leaks across a cut.
+Every picture hit sits on the beat grid, so the music never changes tempo, never breaks down and never
+stops dead: the energy only steps up, sentence by sentence (soft pulse -> kick and claps -> hats ->
+four on the floor), eases for three seconds at 100 s while the harmony carries on, builds into the peak
+at 110 s and resolves on D at 117.5 s. The hook (F#5 E5 D5 E5 A4 | D5 F#5 A5) returns once per
+sentence, gaining a layer each time (pluck, then glockenspiel, then piano octaves).
 """
 import numpy as np
 from scipy import signal
@@ -29,31 +15,18 @@ from dsp import (N, SR, add, convolve_stereo, db, envelope, fade, filt, highpass
 
 # ---------------------------------------------------------------- tempo map
 # (t0, t1, beats, what)
-SEGS = [
-    (0.0, 13.0, 24, "intro: piano + soft pulse, typing 1, riser 11.2 -> 13.0"),
-    (13.0, 21.0, 15, "groove 1"),
-    (21.0, 25.0, 8, "breakdown 1 (half-time, filtered)"),
-    (25.0, 28.5, 6.5, "hook 1 -> hit 28.5"),
-    (28.5, 34.5, 11, "tail, typing 2 (30.0), riser 33.0 -> 34.5"),
-    (34.5, 42.0, 14, "groove 2"),
-    (42.0, 46.0, 8, "breakdown 2"),
-    (46.0, 49.5, 6.5, "hook 2 -> hit 49.5"),
-    (49.5, 56.6, 13, "tail, typing 3 (52.0), riser 55.2 -> 56.6"),
-    (56.6, 65.0, 15, "groove 3"),
-    (65.0, 69.5, 8, "breakdown 3 (longest)"),
-    (69.5, 72.5, 5.5, "hook 3 -> hit 72.5"),
-    (72.5, 78.6, 11, "tail, typing 4 (74.0), riser 77.4 -> 78.6"),
-    (78.6, 86.0, 14, "groove 4 (tight 16ths)"),
-    (86.0, 88.5, 5, "breakdown 4"),
-    (88.5, 92.5, 7.5, "hook 4 -> hit 92.5"),
-    (92.5, 100.0, 15, "tail, montage hits 94.0/95.5/97.0/98.5, riser -> 100.0 stop"),
-    (100.4, 103.2, 5, "breath: piano hook alone"),
-    (103.2, 110.0, 12, "build"),
-    (110.0, 113.6, 6.5, "peak -> scissor cut 113.6"),
-    (113.6, 117.5, 7, "outro: piano tail, hook over G - A"),
-    (117.5, 120.0, 4.5, "resolution: D major"),
-]
-TAKES = [(0.0, 100.0), (100.0, 113.6), (113.6, 120.0)]
+BPM = 120.0
+BT = 60.0 / BPM
+# One tempo for the whole film. At 120 BPM every picture hit (13.0, 28.5, 34.5, 49.5, 72.5, 92.5, the
+# montage cuts 94.0/95.5/97.0/98.5, 110.0, 117.5) already sits on a beat; 56.6 and 78.6 land 0.1 s
+# after the downbeat at 56.5 / 78.5, which reads as the picture answering the music.
+# (t0, t1, beats, what) -- energy only ever steps up until the build; no breakdowns, no dead stops.
+_S = [(0.0, 13.0, "intro: piano, soft pulse from 4 s, riser into 13"), (13.0, 28.5, "groove 1"),
+      (28.5, 34.5, "groove 1, lighter (typing 2)"), (34.5, 56.5, "groove 2"), (56.5, 78.5, "groove 3"),
+      (78.5, 100.0, "groove 4 + montage"), (100.0, 103.0, "breath: drums out, harmony stays"),
+      (103.0, 110.0, "build"), (110.0, 113.5, "peak"), (113.5, 117.5, "outro"), (117.5, 120.0, "resolution")]
+SEGS = [(t0, t1, (t1 - t0) / BT, w) for t0, t1, w in _S]
+TAKES = [(0.0, 120.0)]
 
 
 class Seg:
@@ -420,286 +393,203 @@ def light(S, g, b0, b1, changes, vel=0.5, pulse=True, shaker_from=None, lvl=1.0)
 
 
 # ---------------------------------------------------------------- the cue sheet
+class Grid:
+    """Absolute beat grid: beat b sits at b * BT seconds."""
+    t0, bt = 0.0, BT
+
+    def __call__(self, b):
+        return b * BT
+
+
+PROG = ["D", "A", "Bm", "G"]          # one chord per bar, the whole film
+
+
+def prog(b0, b1, cyc=PROG):
+    first = int(np.floor(b0 / 4))
+    return [(4.0 * k, cyc[k % len(cyc)]) for k in range(first, int(np.ceil(b1 / 4)) + 1)]
+
+
+def groove(S, g, b0, b1, level):
+    """Drums on the absolute bar, so the meter never hiccups across sections.
+    1: kick on 1 & 3, shaker 16ths, clap on 4.  2: + clap 2 & 4, offbeat hats.  3: four on the floor,
+    open hats."""
+    b = float(b0)
+    while b < b1 - 1e-6:
+        pos = int(round(b)) % 4
+        if level >= 3 or pos in (0, 2):
+            S.kick(g(b), 1.0 if pos in (0, 2) else 0.85)
+        if level >= 2 and pos == 2:
+            S.kick(g(b - 0.5), 0.5, pump=0.4)
+        if (level >= 2 and pos in (1, 3)) or (level == 1 and pos == 3):
+            S.clap(g(b), 0.9 if level >= 2 else 0.7)
+        for s in range(4):
+            S.shaker(g(b + s * 0.25), 1.0 if s == 2 else 0.55, accent=(s == 2), p=0.3 if s % 2 else 0.15,
+                     gain=0.08 if level == 1 else 0.1)
+        if level >= 2:
+            S.hat(g(b + 0.5), 0.6, open_=(level >= 3), gain=0.05)
+        b += 1.0
+
+
+def fill(S, g, b_end, n=2):
+    """A short snare fill into beat b_end (instead of a full riser)."""
+    k = int(n * 4)
+    for s in range(k):
+        S.snare(g(b_end - n + s * 0.25), 0.3 + 0.4 * s / k, gain=0.13)
+
+
+def accent(S, t, sym, vel=0.8, crash=True):
+    """A hit on the beat without stopping the groove: crash + bright piano chord."""
+    if crash:
+        S.crash(t, vel, dur=2.2)
+    S.stab(t, [bass_midi(sym, 38)] + voicing(sym, 62, 81), 0.62 * vel, ring=1.2, gain=0.4)
+
+
 def compose(events=None, lines=None):
     S = Score()
-    G = [Seg(i) for i in range(len(SEGS))]
+    g = Grid()
+    B = lambda t: round(t / BT, 6)  # noqa: E731
 
-    # ---------------- 0.0–13.0 intro: light and curious ----------------
-    g = G[0]
-    ch = [(0, "D"), (4, "Bm7"), (8, "Gmaj7"), (12, "Asus"), (14, "A"), (16, "D"), (20, "Asus"), (22, "A")]
-    # bar 1: a few notes, a question; then the ostinato
-    for b, name, v in ((1, "A4", 0.40), (1.5, "D5", 0.42), (2, "F#5", 0.46), (3, "E5", 0.40)):
-        S.piano(g(b), nm(name), v, ring=g(b + 1) - g(b) + 0.3, gain=0.45, human=False)
-    S.piano(g(1), nm("D3"), 0.36, ring=g(4) - g(1), gain=0.45, human=False)
-    ostinato(S, g, 4, 24, ch, vel=0.40, lh_vel=0.32, cresc=0.2)
-    pads(S, g, 4, 20.5, ch, level=0.07, bright=0.85)
-    for b in np.arange(8, 20.5, 1.0):     # soft pulse from bar 3
-        S.bass(g(b), bass_midi(at(ch, b), 33) + 12, 0.35 * g.bt, 0.45 + 0.15 * (b > 14), gain=0.42, bright=0.6)
-        S.kick(g(b), 0.28 + 0.06 * (b >= 14), gain=0.62, pump=0.3)
-    for b in np.arange(14, 20.5, 0.5):    # typing starts (8.0): soft shaker
-        S.shaker(g(b), 0.4 if (b * 2) % 2 else 0.25, gain=0.06, p=0.35)
-    # 4.3–6.5: the hook teased high on the piano (while "And still cost someone days." is on screen)
-    for b, name, d in HOOK[:5]:
-        S.piano(g(8 + b), nm(name) + 12, 0.30, ring=d * g.bt + 0.4, gain=0.42, bus="pianoverb")
-    # riser 11.2 -> 13.0 (beat 20.67 -> 24)
-    riser(S, 11.2, 13.0, g, roll_from=21, level=0.9)
-    arp(S, g, 21, 24, ch, vel=0.65, step=0.25, cresc=0.8, gain=0.24)
-    S.filt_pts([(11.1, 20000.0), (11.4, 2000.0), (12.98, 20000.0)])
-    pads(S, g, 20.5, 24, ch, level=0.085, bright=1.0)
+    # ---------------- 0–13 intro: piano, then a soft pulse; nothing drops after this ----------------
+    for b, name, v in ((0, "A4", 0.40), (0.5, "D5", 0.42), (1, "F#5", 0.46), (2, "E5", 0.40)):
+        S.piano(g(b), nm(name), v, ring=0.8, gain=0.45, human=False)
+    S.piano(g(0), nm("D3"), 0.36, ring=2.0, gain=0.45, human=False)
+    ch = prog(4, 26)
+    ostinato(S, g, 4, 26, ch, vel=0.40, lh_vel=0.32, cresc=0.15)
+    pads(S, g, 4, 26, ch, level=0.08, bright=0.9)
+    for b, name, d in HOOK[:5]:               # the hook teased high, while "And still cost someone days." is up
+        S.piano(g(9 + b), nm(name) + 12, 0.30, ring=d * BT + 0.4, gain=0.42, bus="pianoverb")
+    for b in np.arange(8, 26, 1.0):           # soft pulse from 4 s
+        S.bass(g(b), bass_midi(at(ch, b), 33) + 12, 0.35 * BT, 0.5, gain=0.42, bright=0.6)
+        S.kick(g(b), 0.3 + 0.15 * (b >= 16), gain=0.62, pump=0.3)
+    for b in np.arange(16, 26, 0.5):          # typing (8.0): shaker
+        S.shaker(g(b), 0.4 if (b * 2) % 2 else 0.25, gain=0.07, p=0.35)
+    arp(S, g, 18, 26, ch, vel=0.55, cresc=0.5, gain=0.22)
+    riser(S, 11.0, 13.0, None, level=0.7)
+    fill(S, g, 26, 1.5)
 
-    # ---------------- 13.0–21.0 groove 1 ----------------
-    g = G[1]
-    ch = [(0, "D"), (4, "A/C#"), (8, "Bm"), (12, "G")]
-    impact(S, g.t0, "D", 0.85)
-    drums(S, g, 0, g.beats, level=1, clap_from=8)
-    bassline(S, g, 0, g.beats, ch, vel=0.9)
-    pads(S, g, 0, g.beats, ch, level=0.11)
-    ostinato(S, g, 0, g.beats, ch, vel=0.5)
-    arp(S, g, 4, g.beats, ch, vel=0.75, gain=0.25)
+    # ---------------- 13–34.5 groove 1 (sentence 1, then typing 2 slightly lighter) ----------------
+    b0, b1 = B(13.0), B(34.5)
+    ch = prog(b0, b1)
+    S.crash(13.0, 0.75)
+    S.boom(13.0, 0.6, f=float(I.midi_hz(bass_midi("A", 26))))
+    groove(S, g, b0, b1, 1)
+    bassline(S, g, b0, b1, ch, vel=0.9)
+    pads(S, g, b0, b1, ch, level=0.11)
+    ostinato(S, g, b0, b1, ch, vel=0.48)
+    arp(S, g, B(17.0), B(28.5), ch, vel=0.72, gain=0.24)
+    hook(S, g, B(24.0), HOOK, vel=0.64)
+    accent(S, 28.5, "A", 0.7)
+    fill(S, g, b1, 1)
 
-    # ---------------- 21.0–25.0 breakdown 1 ----------------
-    g = G[2]
-    breakdown(S, g, [(0, "Bm7"), (4, "G"), (6, "Asus"), (7, "A")], HOOK, build_beats=2)
+    # ---------------- 34.5–56.5 groove 2 (PPT, then typing 3) ----------------
+    b0, b1 = B(34.5), B(56.5)
+    ch = prog(b0, b1)
+    S.crash(34.5, 0.8)
+    groove(S, g, b0, b1, 2)
+    bassline(S, g, b0, b1, ch, vel=0.95)
+    pads(S, g, b0, b1, ch, level=0.115)
+    ostinato(S, g, b0, b1, ch, vel=0.48)
+    arp(S, g, b0, B(49.5), ch, vel=0.76, gain=0.25)
+    arp(S, g, B(49.5), b1, ch, vel=0.6, gain=0.2)
+    hook(S, g, B(46.0), HOOK, vel=0.66, pluck=True)
+    accent(S, 49.5, "G", 0.75)
+    fill(S, g, b1, 1)
 
-    # ---------------- 25.0–28.5 hook 1 -> hit 28.5 ----------------
-    g = G[3]
-    ch = [(0, "D"), (2, "A"), (4, "G")]
-    S.crash(g.t0, 0.7)
-    drums(S, g, 0, 6, level=1, fill=False)
-    for s in range(4):
-        S.snare(g(5.5 + s * 0.25), 0.4 + 0.15 * s)
-    bassline(S, g, 0, 6.5, ch, vel=0.9)
-    pads(S, g, 0, 6.5, ch, level=0.11)
-    ostinato(S, g, 0, 6.5, ch, vel=0.38, lh=True, lo=57, hi=72)
-    arp(S, g, 0, 6.5, ch, vel=0.6, gain=0.22)
-    hook(S, g, 0, HOOK, vel=0.66)
-    impact(S, 28.5, "D", 0.9)
-    S.piano(28.5, nm("D6"), 0.55, ring=1.4, gain=0.45, bus="pianoverb")
+    # ---------------- 56.5–78.5 groove 3 (Word, then typing 4): four on the floor ----------------
+    b0, b1 = B(56.5), B(78.5)
+    ch = prog(b0, b1)
+    S.crash(56.5, 0.85)
+    S.boom(56.5, 0.55, f=float(I.midi_hz(bass_midi("D", 26))))
+    groove(S, g, b0, b1, 3)
+    bassline(S, g, b0, b1, ch, vel=1.0)
+    pads(S, g, b0, b1, ch, level=0.12, bright=1.1)
+    ostinato(S, g, b0, b1, ch, vel=0.5)
+    arp(S, g, b0, b1, ch, vel=0.78, gain=0.25, lo=66)
+    hook(S, g, B(70.0), HOOK, vel=0.68, pluck=True, glock=True)
+    accent(S, 72.5, "A", 0.8)
+    fill(S, g, b1, 1)
 
-    # ---------------- 28.5–34.5 tail, typing 2, riser ----------------
-    g = G[4]
-    tail(S, 28.5, g(2), "D")
-    ch = [(2, "G"), (7, "Asus"), (8, "A")]
-    light(S, g, 2, 11, ch, shaker_from=3)
-    riser(S, 33.0, 34.5, g, roll_from=8.5, level=0.9)
-    arp(S, g, 8.25, 11, [(0, "A")], vel=0.6, cresc=0.8, gain=0.24)
-    S.filt_pts([(32.9, 20000.0), (33.2, 2000.0), (34.48, 20000.0)])
-
-    # ---------------- 34.5–42.0 groove 2 ----------------
-    g = G[5]
-    ch = [(0, "D"), (4, "Bm"), (8, "G"), (12, "A")]
-    impact(S, g.t0, "D", 0.9)
-    drums(S, g, 0, g.beats, level=2)
-    bassline(S, g, 0, g.beats, ch, vel=0.95)
-    pads(S, g, 0, g.beats, ch, level=0.115)
-    ostinato(S, g, 0, g.beats, ch, vel=0.5)
-    arp(S, g, 0, g.beats, ch, vel=0.78, gain=0.26)
-    # counter-line on the pluck, bars 3-4 (answers the hook)
-    for b, name, d in ((8, "B5", 0.5), (8.5, "A5", 0.5), (9, "G5", 1.0), (10.5, "F#5", 0.5), (11, "G5", 1.0),
-                       (12, "A5", 1.5), (13.5, "E5", 0.5)):
-        S.pluck(g(b), nm(name), d * g.bt * 0.85, 0.75, p=0.15, bright=1.0, gain=0.15)
-
-    # ---------------- 42.0–46.0 breakdown 2 ----------------
-    g = G[6]
-    breakdown(S, g, [(0, "G"), (4, "Em7"), (6, "Asus"), (7, "A")], HOOK, build_beats=2)
-
-    # ---------------- 46.0–49.5 hook 2 (+ pluck an octave up) -> hit 49.5 ----------------
-    g = G[7]
-    ch = [(0, "D"), (2, "A"), (4, "G")]
-    S.crash(g.t0, 0.75)
-    drums(S, g, 0, 6, level=2, fill=False)
-    for s in range(4):
-        S.snare(g(5.5 + s * 0.25), 0.4 + 0.15 * s)
-    bassline(S, g, 0, 6.5, ch, vel=0.95)
-    pads(S, g, 0, 6.5, ch, level=0.115)
-    ostinato(S, g, 0, 6.5, ch, vel=0.38, lo=57, hi=72)
-    arp(S, g, 0, 6.5, ch, vel=0.62, gain=0.22)
-    hook(S, g, 0, HOOK, vel=0.68, pluck=True)
-    impact(S, 49.5, "D", 0.95)
-    S.piano(49.5, nm("D6"), 0.58, ring=1.4, gain=0.45, bus="pianoverb")
-
-    # ---------------- 49.5–56.6 tail, typing 3, riser (lowest, longest) ----------------
-    g = G[8]
-    tail(S, 49.5, g(3), "D")
-    ch = [(3, "Bm7"), (7, "G"), (10.5, "Asus"), (11.5, "A")]
-    light(S, g, 3, 13, ch, shaker_from=4.5)
-    riser(S, 55.2, 56.6, g, roll_from=10.5, level=1.0, low=120, high=4500)
-    arp(S, g, 10.5, 13, ch, vel=0.6, cresc=0.8, gain=0.24)
-    S.filt_pts([(55.1, 20000.0), (55.4, 1600.0), (56.58, 20000.0)])
-
-    # ---------------- 56.6–65.0 groove 3 (four on the floor, open hats, high pad) ----------------
-    g = G[9]
-    ch = [(0, "G"), (4, "D/F#"), (8, "Em7"), (12, "A")]
-    impact(S, g.t0, "G", 0.95)
-    drums(S, g, 0, g.beats, level=3)
-    bassline(S, g, 0, g.beats, ch, vel=1.0)
-    pads(S, g, 0, g.beats, ch, level=0.12, bright=1.1)
-    S.pad(g(0), g(g.beats), "A", 0.035, fi=2.0, fo=0.3, lo=81, hi=82, bright=0.9)   # long high A5 (patient "reading")
-    ostinato(S, g, 0, g.beats, ch, vel=0.52)
-    arp(S, g, 0, g.beats, ch, vel=0.8, gain=0.26, lo=66)
-
-    # ---------------- 65.0–69.5 breakdown 3 (longest: no kick for the first bar) ----------------
-    g = G[10]
-    breakdown(S, g, [(0, "Bm7"), (4, "G"), (6, "Asus"), (7, "A")], HOOK, build_beats=2, kick_from=4, depth=420.0)
-    S.bass(68.0, nm("A1"), 0.9, 0.9)   # the line pulls taut (68.0)
-
-    # ---------------- 69.5–72.5 hook 3 (+ glock) -> hit 72.5 ----------------
-    g = G[11]
-    ch = [(0, "D"), (2, "A"), (4, "G")]
-    S.crash(g.t0, 0.8)
-    drums(S, g, 0, 5, level=3, fill=False)
-    for s in range(4):
-        S.snare(g(4.5 + s * 0.25), 0.4 + 0.15 * s)
-    bassline(S, g, 0, 5.5, ch, vel=1.0)
-    pads(S, g, 0, 5.5, ch, level=0.12, bright=1.1)
-    ostinato(S, g, 0, 5.5, ch, vel=0.38, lo=57, hi=72)
-    arp(S, g, 0, 5.5, ch, vel=0.62, gain=0.22, lo=66)
-    hook(S, g, 0, HOOK_SHORT, vel=0.7, pluck=True, glock=True)
-    impact(S, 72.5, "D", 1.0)
-    S.piano(72.5, nm("D6"), 0.6, ring=1.4, gain=0.45, bus="pianoverb")
-    S.glock(72.5, nm("D6"), 0.8)
-
-    # ---------------- 72.5–78.6 tail, typing 4, riser (with a digital edge) ----------------
-    g = G[12]
-    tail(S, 72.5, g(2), "D")
-    ch = [(2, "Em7"), (6, "G"), (8.5, "Asus"), (9.5, "A")]
-    light(S, g, 2, 11, ch, shaker_from=3)
-    riser(S, 77.4, 78.6, g, roll_from=8.5, level=0.9, low=250, high=6000)
-    arp(S, g, 8.5, 11, ch, vel=0.6, step=0.125, dur=0.08, cresc=0.8, gain=0.2)   # 32nds: a digital flicker
-    S.filt_pts([(77.3, 20000.0), (77.6, 2000.0), (78.58, 20000.0)])
-
-    # ---------------- 78.6–86.0 groove 4 (tight 16ths: code) ----------------
-    g = G[13]
-    ch = [(0, "D"), (4, "Bm"), (8, "G"), (12, "A")]
-    impact(S, g.t0, "D", 0.95)
-    drums(S, g, 0, g.beats, level=3)
-    bassline(S, g, 0, g.beats, ch, vel=1.0)
-    pads(S, g, 0, g.beats, ch, level=0.11, bright=1.05)
-    ostinato(S, g, 0, g.beats, ch, vel=0.5)
-    arp(S, g, 0, g.beats, ch, vel=0.82, dur=0.09, gain=0.27, pattern=(0, 2, 1, 3, 2, 4, 3, 1), lo=66)
-
-    # ---------------- 86.0–88.5 breakdown 4 ----------------
-    g = G[14]
-    breakdown(S, g, [(0, "G"), (3, "Asus"), (4, "A")], HOOK[:3], build_beats=1.5)
-
-    # ---------------- 88.5–92.5 hook 4 (piano in octaves + pluck + glock) -> hit 92.5 ----------------
-    g = G[15]
-    ch = [(0, "D"), (2, "A"), (4, "Bm"), (6, "G")]
-    S.crash(g.t0, 0.85)
-    drums(S, g, 0, 7, level=3, fill=False)
-    for s in range(6):
-        S.snare(g(6.0 + s * 0.25), 0.35 + 0.12 * s)
-    bassline(S, g, 0, 7.5, ch, vel=1.0)
-    pads(S, g, 0, 7.5, ch, level=0.125, bright=1.15)
-    ostinato(S, g, 0, 7.5, ch, vel=0.38, lo=57, hi=72)
-    arp(S, g, 0, 7.5, ch, vel=0.62, gain=0.22, lo=66)
+    # ---------------- 78.5–100 groove 4 (code) + montage hits ----------------
+    b0, b1 = B(78.5), B(100.0)
+    ch = prog(b0, b1)
+    S.crash(78.5, 0.85)
+    groove(S, g, b0, b1, 3)
+    bassline(S, g, b0, b1, ch, vel=1.0)
+    pads(S, g, b0, b1, ch, level=0.12, bright=1.15)
+    ostinato(S, g, b0, b1, ch, vel=0.5)
+    arp(S, g, b0, b1, ch, vel=0.8, dur=0.1, gain=0.26, pattern=(0, 2, 1, 3, 2, 4, 3, 1), lo=66)
     hook4 = HOOK[:5] + [(4.0, "D5", 0.75), (4.75, "F#5", 0.75), (5.5, "A5", 0.5), (6.0, "B5", 0.75), (6.75, "A5", 0.75)]
-    hook(S, g, 0, hook4, vel=0.7, octave=True, pluck=True, glock=True)
-    impact(S, 92.5, "D", 1.0)
-    S.piano(92.5, nm("D6"), 0.6, ring=1.2, gain=0.45, bus="pianoverb")
+    hook(S, g, B(88.0), hook4, vel=0.68, octave=True, pluck=True, glock=True)
+    accent(S, 92.5, "A", 0.85)
+    for t in (94.0, 95.5, 97.0, 98.5):
+        sym = at(ch, B(t))
+        accent(S, t, sym, 0.7)
+        S.pluck(t, voicing(sym, 74, 86)[-1], 0.5, 0.85, p=0.0, gain=0.14)
+    fill(S, g, b1, 1)
 
-    # ---------------- 92.5–100.0 tail + montage: four punchy hits, riser, stop ----------------
-    g = G[16]
-    tail(S, 92.5, 94.0, "D", 0.09)
-    mch = [(3, "G"), (6, "A"), (9, "Bm"), (12, "A")]
-    for b, sym in mch:
-        t = g(b)
-        S.kick(t, 1.0, pump=1.2)
-        S.boom(t, 0.6, f=float(I.midi_hz(bass_midi(sym, 26))))
-        S.clap(t, 0.9, gain=0.2)
-        S.crash(t, 0.55, dur=1.4)
-        S.stab(t, [bass_midi(sym, 38)] + voicing(sym, 62, 81), 0.7, ring=1.2, gain=0.42)
-        S.pluck(t, voicing(sym, 74, 86)[-1], 0.5, 0.9, p=0.0, gain=0.15)
-        # driving 8ths between the hits
-        for s in np.arange(0.5, 3.0, 0.5):
-            if b + s < 15 - 1.6 or b < 12:
-                S.bass(g(b + s), bass_midi(sym, 33) + (12 if s % 1 else 0), 0.4 * g.bt, 0.85, gain=0.4)
-        for s in np.arange(0, 3.0, 0.25):
-            S.shaker(g(b + s), 0.9 if (s * 4) % 2 else 0.5, gain=0.07, p=0.3)
-        S.kick(g(b + 2), 0.75, pump=0.6)
-        S.clap(g(b + 1), 0.6, gain=0.13)
-        S.pad(t, g(b + 3), sym, 0.10, fi=0.02, fo=0.2, bright=1.1)
-    riser(S, 98.5, 100.0, g, roll_from=12.5, level=1.0, low=200, high=6500)
-    arp(S, g, 12, 15, [(0, "A")], vel=0.65, cresc=0.9, gain=0.22, lo=69)
-
-    # ================= take 2: 100.4–113.6 =================
-    # ---------------- 100.4–103.2 breath: the hook alone on the piano ----------------
-    g = G[17]
-    bch = [(0, "D"), (2, "A/C#"), (4, "G")]
+    # ---------------- 100–103 breath: drums out, harmony and the hook carry on ----------------
+    b0, b1 = B(100.0), B(103.0)
+    ch = [(b0, "G"), (b0 + 4, "A")]
+    S.crash(100.0, 0.5, dur=2.5)
+    pads(S, g, b0, b1, ch, level=0.12, bright=1.05)
+    bassline(S, g, b0, b1, ch, vel=0.7, style="whole")
     for b, name, d in HOOK[:5]:
-        S.piano(g(b), nm(name), 0.46, ring=d * g.bt + 0.5, gain=0.48, bus="pianoverb")
-    S.piano(g(4.0), nm("D5"), 0.42, ring=0.9, gain=0.48, bus="pianoverb")
-    S.piano(g(4.5), nm("B4"), 0.40, ring=0.9, gain=0.48, bus="pianoverb")
-    for b, sym in bch:
-        S.piano(g(b), bass_midi(sym, 38), 0.3, ring=2 * g.bt + 0.2, gain=0.45, bus="pianoverb")
-        S.piano(g(b) + 0.004, voicing(sym, 57, 66)[0], 0.24, ring=2 * g.bt + 0.2, gain=0.45, bus="pianoverb")
+        S.piano(g(b0 + b), nm(name), 0.48, ring=d * BT + 0.5, gain=0.48, bus="pianoverb")
+    arp(S, g, b0, b1, ch, vel=0.5, gain=0.18, lo=66)
 
-    # ---------------- 103.2–110.0 build ----------------
-    g = G[18]
-    ch = [(0, "G"), (4, "Em7"), (8, "Asus"), (10, "A")]
-    S.filt_pts([(103.19, 20000.0), (103.2, 520.0), (107.7, 2400.0), (109.98, 20000.0)])
-    pads(S, g, 0, 12, ch, level=0.13, bright=1.15)
-    ostinato(S, g, 0, 12, ch, vel=0.42, cresc=0.2)
-    arp(S, g, 2, 12, ch, vel=0.6, cresc=0.6, gain=0.24, lo=66)
-    bassline(S, g, 4, 12, ch, vel=0.9)
-    for b in range(4, 12):
-        S.kick(g(b), 0.6 + 0.4 * (b - 4) / 7, pump=0.8)
-        S.shaker(g(b + 0.5), 0.8, gain=0.07, accent=True)
-    for b in range(8, 12):
-        if b % 2:
-            S.clap(g(b), 0.85)
-    riser(S, g(6), 110.0, g, roll_from=8, level=1.15, low=150, high=7000)
-    S.sweep(g(8), 110.0, 90, 600, gain=0.06)   # low swell under the riser
+    # ---------------- 103–110 build ----------------
+    b0, b1 = B(103.0), B(110.0)
+    ch = prog(b0, b1)
+    S.filt_pts([(102.99, 20000.0), (103.0, 900.0), (108.0, 3000.0), (109.98, 20000.0)])
+    pads(S, g, b0, b1, ch, level=0.13, bright=1.15)
+    ostinato(S, g, b0, b1, ch, vel=0.44, cresc=0.2)
+    arp(S, g, b0, b1, ch, vel=0.62, cresc=0.6, gain=0.24, lo=66)
+    bassline(S, g, b0, b1, ch, vel=0.9)
+    for b in np.arange(b0, b1, 1.0):
+        S.kick(g(b), 0.6 + 0.4 * (b - b0) / (b1 - b0), pump=0.8)
+        S.shaker(g(b + 0.5), 0.8, gain=0.08, accent=True)
+        if int(b) % 2:
+            S.clap(g(b), 0.8)
+    riser(S, 106.0, 110.0, g, roll_from=b1 - 6, level=1.0, low=150, high=7000)
 
-    # ---------------- 110.0–113.6 peak: the biggest, happiest moment ----------------
-    g = G[19]
-    ch = [(0, "D"), (2, "A/C#"), (4, "Bm"), (6, "G")]
-    impact(S, 110.0, "D", 1.15, big=True)
+    # ---------------- 110–113.5 peak ----------------
+    b0, b1 = B(110.0), B(113.5)
+    ch = prog(b0, b1)
+    impact(S, 110.0, "D", 1.1, big=True)
     S.glock(110.0, nm("D6"), 1.0)
-    S.glock(110.0, nm("A6"), 0.6)
-    drums(S, g, 0, 6.5, level=3, fill=False)
-    S.kick(g(6), 1.0)
-    bassline(S, g, 0, 6.5, ch, vel=1.05)
-    pads(S, g, 0, 6.5, ch, level=0.135, bright=1.25, hi=79)
-    ostinato(S, g, 0, 6.5, ch, vel=0.5, lo=57, hi=72)
-    arp(S, g, 0, 6.5, ch, vel=0.7, gain=0.24, lo=69, hi=93)
-    hook(S, g, 0, HOOK_PEAK, vel=0.76, octave=True, pluck=True, glock=True, gain=0.52)
-    pads(S, g, 0, 6.5, ch, level=0.07, bright=1.2, lo=74, hi=88)      # a high, wide layer only here
-    for b in (1, 3, 5):
-        S.snare(g(b), 0.55, gain=0.12)
-    S.crash(g(4), 0.6, dur=2.0)
+    groove(S, g, b0, b1, 3)
+    bassline(S, g, b0, b1, ch, vel=1.05)
+    pads(S, g, b0, b1, ch, level=0.135, bright=1.25, hi=79)
+    pads(S, g, b0, b1, ch, level=0.06, bright=1.2, lo=74, hi=88)
+    ostinato(S, g, b0, b1, ch, vel=0.5, lo=57, hi=72)
+    arp(S, g, b0, b1, ch, vel=0.72, gain=0.25, lo=69, hi=93)
+    hook(S, g, b0, HOOK_PEAK, vel=0.74, octave=True, pluck=True, glock=True, gain=0.52)
 
-    # ================= take 3: 113.6–120.0 =================
-    # ---------------- 113.6 the cut: one bright piano chord rings on ----------------
-    g = G[20]
-    S.stab(113.6, [nm("G2"), nm("D3"), nm("B3"), nm("F#4"), nm("A4"), nm("D5"), nm("F#5")], 0.62, ring=2.6, gain=0.44,
+    # ---------------- 113.5–117.5 outro: the groove eases, the hook once more ----------------
+    b0, b1 = B(113.5), B(117.5)
+    och = [(b0, "Gmaj7"), (b0 + 4, "Asus"), (b0 + 6, "A")]
+    S.stab(113.5, [nm("G2"), nm("D3"), nm("B3"), nm("F#4"), nm("A4"), nm("D5")], 0.5, ring=2.0, gain=0.42,
            bus="pianoverb", spread=0.006)
-    S.glock(113.6, nm("B5"), 0.55, decay=1.4)
-    # ---------------- 114–117.5 outro: the hook, gently, over G - A ----------------
-    och = [(0, "Gmaj7"), (4, "Asus"), (5.5, "A")]
-    S.pad(g(1), g(4), "Gmaj7", 0.08, fi=1.0, fo=0.3, bright=0.95)
-    S.pad(g(4), g(7), "A", 0.085, fi=0.4, fo=0.3, bright=0.95)
-    for b, name, d in ((2.0, "F#5", 0.75), (2.75, "E5", 0.75), (3.5, "D5", 0.5), (4.0, "E5", 1.0), (5.0, "A4", 0.75),
-                       (5.75, "C#5", 0.75), (6.5, "E5", 0.5)):
-        S.piano(g(b), nm(name), 0.44, ring=d * g.bt + 0.35, gain=0.46, bus="pianoverb")
-    S.piano(g(4), nm("A2"), 0.32, ring=3 * g.bt, gain=0.45, bus="pianoverb")
-    S.piano(g(4), nm("E3"), 0.26, ring=3 * g.bt, gain=0.45, bus="pianoverb")
-    for b in np.arange(2, 7, 1.0):   # the soft pulse returns, warm
-        S.bass(g(b), bass_midi(at(och, b), 33) + 12, 0.4 * g.bt, 0.4, gain=0.42, bright=0.6)
-        S.kick(g(b), 0.24, pump=0.25)
-    # ---------------- 117.5 resolution: D major, rings to the end ----------------
-    g = G[21]
+    pads(S, g, b0, b1, och, level=0.1, bright=1.0)
+    for b in np.arange(b0, b1, 1.0):
+        S.kick(g(b), 0.4, pump=0.3)
+        S.bass(g(b), bass_midi(at(och, b), 33) + 12, 0.4 * BT, 0.45, gain=0.42, bright=0.6)
+        S.shaker(g(b + 0.5), 0.5, gain=0.06)
+    for b, name, d in ((1.0, "F#5", 0.75), (1.75, "E5", 0.75), (2.5, "D5", 0.5), (3.0, "E5", 1.0), (4.0, "A4", 0.75),
+                       (4.75, "C#5", 0.75), (5.5, "E5", 0.5)):
+        S.piano(g(b0 + b), nm(name), 0.44, ring=d * BT + 0.35, gain=0.46, bus="pianoverb")
+
+    # ---------------- 117.5 resolution ----------------
     S.stab(117.5, [nm("D2"), nm("A2"), nm("D3"), nm("F#3"), nm("A3"), nm("E4"), nm("F#4"), nm("A4"), nm("D5")], 0.55,
            ring=2.6, gain=0.44, bus="pianoverb", spread=0.008)
     S.piano(117.5, nm("F#5"), 0.5, ring=2.6, gain=0.46, bus="pianoverb")
-    S.pad(117.5, 120.0, "Dadd9", 0.10, fi=0.6, fo=0.2, bright=1.0)
+    S.pad(117.5, 120.0, "Dadd9", 0.10, fi=0.3, fo=0.2, bright=1.0)
     S.bass(117.5, nm("D2"), 2.3, 0.55, gain=0.4, bright=0.5)
-    S.glock(118.4, nm("A5"), 0.5, decay=1.2)   # the wordmark
-    S.glock(118.4 + 0.27, nm("D6"), 0.45, decay=1.2)
+    S.glock(118.5, nm("A5"), 0.5, decay=1.2)
+    S.glock(119.0, nm("D6"), 0.45, decay=1.2)
     return S
 
 
-# ---------------------------------------------------------------- mixing
 def pump_curve(kicks, depth, release=0.16):
     """Side-chain gain from the kick times: dips to (1 - depth*k) in 4 ms, recovers with a smooth curve."""
     hop = 48
@@ -779,9 +669,7 @@ def echo(x, delay=0.409, fb=0.32, mix=0.22, lp=4500.0):
 
 
 RIDES = [  # (t0, t1, dB)
-    (13.0, 21.0, -1.5), (21.15, 24.0, -2.0), (42.15, 45.0, -1.5), (65.15, 68.4, -1.0), (86.15, 87.75, -1.5),
-    (25.0, 28.5, -1.0), (34.5, 42.0, -1.0), (46.0, 49.5, -0.5), (56.6, 65.0, -0.5),
-    (103.2, 110.0, -0.5), (110.0, 113.6, 2.0)]
+    (0.0, 34.5, -1.0), (110.0, 113.5, 1.0)]
 
 
 def ride_curve():
