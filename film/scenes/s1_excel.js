@@ -56,9 +56,12 @@
   const COLS = [ // key, width, numeric
     ['date', 132], ['store', 92], ['region', 92], ['cat', 76], ['order', 168], ['amt', 132, 1], ['disc', 80, 1], ['qty', 64, 1], ['ch', 76], [null, 80], [null, 80], [null, 82]];
   const COLX = []; { let x = GUT; for (const c of COLS) { COLX.push(x); x += c[1]; } }
-  const C = { bgHero: 'rgb(33,31,30)', bgGlass: 'rgba(30,28,27,0.96)', grid: 'rgba(247,245,243,0.075)', strip: 'rgba(247,245,243,0.045)',
-    letter: 'rgba(161,157,155,0.75)', head: 'rgba(247,245,243,0.70)', clean: 'rgba(247,245,243,0.86)', dirty: 'rgba(176,172,169,0.74)', bad: 'rgba(176,172,169,0.62)',
-    accent: '#4b8fe3', danger: '#f09a9a' };
+  // v2: bright paper sheets floating on the green->teal->blue field
+  const C = { bgHero: '#ffffff', bgGlass: '#ffffff', grid: 'rgba(32,30,29,0.085)', strip: '#f4f4f2',
+    letter: '#a29e9b', head: 'rgba(32,30,29,0.78)', clean: '#201e1d', dirty: '#a8a4a1', bad: '#b9b5b2',
+    accent: '#2a78d6', danger: '#c93a3a' };
+  const SHADOW = 'var(--card-shadow)';
+  const FIELD_MID = 'rgb(38,164,168)';   // the field's own colour where the stack recedes into it
   const MONO = '"IBM Plex Mono", "Noto Sans SC", monospace';
   const SANS = '"IBM Plex Sans", "Noto Sans SC", sans-serif';
 
@@ -82,7 +85,7 @@
   function drawRow(ctx, y, row, st, header = false) {
     const c = st.c ?? 1, a = st.a ?? 1, sw = st.sw ?? 1;
     const ym = y + RH / 2 + 1;
-    if (st.tint) { ctx.fillStyle = `rgba(240,154,154,${0.17 * st.tint})`; ctx.fillRect(GUT, y, SW - GUT, RH); }
+    if (st.tint) { ctx.fillStyle = `rgba(201,58,58,${0.13 * st.tint})`; ctx.fillRect(GUT, y, SW - GUT, RH); }
     ctx.textBaseline = 'middle';
     const colX = (key) => {
       // dirty files list region before store: the two columns slide past each other into place
@@ -109,7 +112,7 @@
     const red = (base) => tint > 0.01 ? (tint > 0.5 ? C.danger : base) : base;
     ctx.font = `15px ${MONO}`;
     const fl = st.flash || 0;
-    if (fl > 0.01) { ctx.fillStyle = `rgba(75,143,227,${0.20 * fl})`; ctx.fillRect(COLX[0] + 1, y + 1, COLS[0][1] - 1, RH - 1); }
+    if (fl > 0.01) { ctx.fillStyle = `rgba(42,120,214,${0.16 * fl})`; ctx.fillRect(COLX[0] + 1, y + 1, COLS[0][1] - 1, RH - 1); }
     // date: dirty spellings resolve into ISO
     if (row.dateBad) {
       text(row.dateDirty, COLX[0], COLS[0][1], 0, C.dirty, -5 * c, 1 - c);
@@ -120,7 +123,7 @@
     if (row.regionBad && c < 1) { // the trailing space, shown as a faint open box
       ctx.font = `15px ${MONO}`;
       const w = ctx.measureText(row.region).width, x = colX('region') + PADX + w + 3;
-      ctx.globalAlpha = 1 - c; ctx.strokeStyle = 'rgba(232,184,92,0.55)'; ctx.lineWidth = 1.2;
+      ctx.globalAlpha = 1 - c; ctx.strokeStyle = 'rgba(184,122,20,0.7)'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.moveTo(x, ym + 1); ctx.lineTo(x, ym + 5); ctx.lineTo(x + 8, ym + 5); ctx.lineTo(x + 8, ym + 1); ctx.stroke(); ctx.globalAlpha = 1;
     }
     ctx.font = `14px ${SANS}`;
@@ -144,7 +147,7 @@
   }
   // grey (dirty) -> paper white (clean); `bad` biases toward the dirtier grey
   function lerpColor(c, bad = 0) {
-    const a = lerp(0.7 - bad * 0.25, 0.88, c), g = Math.round(lerp(176, 247, c)), g2 = Math.round(lerp(172, 245, c)), g3 = Math.round(lerp(169, 243, c));
+    const a = lerp(0.85 - bad * 0.25, 0.92, c), g = Math.round(lerp(168, 32, c)), g2 = Math.round(lerp(164, 30, c)), g3 = Math.round(lerp(161, 29, c));
     return `rgba(${g},${g2},${g3},${a.toFixed(3)})`;
   }
 
@@ -252,7 +255,16 @@
 
   // =====================================================================
   // background
-  F.scene({ id: 's1_bg', start: T0, end: T1, z: 5, build(layer) { K.depth(layer); return () => {}; } });
+  // v2: a saturated colour field with one large, soft highlight drifting slowly across it
+  function fieldBg(layer, field) {
+    const base = h('div', { class: 'abs' }); css(base, { inset: 0, background: field });
+    const hi = h('div', { class: 'abs' });
+    css(hi, { left: -400, top: -400, width: 2720, height: 1880, background: 'radial-gradient(closest-side, rgba(255,255,255,.26), rgba(255,255,255,.08) 55%, transparent)', willChange: 'transform' });
+    const shade = h('div', { class: 'abs' }); css(shade, { inset: 0, background: 'radial-gradient(130% 100% at 50% 40%, transparent 55%, rgba(6,40,70,.18) 100%)' });
+    layer.append(base, hi, shade);
+    return (t) => { css(hi, { transform: `translate(${Math.sin(t * 0.21) * 260 - 300}px,${Math.cos(t * 0.17) * 160 - 120}px) scale(0.62)` }); };
+  }
+  F.scene({ id: 's1_bg', start: T0, end: T1, z: 5, build(layer) { const u = fieldBg(layer, 'var(--field-sheet)'); return (lt, t) => u(t); } });
 
   // =====================================================================
   // the world: the stack, the hero sheet, the duplicate block
@@ -284,8 +296,8 @@
         el.append(face);
         const tab = h('div', { class: 'abs', text: sheetLabel(i) });
         css(tab, { left: 0, top: -31, height: 31, padding: '0 14px', lineHeight: '31px', fontFamily: 'var(--mono)', fontSize: 15, letterSpacing: '0.02em',
-          color: i === HERO ? 'rgba(247,245,243,.92)' : 'rgba(161,157,155,.9)', background: i === HERO ? C.bgHero : C.bgGlass, borderRadius: '7px 7px 0 0',
-          border: '1px solid rgba(247,245,243,.10)', borderBottom: 'none' });
+          color: i === HERO ? '#1d7a4a' : '#6f6b68', fontWeight: i === HERO ? 600 : 400, background: i === HERO ? '#ffffff' : '#f4f4f2', borderRadius: '9px 9px 0 0',
+          borderTop: `3px solid ${i === HERO ? 'var(--file-sheet)' : 'rgba(47,125,74,.35)'}` });
         face.append(tab);
         const s = { el, face, tab, i, p };
         if (i !== HERO) {
@@ -294,9 +306,9 @@
           s.clean = own ? h('canvas', { width: SW * DPI, height: SH * DPI }) : h('img'); css(s.clean, { position: 'absolute', left: 0, top: 0, width: SW, height: SH, clipPath: 'inset(0 100% 0 0)' });
           s.own = own;
           // depth fog: darken toward the background instead of fading (fading stacks into murk)
-          s.fog = h('div', { class: 'abs' }); css(s.fog, { left: -1, top: -32, right: -1, bottom: -1, background: '#141312', opacity: 0, borderRadius: '7px 7px 0 0' });
+          s.fog = h('div', { class: 'abs' }); css(s.fog, { left: -1, top: -32, right: -1, bottom: -1, background: FIELD_MID, opacity: 0, borderRadius: '9px 9px 0 0' });
           face.append(s.dirty, s.clean, s.fog);
-          css(face, { border: '1px solid rgba(247,245,243,.12)', boxShadow: '0 -1px 0 rgba(247,245,243,.06), 0 24px 60px rgba(0,0,0,.45)' });
+          css(face, { borderRadius: '0 8px 8px 8px', boxShadow: '0 24px 60px rgba(10,60,70,.22), 0 2px 6px rgba(10,60,70,.10)' });
         }
         world.append(el);
         return s;
@@ -306,7 +318,7 @@
       const hero = sheets[HERO];
       css(hero.el, { transformStyle: 'preserve-3d' });
       const hcv = h('canvas', { width: SW * RS, height: SH * RS }); css(hcv, { position: 'absolute', left: 0, top: 0, width: SW, height: SH });
-      css(hero.face, { border: '1px solid rgba(247,245,243,.14)', boxShadow: '0 40px 120px rgba(0,0,0,.55)' });
+      css(hero.face, { borderRadius: '0 10px 10px 10px', boxShadow: '0 40px 110px rgba(8,50,80,.30), 0 3px 10px rgba(8,50,80,.12)' });
       hero.face.append(hcv);
       const hctx = hcv.getContext('2d');
       const MX = 90, MT = 300, MB = 40;
@@ -334,7 +346,7 @@
         bc.translate(MX, MT);
         bc.fillStyle = C.bgHero; bc.fillRect(0, 0, SW, BN * RH);
         for (let j = 0; j < BN; j++) drawRow(bc, j * RH, heroRows[j], { tint: 1 });
-        bc.strokeStyle = 'rgba(240,154,154,.35)'; bc.lineWidth = 1; bc.beginPath();
+        bc.strokeStyle = 'rgba(201,58,58,.30)'; bc.lineWidth = 1; bc.beginPath();
         for (let j = 0; j <= BN; j++) { bc.moveTo(GUT, j * RH + 0.5); bc.lineTo(SW, j * RH + 0.5); } bc.stroke();
         const img = bc.getImageData(0, 0, BW * RS, BH * RS).data, R = rng(4242);
         particles = [];
@@ -395,7 +407,7 @@
         ctx.save(); ctx.beginPath(); ctx.rect(0, LET, SW, RH); ctx.clip();
         drawRow(ctx, LET, null, { sw: ka }, true);
         ctx.restore();
-        ctx.strokeStyle = 'rgba(247,245,243,.14)'; ctx.beginPath(); ctx.moveTo(0, LET + RH + 0.5); ctx.lineTo(SW, LET + RH + 0.5); ctx.stroke();
+        ctx.strokeStyle = 'rgba(32,30,29,.22)'; ctx.beginPath(); ctx.moveTo(0, LET + RH + 0.5); ctx.lineTo(SW, LET + RH + 0.5); ctx.stroke();
       }
 
       // the blue thread, projected from 3D each frame and drawn over the stack
@@ -455,8 +467,9 @@
         }
         if (n + 1 < pts.length && head.z < near && !(n === 2 && heroQuad && k < 0.08)) {
           const r = 3.4 * Math.max(0.6, head.k * c.s);
-          ctx.globalAlpha = fadeOut * fog(head.z) * 0.35; ctx.fillStyle = C.accent; ctx.beginPath(); ctx.arc(head.x, head.y, r * 2.2, 0, 7); ctx.fill();
-          ctx.globalAlpha = fadeOut * fog(head.z); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, 7); ctx.fill();
+          ctx.globalAlpha = fadeOut * fog(head.z) * 0.28; ctx.fillStyle = C.accent; ctx.beginPath(); ctx.arc(head.x, head.y, r * 2.6, 0, 7); ctx.fill();
+          ctx.globalAlpha = fadeOut * fog(head.z); ctx.beginPath(); ctx.arc(head.x, head.y, r * 1.25, 0, 7); ctx.fill();
+          ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(head.x, head.y, r * 0.55, 0, 7); ctx.fill();
         }
         ctx.globalAlpha = 1;
       }
@@ -541,7 +554,7 @@
           if (showBlock) {
             const kl = tw(t, LIFT[0], LIFT[1], 'outCubic');
             css(block, { top: blockTopY - MT, transform: `translate3d(${-6 * kl}px,${-14 * kl}px,${80 * kl}px) rotateX(${-6 * kl}deg)`,
-              filter: `drop-shadow(0 ${18 * kl}px ${28 * kl}px rgba(0,0,0,${0.55 * kl}))` });
+              filter: `drop-shadow(0 ${22 * kl}px ${30 * kl}px rgba(150,30,40,${0.30 * kl}))` });
             drawBlock(t);
           }
         }
@@ -555,7 +568,9 @@
   // =====================================================================
   // UI fragments, faithful to the app (dark theme tokens, ~1.5x scale)
   const UI = 1.5;
-  const D = { bg: '#232120', fg: '#f7f5f3', muted: '#a19d9b', card: '#322f2e', border: 'rgba(247,245,243,.14)', borderHover: 'rgba(247,245,243,.26)', accent: '#4b8fe3', code: 'rgba(247,245,243,.12)' };
+  // v2: the app's light theme (index.css :root)
+  const D = { bg: '#fcfcfb', fg: '#201e1d', muted: '#7d7979', card: '#f0f0ef', border: 'rgba(32,30,29,.14)', borderHover: 'rgba(32,30,29,.26)', accent: '#2a78d6', code: '#f0f0ef' };
+  const INK = 'var(--field-ink)', INK_SOFT = 'rgba(255,255,255,.78)';
   const ICON = (d, size, color, sw = 2) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
   const CHECK = 'M20 6L9 17l-5-5', CHEV_DOWN = 'M6 9l6 6 6-6', CHEV_RIGHT = 'M9 6l6 6-6 6';
 
@@ -563,7 +578,7 @@
   function progressPanel(parent, { x, y, w = 320 * UI }) {
     const root = h('div', { class: 'abs' });
     css(root, { left: x, top: y, width: w, background: D.bg, border: `${UI}px solid ${D.border}`, borderRadius: 12 * UI, color: D.fg,
-      fontFamily: 'var(--sans)', boxShadow: '0 30px 80px rgba(0,0,0,.5)', overflow: 'hidden' });
+      fontFamily: 'var(--sans)', boxShadow: SHADOW, overflow: 'hidden' });
     const sec = h('div'); css(sec, { padding: `${12 * UI}px ${16 * UI}px ${14 * UI}px` });
     const title = h('div', { html: `<span>Progress</span>${ICON(CHEV_DOWN, 14 * UI, D.muted)}` });
     css(title, { display: 'flex', alignItems: 'center', gap: 6 * UI, fontSize: 14 * UI, fontWeight: '500' });
@@ -628,7 +643,7 @@
       F.event(24.35, 'click', { what: 'review step flips to done' });
 
       // S1-05 ranking: the steepest regional decline, before and after
-      const rank = h('div', { class: 'abs' }); css(rank, { left: 128, top: 150, width: 600, color: D.fg }); layer.append(rank);
+      const rank = h('div', { class: 'abs' }); css(rank, { left: 128, top: 112, width: 660, color: D.fg, background: '#fff', borderRadius: 20, padding: '24px 34px 18px', boxShadow: SHADOW }); layer.append(rank);
       const cap = h('div', { text: L('区域销售同比 · 下滑最大', 'Regional sales YoY · steepest first') });
       css(cap, { fontFamily: 'var(--sans)', fontSize: 17, color: D.muted, letterSpacing: '0.04em', marginBottom: 14 });
       rank.append(cap);
@@ -661,8 +676,8 @@
 
       // S1-05 Review work: the tool row, opened (ChatLog ToolRunGroupView + ToolDetail)
       const rev = h('div', { class: 'abs' });
-      css(rev, { left: 128, top: 420, width: 660, background: D.bg, borderRadius: 12 * UI, border: `${UI}px solid ${D.border}`, padding: `${12 * UI}px ${14 * UI}px ${14 * UI}px`,
-        boxShadow: '0 30px 80px rgba(0,0,0,.5)', fontFamily: 'var(--sans)' });
+      css(rev, { left: 128, top: 438, width: 660, background: D.bg, borderRadius: 12 * UI, border: `${UI}px solid ${D.border}`, padding: `${12 * UI}px ${14 * UI}px ${14 * UI}px`,
+        boxShadow: SHADOW, fontFamily: 'var(--sans)' });
       const sum = h('div'); css(sum, { display: 'flex', alignItems: 'center', gap: 4 * UI, color: D.muted, fontSize: 14 * UI });
       const chev = h('span', { html: ICON(CHEV_RIGHT, 14 * UI, D.muted) }); css(chev, { display: 'flex' });
       sum.append(h('span', { text: 'Asked a reviewer to check the work' }), chev);
@@ -679,8 +694,8 @@
         const on1 = t < 16.8;
         p1.root.style.display = on1 ? '' : 'none';
         if (on1) {
-          const k = tw(t, 13.9, 14.35, 'outCubic') * (1 - tw(t, 16.15, 16.55, 'inQuad'));
-          css(p1.root, { opacity: k, transform: `translateY(${(1 - k) * 16}px)` });
+          const k = tw(t, 13.9, 14.4, 'outBack') * (1 - tw(t, 16.15, 16.55, 'inQuad'));
+          css(p1.root, { opacity: clamp(k), transform: `translateY(${(1 - k) * 36}px)` });
           const st2 = t >= 15.75;
           p1.update(TASKS.map((x, i) => ({ text: x, st: i === 0 ? 'done' : i === 1 ? (st2 ? 'done' : 'run') : i === 2 && st2 ? 'run' : 'todo' })), t);
         }
@@ -688,8 +703,8 @@
         const on2 = t > 23.6;
         p2.root.style.display = on2 ? '' : 'none';
         if (on2) {
-          const k = tw(t, 23.7, 24.1, 'outCubic') * (1 - tw(t, 24.95, 25.3, 'inQuad'));
-          css(p2.root, { opacity: k, transform: `translateY(${(1 - k) * 16}px)` });
+          const k = tw(t, 23.7, 24.15, 'outBack') * (1 - tw(t, 24.95, 25.3, 'inQuad'));
+          css(p2.root, { opacity: clamp(k), transform: `translateY(${(1 - k) * 36}px)` });
           const fk = prog(t, 24.3, 24.6);
           const items = [...TASKS.slice(0, 4).map((x) => ({ text: x, st: 'done' })),
             { text: REVIEW_STEP, st: fk >= 1 ? 'done' : 'run', flip: { to: REVIEW_DONE, k: fk } }, { text: TASKS[4], st: 'todo' }];
@@ -700,8 +715,8 @@
         const onR = t > 21.3;
         rank.style.display = onR ? '' : 'none';
         if (onR) {
-          const k = tw(t, 21.4, 21.95, 'outCubic') * (1 - tw(t, 24.95, 25.3, 'inQuad'));
-          css(rank, { opacity: k, transform: `translateY(${(1 - k) * 18}px)` });
+          const k = tw(t, 21.4, 21.95, 'outBack') * (1 - tw(t, 24.95, 25.3, 'inQuad'));
+          css(rank, { opacity: clamp(k), transform: `translateY(${(1 - k) * 40}px) scale(${0.96 + 0.04 * k})` });
           const v = lerp(113, 49, tw(t, ROLL[0], ROLL[1], 'inOutCubic')); // tenths of a percent
           const pos0 = v % 10, pos1 = Math.floor(v / 10) % 10 + clamp((v % 10) - 9), pos2 = Math.floor(v / 100) + clamp((v % 100) - 99);
           css(tenths.col, { transform: `translateY(${-pos0 * DIGH}px)` });
@@ -715,15 +730,15 @@
           css(east.r, { transform: `translateY(${sw * RHt}px)`, opacity: 1 - smooth(0.05, 0.35, sw) + smooth(0.65, 0.95, sw) });
           css(south.r, { transform: `translate(${bump(sw) * 30}px,${(1 - sw) * RHt}px)` });
           css(east.val, { color: sw > 0.5 ? D.muted : D.fg }); css(east.nm, { color: sw > 0.5 ? D.muted : D.fg });
-          css(south.val, { color: D.fg });
+          css(south.val, { color: D.fg, fontWeight: sw > 0.5 ? 500 : 400 });
         }
         // review row
         const onV = t > 21.3 && t < 24.6;
         rev.style.display = onV ? '' : 'none';
         if (onV) {
           if (!boxH) boxH = pre.offsetHeight;
-          const k = tw(t, 21.35, 21.85, 'outCubic') * (1 - tw(t, 24.1, 24.5, 'inQuad'));
-          css(rev, { opacity: k, transform: `translateX(${(1 - k) * -28}px)` });
+          const k = tw(t, 21.5, 22.0, 'outBack') * (1 - tw(t, 24.1, 24.5, 'inQuad'));
+          css(rev, { opacity: clamp(k), transform: `translateX(${(1 - k) * -60}px)` });
           const open = tw(t, 21.75, 22.2, 'inOutCubic');
           css(chev, { transform: `rotate(${90 * tw(t, 21.7, 21.95, 'inOutQuad')}deg)` });
           css(box, { height: open * (boxH + 2 * UI), opacity: open > 0 ? 1 : 0, marginTop: open * 8 * UI });
@@ -750,19 +765,19 @@
     id: 's1_hypo', start: 16.85, end: 21.5, z: 12,
     build(layer) {
       const svg = h('svg', { class: 'full', viewBox: '0 0 1920 1080' }); layer.append(svg);
-      const line = h('line', { x1: HX, x2: HX, y1: -20, y2: -20, stroke: D.accent, 'stroke-width': 2.2, 'stroke-linecap': 'round' });
-      const halo = h('circle', { r: 7.5, fill: D.accent, opacity: 0.35 }), head = h('circle', { r: 3.4, fill: '#fff' });
+      const line = h('line', { x1: HX, x2: HX, y1: -20, y2: -20, stroke: '#fff', 'stroke-width': 2.6, 'stroke-linecap': 'round' });
+      const halo = h('circle', { r: 9, fill: '#fff', opacity: 0.3 }), head = h('circle', { r: 4.2, fill: '#fff' });
       svg.append(line);
-      const nodes = HROW.map(() => { const c = h('circle', { cx: HX, r: 6, fill: '#141312', stroke: D.accent, 'stroke-width': 1.8 }); svg.append(c); return c; });
-      const core = h('circle', { cx: HX, cy: HROW[2], r: 0, fill: '#fff' }); svg.append(core, halo, head);
+      const nodes = HROW.map(() => { const c = h('circle', { cx: HX, r: 6, fill: 'rgba(255,255,255,.18)', stroke: '#fff', 'stroke-width': 2.2 }); svg.append(c); return c; });
+      const core = h('circle', { cx: HX, cy: HROW[2], r: 0, fill: 'var(--file-sheet)' }); svg.append(core, halo, head);
       const rows = HYP.map((d, i) => {
         const r = h('div', { class: 'abs' });
-        css(r, { left: HX + 40, top: HROW[i], transform: 'translateY(-50%)', display: 'flex', alignItems: 'baseline', gap: 26, whiteSpace: 'nowrap', color: D.fg });
-        const lab = h('span', { text: d.lab }); css(lab, { fontFamily: 'var(--sans)', fontSize: 18, letterSpacing: '0.12em', color: D.muted, width: L(64, 34) });
-        const hyp = h('span'); css(hyp, { position: 'relative', fontFamily: 'var(--serif)', fontSize: 50, color: 'rgba(247,245,243,.9)', letterSpacing: '0.02em' });
+        css(r, { left: HX + 40, top: HROW[i], transform: 'translateY(-50%)', display: 'flex', alignItems: 'baseline', gap: 26, whiteSpace: 'nowrap', color: INK, textShadow: '0 2px 18px rgba(6,50,70,.18)' });
+        const lab = h('span', { text: d.lab }); css(lab, { fontFamily: 'var(--sans)', fontSize: 18, letterSpacing: '0.12em', color: INK_SOFT, width: L(64, 34) });
+        const hyp = h('span'); css(hyp, { position: 'relative', fontFamily: 'var(--serif)', fontSize: 54, color: INK, letterSpacing: '0.02em' });
         const chars = Array.from(d.hyp).map((ch) => { const e = h('span', { text: ch }); css(e, { display: 'inline-block', whiteSpace: 'pre' }); hyp.append(e); return e; });
-        const res = h('span'); css(res, { fontFamily: 'var(--sans)', fontSize: 25, color: D.muted, display: 'flex', alignItems: 'baseline', gap: 14 });
-        const arrow = h('span', { text: '→' }); css(arrow, { color: 'rgba(161,157,155,.7)' });
+        const res = h('span'); css(res, { fontFamily: 'var(--sans)', fontSize: 26, color: INK_SOFT, display: 'flex', alignItems: 'baseline', gap: 14 });
+        const arrow = h('span', { text: '→' }); css(arrow, { color: 'rgba(255,255,255,.6)' });
         const rt = h('span', { html: d.res });
         res.append(arrow, rt);
         r.append(lab, hyp, res); layer.append(r);
@@ -772,15 +787,15 @@
         const d1 = 'M' + pts.map((p) => p.join(' ')).join(' L');
         const st = h('svg', { viewBox: '0 0 100 10', preserveAspectRatio: 'none' });
         css(st, { position: 'absolute', left: -8, top: '46%', width: 'calc(100% + 16px)', height: 12, overflow: 'visible', pointerEvents: 'none' });
-        const s1 = h('path', { d: d1, fill: 'none', stroke: 'rgba(247,245,243,.82)', 'stroke-width': 2.4, 'vector-effect': 'non-scaling-stroke', 'stroke-linecap': 'round' });
-        const s2 = h('path', { d: d1, fill: 'none', stroke: 'rgba(247,245,243,.35)', 'stroke-width': 1, transform: 'translate(0 1.4)', 'vector-effect': 'non-scaling-stroke' });
+        const s1 = h('path', { d: d1, fill: 'none', stroke: '#fff', 'stroke-width': 3, 'vector-effect': 'non-scaling-stroke', 'stroke-linecap': 'round' });
+        const s2 = h('path', { d: d1, fill: 'none', stroke: 'rgba(255,255,255,.45)', 'stroke-width': 1.2, transform: 'translate(0 1.4)', 'vector-effect': 'non-scaling-stroke' });
         st.append(s2, s1);
         // drawn left to right by a widening window (dash offsets ignore non-scaling strokes)
         const win = h('div'); css(win, { position: 'absolute', left: -8, top: '40%', width: 0, height: 26, overflow: 'hidden', pointerEvents: 'none' });
         const inner = h('div'); css(inner, { position: 'absolute', left: 0, top: 0, height: 26 }); inner.append(st);
         css(st, { left: 0, top: 6, width: '100%' });
         win.append(inner); if (i < 2) hyp.append(win);
-        rt.querySelectorAll('b').forEach((b) => css(b, { fontWeight: '500' }));
+        rt.querySelectorAll('b').forEach((b) => css(b, { fontWeight: '600', display: 'inline-block' }));
         return { r, lab, hyp, chars, res, rt, win, inner };
       });
       // the head comes down the left margin and stops at each line
@@ -799,7 +814,7 @@
         F.attr(head, { cx: HX, cy: hy, opacity: moving ? 1 : 0 }); F.attr(halo, { cx: HX, cy: hy, opacity: moving ? 0.35 : 0 });
         nodes.forEach((n, i) => {
           const k = ease.outBack(clamp((hy - HROW[i] + 40) / 40));
-          F.attr(n, { cy: HROW[i], r: i === 2 ? 6 + 3 * tw(t, 20.4, 20.9, 'outCubic') : 6 * k, opacity: k > 0 ? 1 : 0, fill: i === 2 && t > 20.45 ? D.accent : '#141312' });
+          F.attr(n, { cy: HROW[i], r: i === 2 ? 6 + 3 * tw(t, 20.4, 20.9, 'outCubic') : 6 * k, opacity: k > 0 ? 1 : 0, fill: i === 2 && t > 20.45 ? '#fff' : 'rgba(255,255,255,.18)' });
         });
         F.attr(core, { r: 3.2 * tw(t, 20.5, 20.9, 'outCubic') });
         rows.forEach((r, i) => {
@@ -818,9 +833,11 @@
             css(r.r, { opacity: 1 - 0.5 * tw(t, tx + 0.5, tx + 1.0) });
           } else {
             const kb = tw(t, tx, tx + 0.5, 'outQuad');
-            css(r.hyp, { color: `rgba(255,255,255,${0.9 + 0.1 * kb})` });
-            css(r.res, { color: kb > 0.5 ? D.fg : D.muted });
-            r.rt.querySelectorAll('b').forEach((b) => css(b, { color: kb > 0.5 ? '#a9cbf5' : 'inherit' }));
+            css(r.hyp, { transform: `scale(${1 + 0.06 * bump(kb) + 0.02 * kb})`, transformOrigin: '0 60%' });
+            css(r.res, { color: kb > 0.5 ? INK : INK_SOFT });
+            // the numbers that hold become white pills with sheet-green ink
+            r.rt.querySelectorAll('b').forEach((b) => css(b, { color: kb > 0.5 ? '#1d7a4a' : 'inherit', background: `rgba(255,255,255,${kb})`, borderRadius: 8, padding: '2px 10px',
+              boxShadow: kb > 0.5 ? '0 8px 24px rgba(6,50,70,.18)' : 'none', fontWeight: 600 }));
           }
         });
       };
@@ -845,7 +862,7 @@
     'Not footfall (−1.2%), not new stores (still −6.1% without them).',
     'Concentrated in 8 South China stores; East China March double entries removed.',
   ]);
-  const BOOK = { rise: [25.05, 25.35], trace: [25.35, 25.85], pane: [25.62, 26.0], tabs: 26.0, line: [26.2, 27.1], bars: 26.45, front: [26.85, 27.35], find: 27.05,
+  const BOOK = { rise: [25.0, 25.3], trace: [25.3, 25.72], pane: [25.38, 25.62], tabs: 25.7, table: [25.5, 26.05], line: [25.95, 26.8], bars: 26.1, kpi: 26.3, front: [26.7, 27.15], find: 26.9,
     collapse: [28.3, 28.6], morph: [28.4, 29.35] };
   F.event(BOOK.rise[0], 'thread', { dur: BOOK.trace[1] - BOOK.rise[0], what: 'thread pulls the workbook up' });
   TABS.forEach((_, i) => F.event(BOOK.tabs + i * 0.09, 'tick', { kind: 'tab' }));
@@ -863,8 +880,8 @@
 
       // ---- the back pane: the workbook window (morphs into the chip) ----
       const back = h('div', { class: 'abs' });
-      css(back, { left: BK.x, top: BK.y, width: BK.w, height: BK.h, overflow: 'hidden', background: '#fcfcfb', border: '1px solid rgba(47,125,74,.55)', borderRadius: 10,
-        boxShadow: '0 50px 120px rgba(0,0,0,.6)' });
+      css(back, { left: BK.x, top: BK.y, width: BK.w, height: BK.h, overflow: 'hidden', background: '#fcfcfb', border: '1px solid rgba(255,255,255,.9)', borderRadius: 14,
+        boxShadow: '0 50px 120px rgba(6,50,80,.30), 0 3px 10px rgba(6,50,80,.12)' });
       const inner = h('div', { class: 'abs' }); css(inner, { left: 0, top: 0, width: BK.w, height: BK.h, transformOrigin: '0 0', color: 'var(--fg)', fontFamily: 'var(--sans)' });
       back.append(inner); group.append(back);
       // title bar
@@ -887,6 +904,8 @@
       inner.append(grid);
       const tableCv = h('canvas', { width: BK.w * 2, height: 7 * RH2 * 2 }); css(tableCv, { position: 'absolute', left: 0, top: G0 + CH, width: BK.w, height: 7 * RH2 });
       inner.append(tableCv);
+      const wcur = h('div', { class: 'abs' }); css(wcur, { top: G0 + CH, width: 3, height: 7 * RH2, background: '#2a78d6', borderRadius: 2, boxShadow: '0 0 0 4px rgba(42,120,214,.15)' });
+      inner.append(wcur);
       const SHARE = [0.31, 0.27, 0.23, 0.19];
       function drawGrid() {
         const g = grid.getContext('2d'); g.setTransform(2, 0, 0, 2, 0, 0); g.clearRect(0, 0, BK.w, BK.h);
@@ -972,8 +991,8 @@
 
       // ---- the front pane: the 结论 sheet ----
       const front = h('div', { class: 'abs' });
-      css(front, { left: FP.x, top: FP.y, width: FP.w, height: FP.h, background: '#fcfcfb', border: '1px solid rgba(32,30,29,.14)', borderRadius: 10, overflow: 'hidden',
-        boxShadow: '0 40px 100px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.2)', fontFamily: 'var(--sans)', color: 'var(--fg)' });
+      css(front, { left: FP.x, top: FP.y, width: FP.w, height: FP.h, background: '#fcfcfb', border: '1px solid rgba(32,30,29,.10)', borderRadius: 14, overflow: 'hidden',
+        boxShadow: '0 40px 100px rgba(6,50,80,.32), 0 2px 8px rgba(6,50,80,.14)', fontFamily: 'var(--sans)', color: 'var(--fg)' });
       const fh = h('div'); css(fh, { height: 44, display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', background: '#f0f0ef' });
       const ftab = h('span', { text: TABS[4] }); css(ftab, { display: 'flex', alignItems: 'center', padding: '0 20px', fontSize: 14.5, fontWeight: '600', color: GREEN, background: '#fff', borderBottom: `3px solid ${GREEN}` });
       const fnm = h('span', { text: T('s1_out') }); css(fnm, { display: 'flex', alignItems: 'center', padding: '0 18px', fontSize: 12.5, color: 'var(--muted)', fontFamily: 'var(--mono)' });
@@ -986,16 +1005,27 @@
       });
       group.append(front);
 
+      // ---- a KPI card floating nearest the camera (the headline number of §4.1) ----
+      const kpi = h('div', { class: 'abs' });
+      css(kpi, { left: 196, top: 520, width: 340, padding: '22px 26px 20px', background: '#fff', borderRadius: 16, fontFamily: 'var(--sans)', color: 'var(--fg)',
+        boxShadow: '0 40px 90px rgba(6,50,80,.32), 0 2px 8px rgba(6,50,80,.14)', borderLeft: `5px solid ${GREEN}` });
+      const kl1 = h('div', { text: L('12 个月销售额', '12-month sales') }); css(kl1, { fontSize: 15, color: 'var(--muted)', letterSpacing: '.03em' });
+      const kv = h('div'); css(kv, { fontFamily: 'var(--mono)', fontSize: 50, fontWeight: 500, lineHeight: 1.15, marginTop: 6, fontVariantNumeric: 'tabular-nums' });
+      const kd = h('div', { html: L('同比 <b>−6.8%</b>', 'YoY <b>−6.8%</b>') }); css(kd, { fontSize: 16, color: 'var(--muted)', marginTop: 4 });
+      kd.querySelector('b').style.color = 'var(--danger)'; kd.querySelector('b').style.fontWeight = '600';
+      kpi.append(kl1, kv, kd); group.append(kpi);
+      F.event(BOOK.kpi, 'tick', { kind: 'roll' });
+
       // ---- the thread that pulls it up and traces the window ----
       const svg = h('svg', { class: 'full', viewBox: '0 0 1920 1080' }); layer.append(svg);
       const cx0 = BK.x + BK.w / 2, by = BK.y + BK.h, R0 = 10;
       const dRise = `M ${cx0} 1100 L ${cx0} ${by}`;
       const dL = `M ${cx0} ${by} H ${BK.x + R0} Q ${BK.x} ${by} ${BK.x} ${by - R0} V ${BK.y + R0} Q ${BK.x} ${BK.y} ${BK.x + R0} ${BK.y} H ${cx0}`;
       const dR = `M ${cx0} ${by} H ${BK.x + BK.w - R0} Q ${BK.x + BK.w} ${by} ${BK.x + BK.w} ${by - R0} V ${BK.y + R0} Q ${BK.x + BK.w} ${BK.y} ${BK.x + BK.w - R0} ${BK.y} H ${cx0}`;
-      const paths = [dRise, dL, dR].map((d) => { const p = h('path', { d, fill: 'none', stroke: D.accent, 'stroke-width': 2.2, 'stroke-linecap': 'round' }); svg.append(p); return p; });
+      const paths = [dRise, dL, dR].map((d) => { const p = h('path', { d, fill: 'none', stroke: '#fff', 'stroke-width': 2.8, 'stroke-linecap': 'round' }); svg.append(p); return p; });
       const lens = paths.map((p, i) => (p.getTotalLength ? p.getTotalLength() : [362, 1700, 1700][i]) || [362, 1700, 1700][i]);
       paths.forEach((p, i) => F.attr(p, { 'stroke-dasharray': `${lens[i]} ${lens[i]}`, 'stroke-dashoffset': lens[i] }));
-      const heads = [0, 1].map(() => { const g = h('g'); g.append(h('circle', { r: 7.5, fill: D.accent, opacity: 0.35 }), h('circle', { r: 3.4, fill: '#fff' })); svg.append(g); return g; });
+      const heads = [0, 1].map(() => { const g = h('g'); g.append(h('circle', { r: 10, fill: '#fff', opacity: 0.3 }), h('circle', { r: 4.4, fill: '#fff' })); svg.append(g); return g; });
 
       // ---- the chip it becomes (same component as the surface's) ----
       const chipWrap = h('div', { class: 'abs' }); css(chipWrap, { left: 0, top: 0, transformOrigin: '0 0' });
@@ -1021,33 +1051,43 @@
         // slow orbit while it hangs there; settles flat for the shrink
         const flat = tw(t, BOOK.morph[0], BOOK.morph[0] + 0.45, 'inOutCubic');
         const ry = lerp(-7, 3, tw(t, 25.4, 28.4, 'inOutQuad')) * (1 - flat), rx = lerp(5, 1.5, tw(t, 25.4, 28.4, 'inOutQuad')) * (1 - flat);
-        css(group, { transform: `translateY(${(1 - tw(t, 25.5, 26.3, 'outCubic')) * 50}px) rotateX(${rx}deg) rotateY(${ry}deg)` });
+        const kup = tw(t, 25.3, 25.95, 'outBack');
+        css(group, { transform: `translateY(${(1 - kup) * 90}px) scale(${0.92 + 0.08 * kup}) rotateX(${rx}deg) rotateY(${ry}deg)` });
         css(back, { opacity: kp });
-        css(tb, { opacity: tw(t, 25.75, 26.1) });
-        const nf = Array.from(formula).length, kf = prog(t, 25.95, 26.5);
+        css(tb, { opacity: tw(t, 25.42, 25.7) });
+        const nf = Array.from(formula).length, kf = prog(t, 25.5, 25.95);
         const ftxt = Array.from(formula).slice(0, Math.round(nf * kf)).join('');
         if (fxt.textContent !== ftxt) fxt.textContent = ftxt;
-        css(fx, { opacity: tw(t, 25.8, 26.1) });
-        css(grid, { opacity: tw(t, 25.7, 26.1) });
-        css(tableCv, { opacity: tw(t, 25.9, 26.4), transform: `translateY(${(1 - tw(t, 25.9, 26.4, 'outCubic')) * 6}px)` });
+        css(fx, { opacity: tw(t, 25.42, 25.7) });
+        css(grid, { opacity: tw(t, 25.38, 25.6) });
+        // the SUMIFS results write themselves in, column by column, as the formula lands
+        const ktab = tw(t, BOOK.table[0], BOOK.table[1], 'inOutQuad');
+        css(tableCv, { opacity: ktab > 0 ? 1 : 0, clipPath: `inset(0 ${((1 - ktab) * BK.w).toFixed(1)}px 0 0)` });
+        css(wcur, { display: ktab > 0 && ktab < 1 ? '' : 'none', left: ktab * BK.w - 3 });
         tabEls.forEach((e, i) => { const k = tw(t, BOOK.tabs + i * 0.09, BOOK.tabs + i * 0.09 + 0.3, 'outCubic'); css(e, { opacity: k, transform: `translateY(${(1 - k) * 10}px)` }); });
         css(plus, { opacity: tw(t, BOOK.tabs + 0.5, BOOK.tabs + 0.8) });
-        const kc1 = tw(t, BOOK.line[0] - 0.15, BOOK.line[0] + 0.2, 'outQuad');
-        css(lc, { opacity: kc1, transform: `translateY(${(1 - kc1) * 10}px)` });
+        const kc1 = tw(t, BOOK.line[0] - 0.2, BOOK.line[0] + 0.3, 'outBack');
+        css(lc, { opacity: clamp(kc1 * 1.5), transform: `translateY(${(1 - kc1) * 40}px) scale(${0.94 + 0.06 * kc1})`, transformOrigin: '50% 100%' });
         F.attr(clipR, { width: 590 * tw(t, BOOK.line[0], BOOK.line[1], 'inOutSine' in ease ? 'inOutSine' : 'inOutQuad') });
-        const kc2 = tw(t, BOOK.bars - 0.2, BOOK.bars + 0.15, 'outQuad');
-        css(bc, { opacity: kc2, transform: `translateY(${(1 - kc2) * 10}px)` });
+        const kc2 = tw(t, BOOK.bars - 0.2, BOOK.bars + 0.3, 'outBack');
+        css(bc, { opacity: clamp(kc2 * 1.5), transform: `translateY(${(1 - kc2) * 40}px) scale(${0.94 + 0.06 * kc2})`, transformOrigin: '50% 100%' });
         bars.forEach((b, i) => F.attr(b.r, { width: b.w * tw(t, BOOK.bars + i * 0.1, BOOK.bars + i * 0.1 + 0.55, 'outCubic') }));
         // the findings sheet: lands with a little weight, nearer the camera
-        const kfr = tw(t, BOOK.front[0], BOOK.front[1], 'outCubic');
+        const kfr = tw(t, BOOK.front[0], BOOK.front[1], 'outBack');
         const kcol = tw(t, BOOK.collapse[0], BOOK.collapse[1], 'inOutCubic');
-        css(front, { opacity: kfr * (1 - kcol), transform: `translate3d(${-kcol * 300}px,${(1 - kfr) * 46 - kcol * 160}px,${70 * (1 - kcol)}px) scale(${1 - 0.25 * kcol})` });
+        const kk = tw(t, BOOK.kpi, BOOK.kpi + 0.5, 'outBack');
+        css(kpi, { opacity: clamp(kk * 1.6) * (1 - kcol), transform: `translate3d(${kcol * 300}px,${(1 - kk) * 60 - kcol * 120}px,${110 * (1 - kcol)}px) scale(${1 - 0.25 * kcol})` });
+        const kvv = 3.84 * tw(t, BOOK.kpi, BOOK.kpi + 0.7, 'outExpo');
+        const kvs = L(`¥${kvv.toFixed(2)} 亿`, `¥${Math.round(kvv * 100)}M`);
+        if (kv.textContent !== kvs) kv.textContent = kvs;
+        css(front, { opacity: clamp(kfr * 1.6) * (1 - kcol), transform: `translate3d(${-kcol * 300}px,${(1 - kfr) * 70 - kcol * 160}px,${70 * (1 - kcol)}px) scale(${1 - 0.25 * kcol})` });
         flines.forEach((e, i) => { const k = tw(t, BOOK.find + i * 0.25, BOOK.find + i * 0.25 + 0.45, 'outCubic'); css(e, { opacity: k, transform: `translateY(${(1 - k) * 8}px)` }); });
 
         // ---- S1-07: the window collapses into the chip ----
         const S2 = 1.2 + 0.03 * prog(BOOK.morph[1], 28.5, 33.0); // the next surface's resting zoom then
         const cw = chip.offsetWidth || 230, chh = chip.offsetHeight || 37;
-        const tx0 = 960 + (543 - 960) * S2, ty0 = 540 + (491 - 540) * S2;   // chip slot: box left + padding, first row (see surfaces.js / kit inputBox)
+        // chip slot: first chip's top-left in surface world coords (kit inputBox: 848*Z card centred, 12*Z padding; K.CHIP_SLOT is its centre at zoom 1.2)
+        const tx0 = 960 + (364 - 960) * S2, ty0 = 540 + (519.5 - 540) * S2;
         const target = { x: tx0, y: ty0, w: cw * S2, h: chh * S2 };
         const kw = ease.inOutCubic(prog(t, BOOK.morph[0], BOOK.morph[1])), kh = ease.inOutCubic(prog(t, BOOK.morph[0], BOOK.morph[1] - 0.12));
         const kpos = ease.inOutQuad(prog(t, BOOK.morph[0], BOOK.morph[1]));
@@ -1056,14 +1096,14 @@
         const morphing = t >= BOOK.morph[0];
         if (morphing) {
           const kshape = tw(t, BOOK.morph[0] + 0.3, BOOK.morph[1], 'inOutQuad');
-          css(back, { left: cxm - w / 2, top: cym - hh / 2, width: w, height: hh, borderRadius: lerp(10, hh / 2, kshape),
+          css(back, { left: cxm - w / 2, top: cym - hh / 2, width: w, height: hh, borderRadius: lerp(14, hh / 2, kshape),
             background: `rgb(${Math.round(lerp(252, 240, kshape))},${Math.round(lerp(252, 240, kshape))},${Math.round(lerp(251, 239, kshape))})`,
             borderColor: `rgba(${Math.round(lerp(47, 32, kshape))},${Math.round(lerp(125, 30, kshape))},${Math.round(lerp(74, 29, kshape))},${lerp(0.55, 0.14, kshape).toFixed(3)})`,
-            boxShadow: `0 ${50 * (1 - kshape)}px ${120 * (1 - kshape)}px rgba(0,0,0,${(0.6 * (1 - kshape)).toFixed(3)})` });
+            boxShadow: `0 ${50 * (1 - kshape)}px ${120 * (1 - kshape)}px rgba(6,50,80,${(0.3 * (1 - kshape)).toFixed(3)})` });
           const sc = w / BK.w;
           css(inner, { transform: `translate(${(w - BK.w * sc) / 2}px,${(hh - BK.h * sc) / 2}px) scale(${sc})`, opacity: 1 - tw(t, BOOK.morph[0] + 0.12, BOOK.morph[0] + 0.5, 'inOutQuad') });
         } else {
-          css(back, { left: BK.x, top: BK.y, width: BK.w, height: BK.h, borderRadius: 10 });
+          css(back, { left: BK.x, top: BK.y, width: BK.w, height: BK.h, borderRadius: 14 });
           css(inner, { transform: 'none', opacity: 1 });
         }
         const kchip = tw(t, BOOK.morph[0] + 0.32, BOOK.morph[1] - 0.12, 'inOutQuad');
@@ -1080,7 +1120,7 @@
       css(layer, { pointerEvents: 'none' });
       const g = K.grain(layer, 0.04);
       const tag = h('div', { class: 'abs', text: T('example') });
-      css(tag, { right: 40, bottom: 34, fontFamily: 'var(--sans)', fontSize: 13, letterSpacing: '0.08em', color: 'rgba(161,157,155,.7)', border: '1px solid rgba(161,157,155,.3)', borderRadius: 4, padding: '3px 8px' });
+      css(tag, { right: 40, bottom: 34, fontFamily: 'var(--sans)', fontSize: 13, letterSpacing: '0.08em', color: 'rgba(255,255,255,.85)', border: '1px solid rgba(255,255,255,.45)', borderRadius: 4, padding: '3px 8px' });
       layer.append(tag);
       return (lt, t) => { g(t); css(tag, { opacity: F.env(t, 13.0, 28.4, 0.6, 0.4) }); };
     },

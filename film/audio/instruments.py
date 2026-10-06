@@ -250,3 +250,217 @@ def riser(dur, f_lo, f_hi, seed=0, curve=2.2):
     st = np.stack([y, a])
     st = filt(st, highpass(60), lowpass(8000))
     return fade(st / (np.max(np.abs(st)) + 1e-9), 0.05, 0.012)
+
+
+# ================================================================ v2 (bright launch score) instruments
+# All mono unless noted; the score pans / spreads them. Band-limited by construction (additive partials
+# stop below 11 kHz; noise sources are low-passed); every sound has a soft onset ramp and faded tail.
+
+def piano_bright_eq(x):
+    """Bright grand colour: clean low end, a little presence, polished (not glassy) top."""
+    return filt(x, highpass(55), peak(220, -1.5, 0.9), peak(2900, 1.8, 0.8), shelf(9000, -2.0, True))
+
+
+@functools.lru_cache(maxsize=1024)
+def pluck(m, dur=0.3, bright=1.0, seed=0):
+    """Plucked synth: saw-like additive tone, higher partials die faster (a closing filter), two slightly
+    detuned voices. dur: gate length in seconds (release 60 ms after)."""
+    r = rng(20000 + m * 3 + seed)
+    f0 = float(midi_hz(m))
+    L = int((dur + 0.12) * SR)
+    t = np.arange(L) / SR
+    y = np.zeros(L)
+    tau0 = 0.16 + 0.25 * bright
+    for v, cents in enumerate((-6.0, 6.0)):
+        f = f0 * 2 ** (cents / 1200)
+        ph = r.uniform(0, 2 * np.pi)
+        k = 1
+        while k * f < 10500 and k <= 40:
+            tau = tau0 / (1 + 0.55 * (k - 1) / bright)
+            a = (1.0 / k) * np.exp(-((k * f) / (3800 * bright)) ** 2)
+            y += a * np.sin(2 * np.pi * k * f * t + ph * k) * np.exp(-t / tau)
+            k += 1
+    y *= 1 - np.exp(-t / 0.0015)
+    g = int(dur * SR)
+    if g < L:
+        y[g:] *= np.exp(-(t[g:] - dur) / 0.03)
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.02)
+
+
+@functools.lru_cache(maxsize=256)
+def glock(m, decay=1.1, seed=0):
+    """Glockenspiel / celesta-ish bell: a few bright partials, quick attack, warm decay."""
+    r = rng(21000 + m + seed)
+    f = float(midi_hz(m))
+    L = int(decay * 4 * SR)
+    t = np.arange(L) / SR
+    y = np.zeros(L)
+    for ratio, a, dk in ((1.0, 1.0, 1.0), (2.0, 0.12, 0.5), (2.76, 0.22, 0.35), (5.40, 0.06, 0.18), (8.93, 0.025, 0.1)):
+        if f * ratio > 10500:
+            continue
+        y += a * np.sin(2 * np.pi * f * ratio * t + r.uniform(0, 6.28)) * np.exp(-t / (decay * dk))
+    y *= 1 - np.exp(-t / 0.0012)
+    y = filt(y, lowpass(9000, 0.7))
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.05)
+
+
+def synth_pad(m, dur, env_pts, bright=1.0, seed=0, voices=6):
+    """Warm detuned-saw pad note (stereo): PolyBLEP saws spread across the field, slow drift, low-passed."""
+    from dsp import envelope
+    r = rng(22000 + m * 5 + seed)
+    L = int(dur * SR)
+    f0 = float(midi_hz(m))
+    acc = np.zeros((2, L))
+    for v in range(voices):
+        det = (v - (voices - 1) / 2) / ((voices - 1) / 2) * 11 + r.uniform(-2, 2)
+        drift = 3 * smooth_noise(L, 0.3, int(r.integers(1 << 30)))
+        y = polyblep_saw(f0 * 2 ** ((det + drift) / 1200), r.random())
+        acc += pan(y, (v - (voices - 1) / 2) / ((voices - 1) / 2) * 0.85)
+    acc /= voices
+    fc = min((1400 + 2.2 * f0) * bright, 7000)
+    acc = butter_lp(acc, fc, 2)
+    acc = filt(acc, highpass(max(f0 * 0.7, 80)), peak(fc * 0.8, 2.0, 1.2))
+    acc *= envelope(env_pts, L)[None]
+    return fade(acc, 0.01, 0.05)
+
+
+@functools.lru_cache(maxsize=512)
+def bass_note(m, dur=0.25, bright=1.0):
+    """Synth bass: sine sub + low-passed saw with a short filter envelope. Mono."""
+    f0 = float(midi_hz(m))
+    L = int((dur + 0.08) * SR)
+    t = np.arange(L) / SR
+    sub = np.sin(2 * np.pi * f0 * t)
+    saw = polyblep_saw(np.full(L, f0), 0.25) + 0.6 * polyblep_saw(np.full(L, f0 * 1.004), 0.6)
+    # filter envelope approximated by mixing two fixed low-passes (no zipper)
+    lo = butter_lp(saw, 260, 2)
+    hi = butter_lp(saw, 900 * bright, 2)
+    k = np.exp(-t / 0.07)
+    y = 0.9 * sub + 0.45 * (lo * (1 - k) + hi * k)
+    e = (1 - np.exp(-t / 0.004))
+    g = int(dur * SR)
+    e[g:] *= np.exp(-(t[g:] - dur) / 0.025)
+    y = filt(y * e, highpass(30))
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.01)
+
+
+@functools.lru_cache(maxsize=8)
+def kick(variant=0):
+    """Clean, round kick: pitch-swept sine body, soft beater click (band-limited), gentle saturation."""
+    L = int(0.45 * SR)
+    t = np.arange(L) / SR
+    f = 47 + 95 * np.exp(-t / 0.032) + 40 * np.exp(-t / 0.004)
+    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (0.16 if variant == 0 else 0.26))
+    r = rng(23000 + variant)
+    nz = r.standard_normal(L) * np.exp(-t / 0.0025)
+    click = filt(nz, bandpass(3200, 0.9), lowpass(7000))
+    y = body + 0.25 * click / (np.max(np.abs(click)) + 1e-9)
+    y = np.tanh(1.6 * y) / np.tanh(1.6)
+    y *= 1 - np.exp(-t / 0.0007)
+    y = filt(y, highpass(32), lowpass(9000))
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.03)
+
+
+@functools.lru_cache(maxsize=16)
+def clap(seed=0):
+    """Hand clap: four noise bursts a few ms apart, band-passed around 1.3 kHz, short diffuse tail. Stereo."""
+    r = rng(24000 + seed)
+    L = int(0.35 * SR)
+    t = np.arange(L) / SR
+    out = []
+    for c in range(2):
+        y = np.zeros(L)
+        for j, dt in enumerate((0.0, 0.009, 0.018, 0.029)):
+            i = max(0, int((dt + r.uniform(-0.0008, 0.0008)) * SR))
+            b = r.standard_normal(L - i) * np.exp(-t[:L - i] / (0.004 if j < 3 else 0.075))
+            y[i:] += b * (0.8 if j < 3 else 1.0)
+        y = filt(y, bandpass(1250, 0.7), highpass(500), lowpass(7500))
+        out.append(y)
+    y = np.stack(out)
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.03)
+
+
+@functools.lru_cache(maxsize=16)
+def snare(seed=0):
+    """Light snare for fills: short tone + band-passed noise."""
+    r = rng(25000 + seed)
+    L = int(0.25 * SR)
+    t = np.arange(L) / SR
+    tone = np.sin(2 * np.pi * 196 * t) * np.exp(-t / 0.03) + 0.4 * np.sin(2 * np.pi * 330 * t) * np.exp(-t / 0.02)
+    nz = filt(r.standard_normal(L), bandpass(2600, 0.6), lowpass(8000)) * np.exp(-t / 0.06)
+    y = 0.6 * tone + nz / (np.max(np.abs(nz)) + 1e-9)
+    y *= 1 - np.exp(-t / 0.0006)
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.02)
+
+
+@functools.lru_cache(maxsize=16)
+def shaker(seed=0, accent=False):
+    """Shaker: soft high noise grain, rounded (no fizz above ~10 kHz)."""
+    r = rng(26000 + seed)
+    L = int(0.12 * SR)
+    t = np.arange(L) / SR
+    e = (1 - np.exp(-t / (0.006 if accent else 0.009))) * np.exp(-t / (0.035 if accent else 0.028))
+    y = filt(r.standard_normal(L), highpass(4200, 0.7), lowpass(9500, 0.7), peak(6500, 2.0, 1.0)) * e
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.01)
+
+
+@functools.lru_cache(maxsize=8)
+def hat(open_=False, seed=0):
+    """Hi-hat: inharmonic metallic partials + noise, band-limited, softened top."""
+    r = rng(27000 + seed)
+    L = int((0.35 if open_ else 0.08) * SR)
+    t = np.arange(L) / SR
+    y = np.zeros(L)
+    for fr in (3150, 4470, 5210, 6040, 7330, 8120):
+        y += np.sin(2 * np.pi * fr * r.uniform(0.99, 1.01) * t + r.uniform(0, 6.28))
+    y = 0.35 * y / 6 + filt(r.standard_normal(L), highpass(6000))
+    y *= np.exp(-t / (0.11 if open_ else 0.018)) * (1 - np.exp(-t / 0.0008))
+    y = filt(y, highpass(5000, 0.7), lowpass(10000, 0.7))
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.02)
+
+
+@functools.lru_cache(maxsize=8)
+def crash(dur=2.4, seed=0):
+    """Soft crash / ride swell for impacts: decorrelated stereo noise + metallic partials, dark top. Stereo."""
+    r = rng(28000 + seed)
+    L = int(dur * SR)
+    t = np.arange(L) / SR
+    chans = []
+    for c in range(2):
+        y = r.standard_normal(L)
+        for fr in (3520, 4130, 5270, 6680):
+            y += 0.3 * np.sin(2 * np.pi * fr * r.uniform(0.98, 1.02) * t + r.uniform(0, 6.28))
+        y = filt(y, highpass(700, 0.7), lowpass(8500, 0.6), peak(5000, -2.0, 0.8))
+        e = np.exp(-t / (dur * 0.28)) * (1 - np.exp(-t / 0.002))
+        chans.append(y * e)
+    y = np.stack(chans)
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.3)
+
+
+@functools.lru_cache(maxsize=8)
+def boom(f_end=41.2, dur=1.6):
+    """Sub impact: a sine dropping into the root, with a felted thump. Mono."""
+    L = int(dur * SR)
+    t = np.arange(L) / SR
+    f = f_end * (1 + 1.4 * np.exp(-t / 0.06))
+    y = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (dur * 0.33))
+    y += 0.3 * np.sin(2 * np.pi * 2 * np.cumsum(f) / SR) * np.exp(-t / 0.15)
+    y *= 1 - np.exp(-t / 0.002)
+    y = filt(y, lowpass(400), highpass(28))
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.2)
+
+
+def sweep(dur, f0, f1, seed=0, q=1.0):
+    """Noise sweep (riser if f1 > f0, downlifter if f1 < f0), loudest where the motion ends (riser) or
+    begins (downlifter). Stereo, band-limited below 9 kHz."""
+    up = f1 > f0
+
+    def spec(t, f):
+        k = np.clip(t / dur, 0, 1)
+        fc = f0 * (f1 / f0) ** (k ** (1.6 if up else 0.6))
+        g = np.exp(-0.5 * ((np.log2(np.maximum(f, 20)) - np.log2(fc)) / (0.8 * q)) ** 2)
+        lvl = (0.05 + k ** 1.8) if up else (1 - k) ** 1.4 + 0.02
+        return g * lvl * (f < 9500)
+    y = np.stack([shaped_noise(dur, spec, seed), shaped_noise(dur, spec, seed + 1)])
+    y = filt(y, highpass(80))
+    return fade(y / (np.max(np.abs(y)) + 1e-9), 0.03 if up else 0.004, 0.02 if up else 0.2)

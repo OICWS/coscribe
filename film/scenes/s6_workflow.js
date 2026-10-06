@@ -8,7 +8,8 @@
 //  S6-04 110.0–113.6  identical runs tile into a fabric while the camera pulls back; hard cut at 113.6:
 //                     everything collapses into one blue line (s7_close.js takes it from there).
 // UI fragments follow office-agent/frontend/src/components/workflow/* (WorkflowDraftCard, StepSummary,
-// WorkflowRunView, parts) and ScheduledTaskDetail / RunPanel / RunStatusIcon, in the app's dark theme.
+// WorkflowRunView, parts) and ScheduledTaskDetail / RunPanel / RunStatusIcon, in the app's light theme,
+// as white cards floating on the brand field (var(--field-flow)).
 (function () {
   const { h, css, attr, clamp, lerp, tw, ease, prog, env, L, T } = F;
 
@@ -22,14 +23,20 @@
   const CARD_IN = 105.45, SAVED = 106.0, OPEN = 106.36, TASK_IN = 106.5;
   const MONDAYS = [106.6, 107.4, 108.2, 109.0, 109.8];
   const SWEEP = 0.56;                        // one run, top to bottom
-  const HIT = 110.0, BEAT = 60 / 72;         // 72 BPM
+  const HIT = 110.0, BEAT = 0.545;           // v2 score: ~110 BPM
   const SQUEEZE0 = 113.4;
 
   // ---------- the app's dark theme (office-agent/frontend/src/index.css, [data-theme="dark"]) ----------
-  const D = { bg: '#232120', fg: '#f7f5f3', muted: '#a19d9b', card: '#322f2e', border: 'rgba(247,245,243,.14)',
-    borderHover: 'rgba(247,245,243,.26)', accent: '#4b8fe3', accentInk: '#9cc3f3', accentSoft: 'rgba(75,143,227,.16)',
-    success: '#8fd19f', warning: '#e8b85c', sheet: '#7fcf98', slides: '#f0a076', depth: '#141312' };
-  const KC = { tool: '#cbc5c2', script: '#8cb4f0', llm: '#ef92ab', check: '#8fd19f', approval: '#e8b85c', branch: '#c3adf7', loop: '#7fd2d6' };
+  // v2: the app's LIGHT theme (index.css :root) for every card; white ink on the brand field
+  const D = { bg: '#fcfcfb', fg: '#201e1d', muted: '#7d7979', card: '#f0f0ef', border: 'rgba(32,30,29,.14)',
+    borderHover: 'rgba(32,30,29,.28)', accent: '#2a78d6', accentInk: '#1d5fb0', accentSoft: '#eaf2fc',
+    success: '#3d8f56', warning: '#b87a14', sheet: '#2f7d4a', slides: '#c4561f', doc: '#2d62b8', depth: '#3b5bfd' };
+  const KC = { tool: '#5f5a57', script: '#2d62b8', llm: '#b8456a', check: '#2f7d4a', approval: '#93600f', branch: '#6a4db3', loop: '#17767c' };
+  const INK = '#ffffff', BRAND1 = '#3b5bfd', BRAND2 = '#8b5cf6';
+  const SHADOW = '0 30px 80px rgba(16,24,64,.22), 0 2px 8px rgba(16,24,64,.10)';
+  // the field gradients (film.css), as canvas stops
+  const FIELDS = { sheet: ['#18a05e', 0, '#12b5a4', 0.55, '#3b82f6', 1], slides: ['#ff8a3d', 0, '#f4511e', 0.5, '#e8457c', 1],
+    doc: ['#2563eb', 0, '#1d9bf0', 0.55, '#22c1d6', 1], code: ['#312e81', 0, '#4f46e5', 0.5, '#0891b2', 1] };
   const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
   const SANS = '"IBM Plex Sans", "Noto Sans SC", sans-serif', MONO = '"IBM Plex Mono", "Noto Sans SC", monospace';
 
@@ -77,6 +84,7 @@
 
   // list geometry in product px (1x); the list is drawn at scale S
   const S = 1.7, COLW = 560, RAILX = 11;
+  const CARDPAD = [22, 20];                  // the white run-view card around the list (product px)
   // the right-hand column (draft card / scheduled task / runs) is drawn at SR
   const SR = 1.55, RCOLW = 370;
   // rest layout on screen (f = 1): the list fills the left two thirds, the column sits right, the calendar below
@@ -99,7 +107,13 @@
     id: 's6', start: T0, end: TEND, z: 30,
     build(layer) {
       // ======================= layers =======================
-      const bg = K.depth(layer);
+      // the brand field with one soft, slowly drifting highlight (and a gentle lift on the big beats)
+      const bg = h('div', { class: 'abs' });
+      css(bg, { inset: 0, background: 'var(--field-flow)' });
+      const glow = h('div', { class: 'abs' });
+      css(glow, { left: -600, top: -600, width: 1800, height: 1800, borderRadius: '50%', pointerEvents: 'none',
+        background: 'radial-gradient(closest-side, rgba(255,255,255,.30), rgba(255,255,255,.10) 55%, rgba(255,255,255,0))' });
+      layer.append(bg, glow);
       const P = 1800;
       const view = h('div', { class: 'abs' });
       css(view, { left: 0, top: 0, width: 1920, height: 1080, perspective: P + 'px', perspectiveOrigin: '960px 540px' });
@@ -111,17 +125,19 @@
       const paper = h('div', { class: 'abs' });
       css(paper, { left: 0, top: 0, width: 1920, height: 1080, transformOrigin: '0 0', overflow: 'hidden' });
       K.surface(paper);
-      const box = K.inputBox(paper, { y: 540, placeholder: T('placeholder') });
+      // (the rig's resting camera, cz -300 at perspective 1800, shows the paper at the surfaces' 1.2 zoom)
+      const paperIn = h('div', { class: 'abs' });
+      css(paperIn, { left: 0, top: 0, width: 1920, height: 1080 });
+      paper.append(paperIn);
+      const box = K.inputBox(paperIn, { y: 540, placeholder: T('placeholder') });
       const chipDefs = [['s1_out', 'sheet'], ['s2_out', 'slides'], ['s3_out', 'doc'], ['s4_out', 'code']];
       const chips = chipDefs.map(([k, kind]) => box.addChip(T(k), kind));
-      // four chips must sit on one row: tighten them a little (same chip, smaller set)
-      // like Composer.tsx's attachment chips: max-w 220px, the name truncates (and they shrink to share one row)
+      // like Composer.tsx's attachment chips: max-w 220px (x Z), the name truncates
       chips.forEach((c) => {
-        css(c, { fontSize: 14, padding: '6px 12px 6px 7px', gap: 8, maxWidth: 220, minWidth: 0, flex: '0 1 auto', whiteSpace: 'nowrap' });
-        css(c.firstChild, { flex: 'none' });
-        css(c.lastChild, { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' });
+        css(c, { maxWidth: 220 * K.Z, minWidth: 0 });
+        css(c.firstChild, { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' });
+        css(c.lastChild, { flex: 'none' });
       });
-      css(box.chips, { flexWrap: 'nowrap', gap: 7 });
       rig.append(paper);
 
       // ---- the strata: three depth worlds as sheets beneath the paper ----
@@ -149,35 +165,38 @@
       mask.append(h('rect', { x: 0, y: 0, width: 1920, height: 1080, fill: '#fff' }), maskPoly);
       defs.append(mask); ov.append(defs);
       const lineG = h('g', { mask: 'url(#s6mask)' });
-      const lineHalo = h('path', { fill: 'none', stroke: D.accent, 'stroke-width': 9, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.1 });
-      const linePath = h('path', { fill: 'none', stroke: D.accent, 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+      const lineHalo = h('path', { fill: 'none', stroke: '#fff', 'stroke-width': 9, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.9 });
+      const linePath = h('path', { fill: 'none', stroke: BRAND1, 'stroke-width': 3.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
       lineG.append(lineHalo, linePath);
       const nodeEls = STEPS.map(() => {
         const g = h('g');
-        g.append(h('circle', { r: 6.5, fill: D.depth, stroke: D.accent, 'stroke-width': 1.6 }), h('circle', { r: 2.4, fill: '#fff' }));
+        g.append(h('circle', { r: 8, fill: BRAND1, stroke: '#fff', 'stroke-width': 3 }), h('circle', { r: 2.6, fill: '#fff' }));
         return g;
       });
-      const head = h('circle', { r: 5, fill: '#fff' });
+      const head = h('circle', { r: 7, fill: '#fff', stroke: BRAND1, 'stroke-width': 2.5 });
       lineG.append(...nodeEls);
       ov.append(lineG, head);
       layer.append(ov);
 
       // subtitle scrim (VO-08 over the fabric) and the final collapse line
-      const scrim = h('div', { class: 'abs' });
-      css(scrim, { left: 0, top: 0, width: 1920, height: 1080, pointerEvents: 'none', opacity: 0,
-        background: 'linear-gradient(180deg, rgba(13,12,12,0) 0px, rgba(13,12,12,0) 760px, rgba(13,12,12,.74) 872px, rgba(13,12,12,.74) 952px, rgba(13,12,12,.5) 1080px)' });
+      // (the subtitle band is kept calm by masking the fabric, not by a dark scrim)
       const collapseLine = h('div', { class: 'abs' });
-      css(collapseLine, { left: 960 - 1.25, top: 0, width: 2.5, height: 1080, background: D.accent, opacity: 0 });
+      css(collapseLine, { left: 960 - 1.5, top: 0, width: 3, height: 1080, background: '#fff', opacity: 0, boxShadow: '0 0 18px rgba(255,255,255,.55)' });
       const exTag = h('div', { class: 'abs', text: T('example') });
-      css(exTag, { left: 48, top: 40, fontFamily: 'var(--mono)', fontSize: 12, letterSpacing: '.08em', color: D.muted, opacity: 0 });
-      layer.append(scrim, collapseLine, exTag);
-      const grainU = K.grain(layer, 0.04);
+      css(exTag, { left: 48, top: 40, fontFamily: 'var(--mono)', fontSize: 12, letterSpacing: '.08em', color: INK, opacity: 0 });
+      layer.append(collapseLine, exTag);
+      const grainU = K.grain(layer, 0.025);
 
       // ======================= the step list (DOM) =======================
       const list = h('div', { class: 'abs' });
       css(list, { left: 0, top: 0, width: COLW, height: LIST_H, transformOrigin: '0 0', fontFamily: SANS, color: D.fg });
       world.append(list);
-      const rail = h('div', { class: 'abs' }); css(rail, { left: RAILX - 1, width: 2, background: D.accent, top: 0, height: 0 });
+      // the run view as a crisp white card (WorkflowRunView inside the task panel)
+      const listCard = h('div', { class: 'abs' });
+      css(listCard, { left: -CARDPAD[0], top: -CARDPAD[1], width: COLW + 2 * CARDPAD[0], height: LIST_H + 2 * CARDPAD[1], borderRadius: 14,
+        background: D.bg, border: `1px solid ${D.border}`, boxShadow: SHADOW, transformOrigin: '50% 40%' });
+      list.append(listCard);
+      const rail = h('div', { class: 'abs' }); css(rail, { left: RAILX - 1.5, width: 3, background: BRAND1, top: 0, height: 0, boxShadow: '0 0 0 1.5px rgba(255,255,255,.9)' });
       const railLit = h('div', { class: 'abs' }); css(railLit, { left: RAILX - 1, width: 2, background: D.accent, top: 11, height: 0 });
       const runHead = h('div', { class: 'abs' }); css(runHead, { left: RAILX - 4.5, width: 9, height: 9, borderRadius: 5, background: '#fff', opacity: 0 });
       // the branch's "then" arm: the nested section (WorkflowRunView Nested / editor arms)
@@ -203,7 +222,7 @@
         const x0 = s.nested ? SECTION.x + 12 : 0;
         css(r, { left: x0, top: ROWY[i], width: COLW - x0 - (s.nested ? 10 : 0), height: 22, display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' });
         // status dot (WorkflowRunView StatusDot) over an opaque disc so the rail passes behind it
-        const dotWrap = h('span'); css(dotWrap, { position: 'relative', width: 22, height: 22, flex: 'none', borderRadius: 11, background: '#191817' });
+        const dotWrap = h('span'); css(dotWrap, { position: 'relative', width: 22, height: 22, flex: 'none', borderRadius: 11, background: '#fff' });
         const dot = {
           nr: h('span'), done: h('span'), wait: h('span'), skip: h('span'),
         };
@@ -239,13 +258,13 @@
       }
       // date header shown above each run column in the fabric
       const colHead = h('div', { class: 'abs', text: '11-09' });
-      css(colHead, { left: 0, top: -40, fontFamily: MONO, fontSize: 13, color: D.muted, letterSpacing: '.04em', opacity: 0 });
+      css(colHead, { left: 0, top: -48, fontFamily: MONO, fontSize: 13, color: INK, letterSpacing: '.04em', opacity: 0 });
       list.append(colHead);
 
       // ======================= draft card (WorkflowDraftCard) =======================
       const card = h('div', { class: 'abs' });
       css(card, { left: 0, top: 0, width: RCOLW, padding: 16, borderRadius: 12, border: `1px solid ${D.border}`, background: D.bg,
-        fontFamily: SANS, color: D.fg, transformOrigin: '0 0', boxShadow: '0 30px 80px rgba(0,0,0,.45)' });
+        fontFamily: SANS, color: D.fg, transformOrigin: '0 0', boxShadow: SHADOW });
       const cHead = h('div'); css(cHead, { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 12, fontWeight: '500', letterSpacing: '.04em', textTransform: 'uppercase', color: D.muted });
       cHead.innerHTML = svgIcon('workflow', 14, D.muted, 2) + '<span>Fixed workflow draft</span>';
       const cName = h('div', { text: NAME }); css(cName, { fontSize: 15, fontWeight: '500', lineHeight: '1.4' });
@@ -272,7 +291,7 @@
 
       // ======================= runs (ScheduledTaskDetail RunsSection + RunStatusIcon) =======================
       const runs = h('div', { class: 'abs' });
-      css(runs, { left: 0, top: 0, width: RCOLW, fontFamily: SANS, color: D.fg, transformOrigin: '0 0' });
+      css(runs, { left: -16, top: 0, width: RCOLW + 32, padding: '14px 16px 10px', borderRadius: 12, border: `1px solid ${D.border}`, background: D.bg, boxShadow: SHADOW, fontFamily: SANS, color: D.fg, transformOrigin: '16px 0' });
       const runsLabel = h('div', { text: 'Runs' }); css(runsLabel, { fontSize: 14, color: D.muted, marginBottom: 4 });
       const runsBody = h('div'); css(runsBody, { position: 'relative', height: 5 * 36 });
       runs.append(runsLabel, runsBody);
@@ -290,7 +309,7 @@
 
       // ======================= scheduled task header (ScheduledTaskDetail / RunPanel) =======================
       const task = h('div', { class: 'abs' });
-      css(task, { left: 0, top: 0, width: RCOLW, fontFamily: SANS, color: D.fg, transformOrigin: '0 0' });
+      css(task, { left: -16, top: 0, width: RCOLW + 32, padding: 16, borderRadius: 12, border: `1px solid ${D.border}`, background: D.bg, boxShadow: SHADOW, fontFamily: SANS, color: D.fg, transformOrigin: '16px 0' });
       // the title wraps before "daily-report check", never at its hyphen
       const tName = h('div');
       { const k = NAME.indexOf('daily-report'); if (k < 0) tName.textContent = NAME; else { const nb = h('span', { text: NAME.slice(k) }); css(nb, { whiteSpace: 'nowrap' }); tName.append(NAME.slice(0, k), nb); } } css(tName, { fontSize: 22, fontWeight: '600', lineHeight: '1.3' });
@@ -307,21 +326,21 @@
 
       // ======================= the calendar ruler (five Mondays) =======================
       const ruler = h('div', { class: 'abs' });
-      css(ruler, { left: 0, top: 0, width: RULER_W, height: 60, fontFamily: MONO, color: D.muted });
+      css(ruler, { left: 0, top: 0, width: RULER_W, height: 60, fontFamily: MONO, color: INK });
       const DAY = RULER_W / 46; // 10-05 .. 11-19
-      const rbase = h('div', { class: 'abs' }); css(rbase, { left: 0, top: 0, width: RULER_W, height: 1, background: D.border });
+      const rbase = h('div', { class: 'abs' }); css(rbase, { left: 0, top: 0, width: RULER_W, height: 1.5, background: 'rgba(255,255,255,.5)' });
       ruler.append(rbase);
       const MON_LABELS = ['10-05', '10-12', '10-19', '10-26', '11-02', '11-09', '11-16'];
       for (let d = 0; d <= 46; d++) {
         const mon = d % 7 === 0;
-        const tk = h('div', { class: 'abs' }); css(tk, { left: d * DAY, top: 0, width: 1, height: mon ? 10 : 4, background: mon ? D.borderHover : D.border });
+        const tk = h('div', { class: 'abs' }); css(tk, { left: d * DAY, top: 0, width: 1, height: mon ? 12 : 5, background: mon ? 'rgba(255,255,255,.85)' : 'rgba(255,255,255,.4)' });
         ruler.append(tk);
       }
       const monEls = MON_LABELS.map((s, i) => {
-        const e = h('div', { class: 'abs', text: s }); css(e, { left: i * 7 * DAY - 50, top: 20, width: 100, textAlign: 'center', fontSize: 17, letterSpacing: '.04em', color: D.muted, opacity: 0.55 });
+        const e = h('div', { class: 'abs', text: s }); css(e, { left: i * 7 * DAY - 50, top: 20, width: 100, textAlign: 'center', fontSize: 18, fontWeight: '500', letterSpacing: '.04em', color: INK, opacity: 0.55 });
         ruler.append(e); return e;
       });
-      const marker = h('div', { class: 'abs' }); css(marker, { left: 0, top: -16, width: 2, height: 16, background: D.accent });
+      const marker = h('div', { class: 'abs' }); css(marker, { left: 0, top: -22, width: 4, height: 22, borderRadius: 2, background: '#fff', boxShadow: '0 4px 14px rgba(16,24,64,.3)' });
       ruler.append(marker);
       world.append(ruler);
 
@@ -330,8 +349,9 @@
       let X0 = 960 - 440 + 22 + 340, Y0 = 560, measured = false;
       function measure() {
         let e = box.text.children[1], x = 0, y = 0;
-        while (e && e !== paper) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; }
-        if (e === paper) { X0 = x + 1; Y0 = y + 15; measured = true; }
+        const ch = e ? e.offsetHeight : 26;
+        while (e && e !== paperIn) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; }
+        if (e === paperIn) { X0 = x + 1; Y0 = y + ch / 2; measured = true; }
       }
       const V0 = 60;                             // first row top, in depth units below the paper
       const nodeV = STEPS.map((s, i) => V0 + (ROWY[i] + 11) * S);
@@ -466,13 +486,18 @@
       const FINAL = STEPS.map((s, i) => (i === APPROVAL ? 'skip' : 'done'));
 
       // ======================= fabric sprite =======================
-      const PW = COLW * S + 44, PH = (LIST_H + 50) * S + 26;   // tiling pitch in world px
+      // tiling pitch in world px: one white card plus its date label, with a field gap between
+      const PW = (COLW + 2 * CARDPAD[0]) * S + 40, PH = (LIST_H + 2 * CARDPAD[1] + 30) * S + 30;
       let sprites = null;
       function buildSprites() {
-        const pad = 20, w = Math.ceil(COLW * S + pad * 2), hh = Math.ceil((LIST_H + 50) * S + pad * 2);
+        const PADL = 44;   // room for the card's coloured shadow (list px)
+        const pad = PADL * S, w = Math.ceil((COLW + 2 * CARDPAD[0] + 2 * PADL) * S), hh = Math.ceil((LIST_H + 2 * CARDPAD[1] + 2 * PADL) * S);
         const chain = (abstract) => {
           const base = h('canvas', { width: w, height: hh }), c = base.getContext('2d');
-          c.translate(pad, pad + 50 * S); c.scale(S, S);
+          c.translate(pad + CARDPAD[0] * S, pad + CARDPAD[1] * S);
+          c.save(); c.shadowColor = 'rgba(16,24,64,.24)'; c.shadowBlur = 50; c.shadowOffsetY = 22;
+          roundRect(c, -CARDPAD[0] * S, -CARDPAD[1] * S, (COLW + 2 * CARDPAD[0]) * S, (LIST_H + 2 * CARDPAD[1]) * S, 14 * S); c.fillStyle = '#fcfcfb'; c.fill(); c.restore();
+          c.scale(S, S);
           drawList(c, abstract);
           const mips = [{ cv: base, s: 1 }];
           for (let k = 1; k <= 4; k++) {
@@ -482,7 +507,7 @@
           }
           return mips;
         };
-        return { mips: chain(false), abs: chain(true), pad, ox: pad + RAILX * S, oy: pad + 50 * S };
+        return { mips: chain(false), abs: chain(true), pad, ox: pad + (CARDPAD[0] + RAILX) * S, oy: pad + CARDPAD[1] * S };
       }
       function drawList(c, abstract) {
         if (abstract) { drawAbstract(c); return; }
@@ -500,7 +525,7 @@
         STEPS.forEach((s, i) => {
           const x0 = s.nested ? SECTION.x + 12 : 0, y = ROWY[i], cy = y + 11;
           const st = FINAL[i];
-          c.fillStyle = '#191817'; c.beginPath(); c.arc(x0 + 11, cy, 11, 0, Math.PI * 2); c.fill();
+          c.fillStyle = '#fff'; c.beginPath(); c.arc(x0 + 11, cy, 11, 0, Math.PI * 2); c.fill();
           if (st === 'done') {
             c.fillStyle = rgba(D.success, 0.16); c.beginPath(); c.arc(x0 + 11, cy, 11, 0, Math.PI * 2); c.fill();
             drawIcon(c, 'tick', x0 + 5, cy - 6, 12, D.success, 3);
@@ -527,20 +552,20 @@
 
       // the same column seen from far away: its threads only (rail, status, kinds, text as bars)
       function drawAbstract(c) {
-        c.fillStyle = rgba(D.accent, 0.95); c.fillRect(RAILX - 5, -20, 10, ROWY[13] + 62);
+        c.fillStyle = BRAND1; c.fillRect(RAILX - 5, -6, 10, ROWY[13] + 34);
         c.fillStyle = rgba(KC.branch, 0.5); c.fillRect(SECTION.x, SECTION.y + 2, 4, SECTION.hgt - 4);
         c.fillStyle = rgba(KC.branch, 0.06); c.fillRect(SECTION.x, SECTION.y, COLW - SECTION.x, SECTION.hgt);
-        c.fillStyle = 'rgba(161,157,155,.35)'; c.fillRect(SECTION.x + 14, OTHER_Y + 6, 200, 5);
+        c.fillStyle = 'rgba(125,121,121,.3)'; c.fillRect(SECTION.x + 14, OTHER_Y + 6, 200, 5);
         c.font = `500 14px ${SANS}`;
         STEPS.forEach((s, i) => {
           const x0 = s.nested ? SECTION.x + 12 : 0, cy = ROWY[i] + 11;
           c.fillStyle = s.nested ? D.card : D.success; c.beginPath(); c.arc(x0 + 11, cy, 12, 0, Math.PI * 2); c.fill();
           roundRect(c, x0 + 35, cy - 11, 22, 22, 5); c.fillStyle = KC[s.kind]; c.fill();
           const tw1 = c.measureText(s.title).width;
-          c.fillStyle = 'rgba(247,245,243,.62)'; c.fillRect(x0 + 66, cy - 4, tw1, 8);
+          c.fillStyle = 'rgba(32,30,29,.55)'; c.fillRect(x0 + 66, cy - 4, tw1, 8);
           const sw1 = Math.min(COLW - x0 - 66 - tw1 - 60, 120 + (i * 53) % 160);
-          c.fillStyle = 'rgba(161,157,155,.34)'; c.fillRect(x0 + 66 + tw1 + 10, cy - 3, sw1, 6);
-          if (s.d) { c.fillStyle = 'rgba(161,157,155,.34)'; c.fillRect(COLW - 26, cy - 3, 26, 6); }
+          c.fillStyle = 'rgba(125,121,121,.3)'; c.fillRect(x0 + 66 + tw1 + 10, cy - 3, sw1, 6);
+          if (s.d) { c.fillStyle = 'rgba(125,121,121,.3)'; c.fillRect(COLW - 26, cy - 3, 26, 6); }
         });
       }
 
@@ -550,6 +575,10 @@
         if (!measured && t >= ENTER - 0.3) { measure(); KEYS3 = null; }
         if (!KEYS3) KEYS3 = keys3();
         grainU(t);
+        // the field's light drifts slowly; each big beat from 110.0 lifts it a little
+        let lift = 0;
+        for (let r = 0; r < 4; r++) { const d = t - (HIT + r * BEAT); if (d >= 0) lift = Math.max(lift, (r ? 0.35 : 1) * Math.exp(-d / 0.35)); }
+        css(glow, { transform: `translate(${(560 + 520 * Math.sin((t - T0) * 0.21)).toFixed(1)}px,${(160 + 160 * Math.cos((t - T0) * 0.17)).toFixed(1)}px) scale(${(1 + 0.25 * lift).toFixed(3)})`, opacity: (0.8 + 0.2 * lift).toFixed(3) });
 
         // ---------- S6-01: the surface, typing ----------
         const n = K.typedCount(keyTimes, t);
@@ -616,7 +645,7 @@
         // ---------- 2D phase ----------
         const in2D = t >= SWITCH;
         world.style.display = in2D ? '' : 'none';
-        if (!in2D) { fabric.style.display = 'none'; css(exTag, { opacity: 0.6 * tw(t, 103.6, 104.2) }); scrim.style.opacity = 0; collapseLine.style.opacity = 0; return; }
+        if (!in2D) { fabric.style.display = 'none'; css(exTag, { opacity: 0.6 * tw(t, 103.6, 104.2) }); collapseLine.style.opacity = 0; return; }
         const r0 = REST(), sw0 = SW0();
         // after the hand-over the camera settles into the rest layout as the list crystallises
         const kSet = ease.inOutCubic(prog(t, SWITCH, SWITCH + 0.95));
@@ -639,6 +668,9 @@
         const railTop = lerp(-V0 / S, 11, kR), railBot = lerp((V_END - V0) / S, ROWY[13] + 11, kR);
         const railDim = lerp(1, 0.5, tw(t, 105.9, 106.5));
         css(rail, { top: railTop, height: railBot - railTop, opacity: railDim });
+        // the white card condenses around the list as it crystallises (a small confident overshoot)
+        const kCardL = prog(t, CRYST - 0.05, CRYST + 0.5);
+        css(listCard, { opacity: ease.outQuad(clamp(kCardL * 1.6)).toFixed(3), transform: `scale(${(0.94 + 0.06 * ease.outBack(kCardL)).toFixed(4)})` });
         // crystallised rows
         rows.forEach((row, i) => {
           const tc = CRYST + i * CRYST_STEP;
@@ -679,7 +711,7 @@
         const kGone = tw(t, OPEN + 0.04, OPEN + 0.34, 'inOutCubic');
         const [cwx, cwy] = RS(r0, RCOL_SX, LIST_SY);
         css(card, { transform: `translate(${cwx}px,${cwy - kGone * 26}px) scale(${SR}) translateY(${(1 - kCard) * 18}px)`, opacity: kCard * (1 - kGone), display: kGone >= 1 ? 'none' : '' });
-        css(openBtn, { background: kOpen > 0.01 ? `rgba(247,245,243,${(0.1 * kOpen).toFixed(3)})` : D.bg, transform: `scale(${(1 - 0.05 * kOpen).toFixed(3)})` });
+        css(openBtn, { background: kOpen > 0.01 ? `rgba(32,30,29,${(0.08 * kOpen).toFixed(3)})` : D.bg, transform: `scale(${(1 - 0.05 * kOpen).toFixed(3)})` });
         const kFlip = tw(t, SAVED, SAVED + 0.4, 'inOutCubic');
         css(stTested, { transform: `rotateX(${kFlip * 90}deg)`, opacity: kFlip < 0.5 ? 1 : 0 });
         css(stSaved, { transform: `rotateX(${(kFlip - 1) * 90}deg)`, opacity: kFlip >= 0.5 ? 1 : 0 });
@@ -688,7 +720,7 @@
 
         // runs list under the card: newest first
         const kRuns = tw(t, MONDAYS[0] - 0.2, MONDAYS[0] + 0.2, 'outCubic');
-        const [rwx, rwy] = RS(r0, RCOL_SX, LIST_SY + 300);
+        const [rwx, rwy] = RS(r0, RCOL_SX, LIST_SY + 330);
         css(runs, { transform: `translate(${rwx}px,${rwy}px) scale(${SR})`, opacity: kRuns * outR });
         runRows.forEach((r, k) => {
           const tin = MONDAYS[k] + (k === 2 ? rowT(APPROVAL) * SWEEP + 0.05 : SWEEP + 0.03);
@@ -711,7 +743,7 @@
         css(marker, { left: mx - 1 });
         monEls.forEach((e, k) => {
           const hit = k >= 1 && k <= 5 ? tw(t, MONDAYS[k - 1] - 0.05, MONDAYS[k - 1] + 0.1) : 0;
-          css(e, { opacity: (0.45 + 0.55 * hit).toFixed(3), color: hit > 0.5 ? D.fg : D.muted });
+          css(e, { opacity: (0.5 + 0.5 * hit).toFixed(3), transform: `scale(${(1 + 0.12 * Math.sin(Math.PI * clamp(hit)) ).toFixed(3)})` });
         });
 
         // ---------- S6-04: identical runs tile into a fabric ----------
@@ -747,25 +779,31 @@
               a = ease.outCubic(clamp((fillR - sd) / 0.3));
             }
             if (a <= 0) continue;
-            const pull = ring <= 3 ? (1 - a) * 0.12 : 0;   // the first rings stamp in; the outer weave only fades in, in register
+            const pull = ring <= 3 ? (1 - a) * 0.12 : 0;
+            // the first rings land with a small overshoot, like a stamp
+            const sc = ring && ring <= 3 ? 0.86 + 0.14 * ease.outBack(clamp((t - ringT(i, j, ring) - 0.06 * F.hash(i * 31 + j * 17)) / 0.42)) : 1;   // the first rings stamp in; the outer weave only fades in, in register
             const wx = X0 + (i * PW) * (1 - pull) - sprites.ox, wy = V0 + (j * PH) * (1 - pull) - sprites.oy;
-            const sx = 960 + (wx - cxF) * f, sy = 540 + (wy - vc) * f;
+            let sx = 960 + (wx - cxF) * f, sy = 540 + (wy - vc) * f;
+            const scx = sx + (sprites.ox) * f, scy = sy + (sprites.oy + LIST_H * S / 2) * f;   // card centre
+            sx = scx + (sx - scx) * sc; sy = scy + (sy - scy) * sc;
             if (sx > 1920 || sy > 1080 || sx + sw * f < 0 || sy + sh * f < 0) continue;
-            const base = a * (ring ? 0.92 - 0.3 * clamp((ring - 1) / 9) : 1);
-            if (kAbs < 1) { fctx.globalAlpha = base * (1 - kAbs); fctx.drawImage(mip.cv, sx, sy, sw * f, sh * f); }
-            if (kAbs > 0) { fctx.globalAlpha = base * kAbs * 0.85; fctx.drawImage(amip.cv, sx, sy, sw * f, sh * f); }
+            const base = a;
+            if (kAbs < 1) { fctx.globalAlpha = base * (1 - kAbs); fctx.drawImage(mip.cv, sx, sy, sw * f * sc, sh * f * sc); }
+            if (kAbs > 0) { fctx.globalAlpha = base * kAbs; fctx.drawImage(amip.cv, sx, sy, sw * f * sc, sh * f * sc); }
             fctx.globalAlpha = base;
             if (f > 0.22 && ring) { // each copy is a Monday: its date above the column
               const dd = new Date(Date.UTC(2026, 10, 9 + 7 * (i + 21 * j)));
               fctx.globalAlpha *= clamp((f - 0.22) / 0.15);
-              fctx.font = `400 ${13 * S * f}px ${MONO}`; fctx.fillStyle = D.muted; fctx.textBaseline = 'middle';
-              fctx.fillText(`${String(dd.getUTCMonth() + 1).padStart(2, '0')}-${String(dd.getUTCDate()).padStart(2, '0')}`, 960 + (X0 + i * PW * (1 - pull) - RAILX * S - cxF) * f, 540 + (V0 + j * PH * (1 - pull) - 32 * S - vc) * f);
+              fctx.font = `500 ${13 * S * f}px ${MONO}`; fctx.fillStyle = INK; fctx.textBaseline = 'middle';
+              fctx.fillText(`${String(dd.getUTCMonth() + 1).padStart(2, '0')}-${String(dd.getUTCDate()).padStart(2, '0')}`, 960 + (X0 + i * PW * (1 - pull) - RAILX * S - cxF) * f, 540 + (V0 + j * PH * (1 - pull) - (CARDPAD[1] + 22) * S - vc) * f);
             }
           }
           fctx.globalAlpha = 1;
         }
-        // subtitle band stays calm
-        scrim.style.opacity = (env(t, 110.25, TEND, 0.4, 0.2)).toFixed(3);
+        // subtitle band stays calm: the fabric thins out behind the line (white text on the field)
+        const calm = env(t, 110.25, TEND, 0.4, 0.2);
+        const mk = calm > 0.001 ? `linear-gradient(180deg, #000 0px, #000 770px, rgba(0,0,0,${(1 - 0.8 * calm).toFixed(3)}) 840px, rgba(0,0,0,${(1 - 0.8 * calm).toFixed(3)}) 960px, #000 1040px)` : 'none';
+        css(fabric, { webkitMaskImage: mk, maskImage: mk });
 
         // ---------- 113.4–113.6: everything collapses into one blue line ----------
         const q = ease.inCubic(prog(t, SQUEEZE0, TEND));
@@ -774,85 +812,105 @@
         css(exTag, { opacity: (0.6 * (1 - tw(t, HIT, HIT + 0.4))).toFixed(3) });
       };
 
-      // ======================= the three depth worlds (canvas textures) =======================
+      // ======================= the three earlier worlds, as bright strata (canvas textures) =======================
+      // each stratum is that world's colour field with its work on it as white documents
+      function field(c, kind) {
+        const st = FIELDS[kind], g = c.createLinearGradient(0, 0, SW, SH);
+        for (let i = 0; i < st.length; i += 2) g.addColorStop(st[i + 1], st[i]);
+        roundRect(c, 0, 0, SW, SH, 28); c.fillStyle = g; c.fill();
+        // the same soft light as the live fields
+        const rg = c.createRadialGradient(SW * 0.3, SH * 0.2, 0, SW * 0.3, SH * 0.2, SW * 0.6);
+        rg.addColorStop(0, 'rgba(255,255,255,.22)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+        c.fillStyle = rg; c.fill();
+      }
+      function whiteCard(c, x, y, w, hh, r = 14) {
+        c.save(); c.shadowColor = 'rgba(16,24,64,.28)'; c.shadowBlur = 40; c.shadowOffsetY = 16;
+        roundRect(c, x, y, w, hh, r); c.fillStyle = '#ffffff'; c.fill(); c.restore();
+      }
       function sheetLabel(c, kind, text, color) {
-        // a file chip label in the sheet's corner: [XLSX] name
+        // a white file pill on the field: [XLSX] name
         c.font = `600 15px ${MONO}`;
         const ext = { sheet: 'XLSX', slides: 'PPTX', code: 'PY' }[kind];
-        const ew = c.measureText(ext).width + 14;
-        roundRect(c, 36, 30, ew, 26, 5); c.fillStyle = color; c.fill();
-        c.fillStyle = '#141312'; c.textBaseline = 'middle'; c.fillText(ext, 43, 44);
-        c.font = `500 20px ${SANS}`; c.fillStyle = 'rgba(247,245,243,.86)'; c.fillText(text, 36 + ew + 12, 44);
-      }
-      function frame(c, color) {
-        c.strokeStyle = rgba(color, 0.55); c.lineWidth = 2; c.strokeRect(1, 1, SW - 2, SH - 2);
+        const ew = c.measureText(ext).width;
+        c.font = `500 20px ${SANS}`; const nw = c.measureText(text).width;
+        roundRect(c, 36, 22, ew + nw + 52, 44, 22); c.fillStyle = '#fff'; c.fill();
+        c.font = `600 15px ${MONO}`; c.fillStyle = color; c.textBaseline = 'middle'; c.fillText(ext, 56, 44);
+        c.font = `500 20px ${SANS}`; c.fillStyle = D.fg; c.fillText(text, 56 + ew + 14, 45);
       }
       function drawSheetWorld() {
         const cv = h('canvas', { width: SW, height: SH }), c = cv.getContext('2d'), r = F.rng(501);
-        c.fillStyle = 'rgba(22,21,20,.9)'; c.fillRect(0, 0, SW, SH);
-        const top = 80, cw = 128, rh = 36, x0 = 70;
-        c.fillStyle = rgba(D.sheet, 0.1); c.fillRect(x0, top, SW - x0 - 30, rh);
+        field(c, 'sheet');
+        const X = 40, Y = 84, Wd = SW - 80, Hd = SH - 124;
+        whiteCard(c, X, Y, Wd, Hd, 16);
+        c.save(); roundRect(c, X, Y, Wd, Hd, 16); c.clip();
+        const top = Y + 14, cw = 124, rh = 34, x0 = X + 56;
+        c.fillStyle = '#f3f6f4'; c.fillRect(X, top, Wd, rh);
         c.textBaseline = 'middle';
-        for (let ci = 0; ci < 15; ci++) { c.font = `500 15px ${MONO}`; c.fillStyle = rgba(D.sheet, 0.85); c.fillText(String.fromCharCode(65 + ci), x0 + ci * cw + cw / 2 - 5, top + rh / 2); }
+        for (let ci = 0; ci < 15; ci++) { c.font = `500 14px ${MONO}`; c.fillStyle = D.muted; c.fillText(String.fromCharCode(65 + ci), x0 + ci * cw + cw / 2 - 5, top + rh / 2); }
         const heads = L(['区域', '门店', '月份', '销售额', '同比', '客流', '客单价', '折扣率', '品类', '订单数', '退款', '毛利', '库存', '新店', '备注'], ['Region', 'Store', 'Month', 'Sales', 'YoY', 'Footfall', 'Basket', 'Discount', 'Category', 'Orders', 'Refunds', 'Margin', 'Stock', 'New', 'Note']);
         const regions = L(['华东', '华南', '华北', '西南'], ['East', 'South', 'North', 'Southwest']);
+        const bottom = Y + Hd - 56;
         for (let ri = 1; ri < 30; ri++) {
           const y = top + ri * rh;
-          if (y > SH - 70) break;
-          c.font = `400 13px ${MONO}`; c.fillStyle = 'rgba(161,157,155,.6)'; c.fillText(String(ri), 30, y + rh / 2);
+          if (y > bottom - rh) break;
+          c.font = `400 13px ${MONO}`; c.fillStyle = D.muted; c.fillText(String(ri), X + 18, y + rh / 2);
+          if (ri === 1) { c.fillStyle = rgba(D.sheet, 0.1); c.fillRect(x0, y, 15 * cw, rh); }
           for (let ci = 0; ci < 15; ci++) {
             const x = x0 + ci * cw;
             let s;
-            if (ri === 1) { s = heads[ci]; c.font = `500 15px ${SANS}`; c.fillStyle = 'rgba(247,245,243,.75)'; }
+            if (ri === 1) { s = heads[ci]; c.font = `600 15px ${SANS}`; c.fillStyle = D.sheet; }
             else {
-              c.font = `400 15px ${MONO}`; c.fillStyle = 'rgba(247,245,243,.5)';
+              c.font = `400 15px ${MONO}`; c.fillStyle = '#4a4644';
               if (ci === 0) s = regions[ri % 4]; else if (ci === 1) s = `S${String(10 + (ri * 7) % 40).padStart(2, '0')}`;
               else if (ci === 2) s = `2026-${String(1 + (ri % 9)).padStart(2, '0')}`;
-              else if (ci === 4) { const v = -(r() * 12).toFixed(1); s = `${v}%`; c.fillStyle = v < -8 ? rgba(D.sheet, 0.95) : 'rgba(247,245,243,.5)'; }
+              else if (ci === 4) { const v = -(r() * 12).toFixed(1); s = `${v}%`; if (v < -8) { c.fillStyle = 'rgba(201,58,58,.12)'; c.fillRect(x + 1, y + 1, cw - 2, rh - 2); c.fillStyle = '#c93a3a'; } }
               else if (ci === 7) s = `${(12 + r() * 8).toFixed(0)}%`;
               else s = K.fmt(Math.round(r() * (ci === 3 ? 1800000 : 9000)));
             }
             c.fillText(s, x + 10, y + rh / 2);
           }
         }
-        c.strokeStyle = 'rgba(247,245,243,.07)'; c.lineWidth = 1;
-        for (let ci = 0; ci <= 15; ci++) { c.beginPath(); c.moveTo(x0 + ci * cw + 0.5, top); c.lineTo(x0 + ci * cw + 0.5, SH - 70); c.stroke(); }
-        for (let ri = 0; ri <= 29; ri++) { const y = top + ri * rh; if (y > SH - 70) break; c.beginPath(); c.moveTo(x0, y + 0.5); c.lineTo(SW - 30, y + 0.5); c.stroke(); }
-        c.strokeStyle = D.sheet; c.lineWidth = 2.5; c.strokeRect(x0 + 4 * cw, top + 6 * rh, cw, rh);
+        c.strokeStyle = 'rgba(32,30,29,.09)'; c.lineWidth = 1;
+        for (let ci = 0; ci <= 15; ci++) { c.beginPath(); c.moveTo(x0 + ci * cw + 0.5, top); c.lineTo(x0 + ci * cw + 0.5, bottom); c.stroke(); }
+        for (let ri = 0; ri <= 29; ri++) { const y = top + ri * rh; if (y > bottom) break; c.beginPath(); c.moveTo(X, y + 0.5); c.lineTo(X + Wd, y + 0.5); c.stroke(); }
+        c.strokeStyle = D.sheet; c.lineWidth = 3; c.strokeRect(x0 + 4 * cw, top + 6 * rh, cw, rh);
         const tabs = L(['清洗明细', '区域×月份', '品类×月份', '门店排名', '结论'], ['Clean data', 'Region×Month', 'Category×Month', 'Store ranking', 'Findings']);
+        c.fillStyle = '#f6f6f5'; c.fillRect(X, bottom + 8, Wd, 48);
         let tx = x0; c.font = `500 16px ${SANS}`;
-        tabs.forEach((s, i) => { const w = c.measureText(s).width + 32; c.fillStyle = i === 1 ? rgba(D.sheet, 0.18) : 'rgba(247,245,243,.04)'; c.fillRect(tx, SH - 56, w, 36); c.fillStyle = i === 1 ? D.sheet : 'rgba(247,245,243,.55)'; c.fillText(s, tx + 16, SH - 38); tx += w + 4; });
+        tabs.forEach((s, i) => { const w = c.measureText(s).width + 32; if (i === 1) { c.fillStyle = '#fff'; c.fillRect(tx, bottom + 8, w, 40); c.fillStyle = D.sheet; c.fillRect(tx, bottom + 45, w, 3); } c.fillStyle = i === 1 ? D.sheet : D.muted; c.fillText(s, tx + 16, bottom + 28); tx += w + 4; });
+        c.restore();
         sheetLabel(c, 'sheet', T('s1_out'), D.sheet);
-        frame(c, D.sheet);
         return cv;
       }
       function drawSlidesWorld() {
         const cv = h('canvas', { width: SW, height: SH }), c = cv.getContext('2d'), r = F.rng(702);
-        c.fillStyle = 'rgba(22,21,20,.9)'; c.fillRect(0, 0, SW, SH);
+        field(c, 'slides');
         const titles = L(['40 家门店销售下滑：原因与建议', '结论先行：下滑 6.8%', '不是客流：客流 −1.2%', '不是新店：剔除后仍 −6.1%', '是折扣：12% → 19%', '集中在华南 8 家门店', '数据修正说明', '建议', '下一步与时间表', '附：区域明细', '附：品类明细', '附：方法'],
           ['Sales decline across 40 stores', 'Bottom line: down 6.8%', 'Not footfall: −1.2%', 'Not new stores: still −6.1%', 'Discounts: 12% → 19%', 'Concentrated in South China', 'Data correction', 'Recommendations', 'Next steps', 'Appendix: regions', 'Appendix: categories', 'Appendix: method']);
-        const sw = 430, shh = 242, gx = 46, gy = 52, ox = 66, oy = 100;
+        const sw = 430, shh = 242, gx = 46, gy = 40, ox = 66, oy = 96;
         for (let k = 0; k < 12; k++) {
           const col = k % 4, row = Math.floor(k / 4), x = ox + col * (sw + gx), y = oy + row * (shh + gy);
-          c.fillStyle = 'rgba(247,245,243,.035)'; c.fillRect(x, y, sw, shh);
-          c.strokeStyle = rgba(D.slides, 0.55); c.lineWidth = 1.5; c.strokeRect(x + 0.5, y + 0.5, sw, shh);
-          c.fillStyle = rgba(D.slides, 0.8); c.fillRect(x + 22, y + 22, 26, 4);
-          c.font = `500 19px ${SANS}`; c.fillStyle = 'rgba(247,245,243,.82)'; c.textBaseline = 'alphabetic'; c.fillText(titles[k], x + 22, y + 56);
+          whiteCard(c, x, y, sw, shh, 10);
+          c.fillStyle = D.slides; c.fillRect(x + 22, y + 22, 26, 4);
+          c.font = `600 19px ${SANS}`; c.fillStyle = D.fg; c.textBaseline = 'alphabetic'; c.fillText(titles[k], x + 22, y + 56);
           if (k % 3 === 1) { // bars
-            for (let b = 0; b < 6; b++) { const bh = 30 + r() * 100; c.fillStyle = b === 3 ? rgba(D.slides, 0.85) : rgba(D.slides, 0.32); c.fillRect(x + 30 + b * 60, y + shh - 26 - bh, 36, bh); }
+            for (let b = 0; b < 6; b++) { const bh = 30 + r() * 100; c.fillStyle = b === 3 ? D.slides : rgba(D.slides, 0.28); c.fillRect(x + 30 + b * 60, y + shh - 26 - bh, 36, bh); }
           } else if (k % 3 === 2) { // KPI cards
-            for (let b = 0; b < 3; b++) { c.strokeStyle = 'rgba(247,245,243,.14)'; c.strokeRect(x + 22 + b * 130, y + 90, 116, 110); c.font = `600 28px ${MONO}`; c.fillStyle = b === 0 ? D.slides : 'rgba(247,245,243,.7)'; c.fillText(['−6.8%', '−1.2%', '19%'][b], x + 32 + b * 130, y + 140); c.fillStyle = 'rgba(161,157,155,.6)'; c.fillRect(x + 32 + b * 130, y + 160, 80, 4); c.fillRect(x + 32 + b * 130, y + 172, 56, 4); }
+            for (let b = 0; b < 3; b++) { roundRect(c, x + 22 + b * 130, y + 90, 116, 110, 8); c.fillStyle = '#f6f4f2'; c.fill(); c.font = `600 28px ${MONO}`; c.fillStyle = b === 0 ? D.slides : D.fg; c.fillText(['−6.8%', '−1.2%', '19%'][b], x + 32 + b * 130, y + 140); c.fillStyle = 'rgba(125,121,121,.4)'; c.fillRect(x + 32 + b * 130, y + 160, 80, 4); c.fillRect(x + 32 + b * 130, y + 172, 56, 4); }
           } else { // text lines
-            for (let l = 0; l < 5; l++) { c.fillStyle = 'rgba(247,245,243,.18)'; c.fillRect(x + 22, y + 92 + l * 26, 180 + r() * 200, 6); }
+            for (let l = 0; l < 5; l++) { c.fillStyle = 'rgba(32,30,29,.14)'; c.fillRect(x + 22, y + 92 + l * 26, 180 + r() * 200, 6); }
           }
         }
         sheetLabel(c, 'slides', T('s2_out'), D.slides);
-        frame(c, D.slides);
         return cv;
       }
       function drawCodeWorld() {
         const cv = h('canvas', { width: SW, height: SH }), c = cv.getContext('2d');
-        c.fillStyle = 'rgba(35,33,32,.94)'; c.fillRect(0, 0, SW, SH);
+        field(c, 'code');
+        const X = 40, Y = 84, Wd = SW - 80, Hd = SH - 124;
+        whiteCard(c, X, Y, Wd, Hd, 16);
+        c.save(); roundRect(c, X, Y, Wd, Hd, 16); c.clip();
+        c.fillStyle = '#f6f6f8'; c.fillRect(X, Y, 64, Hd);
         const code = [
           'def merge_daily(erp: pd.DataFrame, pos: pd.DataFrame, shop: pd.DataFrame) -> pd.DataFrame:',
           '    frames = [normalize(df, src) for df, src in ((erp, "ERP"), (pos, "POS"), (shop, "' + L('电商', 'Shop') + '"))]',
@@ -872,29 +930,26 @@
           'def test_dates_in_two_formats_align():',
           '    assert merge_daily(*fixtures("dates"))["date"].notna().all()',
           '',
-          'def test_anomaly_flagged_at_3x_baseline():',
-          '    assert len(flag_anomalies(daily_with_spike())) == 1',
-          '',
           '$ pytest -q',
-          '.....                                                    [100%]',
           '5 passed in 0.41s',
         ];
         c.textBaseline = 'middle';
         code.forEach((ln, i) => {
-          const y = 110 + i * 40;
-          if (y > SH - 30) return;
-          c.font = `400 15px ${MONO}`; c.fillStyle = 'rgba(161,157,155,.45)'; c.fillText(String(i + 1).padStart(2, ' '), 36, y);
-          c.font = `400 19px ${MONO}`;
-          let x = 90;
+          const y = Y + 34 + i * 34;
+          if (y > Y + Hd - 20) return;
+          c.font = `400 14px ${MONO}`; c.fillStyle = '#a3a0a0'; c.fillText(String(i + 1).padStart(2, ' '), X + 18, y);
+          c.font = `400 18px ${MONO}`;
+          let x = X + 90;
+          if (ln.startsWith('5 passed')) { roundRect(c, x - 8, y - 15, 210, 30, 6); c.fillStyle = 'rgba(61,143,86,.14)'; c.fill(); }
           const parts = ln.split(/(\bdef\b|\breturn\b|\bfor\b|\bin\b|\bassert\b|"[^"]*"|#.*$)/);
           for (const p of parts) {
             if (!p) continue;
-            c.fillStyle = /^(def|return|for|in|assert)$/.test(p) ? '#a9cbf5' : p.startsWith('"') ? 'rgba(143,209,159,.85)' : ln.startsWith('5 passed') ? D.success : 'rgba(247,245,243,.72)';
+            c.fillStyle = /^(def|return|for|in|assert)$/.test(p) ? '#6a4db3' : p.startsWith('"') ? '#2f7d4a' : ln.startsWith('5 passed') ? D.success : ln.startsWith('$') ? D.muted : '#24292f';
             c.fillText(p, x, y); x += c.measureText(p).width;
           }
         });
-        sheetLabel(c, 'code', T('s4_out'), '#8cb4f0');
-        frame(c, '#8cb4f0');
+        c.restore();
+        sheetLabel(c, 'code', T('s4_out'), '#4f46e5');
         return cv;
       }
     },
