@@ -572,8 +572,7 @@
       // ======================= update =======================
       let lastCryst = null;
       return (lt, t) => {
-        if (!measured && t >= ENTER - 0.3) { measure(); KEYS3 = null; }
-        if (!KEYS3) KEYS3 = keys3();
+
         grainU(t);
         // the field's light drifts slowly; each big beat from 110.0 lifts it a little
         let lift = 0;
@@ -585,6 +584,9 @@
         const str = Array.from(T('s5')).slice(0, n).join('');
         const sent = prog(t, ENTER, ENTER + 0.35);
         box.update({ str, k: 1, t, sent: sent > 0 && sent < 1 ? sent : 0, caretOn: t < DRAW0 - 0.02, elapsed: t >= ENTER ? t - ENTER : null });
+        // the caret is measured once the sentence is complete, after this frame's text is in the DOM
+        if (!measured && t >= ENTER - 0.05) { measure(); KEYS3 = null; }
+        if (!KEYS3) KEYS3 = keys3();
         const boxIn = tw(t, T0, T0 + 0.45, 'outCubic');
         css(box.root, { opacity: boxIn, transform: `translateY(${(1 - boxIn) * 8}px)` });
         // after Enter the four deliverables light up, faintly, one after another

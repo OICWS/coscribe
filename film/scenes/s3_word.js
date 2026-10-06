@@ -166,7 +166,7 @@
   const TOTAL = 187, WIN = 12;             // table window: 12 rows
   const CONN0 = 62.05, CONN_DT = 0.2, CONN_DUR = 0.45;
   const Q0 = 65.0;                         // quality shot
-  const PAGE_T = [70.0, 70.22, 70.46], WIPE = 0.62;
+  const PAGE_T = [69.72, 69.92, 70.12], WIPE = 0.62;
   const Q_FS = ZH ? 44 : 40;   // the two held lines
   const TAUT = 68.0, CMT = 68.45, QC = 68.72, DOC0 = 69.8, OUT0 = 72.32;
 
@@ -275,9 +275,9 @@
 
       // columns (world coords; pf = parallax factor, sp = scroll speed)
       const COLS = [
-        { id: 'near', x: -70, w: 420, size: 27, lh: 46, sp: 1.55, pf: 1.45, alpha: 0.2, blur: 2.4, seed: 7, page0: 3 },
-        { id: 'focus', x: 432, w: 372, size: 18, lh: 32, sp: 1, pf: 1, alpha: 0.7, blur: 0, seed: 1, page0: 1 },
-        { id: 'far', x: 900, w: 270, size: 14, lh: 25, sp: 0.62, pf: 0.62, alpha: 0.34, blur: 0.6, seed: 4, page0: 2 },
+        { id: 'near', x: -70, w: 420, size: 27, lh: 46, sp: 1.55, pf: 1.45, alpha: 0.5, blur: 2.4, seed: 7, page0: 3 },
+        { id: 'focus', x: 432, w: 372, size: 18, lh: 32, sp: 1, pf: 1, alpha: 0.95, blur: 0, seed: 1, page0: 1 },
+        { id: 'far', x: 900, w: 270, size: 14, lh: 25, sp: 0.62, pf: 0.62, alpha: 0.62, blur: 0.6, seed: 4, page0: 2 },
       ];
       const COL_TOP = 120, HEAD_Y = 478;
       const fontOf = (c, w = 400) => `${w} ${c.size}px ${SERIF}`;
@@ -343,10 +343,10 @@
       }
       function drawLine(g, c, ln, x, y, a) {
         if (ln.k === 'blank') return;
-        if (ln.k === 'head') { g.font = `600 ${Math.round(c.size * 1.12)}px ${SERIF}`; g.fillStyle = `rgba(247,245,243,${a})`; g.fillText(ln.s, x, y); return; }
-        if (ln.k === 'foot') { g.font = `400 ${Math.round(c.size * 0.72)}px ${MONO}`; g.fillStyle = `rgba(161,157,155,${a * 0.9})`; const w = g.measureText(ln.s).width; g.fillText(ln.s, x + c.w / 2 - w / 2, y); return; }
+        if (ln.k === 'head') { g.font = `600 ${Math.round(c.size * 1.12)}px ${SERIF}`; g.fillStyle = `rgba(32,30,29,${a})`; g.fillText(ln.s, x, y); return; }
+        if (ln.k === 'foot') { g.font = `400 ${Math.round(c.size * 0.72)}px ${MONO}`; g.fillStyle = `rgba(125,121,121,${a * 0.9})`; const w = g.measureText(ln.s).width; g.fillText(ln.s, x + c.w / 2 - w / 2, y); return; }
         g.font = fontOf(c);
-        g.fillStyle = `rgba(247,245,243,${a * (ln.k === 'req' ? 1 : 0.92)})`;
+        g.fillStyle = `rgba(32,30,29,${a * (ln.k === 'req' ? 1 : 0.92)})`;
         g.fillText(ln.s, x, y);
       }
       // make sure the canvas faces (and the CJK chunks it needs) are loaded
@@ -364,23 +364,23 @@
         pageTex = [0, 1, 2, 3, 4].map((s) => {
           const a = document.createElement('canvas'); a.width = PAGE_W; a.height = PAGE_H;
           const g = a.getContext('2d'), r = F.rng(s * 31 + 9);
-          g.fillStyle = '#211f1e'; g.fillRect(0, 0, PAGE_W, PAGE_H);
-          g.strokeStyle = 'rgba(247,245,243,.16)'; g.lineWidth = 1; g.strokeRect(0.5, 0.5, PAGE_W - 1, PAGE_H - 1);
+          g.fillStyle = '#ffffff'; g.fillRect(0, 0, PAGE_W, PAGE_H);
+          g.strokeStyle = 'rgba(32,30,29,.16)'; g.lineWidth = 1; g.strokeRect(0.5, 0.5, PAGE_W - 1, PAGE_H - 1);
           g.textBaseline = 'middle';
-          g.font = `400 7px ${MONO}`; g.fillStyle = 'rgba(161,157,155,.8)';
+          g.font = `400 7px ${MONO}`; g.fillStyle = 'rgba(125,121,121,.8)';
           g.fillText(L('华南连锁渠道 2027 年度供应项目 · 招标文件', 'South China retail chain · 2027 supply tender'), 28, 22);
           g.fillRect(28, 30, PAGE_W - 56, 0.6);
           let y = 50;
-          if (s % 2 === 0) { g.font = `600 12px ${SERIF}`; g.fillStyle = 'rgba(247,245,243,.9)'; g.fillText(CHAPTERS[s % CHAPTERS.length], 28, y + 6); y += 30; }
+          if (s % 2 === 0) { g.font = `600 12px ${SERIF}`; g.fillStyle = 'rgba(32,30,29,.9)'; g.fillText(CHAPTERS[s % CHAPTERS.length], 28, y + 6); y += 30; }
           g.font = `400 8.5px ${SERIF}`;
-          g.fillStyle = 'rgba(247,245,243,.62)';
+          g.fillStyle = 'rgba(32,30,29,.62)';
           while (y < PAGE_H - 50) {
             const num = `${1 + (s % 5)}.${1 + Math.floor(r() * 6)}.${1 + Math.floor(r() * 9)}`;
             const para = `${num}${ZH ? '　' : '  '}${POOL[Math.floor(r() * POOL.length)]}${r() < 0.5 ? (ZH ? '' : ' ') + POOL[Math.floor(r() * POOL.length)] : ''}`;
             for (const ln of wrapText(g, para, PAGE_W - 56)) { if (y >= PAGE_H - 50) break; g.fillText(ln, 28, y); y += 13; }
             y += 6;
             if (r() < 0.18) { // a little table
-              g.strokeStyle = 'rgba(247,245,243,.25)';
+              g.strokeStyle = 'rgba(32,30,29,.25)';
               for (let rr = 0; rr < 4; rr++) g.strokeRect(28.5, y + rr * 13 + 0.5, PAGE_W - 57, 13);
               g.beginPath(); g.moveTo(80.5, y); g.lineTo(80.5, y + 52); g.stroke();
               y += 62;
@@ -403,45 +403,46 @@
 
       // reading thread (trail scrolls with the text it has read)
       const trailG = h('g');
-      const trailHalo = h('path', { fill: 'none', stroke: 'var(--d-accent)', 'stroke-width': 12, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.1 });
-      const trail = h('path', { fill: 'none', stroke: 'var(--d-accent)', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+      const trailHalo = h('path', { fill: 'none', stroke: 'var(--accent)', 'stroke-width': 12, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.1 });
+      const trail = h('path', { fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
       const trailHead = h('circle', { r: 5.5, fill: '#fff' });
       trailG.append(trailHalo, trail, trailHead);
 
       // --- requirement table ---
-      const tbl = div({ position: 'absolute', left: 0, top: 0, width: 600, color: 'var(--d-fg)', fontFamily: SANS });
-      const capNum = span({ fontFamily: 'var(--mono)', fontSize: 46, fontWeight: 500, letterSpacing: '-.01em', fontVariantNumeric: 'tabular-nums', color: 'var(--d-fg)' }, '0');
-      const capLbl = span({ fontSize: 17, color: 'var(--d-muted)', marginLeft: 12 }, L('条要求', 'requirements'));
-      const capBrk = div({ fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--d-muted)', marginTop: 6, fontVariantNumeric: 'tabular-nums', whiteSpace: 'pre' });
+      const tbl = div({ position: 'absolute', left: 0, top: 0, width: 600, color: 'var(--fg)', fontFamily: SANS });
+      const capNum = span({ fontFamily: 'var(--mono)', fontSize: 46, fontWeight: 500, letterSpacing: '-.01em', fontVariantNumeric: 'tabular-nums', color: 'var(--fg)' }, '0');
+      const capLbl = span({ fontSize: 17, color: 'var(--muted)', marginLeft: 12 }, L('条要求', 'requirements'));
+      const capBrk = div({ fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--muted)', marginTop: 6, fontVariantNumeric: 'tabular-nums', whiteSpace: 'pre' });
       const cap = div({ position: 'absolute', left: 0, top: -112, display: 'block', whiteSpace: 'nowrap' });
-      const capSrc = div({ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--d-muted)', marginBottom: 10 });
+      const capSrc = div({ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--muted)', marginBottom: 10 });
       capSrc.append(badge('pdf', 10), span({}, T('s3_chip')));
       const capRow = div({ display: 'flex', alignItems: 'baseline' }); capRow.append(capNum, capLbl);
       cap.append(capRow, capBrk);
-      const thead = div({ display: 'grid', alignItems: 'center', height: 36, borderBottom: '1px solid var(--d-border)', fontSize: 13, color: 'var(--d-muted)', letterSpacing: '.02em' });
+      const thead = div({ display: 'grid', alignItems: 'center', height: 36, borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--muted)', letterSpacing: '.02em' });
       const TH = [L('条款', 'Clause'), L('要求', 'Requirement'), L('类别', 'Category'), L('响应', 'Response')].map((s, i) => {
         const c = span({ padding: '0 12px', whiteSpace: 'nowrap', overflow: 'hidden' }, s); thead.append(c); return c;
       });
       const body = div({ position: 'relative', height: WIN * 36 + 4, overflow: 'hidden', marginTop: 4 });
       const SLOTS = Array.from({ length: WIN + 1 }, () => {
-        const r = div({ position: 'absolute', left: 0, right: 0, height: 36, display: 'grid', alignItems: 'center', fontSize: 15, borderBottom: '1px solid rgba(247,245,243,.07)', borderRadius: 4 });
+        const r = div({ position: 'absolute', left: 0, right: 0, height: 36, display: 'grid', alignItems: 'center', fontSize: 15, borderBottom: '1px solid rgba(32,30,29,.07)', borderRadius: 4 });
         const cells = [0, 1, 2, 3].map((i) => {
           const c = span({ padding: '0 12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
           r.append(c); return c;
         });
-        css(cells[0], { fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--d-muted)' });
-        css(cells[2], { fontSize: 13, color: 'var(--d-muted)' });
+        css(cells[0], { fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--muted)' });
+        css(cells[2], { fontSize: 13, color: 'var(--muted)' });
         css(cells[3], { fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 });
         body.append(r);
         return { r, cells, idx: -1, st: '' };
       });
-      const tblBack = div({ position: 'absolute', left: -22, right: -22, top: -166, height: WIN * 36 + 224, background: 'rgba(20,19,18,.86)', borderRadius: 12, border: '1px solid rgba(247,245,243,.06)' });
+      const tblBack = div({ position: 'absolute', left: -22, right: -22, top: -166, height: WIN * 36 + 224, background: '#ffffff', borderRadius: 16, boxShadow: 'var(--card-shadow)' });
       tbl.append(tblBack, cap, thead, body);
       const capTop = div({ position: 'absolute', left: 0, top: -150 }); capTop.append(capSrc); tbl.append(capTop);
 
       // --- company documents column (S3-04) ---
-      const comp = div({ position: 'absolute', left: 1395, top: 0, width: 420, color: 'var(--d-fg)', fontFamily: SANS });
-      const compHead = div({ position: 'absolute', top: 128, display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, color: 'var(--d-muted)' });
+      const comp = div({ position: 'absolute', left: 1395, top: 0, width: 420, color: 'var(--fg)', fontFamily: SANS });
+      comp.append(div({ position: 'absolute', left: -26, top: 106, width: 470, height: 680, background: '#fff', borderRadius: 16, boxShadow: 'var(--card-shadow)' }));
+      const compHead = div({ position: 'absolute', top: 128, display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, color: 'var(--muted)' });
       compHead.append(badge('folder', 10), span({}, T('s3_chip2')));
       comp.append(compHead);
       const ITEM_POS = [];
@@ -455,7 +456,7 @@
           y += 34;
           ITEM_POS[gi] = [];
           d.items.forEach((it, k) => {
-            const e = div({ position: 'absolute', top: y, left: 18, height: 28, display: 'flex', alignItems: 'center', fontSize: 14, color: 'rgba(247,245,243,.78)', paddingLeft: 12, borderLeft: '1px solid var(--d-border)', whiteSpace: 'nowrap' }, it);
+            const e = div({ position: 'absolute', top: y, left: 18, height: 28, display: 'flex', alignItems: 'center', fontSize: 14, color: 'rgba(32,30,29,.78)', paddingLeft: 12, borderLeft: '1px solid var(--border)', whiteSpace: 'nowrap' }, it);
             comp.append(e); compEls.push({ el: e, gi, k });
             ITEM_POS[gi][k] = { y: y + 14, el: e };
             y += 30;
@@ -465,8 +466,9 @@
       }
 
       // --- outline (S3-04, left) ---
-      const outl = div({ position: 'absolute', left: 118, top: 0, width: 380, color: 'var(--d-fg)' });
-      const outlHead = div({ position: 'absolute', top: 128, display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, color: 'var(--d-muted)', whiteSpace: 'nowrap' });
+      const outl = div({ position: 'absolute', left: 118, top: 0, width: 380, color: 'var(--fg)' });
+      outl.append(div({ position: 'absolute', left: -40, top: 106, width: 400, height: 610, background: '#fff', borderRadius: 16, boxShadow: 'var(--card-shadow)' }));
+      const outlHead = div({ position: 'absolute', top: 128, display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, color: 'var(--muted)', whiteSpace: 'nowrap' });
       outlHead.append(badge('doc', 10), span({}, T('s3_out')));
       outl.append(outlHead);
       const OUT_ELS = [];
@@ -474,13 +476,13 @@
         let y = 180;
         OUTLINE.forEach(([lv, n, name]) => {
           const e = div({ position: 'absolute', top: y, left: lv === 1 ? 0 : 30, display: 'flex', gap: 12, alignItems: 'baseline', whiteSpace: 'nowrap',
-            fontFamily: SERIF, fontSize: lv === 1 ? 19 : 15.5, fontWeight: lv === 1 ? 600 : 400, color: lv === 1 ? 'var(--d-fg)' : 'rgba(247,245,243,.72)' });
-          e.append(span({ fontFamily: 'var(--mono)', fontSize: lv === 1 ? 15 : 13, fontWeight: 400, color: lv === 1 ? 'var(--d-doc)' : 'var(--d-muted)', minWidth: lv === 1 ? 16 : 28 }, n), span({}, name));
+            fontFamily: SERIF, fontSize: lv === 1 ? 19 : 15.5, fontWeight: lv === 1 ? 600 : 400, color: lv === 1 ? 'var(--fg)' : 'rgba(32,30,29,.72)' });
+          e.append(span({ fontFamily: 'var(--mono)', fontSize: lv === 1 ? 15 : 13, fontWeight: 400, color: lv === 1 ? 'var(--file-doc)' : 'var(--muted)', minWidth: lv === 1 ? 16 : 28 }, n), span({}, name));
           outl.append(e); OUT_ELS.push(e);
           y += lv === 1 ? 38 : 30;
         });
       }
-      const outlRule = div({ position: 'absolute', left: -18, top: 184, width: 1, background: 'var(--d-border)' });
+      const outlRule = div({ position: 'absolute', left: -18, top: 184, width: 1, background: 'var(--border)' });
       outl.append(outlRule);
 
       // connection lines (S3-04) are drawn in the svg
@@ -489,8 +491,8 @@
       let ci = 0;
       FINAL.forEach((row, ri) => {
         if (!row.to) return;
-        const p = h('path', { fill: 'none', stroke: 'var(--d-accent)', 'stroke-width': 1.4, 'stroke-linecap': 'round', opacity: 0.85 });
-        const dot = h('circle', { r: 3, fill: 'var(--d-accent)' });
+        const p = h('path', { fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.4, 'stroke-linecap': 'round', opacity: 0.85 });
+        const dot = h('circle', { r: 3, fill: 'var(--accent)' });
         connG.append(p, dot);
         const t0 = CONN0 + ci * CONN_DT;
         CONNS.push({ p, dot, ri, to: row.to, t0, dev: row.st === 'dev' });
@@ -506,9 +508,9 @@
       // flights (S3-03): line lifts, turns 90° and lands as a row
       const flights = FLOWN.map((f, i) => {
         const el = div({ position: 'absolute', left: 0, top: 0, transformOrigin: '0 50%', backfaceVisibility: 'hidden', whiteSpace: 'nowrap', pointerEvents: 'none' });
-        const a = div({ position: 'absolute', left: 0, top: 0, height: 32, lineHeight: '32px', fontFamily: SERIF, fontSize: 18, color: 'var(--d-fg)' }, ZH ? `★${f.c}　${f.zh}` : `${f.c}  ${f.en}`);
-        const b = div({ position: 'absolute', left: 0, top: 0, height: 36, width: 596, display: 'grid', gridTemplateColumns: `78px 1fr ${ZH ? 72 : 106}px`, alignItems: 'center', fontSize: 15, fontFamily: SANS, color: 'var(--d-fg)', background: 'rgba(75,143,227,.16)', borderRadius: 4, boxShadow: '0 10px 30px rgba(0,0,0,.35)' });
-        b.append(span({ padding: '0 12px', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--d-accent-2)' }, f.c), span({ padding: '0 12px', whiteSpace: 'nowrap', overflow: 'hidden' }, ZH ? f.zh : f.en), span({ padding: '0 12px', fontSize: 13, color: 'var(--d-muted)' }, CAT[f.cat]));
+        const a = div({ position: 'absolute', left: 0, top: 0, height: 32, lineHeight: '32px', fontFamily: SERIF, fontSize: 18, color: 'var(--fg)' }, ZH ? `★${f.c}　${f.zh}` : `${f.c}  ${f.en}`);
+        const b = div({ position: 'absolute', left: 0, top: 0, height: 36, width: 596, display: 'grid', gridTemplateColumns: `78px 1fr ${ZH ? 72 : 106}px`, alignItems: 'center', fontSize: 15, fontFamily: SANS, color: 'var(--fg)', background: 'rgba(42,120,214,.16)', borderRadius: 4, boxShadow: '0 10px 30px rgba(16,40,100,.19)' });
+        b.append(span({ padding: '0 12px', fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--accent-ink)' }, f.c), span({ padding: '0 12px', whiteSpace: 'nowrap', overflow: 'hidden' }, ZH ? f.zh : f.en), span({ padding: '0 12px', fontSize: 13, color: 'var(--muted)' }, CAT[f.cat]));
         el.append(a, b);
         W.append(el);
         return { el, a, b };
@@ -523,42 +525,48 @@
       W.append(qLayer);
       function qLine(q, below = false) {
         const wrap = div({ position: 'absolute', left: 0, top: 0, transformOrigin: '0 0', whiteSpace: 'nowrap' });
-        const lab = div({ display: 'flex', alignItems: 'center', gap: 9, fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--d-muted)', letterSpacing: '.02em', marginBottom: 12 });
+        const lab = div({ display: 'flex', alignItems: 'center', gap: 9, fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--muted)', letterSpacing: '.02em', marginBottom: 12 });
         lab.append(badge('pdf', 10), span({}, q.label));
-        const ln = div({ fontFamily: SERIF, fontSize: Q_FS, color: 'var(--d-fg)', lineHeight: 1.25, position: 'relative' });
-        const hl = div({ position: 'absolute', left: -8, top: -2, bottom: -5, background: 'rgba(140,180,240,.20)', borderRadius: 3, transformOrigin: '0 50%' });
+        const ln = div({ fontFamily: SERIF, fontSize: Q_FS, color: 'var(--fg)', lineHeight: 1.25, position: 'relative' });
+        const hl = div({ position: 'absolute', left: -8, top: -2, bottom: -5, background: 'rgba(42,120,214,.20)', borderRadius: 3, transformOrigin: '0 50%' });
         const pre = span({}, q.pre), key = span({ position: 'relative' }, q.key), post = span({}, q.post);
-        const ul = div({ position: 'absolute', left: 0, right: 0, bottom: -6, height: 2, background: 'var(--d-accent)', transformOrigin: '0 50%' });
+        const ul = div({ position: 'absolute', left: 0, right: 0, bottom: -6, height: 2, background: 'var(--accent)', transformOrigin: '0 50%' });
         key.append(ul);
         ln.append(hl, pre, key, post);
         // a little of the page around the line: dim serif, fading away from the line
-        const ctx = div({ fontFamily: SERIF, fontSize: 20, lineHeight: '34px', color: 'rgba(247,245,243,.42)' });
-        q.ctx.forEach((s2, i) => ctx.append(div(i === 0 && !below ? { fontFamily: SANS, fontWeight: 600, fontSize: 18, color: 'rgba(247,245,243,.5)' } : {}, s2)));
-        const fade = below ? 'linear-gradient(180deg,#000 0%,#000 30%,rgba(0,0,0,.15) 100%)' : 'linear-gradient(0deg,#000 0%,#000 30%,rgba(0,0,0,.15) 100%)';
+        const ctx = div({ fontFamily: SERIF, fontSize: 20, lineHeight: '34px', color: 'rgba(32,30,29,.42)' });
+        q.ctx.forEach((s2, i) => ctx.append(div(i === 0 && !below ? { fontFamily: SANS, fontWeight: 600, fontSize: 18, color: 'rgba(32,30,29,.5)' } : {}, s2)));
+        const fade = below ? 'linear-gradient(180deg,#000 0%,#000 30%,rgba(16,40,100,.08) 100%)' : 'linear-gradient(0deg,#000 0%,#000 30%,rgba(16,40,100,.08) 100%)';
         css(ctx, { webkitMaskImage: fade, maskImage: fade });
         // a hairline rule down the left edge, like a quoted excerpt
-        const rule = div({ position: 'absolute', left: -28, width: 1, background: 'rgba(247,245,243,.16)', transformOrigin: '50% 0' });
+        const rule = div({ position: 'absolute', left: -28, width: 1, background: 'rgba(32,30,29,.16)', transformOrigin: '50% 0' });
         if (below) { css(lab, { marginBottom: 0, marginTop: 14 }); css(ctx, { marginTop: 18 }); wrap.append(ln, lab, ctx); }
         else { css(ctx, { marginBottom: 16 }); wrap.append(ctx, lab, ln); }
         wrap.append(rule);
+        // v2: each held line is an excerpt card of white paper floating on the field
+        const card = div({ position: 'absolute', left: -52, right: -40, top: -26, bottom: -26, background: '#fff', borderRadius: 18, zIndex: -1,
+          boxShadow: '0 40px 100px rgba(16,40,100,.30), 0 3px 10px rgba(16,40,100,.12)' });
+        wrap.prepend(card);
+        css(wrap, { zIndex: 0 });
         qLayer.append(wrap);
         return { wrap, lab, ln, hl, pre, key, post, ul, ctx, rule, below, m: null };
       }
       const qa = qLine(QA), qb = qLine(QB, true);
+      for (const q of [qa, qb]) css(q.key, { color: 'var(--accent-ink)', fontWeight: 600 });   // v2: the two numbers in conflict carry the accent
       css(qb.hl, { display: 'none' });
       const qSvg = h('svg', { class: 'full', width: 1920, height: 1080 }); css(qSvg, { overflow: 'visible' });
-      const qHalo = h('path', { fill: 'none', stroke: 'var(--d-accent)', 'stroke-width': 12, 'stroke-linecap': 'round', opacity: 0.12 });
-      const qPath = h('path', { fill: 'none', stroke: 'var(--d-accent)', 'stroke-width': 2.5, 'stroke-linecap': 'round' });
-      const qHead = h('circle', { r: 5.5, fill: '#fff' });
-      const qEnd = [h('circle', { r: 3.5, fill: 'var(--d-accent)' }), h('circle', { r: 3.5, fill: 'var(--d-accent)' })];
-      const cLink = h('path', { fill: 'none', stroke: 'var(--file-doc)', 'stroke-width': 1.5, 'stroke-dasharray': '4 4', opacity: 0.9 });
+      const qHalo = h('path', { fill: 'none', stroke: '#fff', 'stroke-width': 14, 'stroke-linecap': 'round', opacity: 0.2 });
+      const qPath = h('path', { fill: 'none', stroke: '#fff', 'stroke-width': 3, 'stroke-linecap': 'round' });
+      const qHead = h('circle', { r: 7, fill: '#fff' });
+      const qEnd = [h('circle', { r: 5, fill: '#fff', stroke: 'var(--accent)', 'stroke-width': 2.5 }), h('circle', { r: 5, fill: '#fff', stroke: 'var(--accent)', 'stroke-width': 2.5 })];
+      const cLink = h('path', { fill: 'none', stroke: '#fff', 'stroke-width': 2, 'stroke-dasharray': '5 5', opacity: 0.9 });
       qSvg.append(cLink, qHalo, qPath, qHead, ...qEnd);
       qLayer.append(qSvg);
 
       // Word comment card (light, as Word draws it)
       function commentCard(scale = 1) {
         const c = div({ position: 'absolute', left: 0, top: 0, width: 420, padding: '14px 16px 15px', background: '#ffffff', color: '#201e1d', borderRadius: 8,
-          border: '1px solid #e1dfdd', borderLeft: '4px solid var(--file-doc)', boxShadow: '0 12px 40px rgba(0,0,0,.45)', fontFamily: SANS, transformOrigin: '0 0' });
+          border: '1px solid #e1dfdd', borderLeft: '4px solid var(--file-doc)', boxShadow: '0 12px 40px rgba(16,40,100,.25)', fontFamily: SANS, transformOrigin: '0 0' });
         const hd = div({ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 });
         const av = span({ width: 28, height: 28, borderRadius: 14, background: 'var(--file-doc)', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 600 }, 'C');
         hd.append(av, span({ fontSize: 14, fontWeight: 600 }, 'Coscribe'), span({ fontSize: 12.5, color: '#7d7979', marginLeft: 'auto' }, L('批注', 'Comment')));
@@ -570,22 +578,22 @@
       qLayer.append(cmt);
 
       // QuestionCard (dark theme, built 1:1 from QuestionCard.tsx, scaled)
-      const qc = div({ position: 'absolute', left: 0, top: 0, width: 420, borderRadius: 14, border: '1px solid var(--d-border)', background: 'var(--d-card)',
-        boxShadow: '0 4px 24px rgba(0,0,0,.4)', color: 'var(--d-fg)', fontFamily: SANS, transformOrigin: '0 0', overflow: 'hidden' });
+      const qc = div({ position: 'absolute', left: 0, top: 0, width: 420, borderRadius: 14, border: '1px solid var(--border)', background: 'var(--bg)',
+        boxShadow: '0 4px 24px rgba(16,40,100,.22)', color: 'var(--fg)', fontFamily: SANS, transformOrigin: '0 0', overflow: 'hidden' });
       {
         const top = div({ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, padding: '14px 16px 8px' });
         const left = div({ minWidth: 0 });
-        left.append(div({ marginBottom: 2, fontSize: 12, lineHeight: '16px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.025em', color: 'var(--d-muted)' }, QCARD.header),
+        left.append(div({ marginBottom: 2, fontSize: 12, lineHeight: '16px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.025em', color: 'var(--muted)' }, QCARD.header),
           div({ fontSize: 14, lineHeight: '20px', fontWeight: 500 }, QCARD.question));
-        const x = span({ flex: 'none', borderRadius: 6, padding: 4, color: 'var(--d-muted)', display: 'grid' }); x.innerHTML = ICON.close;
+        const x = span({ flex: 'none', borderRadius: 6, padding: 4, color: 'var(--muted)', display: 'grid' }); x.innerHTML = ICON.close;
         top.append(left, x);
-        const opts = div({ borderTop: '1px solid var(--d-border)' });
+        const opts = div({ borderTop: '1px solid var(--border)' });
         QCARD.options.forEach((o, i) => {
-          const r = div({ display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid var(--d-border)', padding: '10px 16px', fontSize: 14, lineHeight: '20px' });
-          r.append(span({ width: 20, height: 20, flex: 'none', display: 'grid', placeItems: 'center', borderRadius: 4, background: 'var(--d-bg)', fontSize: 12, color: 'var(--d-muted)' }, String(i + 1)), span({ whiteSpace: 'nowrap' }, o));
+          const r = div({ display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid var(--border)', padding: '10px 16px', fontSize: 14, lineHeight: '20px' });
+          r.append(span({ width: 20, height: 20, flex: 'none', display: 'grid', placeItems: 'center', borderRadius: 4, background: 'var(--card-bg)', fontSize: 12, color: 'var(--muted)' }, String(i + 1)), span({ whiteSpace: 'nowrap' }, o));
           opts.append(r);
         });
-        const se = div({ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', fontSize: 14, lineHeight: '20px', color: 'var(--d-muted)' });
+        const se = div({ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', fontSize: 14, lineHeight: '20px', color: 'var(--muted)' });
         const pe = span({ display: 'grid', flex: 'none' }); pe.innerHTML = ICON.pencil;
         se.append(pe, span({}, 'Something else'));
         opts.append(se);
@@ -598,26 +606,26 @@
       layer.append(ovl);
       // page ticker at the right edge
       const ticker = div({ position: 'absolute', left: 1846, top: 0, width: 50, height: 1080 });
-      const TICKS = Array.from({ length: 11 }, () => { const e = div({ position: 'absolute', right: 0, fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--d-fg)', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }); ticker.append(e); return e; });
-      const tickMark = div({ position: 'absolute', right: 40, width: 12, height: 1.5, background: 'var(--d-accent)', top: HEAD_Y });
-      const tickOf = div({ position: 'absolute', right: 0, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--d-muted)', top: HEAD_Y + 16 }, '/ 203');
+      const TICKS = Array.from({ length: 11 }, () => { const e = div({ position: 'absolute', right: 0, fontFamily: 'var(--mono)', fontSize: 13, color: '#fff', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }); ticker.append(e); return e; });
+      const tickMark = div({ position: 'absolute', right: 40, width: 12, height: 2, background: '#fff', top: HEAD_Y });
+      const tickOf = div({ position: 'absolute', right: 0, fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', top: HEAD_Y + 16 }, '/ 203');
       ticker.append(tickMark);
       ovl.append(ticker);
       // the tool row (ChatLog run header: "Searched PDF: `…`, read `…`")
-      const tool = div({ position: 'absolute', left: 432, top: 938, transformOrigin: '0 50%', fontFamily: SANS, fontSize: 14, lineHeight: '20px', color: 'var(--d-muted)', whiteSpace: 'nowrap',
-        padding: '9px 14px', background: 'rgba(35,33,32,.92)', border: '1px solid var(--d-border)', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 4 });
+      const tool = div({ position: 'absolute', left: 432, top: 938, transformOrigin: '0 50%', fontFamily: SANS, fontSize: 14, lineHeight: '20px', color: 'var(--muted)', whiteSpace: 'nowrap',
+        padding: '9px 14px', background: '#ffffff', border: '1px solid var(--border)', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 4 });
       const toolTxt = span({});
       const chev = span({ display: 'grid' }); chev.innerHTML = ICON.chevron;
       tool.append(toolTxt, chev);
       ovl.append(tool);
       const q1 = L('交付期限', 'delivery'), pdfName = L('招标文件.pdf', 'tender.pdf');
-      const code = (s) => `<code style="border-radius:4px;background:rgba(247,245,243,.12);padding:2px 4px;font-family:var(--mono);font-size:.85em;color:var(--d-fg)">${s}</code>`;
-      const shimmer = (s, t) => { const p = (1 - ((t / 1.8) % 1)) * 100; return `<span style="background:linear-gradient(90deg,var(--d-muted) 0%,var(--d-muted) 35%,var(--d-fg) 50%,var(--d-muted) 65%,var(--d-muted) 100%) ${p.toFixed(1)}% 0 / 250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent">${s}</span>`; };
+      const code = (s) => `<code style="border-radius:4px;background:rgba(32,30,29,.12);padding:2px 4px;font-family:var(--mono);font-size:.85em;color:var(--fg)">${s}</code>`;
+      const shimmer = (s, t) => { const p = (1 - ((t / 1.8) % 1)) * 100; return `<span style="background:linear-gradient(90deg,var(--muted) 0%,var(--muted) 35%,var(--fg) 50%,var(--muted) 65%,var(--muted) 100%) ${p.toFixed(1)}% 0 / 250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent">${s}</span>`; };
       // cursor
       const cursor = div({ position: 'absolute', left: 0, top: 0, width: 26, height: 34 }); cursor.innerHTML = ICON.cursor;
-      css(cursor, { filter: 'drop-shadow(0 2px 4px rgba(0,0,0,.5))' });
+      css(cursor, { filter: 'drop-shadow(0 2px 4px rgba(16,40,100,.28))' });
       // example tag
-      const ex = div({ position: 'absolute', left: 40, top: 1034, fontFamily: 'var(--mono)', fontSize: 12, letterSpacing: '.08em', color: 'var(--d-muted)', opacity: 0.55 }, T('example'));
+      const ex = div({ position: 'absolute', left: 40, top: 1034, fontFamily: 'var(--mono)', fontSize: 12, letterSpacing: '.08em', color: '#fff', opacity: 0.8 }, T('example'));
       ovl.append(ex);
 
       // ---------- the document (S3-06 / S3-07) ----------
@@ -631,7 +639,7 @@
       const pages = [];
       function page(i) {
         const pg = div({ position: 'absolute', left: PX[i], top: PT, width: PW, height: PH, background: '#ffffff', borderRadius: 2, overflow: 'hidden',
-          boxShadow: '0 30px 80px rgba(0,0,0,.5), 0 0 0 1px rgba(0,0,0,.25)', color: ink, transformOrigin: '50% 50%' });
+          boxShadow: '0 30px 80px rgba(16,40,100,.28), 0 0 0 1px rgba(16,40,100,.14)', color: ink, transformOrigin: '50% 50%' });
         const inner = div({ position: 'absolute', left: 0, top: 0, width: PW, height: PH, padding: '34px 44px 0', transformOrigin: '0 0' });
         // the agent's line, writing the page top-down (light-surface accent)
         const wl = div({ position: 'absolute', left: 0, right: 0, top: 0, height: 2, background: 'var(--accent)', opacity: 0 });
@@ -736,12 +744,12 @@
         pages.push(p);
       }
       // stack of further pages behind page 49, page count, file label
-      const stack = [1, 2, 3, 4].map((k) => div({ position: 'absolute', left: PX[2] + k * 7, top: PT + k * 7, width: PW, height: PH, background: '#f4f3f2', borderRadius: 2, boxShadow: '0 20px 60px rgba(0,0,0,.4), 0 0 0 1px rgba(0,0,0,.2)' }));
+      const stack = [1, 2, 3, 4].map((k) => div({ position: 'absolute', left: PX[2] + k * 7, top: PT + k * 7, width: PW, height: PH, background: '#f4f3f2', borderRadius: 2, boxShadow: '0 20px 60px rgba(16,40,100,.22), 0 0 0 1px rgba(16,40,100,.11)' }));
       stack.reverse().forEach((s) => D.append(s));
       pages.forEach((p) => D.append(p.pg));
       css(pages[1].pg, { zIndex: 3 }); css(pages[0].pg, { zIndex: 2 }); css(pages[2].pg, { zIndex: 1 });
-      const pcount = div({ position: 'absolute', left: PX[2] + PW + 28, top: PT + PH + 46, fontFamily: 'var(--mono)', fontSize: 15, color: 'var(--d-fg)', whiteSpace: 'nowrap', transform: 'translateX(-100%)', fontVariantNumeric: 'tabular-nums' });
-      const flabel = div({ position: 'absolute', left: PX[0], top: PT - 40, display: 'flex', alignItems: 'center', gap: 9, fontSize: 15, color: 'var(--d-muted)', fontFamily: SANS, whiteSpace: 'nowrap' });
+      const pcount = div({ position: 'absolute', left: PX[2] + PW + 28, top: PT + PH + 46, fontFamily: 'var(--mono)', fontSize: 17, fontWeight: 500, color: '#fff', whiteSpace: 'nowrap', transform: 'translateX(-100%)', fontVariantNumeric: 'tabular-nums' });
+      const flabel = div({ position: 'absolute', left: PX[0], top: PT - 40, display: 'flex', alignItems: 'center', gap: 9, fontSize: 16, fontWeight: 500, color: '#fff', fontFamily: SANS, whiteSpace: 'nowrap' });
       flabel.append(badge('doc', 10), span({}, T('s3_out')));
       D.append(pcount, flabel);
       // the comment, docked in the margin of page 49
@@ -832,7 +840,7 @@
             ctx.rotate(p.rot * Math.PI / 180);
             ctx.globalAlpha = a;
             ctx.drawImage(pageTex[p.tex], -PAGE_W / 2, -PAGE_H / 2);
-            ctx.font = `400 9px ${MONO}`; ctx.fillStyle = 'rgba(161,157,155,.95)'; ctx.textBaseline = 'middle';
+            ctx.font = `400 9px ${MONO}`; ctx.fillStyle = 'rgba(125,121,121,.95)'; ctx.textBaseline = 'middle';
             const lbl = `— ${p.page} —`; ctx.fillText(lbl, -ctx.measureText(lbl).width / 2, PAGE_H / 2 - 18);
           }
           ctx.globalAlpha = 1;
@@ -851,6 +859,12 @@
             const scroll = POS(t) * col.sp;
             const y0 = ce.y - 540 / s - 60, y1 = ce.y + 540 / s + 60;
             const a = col.alpha * colA * (col.id === 'focus' ? lerp(1, 0.55, tw(t, 61.0, 62.0)) : 1);
+            // v2: each column is a long strip of white paper floating on the field
+            ctx.save();
+            ctx.globalAlpha = colA * (col.id === 'focus' ? 0.97 * lerp(1, 0.6, tw(t, 61.0, 62.0)) : col.id === 'near' ? 0.5 : 0.78);
+            ctx.shadowColor = 'rgba(16,40,100,.28)'; ctx.shadowBlur = 50; ctx.shadowOffsetY = 24;
+            ctx.fillStyle = '#ffffff'; ctx.fillRect(col.x - 34, y0 - 40, col.w + 68, y1 - y0 + 80);
+            ctx.restore();
             if (col.id !== 'focus') {
               const at = atlases[ci2];
               const ay0 = Math.max(0, Math.floor(y0 - COL_TOP + scroll)), ay1 = Math.min(at.height, Math.ceil(y1 - COL_TOP + scroll));
@@ -875,7 +889,7 @@
                   const hk = tw(t, ft - 0.35, ft, 'inOutQuad');
                   if (hk > 0) {
                     ctx.globalAlpha = colA * (0.7 + 0.3 * hk);
-                    ctx.font = fontOf(col); ctx.fillStyle = `rgba(169,203,245,1)`;
+                    ctx.font = fontOf(col); ctx.fillStyle = `rgba(42,120,214,1)`;
                     ctx.fillText(ln.s, col.x, y);
                     continue;
                   }
@@ -908,12 +922,12 @@
         // ======== table ========
         const kMove = tw(t, 61.0, 61.9, 'inOutCubic');
         const tblX = lerp(1226, 548, kMove), tblW = lerp(596, 706, kMove), respW = lerp(0, 120, kMove);
-        const tblA = tw(t, 57.0, 57.6, 'outQuad') * (1 - 0.93 * inQ) * (1 - outQ);
+        const tblA = tw(t, 57.0, 57.6, 'outQuad') * (1 - 0.75 * inQ) * (1 - outQ);
         css(tbl, { left: tblX, top: 296, width: tblW, opacity: tblA, display: tblA > 0.002 ? '' : 'none', filter: inQ > 0.01 ? `blur(${(6 * inQ).toFixed(2)}px)` : 'none' });
         const grid = `78px 1fr ${ZH ? 72 : 106}px ${respW.toFixed(1)}px`;
         css(thead, { gridTemplateColumns: grid, position: 'relative' });
         css(body, { position: 'relative' });
-        css(tblBack, { opacity: kMove });
+        css(tblBack, { opacity: 1 });
         css(TH[3], { opacity: tw(t, 61.4, 61.9) });
         const nRows = rowsAt(t);
         const nInt = Math.floor(nRows + 1e-6);
@@ -953,9 +967,9 @@
             sl.st = st;
             const cell = sl.cells[3];
             cell.innerHTML = '';
-            if (st === 'ok') { cell.append(span({ color: 'var(--d-success)' }, L('完全响应', 'Compliant'))); }
-            else if (st === 'dev') { cell.append(span({ color: 'var(--d-warning)' }, L('△ 偏离', '△ Deviation'))); }
-            else if (st === 'run') { cell.innerHTML = `<svg width="16" height="16" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="var(--d-muted)" stroke-opacity=".3" stroke-width="2" fill="none"/><path d="M10 2a8 8 0 0 1 8 8" stroke="var(--d-accent)" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`; }
+            if (st === 'ok') { cell.append(span({ color: 'var(--success)' }, L('完全响应', 'Compliant'))); }
+            else if (st === 'dev') { cell.append(span({ color: 'var(--warning)' }, L('△ 偏离', '△ Deviation'))); }
+            else if (st === 'run') { cell.innerHTML = `<svg width="16" height="16" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" stroke="var(--muted)" stroke-opacity=".3" stroke-width="2" fill="none"/><path d="M10 2a8 8 0 0 1 8 8" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/></svg>`; }
           }
           if (st === 'run') sl.cells[3].firstChild.style.transform = `rotate(${(t * 360) % 360}deg)`;
           const stK = fr && fr.to ? tw(t, CONNS.find((x) => x.ri === fi).t0 + CONN_DUR, CONNS.find((x) => x.ri === fi).t0 + CONN_DUR + 0.3) : 1;
@@ -963,8 +977,8 @@
           // the 4.3 row: its requirement leaves with line A
           const isQ = fr && fr.st === 'q';
           const qHi = isQ ? tw(t, Q_CONN_T, Q_CONN_T + 0.4) : 0;
-          css(sl.r, { background: glow > 0.01 ? `rgba(75,143,227,${(0.16 * glow).toFixed(3)})` : (qHi > 0 ? `rgba(232,184,92,${(0.08 * qHi).toFixed(3)})` : 'transparent') });
-          css(sl.cells[1], { opacity: isQ ? 1 - tw(t, Q0, Q0 + 0.25) : 1, color: 'var(--d-fg)' });
+          css(sl.r, { background: glow > 0.01 ? `rgba(42,120,214,${(0.16 * glow).toFixed(3)})` : (qHi > 0 ? `rgba(184,122,20,${(0.08 * qHi).toFixed(3)})` : 'transparent') });
+          css(sl.cells[1], { opacity: isQ ? 1 - tw(t, Q0, Q0 + 0.25) : 1, color: 'var(--fg)' });
         });
         // the very first flown row appears exactly where its flight lands
         const slotTop = (idx) => 296 + 36 + 4 + (idx - scrollRows) * 36;
@@ -986,7 +1000,7 @@
           // turn: 0 → 90° (line), then −90° → 0 (row)
           const half = km < 0.5;
           const ang = half ? 90 * ease.inQuad(km / 0.5) : -90 * (1 - ease.outQuad((km - 0.5) / 0.5));
-          css(f.a, { display: half ? '' : 'none', color: lift > 0 ? `rgba(247,245,243,${0.85 + 0.15 * lift})` : 'var(--d-fg)' });
+          css(f.a, { display: half ? '' : 'none', color: lift > 0 ? `rgba(32,30,29,${0.85 + 0.15 * lift})` : 'var(--fg)' });
           css(f.b, { display: half ? 'none' : '' });
           const z = Math.sin(Math.PI * km) * 120 + lift * 20;
           css(f.el, { transform: `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,${z.toFixed(1)}px) rotateY(${ang.toFixed(2)}deg)`, opacity: k > 0.985 ? 0 : 1 });
@@ -994,11 +1008,11 @@
 
         // ======== company documents (S3-04) ========
         const compK = tw(t, 61.2, 62.1, 'outCubic');
-        const compA = compK * (1 - 0.93 * inQ) * (1 - outQ);
+        const compA = compK * (1 - 0.75 * inQ) * (1 - outQ);
         css(comp, { display: compA > 0.002 ? '' : 'none', opacity: compA, transform: `translateX(${(1 - compK) * 320}px)`, filter: inQ > 0.01 ? `blur(${(6 * inQ).toFixed(2)}px)` : 'none' });
         compEls.forEach((ce2, n) => { const kk = tw(t, 61.35 + n * 0.035, 61.75 + n * 0.035, 'outCubic'); css(ce2.el, { opacity: kk, transform: `translateX(${(1 - kk) * 24}px)` }); });
         // ======== outline (S3-04, left) ========
-        const outA = tw(t, 61.15, 61.5) * (1 - 0.93 * inQ) * (1 - outQ);
+        const outA = tw(t, 61.15, 61.5) * (1 - 0.75 * inQ) * (1 - outQ);
         css(outl, { display: outA > 0.002 ? '' : 'none', opacity: outA, filter: inQ > 0.01 ? `blur(${(6 * inQ).toFixed(2)}px)` : 'none' });
         let lastY = 184;
         OUT_ELS.forEach((e, i) => {
@@ -1020,9 +1034,9 @@
           const d = `M${x0} ${y0} C${x0 + 70} ${y0} ${x1 - 70} ${y1} ${x1} ${y1}`;
           if (cn.d !== d) { cn.d = d; cn.p.setAttribute('d', d); cn.len = cn.p.getTotalLength(); cn.p.setAttribute('stroke-dasharray', cn.len); }
           cn.p.setAttribute('stroke-dashoffset', cn.len * (1 - k));
-          cn.p.setAttribute('stroke', cn.dev && k >= 1 ? 'var(--d-warning)' : 'var(--d-accent)');
+          cn.p.setAttribute('stroke', cn.dev && k >= 1 ? 'var(--warning)' : 'var(--accent)');
           const pt = cn.p.getPointAtLength(cn.len * k);
-          attr(cn.dot, { cx: pt.x, cy: pt.y, r: k < 1 ? 3 : 2.5, fill: cn.dev && k >= 1 ? 'var(--d-warning)' : 'var(--d-accent)' });
+          attr(cn.dot, { cx: pt.x, cy: pt.y, r: k < 1 ? 3 : 2.5, fill: cn.dev && k >= 1 ? 'var(--warning)' : 'var(--accent)' });
           css(cn.p, { opacity: (0.75 * (1 - 0.96 * inQ) * (1 - outQ)).toFixed(3) });
           css(cn.dot, { opacity: ((1 - 0.96 * inQ) * (1 - outQ)).toFixed(3) });
         });
@@ -1086,11 +1100,11 @@
           attr(qHead, { cx: hp.x, cy: hp.y, opacity: draw > 0 && draw < 1 ? 1 - qOut : 0 });
           attr(qEnd[0], { cx: pA.x, cy: pA.y, opacity: (draw > 0 ? 1 : 0) * (1 - qOut) });
           attr(qEnd[1], { cx: pB.x, cy: pB.y, opacity: (draw >= 1 ? 1 : 0) * (1 - qOut) });
-          attr(qPath, { opacity: 1 - qOut, 'stroke-width': lerp(2.5, 2.2, taut) });
+          attr(qPath, { opacity: 1 - qOut, 'stroke-width': lerp(3, 3.6, taut) });
           attr(qHalo, { opacity: (0.1 + 0.1 * taut * Math.exp(-Math.max(0, t - 68.1) * 2.5)) * (1 - qOut) });
           // Word comment: highlight on line A, then the card
           const hk = tw(t, CMT - 0.3, CMT + 0.15, 'outCubic');
-          css(qa.hl, { opacity: hk, transform: `scaleX(${hk})`, background: 'rgba(140,180,240,.22)' });
+          css(qa.hl, { opacity: hk, transform: `scaleX(${hk})`, background: 'rgba(42,120,214,.22)' });
           const ck = tw(t, CMT, CMT + 0.55, 'outCubic');
           // the comment card later docks into the document's margin
           const dock = tw(t, DOC0 + 0.15, DOC0 + 1.05, 'inOutCubic');
@@ -1136,7 +1150,7 @@
             const d = Math.abs(k - 5 - fr);
             const txt = n >= 1 && n <= 203 ? String(n).padStart(3, '0') : '';
             if (e.textContent !== txt) e.textContent = txt;
-            css(e, { top: y - 9, opacity: (Math.max(0, 1 - d / 5.5) * (d < 0.5 ? 1 : 0.45)).toFixed(3), color: d < 0.5 ? 'var(--d-fg)' : 'var(--d-muted)' });
+            css(e, { top: y - 9, opacity: (Math.max(0, 1 - d / 5.5) * (d < 0.5 ? 1 : 0.6)).toFixed(3), color: '#fff', fontWeight: d < 0.5 ? 600 : 400 });
           });
         }
 

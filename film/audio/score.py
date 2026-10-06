@@ -853,5 +853,6 @@ def render(events=None, lines=None):
     x *= np.clip((120.0 - t) / 0.6, 0, 1) ** 1.5
     # start: tiny fade so nothing clicks at 0
     x[:, :240] *= np.linspace(0, 1, 240)
-    S.buses_out = B
+    global LAST_BUSES
+    LAST_BUSES = {k: B[k] for k in ("kick", "drums")}
     return x

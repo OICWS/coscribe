@@ -354,11 +354,10 @@ def kick(variant=0):
     body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / (0.13 if variant == 0 else 0.24))
     r = rng(23000 + variant)
     nz = r.standard_normal(L) * np.exp(-t / 0.0025)
-    click = filt(nz, bandpass(3200, 0.9), lowpass(7000))
-    y = body + 0.35 * click / (np.max(np.abs(click)) + 1e-9)
-    y = np.tanh(1.6 * y) / np.tanh(1.6)
-    y *= 1 - np.exp(-t / 0.0007)
-    y = filt(y, highpass(32), lowpass(9000))
+    click = butter_lp(filt(nz, bandpass(2800, 0.9)), 6000, 4)
+    y = np.tanh(1.6 * body) / np.tanh(1.6) + 0.35 * click / (np.max(np.abs(click)) + 1e-9)
+    y *= 1 - np.exp(-t / 0.0012)
+    y = butter_lp(filt(y, highpass(32)), 8000, 4)
     return fade(y / (np.max(np.abs(y)) + 1e-9), 0.0, 0.03)
 
 

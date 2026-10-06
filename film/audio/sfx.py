@@ -34,6 +34,16 @@ def _damped(f, tau, dur, phase=0.0):
     return np.sin(2 * np.pi * f * t + phase) * np.exp(-t / tau)
 
 
+# The score is in D major (v2): pitched SFX bodies are tuned to the D-major pentatonic so they sit inside
+# the music instead of rubbing against it.
+PENTA = [float(midi_hz(m)) for m in range(26, 110) if m % 12 in (2, 4, 6, 9, 11)]
+
+
+def tune(f):
+    """Nearest D-major-pentatonic pitch (Hz) to f."""
+    return min(PENTA, key=lambda p: abs(np.log(p / f)))
+
+
 def _burst(dur, tau, fc, q=0.9, seed=None, kind="bp"):
     r = rng(seed) if seed is not None else _r()
     t = _t(dur)
@@ -50,9 +60,9 @@ def key(variant=None, light=False, space=False):
     """A soft mechanical key: top tap, plastic body (three pitches), bottom-out thump, release."""
     r = _r()
     v = int(r.integers(0, 3)) if variant is None else variant
-    body_f = [235, 268, 302][v] * r.uniform(0.97, 1.03)
+    body_f = [220.0, 246.94, 293.66][v] * r.uniform(0.997, 1.003)   # A3 / B3 / D4
     if space:
-        body_f *= 0.62
+        body_f *= 0.5
     dur = 0.16
     tap = _burst(0.02, 0.0016, 3000 * r.uniform(0.9, 1.1), 1.4)
     body = _damped(body_f, 0.011 if not space else 0.02, dur) + 0.35 * _damped(body_f * 2.7, 0.005, dur)
@@ -79,7 +89,7 @@ def key(variant=None, light=False, space=False):
 def enter():
     """Enter: heavier, lower, a little longer, with the stabiliser."""
     t = _t(0.3)
-    body = _damped(150, 0.025, 0.3) + 0.4 * _damped(320, 0.012, 0.3) + 0.6 * _damped(62, 0.03, 0.3)
+    body = _damped(146.83, 0.025, 0.3) + 0.4 * _damped(293.66, 0.012, 0.3) + 0.6 * _damped(73.42, 0.03, 0.3)
     tap = np.zeros(len(t))
     b = _norm(_burst(0.025, 0.002, 2200, 1.1))
     tap[:len(b)] = b
@@ -137,7 +147,7 @@ def whoosh(dur=1.0, lo=180, hi=900, reverse=False, hum=False, seed=None):
 def tick(pitch=1.0):
     """Cell tick: a 40 ms soft dot."""
     r = _r()
-    f = 1900 * pitch * r.uniform(0.9, 1.12)
+    f = tune(1900 * pitch * r.uniform(0.9, 1.12))
     x = _damped(f, 0.006, 0.04)
     b = _norm(_burst(0.008, 0.0009, f * 1.4, 2.0))
     x[:len(b)] += 0.35 * b
@@ -149,17 +159,17 @@ def snap():
     """Column snaps into alignment: a soft plastic double click with a low body."""
     x = np.zeros(int(0.12 * SR))
     for j, (dt, g) in enumerate(((0.0, 1.0), (0.014, 0.6))):
-        c = _norm(_burst(0.03, 0.002, 1500 - 300 * j, 1.5)) * g + 0.5 * g * _damped(420, 0.01, 0.03)
+        c = _norm(_burst(0.03, 0.002, 1500 - 300 * j, 1.5)) * g + 0.5 * g * _damped(440.0, 0.01, 0.03)
         i = int(dt * SR)
         x[i:i + len(c)] += c
-    x += 0.4 * np.pad(_damped(130, 0.015, 0.06), (0, len(x) - int(0.06 * SR)))
+    x += 0.4 * np.pad(_damped(146.83, 0.015, 0.06), (0, len(x) - int(0.06 * SR)))
     return fade(_norm(filt(x, lowpass(6000), highpass(80))), 0.0, 0.01)
 
 
 def knock(pitch=1.0):
     """Short wooden knock (layout blocks landing): woodblock-ish but felted."""
     r = _r()
-    f = 420 * pitch * r.uniform(0.92, 1.08)
+    f = tune(440 * pitch * r.uniform(0.92, 1.08))
     x = _damped(f, 0.018, 0.12) + 0.4 * _damped(f * 2.6, 0.007, 0.12) + 0.3 * _damped(f * 0.5, 0.02, 0.12)
     b = _norm(_burst(0.01, 0.001, 2000, 1.0))
     x[:len(b)] += 0.25 * b
@@ -169,7 +179,7 @@ def knock(pitch=1.0):
 
 def settle():
     """Chip lands in the input box: a light wooden 'tok' with a soft low body."""
-    x = _damped(330, 0.02, 0.25) + 0.5 * _damped(165, 0.04, 0.25) + 0.2 * _damped(860, 0.008, 0.25)
+    x = _damped(329.63, 0.02, 0.25) + 0.5 * _damped(146.83, 0.04, 0.25) + 0.2 * _damped(880.0, 0.008, 0.25)
     b = _norm(_burst(0.012, 0.0012, 1500, 0.9))
     x[:len(b)] += 0.2 * b
     x *= 1 - np.exp(-_t(0.25) / 0.0008)
@@ -240,7 +250,7 @@ def silk(dur=0.7, pitch=1.0):
     """A fine thread pulled taut: soft airy band gliding up, faint pitched core."""
     t = _t(dur)
     r = _r()
-    f = 1200 * pitch * (1 + 0.5 * t / dur)
+    f = 1174.66 * pitch * (1 + 0.5 * t / dur)
     core = np.sin(2 * np.pi * np.cumsum(f) / SR) * 0.15
     x = r.standard_normal(len(t))
     x = filt(x, bandpass(2400 * pitch, 1.4))
@@ -261,7 +271,7 @@ def chime(note="A5", vel=1.0):
 def thud():
     """Test failure: low, dull, felt."""
     t = _t(0.9)
-    f = 58 * (1 + 0.6 * np.exp(-t / 0.04))
+    f = 55.0 * (1 + 0.6 * np.exp(-t / 0.04))
     x = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.18)
     b = _norm(_burst(0.08, 0.012, 300, 0.7, kind="lp"))
     x[:len(b)] += 0.4 * b
@@ -272,8 +282,8 @@ def thud():
 def stack():
     """Run records stacking: thick soft 'dum'."""
     t = _t(0.7)
-    f = 72 * (1 + 0.4 * np.exp(-t / 0.03))
-    x = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.14) + 0.4 * _damped(190, 0.03, 0.7)
+    f = 73.42 * (1 + 0.4 * np.exp(-t / 0.03))
+    x = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.14) + 0.4 * _damped(185.0, 0.03, 0.7)
     b = _norm(_burst(0.05, 0.006, 700, 0.8, kind="lp"))
     x[:len(b)] += 0.3 * b
     x *= 1 - np.exp(-t / 0.0015)
@@ -282,7 +292,7 @@ def stack():
 
 def clock():
     """A clock 'tock' for each Monday."""
-    x = _damped(1250, 0.006, 0.08) + 0.6 * _damped(640, 0.012, 0.08) + 0.3 * _damped(2900, 0.003, 0.08)
+    x = _damped(1174.66, 0.006, 0.08) + 0.6 * _damped(587.33, 0.012, 0.08) + 0.3 * _damped(2959.96, 0.003, 0.08)
     x *= 1 - np.exp(-_t(0.08) / 0.0003)
     return fade(_norm(filt(x, lowpass(6000))), 0.0, 0.01)
 
@@ -300,7 +310,7 @@ def bell(note="A4"):
 
 def pop(i=0):
     """Rows floating up: a light rounded 'bloop', higher each time."""
-    f = 520 * 2 ** (i * 4 / 12)
+    f = 587.33 * 2 ** ([0, 4, 7, 12, 16][i % 5] / 12)   # D5 F#5 A5 ...
     t = _t(0.25)
     fr = f * (1 + 0.15 * (1 - np.exp(-t / 0.03)))
     x = np.sin(2 * np.pi * np.cumsum(fr) / SR) * np.exp(-t / 0.06) * (1 - np.exp(-t / 0.004))
@@ -319,7 +329,7 @@ def gliss(dur=1.2, lo="D4", hi="A4"):
     return fade(pan(_norm(x * e), 0.2), 0.02, 0.05)
 
 
-def chord(notes=("D5", "A5", "F5")):
+def chord(notes=("D5", "A5", "F#5")):
     """A soft consonance (a line lights up): glass + sine dyad/triad."""
     y = None
     for i, nt in enumerate(notes):
@@ -504,7 +514,7 @@ GUESS = [("whoosh", "whoosh"), ("swish", "whoosh"), ("dive", "dive"), ("key", "k
 # events that belong to the score (montage hits, the riser, the stops): no SFX for them
 SKIP_GROUP = {"ticks": "tick", "tap": "tick"}  # for fallback skipping: these families count as one
 
-GLASS_NOTES = ["D6", "A5", "F6", "E6", "A6", "C6", "D6", "G6", "F6", "A5", "E6", "D6", "C6", "A5", "F5", "D5"]
+GLASS_NOTES = ["D6", "A5", "F#6", "E6", "A6", "B5", "D6", "E6", "F#6", "A5", "E6", "D6", "B5", "A5", "F#5", "D5"]
 
 
 def family(e):
