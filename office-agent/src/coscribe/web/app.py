@@ -791,6 +791,7 @@ COSCRIBE_ENV_VARS = [
     "COSCRIBE_DEFAULT_PERMISSION_MODE",
     "COSCRIBE_CODE_MODEL",
     "COSCRIBE_CODE_MODULE_ENABLED",
+    "COSCRIBE_CODE_SEES_MEMORY",
 ]
 
 # Settings update_config applies to the running server as well as .env.
@@ -800,6 +801,7 @@ LIVE_SETTINGS = {
     "COSCRIBE_DEFAULT_PERMISSION_MODE": "default_permission_mode",
     "COSCRIBE_CODE_MODEL": "code_model",
     "COSCRIBE_CODE_MODULE_ENABLED": "code_module_enabled",
+    "COSCRIBE_CODE_SEES_MEMORY": "code_sees_memory",
 }
 
 # Desktop-shell-consumed, not Settings-backed (see office-agent-desktop's
@@ -839,6 +841,9 @@ BLANK_UNSAFE_ENV_VARS = {
     "COSCRIBE_MAX_TURNS",
     "COSCRIBE_DEFAULT_PERMISSION_MODE",
 }
+
+
+_BOOLEAN_CODE_KEYS = {"COSCRIBE_CODE_MODULE_ENABLED", "COSCRIBE_CODE_SEES_MEMORY"}
 
 
 def _mask(value: str) -> str:
@@ -2572,7 +2577,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             if key == "COSCRIBE_CODE_MODEL" and value.strip() and ":" not in value:
                 rejected[key] = 'must be a "provider:model" string, or blank for the default model'
                 continue
-            if key == "COSCRIBE_CODE_MODULE_ENABLED" and value not in ("true", "false"):
+            if key in _BOOLEAN_CODE_KEYS and value not in ("true", "false"):
                 rejected[key] = 'must be "true" or "false"'
                 continue
             if key == "COSCRIBE_MAX_TURNS" and not (value.strip().isdigit() and int(value) > 0):
@@ -2612,7 +2617,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     live_value: str | int | bool | None = value
                     if key == "COSCRIBE_MAX_TURNS":
                         live_value = int(value)
-                    elif key == "COSCRIBE_CODE_MODULE_ENABLED":
+                    elif key in _BOOLEAN_CODE_KEYS:
                         live_value = value == "true"
                     elif key == "COSCRIBE_CODE_MODEL":
                         live_value = value.strip() or None
@@ -3271,7 +3276,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # user_message handling is: it can block on a future that only
             # resolves via an approval_response arriving through the loop
             # below, so awaiting it inline here would deadlock.
-            asyncio.create_task(session.resume_after_reconnect(websocket))
+            # Tracked, so shutdown stops it before the checkpointer it reads
+            # closes.
+            _track_background(asyncio.create_task(session.resume_after_reconnect(websocket)))
             while True:
                 data = await websocket.receive_json()
                 message_type = data.get("type")

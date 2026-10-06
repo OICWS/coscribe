@@ -1647,7 +1647,9 @@ that process your files, tools you'll reuse, fixes for a script that fails.
 
 - **Code conversations**: the `</>` icon in the sidebar, after Chat and
   Scheduled, lists them; each message is a turn of Codex. Edit and rewind
-  aren't available there.
+  aren't available there. A new one is told your instructions and what
+  coscribe remembers (the memory file), unless *Use your instructions and
+  memory* is off (`COSCRIBE_CODE_SEES_MEMORY=false`).
 - **From a chat**: with *Chats can hand tasks to Code* on (Settings > Code,
   or `COSCRIBE_CODE_MODULE_ENABLED=true`), a chat can hand a programming
   task to it through `run_code_task`; the run shows in the Sub Agents panel,

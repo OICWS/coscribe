@@ -196,6 +196,10 @@ class Settings(BaseSettings):
     Off by default; the module downloads ~111 MB on first use and only
     works with models served over the Responses API."""
 
+    code_sees_memory: bool = True
+    """Whether a new code conversation is told the user's instructions and
+    remembered facts (the memory file), as a chat is."""
+
     code_model: str | None = None
     """What a new code conversation starts with ("provider:model"); unset,
     the default model. Codex can't use every model the chat can, so it's

@@ -32,4 +32,8 @@ test("Settings has a Code section", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Code module" })).toBeVisible();
   await expect(page.getByLabel("Model for code")).toBeVisible();
   await expect(page.getByRole("switch", { name: "Chats can hand tasks to Code" })).toBeVisible();
+  await expect(page.getByRole("switch", { name: "Use your instructions and memory" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
 });

@@ -22,7 +22,13 @@ import coscribe.cli  # noqa: F401 -- web.session imports cli first
 from coscribe.code_runtime.launch import CodexHost, LaunchSpec
 from coscribe.config import Settings
 from coscribe.runtime import empty_hooks_config
-from coscribe.web.code_session import PLAN_NOTE, CodeSession, codex_thread_path
+from coscribe.web.code_session import (
+    INSTRUCTIONS,
+    MEMORY_NOTE,
+    PLAN_NOTE,
+    CodeSession,
+    codex_thread_path,
+)
 
 FAKE = Path(__file__).with_name("fake_codex_app_server.py")
 
@@ -107,6 +113,7 @@ def _session(
     checkpointer: Any = None,
     code_model: str | None = "fake:model",
     mode: str = "manual",
+    sees_memory: bool = True,
 ) -> CodeSession:
     monkeypatch.setattr(
         "coscribe.web.session.resolve_chat_model", lambda name, custom_providers=None: _Model()
@@ -122,6 +129,7 @@ def _session(
         memory_path=tmp_path / "MEMORY.md",
         auto_title_threads=False,
         default_permission_mode=mode,
+        code_sees_memory=sees_memory,
     )
     folder = tmp_path / "workspace"
     folder.mkdir(parents=True, exist_ok=True)
@@ -397,3 +405,40 @@ async def test_pasted_images_go_to_codex_and_stay_in_history(
     [turn] = [r for r in _requests(tmp_path) if r.get("method") == "turn/start"]
     assert turn["params"]["input"][1] == {"type": "image", "url": image}
     assert (await _history(session))[0]["images"] == [image]
+
+
+def _instructions_sent(tmp_path: Path) -> list[str]:
+    return [
+        r["params"].get("developerInstructions", "")
+        for r in _requests(tmp_path)
+        if r.get("method") == "thread/start"
+    ]
+
+
+async def test_a_new_code_conversation_is_told_the_users_memory_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    (tmp_path / "MEMORY.md").write_text("- Amounts keep two decimals.", encoding="utf-8")
+    session = _session(tmp_path, monkeypatch, codex)
+
+    await _say(session, _Socket(), "basic")
+    (tmp_path / "MEMORY.md").write_text("- Changed later.", encoding="utf-8")
+    await _say(session, _Socket(), "basic")
+
+    assert _instructions_sent(tmp_path) == [
+        f"{INSTRUCTIONS}\n\n{MEMORY_NOTE}\n\n- Amounts keep two decimals."
+    ]
+
+
+async def test_memory_stays_out_when_switched_off_or_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    (tmp_path / "MEMORY.md").write_text("- Amounts keep two decimals.", encoding="utf-8")
+    off = _session(tmp_path, monkeypatch, codex, sees_memory=False)
+    await _say(off, _Socket(), "basic")
+    (tmp_path / "MEMORY.md").unlink()
+    codex_thread_path(tmp_path / "state", "code-t1").unlink()
+    empty = _session(tmp_path, monkeypatch, codex)
+    await _say(empty, _Socket(), "basic")
+
+    assert _instructions_sent(tmp_path) == [INSTRUCTIONS, INSTRUCTIONS]

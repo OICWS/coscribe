@@ -31,6 +31,7 @@ from ..runtime_lg.code_agent import (
     approval_call,
     command_args,
 )
+from ..tools.memory import load_memory
 from .session import ChatSessionLG, _usage_event
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,13 @@ PLAN_NOTE = (
     "[Plan mode: read and look around only -- don't change files or run anything "
     "that does. End with the plan, and any questions, in your reply.]\n\n"
 )
+
+
+MEMORY_NOTE = """\
+The user's standing instructions and facts remembered from their chats with \
+coscribe's office assistant follow. Follow the instructions and use the \
+facts; tool names in them belong to that assistant, not to you -- ignore \
+those."""
 
 
 def is_code_thread(thread_id: str) -> bool:
@@ -299,7 +307,7 @@ class CodeSession(ChatSessionLG):
             model,
             Path(self.workspace_root),
             thread_id=self._codex_thread_id(),
-            developer_instructions=INSTRUCTIONS,
+            developer_instructions=self._codex_instructions(),
             context_window=self._context_window,
         )
         try:
@@ -308,6 +316,12 @@ class CodeSession(ChatSessionLG):
             if thread.thread_id is not None and thread.thread_id != self._codex_thread_id():
                 self._codex_thread_path.parent.mkdir(parents=True, exist_ok=True)
                 self._codex_thread_path.write_text(thread.thread_id, encoding="utf-8")
+
+    def _codex_instructions(self) -> str:
+        # Read when a Codex thread starts, the only time Codex takes
+        # developer instructions: a later edit reaches new conversations.
+        memory = load_memory(self.settings.memory_path) if self.settings.code_sees_memory else ""
+        return f"{INSTRUCTIONS}\n\n{MEMORY_NOTE}\n\n{memory}" if memory else INSTRUCTIONS
 
     async def _finish(self, turn: _Turn, result: TurnResult, websocket: WebSocket) -> None:
         if result.status == "completed":
