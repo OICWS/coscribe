@@ -210,15 +210,11 @@ html[lang="zh-CN"] .hero h1 { font-weight: 700; font-size: clamp(38px, 5vw, 68px
 .js .hero h1 .ln:nth-child(2) { animation-delay: .12s; }
 .js .hero-side > :nth-child(1) { animation-delay: .22s; }
 .js .hero-side > :nth-child(2) { animation-delay: .3s; }
-.js .hero-side > :nth-child(3) { animation-delay: .38s; }
 @keyframes rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
 .hero-side { display: grid; gap: 22px; justify-items: start; padding-bottom: 8px; }
 .lede { font-size: 18px; line-height: 1.6; color: var(--fg-2); max-width: 30em; letter-spacing: -.005em; }
 .lede b { display: block; font-weight: 600; color: var(--fg); margin-bottom: 4px; letter-spacing: -.015em; }
 .cta { display: flex; flex-wrap: wrap; gap: 10px; }
-.facts { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 12.5px/1.5 var(--mono); color: var(--muted); }
-.facts > span { display: inline-flex; align-items: center; gap: 7px; }
-.facts > span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--grad); }
 @media (max-width: 920px) { .hero-top { grid-template-columns: minmax(0, 1fr); } .hero { padding-block: 48px 88px; } }
 
 /* ---------- stage: the recreated app window ---------- */
@@ -809,7 +805,6 @@ kbd { display: inline-grid; place-items: center; min-width: 22px; height: 22px; 
 .playp svg { width: 14px; height: 14px; }
 .playp .pl { display: none; }
 .playp[aria-pressed="true"] .pl { display: block; } .playp[aria-pressed="true"] .pa { display: none; }
-.stage-note { margin-top: 18px; font-size: 13px; color: var(--muted); max-width: 70em; }
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 0 minmax(0, 1fr) 0 !important; height: 560px; }
@@ -993,6 +988,13 @@ kbd { display: inline-grid; place-items: center; min-width: 22px; height: 22px; 
 .faq details p { padding: 0 64px 22px 24px; color: var(--fg-2); font-size: 15px; }
 .faq details[open] p { animation: pop .4s var(--ease) both; }
 @media (max-width: 600px) { .faq details p { padding-right: 24px; } }
+.faq .fa { padding: 0 64px 24px 24px; color: var(--fg-2); font-size: 15px; }
+.faq details[open] .fa { animation: pop .4s var(--ease) both; }
+.faq .fa ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.faq .fa li { position: relative; padding-left: 18px; line-height: 1.6; }
+.faq .fa li::before { content: ""; position: absolute; left: 0; top: .62em; width: 6px; height: 6px; border-radius: 50%; background: var(--grad); }
+.faq .fa li b { color: var(--fg); font-weight: 600; margin-right: .35em; }
+@media (max-width: 600px) { .faq .fa { padding-right: 24px; } }
 
 /* ---------- closing ---------- */
 /* promo film */
@@ -1008,7 +1010,6 @@ kbd { display: inline-grid; place-items: center; min-width: 22px; height: 22px; 
 .film-play:hover .disc, .film-play:focus-visible .disc { transform: scale(1.08); }
 .film-play .meta { position: absolute; left: 22px; bottom: 18px; font: 500 12.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: rgba(255, 255, 255, .92); text-shadow: 0 1px 6px rgba(0, 0, 0, .35); }
 .film-frame.playing .film-play { opacity: 0; pointer-events: none; }
-.film-note { text-align: center; margin-top: 18px; font-size: 13.5px; color: var(--muted); }
 @media (max-width: 640px) { .film-frame { border-radius: 12px; margin-top: 36px; } .film-play .disc { width: 64px; height: 64px; } .film-play .disc svg { width: 22px; height: 22px; } .film-play .meta { left: 14px; bottom: 12px; font-size: 11px; } }
 .closing { text-align: center; padding-block: 140px; overflow: hidden; }
 .closing .h2 { font-size: clamp(36px, 5vw, 64px); }
@@ -1081,7 +1082,6 @@ footer a:hover { color: var(--fg); }
           <a class="btn btn-primary" href="#start"><span class="zh">开始使用</span><span class="en">Get started</span><svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
           <a class="btn btn-quiet" href="https://github.com/OICWS/coscribe"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .6a11.4 11.4 0 0 0-3.6 22.2c.57.1.78-.25.78-.55v-2c-3.17.69-3.84-1.36-3.84-1.36-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.72-1.53-2.53-.29-5.2-1.27-5.2-5.63 0-1.24.45-2.26 1.18-3.06-.12-.29-.51-1.45.11-3.01 0 0 .96-.31 3.14 1.17a10.9 10.9 0 0 1 5.72 0c2.18-1.48 3.14-1.17 3.14-1.17.62 1.56.23 2.72.11 3.01.73.8 1.18 1.82 1.18 3.06 0 4.37-2.67 5.33-5.21 5.62.41.35.77 1.05.77 2.12v3.14c0 .3.2.66.79.55A11.4 11.4 0 0 0 12 .6z"/></svg>GitHub</a>
         </div>
-        <div class="facts"><span><span class="zh">MIT 开源</span><span class="en">MIT open source</span></span><span><span class="zh">使用你自己的模型和 API 密钥</span><span class="en">Your own model and API key</span></span><span><span class="zh">本地运行</span><span class="en">Runs locally</span></span></div>
       </div>
     </div>
 
@@ -1372,7 +1372,6 @@ footer a:hover { color: var(--fg); }
         <button class="sc" role="tab" type="button" aria-selected="false" data-s="3" tabindex="-1"><span class="bar"><i></i></span><small>04 · CODE</small><span class="zh">把编程交给代码模块</span><span class="en">Hand code to the code module</span></button>
         <button class="playp" type="button" id="playp" aria-pressed="false" aria-label="Pause the demo"><svg class="pa" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M8 5v14M16 5v14"/></svg><svg class="pl" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12.5-7.5z"/></svg></button>
       </div>
-      <p class="stage-note"><span class="en">This is coscribe's interface rebuilt in HTML, so you can click around and copy any text. The files in it are examples. The code module is optional and off by default.</span><span class="zh">这是用 HTML 重现的 coscribe 界面，可以点，文字也能复制。里面的文件都是示例。代码模块是可选功能，默认关闭。</span></p>
     </div>
   </div>
 </section>
@@ -1575,7 +1574,6 @@ footer a:hover { color: var(--fg); }
         <span class="meta">2:00 · <span class="en">With music</span><span class="zh">含配乐</span></span>
       </button>
     </div>
-    <p class="film-note rv" style="--i:4"><span class="en">Example data throughout.</span><span class="zh">视频为英文，无旁白；片中均为示例数据。</span></p>
   </div>
 </section>
 
@@ -1718,22 +1716,26 @@ df.to_excel("Q3订单明细_清洗后.xlsx", index=False)</span></pre>
     </div>
     <div class="faq">
       <details class="rv" style="--i:1">
+        <summary><span class="zh">和其他桌面 Agent 有什么不同？</span><span class="en">How is it different from other desktop agents?</span><i></i></summary>
+        <div class="fa"><ul class="zh"><li><b>本地运行，模型随便换。</b>文件留在本机，只有对话发给你选的模型。Claude、GPT、Gemini、DeepSeek、Kimi、GLM 等 OpenAI 兼容接口都能接。</li><li><b>Office 能力内置。</b>Word、Excel、PPT、PDF 读写自带：修订、公式、图表、PPT 动画和模板、PDF 检索。写完用 LibreOffice 渲染预览，让模型“看到”成品。</li><li><b>重视做对。</b>独立评审员拿脚本实际看到的证据核对产出，评审次数和每轮步数都有硬上限。</li><li><b>成功对话可固化成工作流。</b>跑通的任务可以固化成固定流程，定时执行时不再让模型做决定，稳定、快、便宜；AI 只在起草和修复失败时参与。</li><li><b>审批分级。</b>四种模式：手动、自动接受编辑、计划、Auto（由评审模型代为审批）。脚本只能写入授权文件夹，有审计日志，支持 Hooks。</li><li><b>成本认真优化。</b>缓存针对各家模型调过，同一个三文件办公任务从约 ¥2.9 降到 ¥1，每次调用花了多少都能查。</li><li><b>一个应用，两个 runtime。</b>办公交给 coscribe runtime，编程可交给 Codex（可选模块，用到时才下载）。</li><li><b>交互打磨到位。</b>内置浏览器面板保持登录、批量提问、运行中途补充、任务进度和子代理面板、会话分组和状态图标。</li></ul><ul class="en"><li><b>Local, any model.</b>Your files stay on your PC; only the conversation goes to the model you pick: Claude, GPT, Gemini, DeepSeek, Kimi, GLM or any OpenAI-compatible API.</li><li><b>Office built in.</b>Word, Excel, PowerPoint and PDF tools ship with it: tracked changes, formulas, charts, slide animations and templates, PDF search. Each file is rendered with LibreOffice so the model sees the result.</li><li><b>Built to get it right.</b>An independent reviewer checks the output against evidence of what the scripts actually saw, and reviews and steps per turn have hard limits.</li><li><b>Chats become workflows.</b>A run that worked can become a fixed workflow. Scheduled runs follow its steps without the model deciding, so they are steady, fast and cheap; AI only drafts it and repairs failures.</li><li><b>Tiered approval.</b>Four modes: manual, auto-accept edits, plan, and Auto, where a reviewer model approves for you. Scripts write only to folders you allowed, with an audit log and Hooks.</li><li><b>Cost tuned per model.</b>Caching is tuned for each provider: the same three-file office task fell from about ¥2.9 to ¥1. You can see what every call cost.</li><li><b>Two runtimes, one app.</b>Office work runs on the coscribe runtime; coding can go to Codex, an optional module downloaded only when you need it.</li><li><b>Polished to use.</b>A built-in browser pane that keeps you signed in, batch questions, adding input mid-run, progress and sub-agent panes, and grouped sessions with status icons.</li></ul></div>
+      </details>
+      <details class="rv" style="--i:2">
         <summary><span class="zh">要付费吗？</span><span class="en">Does it cost anything?</span><i></i></summary>
         <p><span class="zh">coscribe 是 MIT 许可的开源软件，免费使用。你只为自己选的模型服务付费；用 Ollama 跑本地模型则没有 API 费用。</span><span class="en">coscribe is MIT licensed and free. You pay only for the model service you choose, and nothing if you run a local model with Ollama.</span></p>
       </details>
-      <details class="rv" style="--i:2">
+      <details class="rv" style="--i:3">
         <summary><span class="zh">我的文件会被上传吗？</span><span class="en">Are my files uploaded anywhere?</span><i></i></summary>
         <p><span class="zh">coscribe 没有自己的云端服务。对话中模型需要读的内容，会发给你配置的模型服务商；用 Ollama 的话，全程不离开本机。</span><span class="en">coscribe has no cloud service of its own. Whatever the model needs to read goes to the provider you configured; with Ollama, nothing leaves your machine.</span></p>
       </details>
-      <details class="rv" style="--i:3">
+      <details class="rv" style="--i:4">
         <summary><span class="zh">它会不经同意就改我的文件吗？</span><span class="en">Will it change my files without asking?</span><i></i></summary>
         <p><span class="zh">取决于你选的模式，见上面的四种模式。无论哪种，写入都只落在工作区和你添加的文件夹里。</span><span class="en">That depends on the mode you pick, shown above. In every mode, writes stay inside the workspace and the folders you added.</span></p>
       </details>
-      <details class="rv" style="--i:4">
+      <details class="rv" style="--i:5">
         <summary><span class="zh">它能做哪些事？</span><span class="en">What can it actually make?</span><i></i></summary>
         <p><span class="zh">真正的 Word、PPT、Excel 文件：带修订和批注的合同、有图表的汇报、对好账的表格。它也能做数据分析、跑可重复的工作流，写代码的活可以交给代码模块。</span><span class="en">Real Word, PowerPoint and Excel files: contracts with tracked changes, decks with charts, reconciled spreadsheets. It also analyses data, runs workflows you can repeat, and can hand coding work to the code module.</span></p>
       </details>
-      <details class="rv" style="--i:5">
+      <details class="rv" style="--i:6">
         <summary><span class="zh">支持 Mac 或 Linux 吗？</span><span class="en">Is there a Mac or Linux version?</span><i></i></summary>
         <p><span class="zh">暂时不支持。</span><span class="en">Not yet.</span></p>
       </details>
