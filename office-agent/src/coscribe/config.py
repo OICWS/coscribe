@@ -191,9 +191,15 @@ class Settings(BaseSettings):
     """
 
     code_module_enabled: bool = False
-    """The code module: Codex run as a second agent runtime (code_runtime/).
-    Off by default; it downloads ~111 MB on first use and only works with
-    models served over the Responses API."""
+    """Whether a chat can hand programming tasks to the code module (Codex,
+    code_runtime/) as a sub-agent. Code conversations don't depend on it.
+    Off by default; the module downloads ~111 MB on first use and only
+    works with models served over the Responses API."""
+
+    code_model: str | None = None
+    """What a new code conversation starts with ("provider:model"); unset,
+    the default model. Codex can't use every model the chat can, so it's
+    set apart."""
 
     codex_wheel_url: str | None = None
     """Where to fetch the pinned Codex wheel instead of PyPI -- a mirror of

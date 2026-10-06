@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from ..config import Settings
 from ..runtime.provider_config import load_custom_providers
 from ..tools.script_env import ensure_script_env
-from .install import codex_executable, ensure_codex
+from ._pins import CODEX_VERSION
+from .install import codex_executable, ensure_codex, installed, installed_size, remove_codex
 from .launch import CodexHost, LaunchSpec, launch_spec, script_env_bin
 
 
@@ -29,6 +31,9 @@ class CodeService:
         self.state_dir = Path(settings.state_dir)
         self.host = CodexHost(self._spec)
         self._ready = asyncio.Lock()
+        # (bytes written, bytes in all) while Codex downloads; set from the
+        # worker thread, read by status().
+        self._progress: tuple[int, int] | None = None
 
     def _spec(self) -> LaunchSpec:
         # Read fresh, so a provider or key added in Settings reaches Codex
@@ -43,11 +48,38 @@ class CodeService:
     def custom_providers(self) -> dict[str, dict[str, str]]:
         return _custom_providers(self.settings)
 
+    def _report(self, done: int, total: int) -> None:
+        self._progress = (done, total)
+
     async def prepare(self) -> CodexHost:
         async with self._ready:
-            await asyncio.to_thread(ensure_codex, self.state_dir, self.settings.codex_wheel_url)
+            try:
+                await asyncio.to_thread(
+                    ensure_codex, self.state_dir, self.settings.codex_wheel_url, self._report
+                )
+            finally:
+                self._progress = None
             await asyncio.to_thread(ensure_script_env, self.state_dir)
         return self.host
+
+    def status(self) -> dict[str, Any]:
+        progress = self._progress
+        return {
+            "version": CODEX_VERSION,
+            "installed": installed(self.state_dir),
+            "preparing": self._ready.locked(),
+            "progress": None if progress is None else progress[0] / max(progress[1], 1),
+            "size": installed_size(),
+        }
+
+    async def remove(self) -> bool:
+        """Delete the downloaded Codex; False while it's working."""
+        async with self._ready:
+            await self.host.shutdown()
+            if self.host.in_use:
+                return False
+            await asyncio.to_thread(remove_codex, self.state_dir)
+        return True
 
 
 _services: dict[Path, CodeService] = {}

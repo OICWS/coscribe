@@ -407,6 +407,26 @@ async def test_shutting_down_ends_what_codex_started(host: CodexHost, workdir: P
     assert not _alive(child)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+async def test_a_cancelled_turn_ends_the_commands_it_started(
+    host: CodexHost, workdir: Path
+) -> None:
+    run = asyncio.create_task(_thread(host, workdir).run_turn("child", _Approvals(True)))
+    pid_file = workdir / "child.pid"
+    for _ in range(100):
+        if pid_file.exists() and pid_file.read_text():
+            break
+        await asyncio.sleep(0.05)
+    child = int(pid_file.read_text())
+
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+    assert not _alive(child)
+    assert host.server is not None and host.server.running
+
+
 async def test_an_idle_codex_stops_on_its_own(tmp_path: Path, workdir: Path) -> None:
     codex = CodexHost(lambda: _spec(tmp_path), idle_seconds=0.2)
     try:
@@ -453,6 +473,7 @@ def test_config_turns_off_overlapping_features_and_uses_responses() -> None:
         openai_key=False,
     )
 
+    assert text.startswith('web_search = "disabled"\n')
     assert "[analytics]\nenabled = false" in text
     assert '[shell_environment_policy]\nexclude = ["COSCRIBE_CODEX_KEY_*"]' in text
     for feature in DISABLED_FEATURES:

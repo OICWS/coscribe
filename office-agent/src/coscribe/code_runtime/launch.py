@@ -101,6 +101,10 @@ def _toml_str(value: str) -> str:
 
 def config_toml(custom_providers: dict[str, dict[str, str]], openai_key: bool) -> str:
     lines = [
+        # Codex's web search runs on OpenAI's servers yet is offered to
+        # whichever provider is set; work on the user's files doesn't need it.
+        'web_search = "disabled"',
+        "",
         "[analytics]",
         "enabled = false",
         "",
@@ -210,6 +214,10 @@ class CodexHost:
     @property
     def server(self) -> AppServer | None:
         return self._server
+
+    @property
+    def in_use(self) -> bool:
+        return self._users > 0
 
     async def _ensure(self) -> AppServer:
         spec = self._spec()

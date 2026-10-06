@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ThreadIdContext } from "./components/threadContext";
+import { CodeHome } from "./components/CodeHome";
 import { HomeGreeting } from "./components/EmptyState";
 import { ChatLog } from "./components/ChatLog";
 import { Composer, type ComposerSendPayload } from "./components/Composer";
@@ -24,7 +25,7 @@ import type { PptxShapeCapture } from "./components/PptxShapeOverlay";
 import { RunBreadcrumb, TaskPageBreadcrumb } from "./components/RunBreadcrumb";
 import { RunPanel } from "./components/RunPanel";
 import { ScheduledTaskModal } from "./components/ScheduledTaskModal";
-import { SettingsModal } from "./components/settings/SettingsModal";
+import { SettingsModal, type SettingsCategory } from "./components/settings/SettingsModal";
 import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { SubAgentsPanel } from "./components/SubAgentsPanel";
@@ -47,10 +48,12 @@ import {
 } from "./lib/rest";
 import {
   goToThread,
+  isCodeThread,
   readPage,
   SCHEDULED_THREAD_PREFIX,
   showChat,
   showScheduled,
+  startNewCodeThread,
   startNewThread,
   THREAD_CHANGE_EVENT,
 } from "./lib/nav";
@@ -74,6 +77,11 @@ function App() {
   const socketRef = useRef<AgentSocket | null>(null);
   const [threadId, setThreadId] = useState(resolveThreadId);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory | undefined>(undefined);
+  const openSettings = (category: SettingsCategory) => {
+    setSettingsCategory(category);
+    setSettingsOpen(true);
+  };
   // Find in page: null while closed; bumped to refocus an open one.
   const [findKey, setFindKey] = useState<number | null>(null);
   const [pendingComposerAction, setPendingComposerAction] = useState<ComposerAction | null>(null);
@@ -351,6 +359,9 @@ function App() {
   // run_thread_id): gets the "Scheduled / <task>" breadcrumb instead of
   // ThreadHeader, and the sidebar stays on the task list.
   const isScheduledTaskThread = threadId.startsWith(SCHEDULED_THREAD_PREFIX);
+  // A code conversation: the same page, without what only the chat's own
+  // agent uses (the browser, sub-agents, the task list, edit and rewind).
+  const isCode = isCodeThread(threadId);
   const threadTask = isScheduledTaskThread ? taskForThread(scheduledTasks, threadId) : null;
   const threadRun = threadTask?.runs.find((r) => r.thread_id === threadId) ?? null;
   const threadWorkflow = threadRun ? (threadTask?.workflow ?? null) : null;
@@ -367,6 +378,7 @@ function App() {
     threadWorkflow === null;
   const taskPanelShown =
     navMode === "create" &&
+    !isCode &&
     taskPanelWanted &&
     !browserPanelOpen &&
     !subAgentsPanelOpen &&
@@ -385,7 +397,10 @@ function App() {
 
   findAvailable.current = inConversation;
   menuHandler.current = (command) => {
-    if (command === "new-session" || command === "close-session") startNewThread();
+    if (command === "new-session" || command === "close-session") {
+      if (isCode) startNewCodeThread();
+      else startNewThread();
+    }
     else if (command === "settings") setSettingsOpen(true);
     else if (command === "find") {
       if (inConversation) setFindKey((key) => (key ?? 0) + 1);
@@ -410,6 +425,9 @@ function App() {
 
   useEffect(() => setFindKey(null), [threadId]);
   const showingScheduled = navMode === "run" || isScheduledTaskThread;
+  let railMode: NavMode = "create";
+  if (showingScheduled) railMode = "run";
+  else if (isCode) railMode = "code";
 
   useEffect(() => {
     refreshScheduledTasks();
@@ -577,15 +595,17 @@ function App() {
       showScheduledTaskPage(null);
       return;
     }
-    // Leaving Scheduled from a run's conversation goes back to chatting,
-    // not to that run's thread under a different sidebar.
-    if (isScheduledTaskThread) {
-      const recent = threads?.[0];
-      if (recent) goToThread(recent.thread_id);
-      else startNewThread();
+    // Back to the open conversation when it belongs to the chosen mode;
+    // otherwise to that mode's latest one (never a run's conversation).
+    const wantsCode = mode === "code";
+    if (!isScheduledTaskThread && isCode === wantsCode) {
+      showChat();
       return;
     }
-    showChat();
+    const recent = threads?.find((t) => (t.kind === "code") === wantsCode);
+    if (recent) goToThread(recent.thread_id);
+    else if (wantsCode) startNewCodeThread();
+    else startNewThread();
   };
 
   /** Sends a bare user_message with no chat-log bubble -- for commands the
@@ -693,7 +713,8 @@ function App() {
       turnInFlight={state.turnInFlight}
       totalTokens={state.totalTokens}
       workflowTest={state.workflowTest}
-      commands={commands}
+      commands={isCode ? [] : commands}
+      placeholder={isCode ? "Describe what to build, run or fix" : undefined}
       modePill={
         onHome ? null : (
           <ModePill
@@ -828,7 +849,7 @@ function App() {
           ) : (
             <div className="min-w-0 flex-1" />
           )}
-          {navMode === "create" && !onHome && (
+          {navMode === "create" && !onHome && !isCode && (
             <button
               type="button"
               title={taskPanelShown ? "Hide task details" : "Show task details"}
@@ -839,7 +860,7 @@ function App() {
               <PanelRightIcon className="h-[18px] w-[18px]" />
             </button>
           )}
-          {inConversation && (
+          {inConversation && !isCode && (
             <>
               <button
                 type="button"
@@ -901,7 +922,7 @@ function App() {
         ) : navMode === "create" && onHome ? (
           // A new conversation: greeting and message box centered in the page.
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center pb-[6vh]">
-            <HomeGreeting />
+            {isCode ? <CodeHome onOpenSettings={() => openSettings("code")} /> : <HomeGreeting />}
             {state.error && (
               <div className="mx-auto w-full max-w-[880px] px-4 py-1 text-sm text-red-500">{state.error}</div>
             )}
@@ -916,8 +937,8 @@ function App() {
               onApprove={onApprove}
               onAnswerQuestion={onAnswerQuestion}
               onAnswerPlan={onAnswerPlan}
-              onEditMessage={state.turnInFlight ? undefined : onEditMessage}
-              onRewindMessage={state.turnInFlight ? undefined : onRewindMessage}
+              onEditMessage={state.turnInFlight || isCode ? undefined : onEditMessage}
+              onRewindMessage={state.turnInFlight || isCode ? undefined : onRewindMessage}
               loading={!state.historyReceived}
               onReviewTaskDraft={onReviewTaskDraft}
               onDismissTaskDraft={onDismissTaskDraft}
@@ -997,12 +1018,16 @@ function App() {
         )}
         <SettingsModal
           open={settingsOpen}
+          initialCategory={settingsCategory}
           onCreateSkill={onCreateSkill}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false);
+            setSettingsCategory(undefined);
+          }}
         />
         {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       </div>
-      {inConversation && sidePanels}
+      {inConversation && !isCode && sidePanels}
       </div>
       {/* Last in the page: the desktop shell works out which parts of the
        * window drag it in page order, so the sidebar's own buttons must
@@ -1014,7 +1039,7 @@ function App() {
         threads={threads ?? []}
         onThreadsChanged={refreshThreads}
         onThreadRenamed={renameThreadLocally}
-        mode={showingScheduled ? "run" : "create"}
+        mode={railMode}
         onModeChange={onNavModeChange}
         scheduledTasks={scheduledTasks}
         onScheduledTasksChanged={refreshScheduledTasks}

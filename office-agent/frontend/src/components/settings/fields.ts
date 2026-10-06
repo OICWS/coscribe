@@ -42,6 +42,9 @@ export const LOG_LEVELS = [
   { value: "ERROR", label: "Error" },
 ] as const;
 
+export const CODE_MODEL_KEY = "COSCRIBE_CODE_MODEL";
+export const CODE_MODULE_ENABLED_KEY = "COSCRIBE_CODE_MODULE_ENABLED";
+
 export const PERMISSION_MODE_KEY = "COSCRIBE_DEFAULT_PERMISSION_MODE";
 export const PERMISSION_MODES = [
   { value: "manual", label: "Manual" },

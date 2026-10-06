@@ -2,6 +2,14 @@
 // scheduled run's conversation id starts with it.
 export const SCHEDULED_THREAD_PREFIX = "scheduled-";
 
+// Must match web/code_session.py's CODE_THREAD_PREFIX: a conversation with
+// the code module rather than the chat.
+export const CODE_THREAD_PREFIX = "code-";
+
+export function isCodeThread(threadId: string): boolean {
+  return threadId.startsWith(CODE_THREAD_PREFIX);
+}
+
 /** Fired on window after an in-page navigation; App.tsx listens for it
  * (and popstate) and shows the page the URL now names. */
 export const THREAD_CHANGE_EVENT = "coscribe:threadchange";
@@ -58,4 +66,8 @@ export function showScheduled(taskId: string | null, options?: { replace?: boole
 
 export function startNewThread(): void {
   goToThread(crypto.randomUUID().slice(0, 8));
+}
+
+export function startNewCodeThread(): void {
+  goToThread(CODE_THREAD_PREFIX + crypto.randomUUID().slice(0, 8));
 }

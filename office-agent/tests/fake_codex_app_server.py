@@ -10,12 +10,17 @@ a real 0.160.0 session. The prompt's first word picks what the turn does:
     file       asks to apply a file change
     hang       runs until turn/interrupt, sending nothing
     slowcmd    runs a command that takes 1.5 s and prints nothing
-    child      starts a long-lived child process (pid in child.pid), then hangs
+    child      starts a long-lived child process (pid in child.pid), then hangs;
+               as in Codex, an interrupt leaves it running and
+               thread/backgroundTerminals/clean ends it
     crash      exits mid-turn
     fail       ends the turn as failed
     tool       calls a host tool nobody registered
     early      sends the turn's events before answering turn/start
+    count      replies with how many turns the thread has had
 
+As in Codex, a thread can be resumed once a turn of it has run, also by a
+later process: those threads are kept in $CODEX_HOME/fake_threads.json.
 Every request it receives is appended to $FAKE_CODEX_LOG as JSON. With
 $FAKE_CODEX_NO_INIT set it never answers initialize.
 """
@@ -38,6 +43,30 @@ _reply_ready = threading.Condition()
 _interrupted: dict[str, threading.Event] = {}
 _ids = itertools.count(1000)
 _threads: dict[str, str] = {}
+_turns: dict[str, int] = {}
+_children: dict[str, list[subprocess.Popen[bytes]]] = {}
+
+
+def _kept_path() -> Path | None:
+    home = os.environ.get("CODEX_HOME")
+    return Path(home, "fake_threads.json") if home else None
+
+
+def _kept() -> dict[str, list[Any]]:
+    path = _kept_path()
+    if path is None or not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _keep(thread_id: str) -> None:
+    path = _kept_path()
+    if path is None:
+        return
+    kept = _kept()
+    kept[thread_id] = [_threads[thread_id], _turns[thread_id]]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(kept), encoding="utf-8")
 
 
 def send(message: dict[str, Any]) -> None:
@@ -133,6 +162,8 @@ def command(thread_id: str, turn_id: str, cwd: str, script: str = "echo made > m
 def run_turn(thread_id: str, turn_id: str, prompt: str, cwd: str) -> None:
     scenario = prompt.split()[0] if prompt.split() else "basic"
     base = {"threadId": thread_id, "turnId": turn_id}
+    _turns[thread_id] = _turns.get(thread_id, 0) + 1
+    _keep(thread_id)
     if scenario == "approve":
         command(thread_id, turn_id, cwd)
     elif scenario == "read":
@@ -155,6 +186,7 @@ def run_turn(thread_id: str, turn_id: str, prompt: str, cwd: str) -> None:
     elif scenario in ("hang", "child"):
         if scenario == "child":
             child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+            _children.setdefault(thread_id, []).append(child)
             Path(cwd, "child.pid").write_text(str(child.pid), encoding="utf-8")
         _interrupted[turn_id].wait()
         complete(thread_id, turn_id, "interrupted")
@@ -179,6 +211,8 @@ def run_turn(thread_id: str, turn_id: str, prompt: str, cwd: str) -> None:
             {**base, "callId": "c1", "tool": "read_xlsx_summary", "arguments": {}},
         )
         message(thread_id, turn_id, json.dumps(reply.get("error", {}).get("code")))
+    elif scenario == "count":
+        message(thread_id, turn_id, f"turn {_turns[thread_id]}")
     else:
         message(thread_id, turn_id, "Hello from Codex")
     usage(thread_id, turn_id, cached=800)
@@ -197,9 +231,13 @@ def handle(request: dict[str, Any]) -> None:
         send({"id": request_id, "result": {"thread": {"id": thread_id}}})
     elif method == "thread/resume":
         thread_id = params["threadId"]
-        if thread_id not in _threads and not params.get("cwd"):
-            send({"id": request_id, "error": {"code": -32600, "message": "no such thread"}})
+        kept = _kept().get(thread_id)
+        if thread_id not in _turns and kept is None:
+            message_text = f"no rollout found for thread id {thread_id}"
+            send({"id": request_id, "error": {"code": -32600, "message": message_text}})
             return
+        if kept is not None and thread_id not in _turns:
+            _threads[thread_id], _turns[thread_id] = kept
         _threads[thread_id] = params.get("cwd") or _threads[thread_id]
         send({"id": request_id, "result": {"thread": {"id": thread_id}}})
     elif method == "turn/start":
@@ -219,6 +257,11 @@ def handle(request: dict[str, Any]) -> None:
             return
         send({"id": request_id, "result": {"turn": {"id": turn_id, "status": "inProgress"}}})
         worker.start()
+    elif method == "thread/backgroundTerminals/clean":
+        for child in _children.pop(params["threadId"], []):
+            child.kill()
+            child.wait()
+        send({"id": request_id, "result": {}})
     elif method == "turn/interrupt":
         _interrupted[params["turnId"]].set()
         send({"id": request_id, "result": {}})

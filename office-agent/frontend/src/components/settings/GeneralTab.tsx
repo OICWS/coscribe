@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
-import { getProviders } from "../../lib/rest";
 import { setAppearance, useAppearance, type ChatFontChoice } from "../../lib/appearance";
+import { useConfiguredModels } from "../../lib/useConfiguredModels";
 import { MonitorIcon, MoonIcon, SunIcon } from "../icons";
 import { ToggleSwitch } from "../ToggleSwitch";
 import {
@@ -27,23 +26,6 @@ type PermissionMode = (typeof PERMISSION_MODES)[number]["value"];
 
 const DEFAULT_MODEL_KEY = "COSCRIBE_DEFAULT_MODEL";
 const MAX_TURNS_KEY = "COSCRIBE_MAX_TURNS";
-
-/** "provider:model" for every provider set up with a default model. */
-function useConfiguredModels(): string[] {
-  const [models, setModels] = useState<string[]>([]);
-  useEffect(() => {
-    getProviders()
-      .then((providers) =>
-        setModels(
-          Object.entries(providers)
-            .filter(([, info]) => info.default_model)
-            .map(([key, info]) => `${key}:${info.default_model}`),
-        ),
-      )
-      .catch(() => {});
-  }, []);
-  return models;
-}
 
 function DefaultModelSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const models = useConfiguredModels();

@@ -428,7 +428,10 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   // The code module's own commands carry the script in place of a
   // description, so the row names it by its first line.
   run_code_command: (a) => ({ verb: "Ran a command", object: firstLine(str(a, "description") || str(a, "script")), glue: ": " }),
-  apply_code_change: () => ({ verb: "Changed files", object: null }),
+  apply_code_change: (a) => {
+    const paths = Array.isArray(a.paths) ? a.paths.filter((p): p is string => typeof p === "string") : [];
+    return paths.length > 0 ? { verb: "Changed", object: paths.map(basename).join(", ") } : { verb: "Changed files", object: null };
+  },
   spawn_agent_background: (a) => ({
     verb: "Started a sub-agent",
     object: str(a, "description") ?? null,
@@ -616,8 +619,11 @@ const CATEGORY_WORDS: Record<Exclude<Category, "other">, [past: string, present:
 };
 const FILE_CATEGORIES = new Set<Category>(["write", "edit", "read"]);
 
-function fullPathArg(args: ArgRecord): string | undefined {
-  return str(args, "path") ?? str(args, "file_path");
+/** The files a call touched: its path, or the code module's list of them. */
+function filePathsArg(args: ArgRecord): string[] {
+  const path = str(args, "path") ?? str(args, "file_path");
+  if (path) return [path];
+  return Array.isArray(args.paths) ? args.paths.filter((p): p is string => typeof p === "string" && p !== "") : [];
 }
 
 function categoryClause(category: Exclude<Category, "other">, items: ToolOrApprovalItem[], live: boolean): SummaryParts {
@@ -635,9 +641,13 @@ function categoryClause(category: Exclude<Category, "other">, items: ToolOrAppro
   let count = items.length;
   let onlyFile: string | undefined;
   if (FILE_CATEGORIES.has(category)) {
-    const paths = new Set(items.map((item, index) => fullPathArg(item.arguments) ?? `#${index}`));
+    const keys = items.flatMap((item, index) => {
+      const paths = filePathsArg(item.arguments);
+      return paths.length > 0 ? paths : [`#${index}`];
+    });
+    const paths = new Set(keys);
     count = paths.size;
-    if (count === 1) onlyFile = fileArg(items[0].arguments);
+    if (count === 1 && !keys[0].startsWith("#")) onlyFile = basename(keys[0]);
   }
   const verb = running ? present : past;
   const counted = `${verb} ${count} ${count === 1 ? noun : `${noun}s`}`;

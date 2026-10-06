@@ -35,6 +35,8 @@ export interface ConfigResponse {
   COSCRIBE_EXTRA_READABLE_DIRS: string | null;
   COSCRIBE_EXTRA_WRITABLE_DIRS: string | null;
   COSCRIBE_MAX_TURNS: string | null;
+  COSCRIBE_CODE_MODEL: string | null;
+  COSCRIBE_CODE_MODULE_ENABLED: string | null;
   /** Desktop-shell-only, Rust-consumed (see office-agent-desktop's
    * lib.rs) -- "false" opts out of the default hide-on-close/keep-
    * running-in-background behavior. Absent/null/anything but exactly
@@ -349,3 +351,22 @@ export type RunNowResult = { task: ScheduledTask; run: ScheduledRun } | { error:
 export type TaskNotesResult = { notes: string } | { error: string };
 
 export type ScheduledTaskDeleteResult = { deleted: string } | { error: string };
+
+// ---------------------------------------------------------------------
+// The code module (Settings > Code)
+// ---------------------------------------------------------------------
+
+export interface CodeStatus {
+  version: string;
+  installed: boolean;
+  /** Downloading, or setting up after a download. */
+  preparing: boolean;
+  /** 0..1 while downloading. */
+  progress: number | null;
+  /** Bytes on disk once downloaded; null where there's no build. */
+  size: number | null;
+  /** What a new code conversation starts with. */
+  model: string;
+  /** Why the code module can't use that model; null when it can. */
+  model_problem: string | null;
+}

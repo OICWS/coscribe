@@ -1641,29 +1641,33 @@ conversation.
 
 ## The code module (optional)
 
-Off by default. With `COSCRIBE_CODE_MODULE_ENABLED=true` in `.env`, a
-conversation can hand a programming task -- a script you'll run again
-with its tests, or work that takes many rounds of writing and running
-code -- to a coding agent, [Codex](https://github.com/openai/codex)
-(Apache-2.0), through the `run_code_task` tool. It works in the
-conversation's folder and shows up in the Sub Agents panel like any
-sub-agent: you watch it, approve its commands there, and can stop it.
+A coding agent, [Codex](https://github.com/openai/codex) (Apache-2.0), as
+coscribe's second agent. It writes and runs code in your folder: scripts
+that process your files, tools you'll reuse, fixes for a script that fails.
 
-- **Models**: it runs on the conversation's model, and Codex only speaks
-  OpenAI's Responses API -- OpenAI, or a custom provider that serves
-  `/responses` (DeepSeek does). Other models get a message instead of a run.
-- **Download**: the first run fetches the pinned Codex build (~111 MB
-  download, ~330 MB on disk on Windows) into the state directory; nothing
-  is bundled with the app. `COSCRIBE_CODEX_WHEEL_URL` points it at a
-  mirror of the same file (the pinned hashes still have to match).
-- **Approvals**: there is no sandbox -- every command and file change it
-  wants comes to you as an approval, under the conversation's permission
-  mode, except plain reads of the folder (`ls`, `cat`, `grep`, ... with
-  nothing that writes, chains or leaves the folder). Its commands use the
-  same Python environment as `run_python_script`.
+- **Code conversations**: the `</>` icon in the sidebar, after Chat and
+  Scheduled, lists them; each message is a turn of Codex. Edit and rewind
+  aren't available there.
+- **From a chat**: with *Chats can hand tasks to Code* on (Settings > Code,
+  or `COSCRIBE_CODE_MODULE_ENABLED=true`), a chat can hand a programming
+  task to it through `run_code_task`; the run shows in the Sub Agents panel,
+  where you watch, approve and stop it.
+- **Models**: Codex only speaks OpenAI's Responses API -- OpenAI, or a
+  custom provider that serves `/responses` (DeepSeek does). Code
+  conversations start with *Model for code* (`COSCRIBE_CODE_MODEL`), or the
+  default model when that's unset; other models get a message instead.
+- **Download**: nothing is bundled with the app. The pinned Codex build
+  (~111 MB download, ~330 MB on disk on Windows) is fetched into the state
+  directory the first time it's used, or from Settings > Code, which can
+  also remove it. `COSCRIBE_CODEX_WHEEL_URL` points it at a mirror of the
+  same file (the pinned hashes still have to match).
+- **Approvals**: there is no sandbox -- every command and file change comes
+  to you as an approval, under the permission mode, except plain reads of
+  the folder (`ls`, `cat`, `grep`, ... with nothing that writes, chains or
+  leaves the folder). Its commands use the same Python environment as
+  `run_python_script`. Stop ends the commands it started.
 
-Not there yet: its own conversations in the sidebar, a switch in
-Settings, and a run on real Windows.
+Not there yet: a run on real Windows.
 
 ## MCP servers
 

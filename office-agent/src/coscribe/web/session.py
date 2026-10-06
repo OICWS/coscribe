@@ -475,6 +475,7 @@ class ChatSessionLG:
         workspace_explicit: bool = False,
         extra_folders: list[Path] | None = None,
         configured_models: Callable[[], list[str]] | None = None,
+        model: str | None = None,
     ) -> None:
         self.thread_id = thread_id
         # "provider:model" for every configured provider -- what a sub-agent
@@ -611,7 +612,7 @@ class ChatSessionLG:
         self._extra_tools: list[Callable[..., Any] | BaseTool] = list(extra_tools)
         self._title_task: asyncio.Task[None] | None = None
         self._instructions = agent.instructions or ""
-        self._model_string = settings.default_model
+        self._model_string = model or settings.default_model
 
         self.model = with_prompt_cache_key(
             resolve_chat_model(self._model_string, custom_providers), thread_id
