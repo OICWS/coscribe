@@ -7834,6 +7834,52 @@ the whole job. Decided with the user and the main-development session.
       coscribe" -- the chat chose `continue_task` itself, and the second
       record carried the first's id and Codex thread.
 
+## Phase 8db -- Skills: 71 role skills added to Discover (shipped)
+
+Asked which open-source skills are worth bringing in. Looked at eight public
+repositories by cloning them and reading the files and licenses, not the
+READMEs.
+
+- [x] **Added: Anthropic's `knowledge-work-plugins` (Apache-2.0)**, role by
+      role: Legal 6, Finance 7, Marketing 8, Operations 9, People & HR 9,
+      Product 7, Data & analytics 7, Design 7, Customer support 5, Sales 6.
+      Chosen for being useful with only what the user has in hand (a contract
+      pasted or attached, a spreadsheet, an email) -- most say what to do when
+      no playbook or connector is set up. They arrive as slash-command style
+      skills (`/triage-nda`, `@$1`); a real conversation on DeepSeek showed the
+      model loads `triage-nda`, looks for a playbook, finds none and says so,
+      then screens a pasted NDA clause by clause into a RED/YELLOW/GREEN
+      report, so the command wording does no harm. Each skill's folder gets its
+      plugin's Apache license as `LICENSE.txt`.
+- [x] **Also from `anthropics/skills`, which was already listed:** one more,
+      `slack-gif-creator` (Apache). Re-pinned that repository to its current
+      commit.
+- [x] **Discover groups by category**, work categories first, then Design &
+      creative, Writing, Developer. A catalog entry now names its own
+      repository, commit and folder (and a file's `src` when it lives outside
+      the skill's folder), so a second repository needed no new code path.
+      Every one of the 361 files was downloaded from GitHub at its pinned
+      commit and matched its SHA-256 before this shipped.
+- [x] **Left out, and why.** `anthropics/skills`: the document skills
+      (docx/pdf/pptx/xlsx) are source-available and forbid redistribution;
+      `doc-coauthoring` has no license file; `academy-guide` and
+      `discernment-nudge` are about Claude itself; `webapp-testing` and
+      `web-artifacts-builder` are for developers. `knowledge-work-plugins`:
+      `small-business` (44) and `partner-built` (71) are tied to ledgers, CRMs
+      and a vendor's own service and lean on shared files outside the skill's
+      folder; `enterprise-search` needs connected sources; `engineering` and
+      `bio-research` are for developers and scientists; names shared by two
+      plugins are taken once (`competitive-brief` from Marketing), and names too
+      general for a skill list (`analyze`, `brief`) are skipped.
+      Other repositories: `openai/skills` (44, curated for Codex; per-skill
+      licenses, developer and vendor-specific; its three Notion skills are MIT
+      but written around Codex's own setup and Notion's tool names),
+      `obra/superpowers` (MIT, software-development method),
+      `K-Dense-AI/claude-scientific-skills` (MIT, 177 skills for scientists,
+      521 MB), `huggingface/skills` (Apache, machine-learning work),
+      `vercel-labs/agent-skills` (frontend and deployment) and
+      `ComposioHQ/awesome-claude-skills` (864 files but no license at its
+      root). Any of these can still be added from Skills > Add > Upload.
 ## Phase 8db -- A sub-agent task id never names a file outside the store (shipped)
 
 Found reviewing 8da: a task id is the model's (`check_subagent_task`,

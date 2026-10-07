@@ -2358,6 +2358,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 "name": entry["name"],
                 "description": entry["description"],
                 "license": entry["license"],
+                "category": entry.get("category", "Other"),
                 "size": sum(file["size"] for file in entry["files"]),
                 "added": entry["name"] in installed,
             }

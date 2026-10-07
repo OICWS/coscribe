@@ -111,6 +111,8 @@ export interface CatalogSkill {
   name: string;
   description: string;
   license: string;
+  /** What kind of work it is for: Legal, Finance, Marketing... */
+  category: string;
   /** Total bytes the download would fetch. */
   size: number;
   added: boolean;

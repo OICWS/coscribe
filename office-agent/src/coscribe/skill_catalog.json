@@ -1,11 +1,1577 @@
 {
  "repo": "anthropics/skills",
- "commit": "33375500bcea98d610eb30ce10ac4e59b89c390d",
+ "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
  "skills": [
+  {
+   "name": "review-contract",
+   "description": "Review a contract against your organization's negotiation playbook \u2014 flag deviations, generate redlines, provide business impact analysis. Use when reviewing vendor or customer agreements, when you need clause-by-clause analysis against standard positions, or when preparing a negotiation strategy with prioritized redlines and fallback positions.",
+   "category": "Legal",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "legal/skills/review-contract",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 16708,
+     "sha256": "3a6413475f51adedbff130f4d5aabbeeacfb2abd323e0338bc91c21937fbfb76"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "legal/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "triage-nda",
+   "description": "Rapidly triage an incoming NDA and classify it as GREEN (standard approval), YELLOW (counsel review), or RED (full legal review). Use when a new NDA arrives from sales or business development, when screening for embedded non-solicits, non-competes, or missing carveouts, or when deciding whether an NDA can be signed under standard delegation.",
+   "category": "Legal",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "legal/skills/triage-nda",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 14583,
+     "sha256": "767a8f6759268e003ee882af8dfb56579aca2121b9dc49a2c65c4e77de93f768"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "legal/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "compliance-check",
+   "description": "Run a compliance check on a proposed action, product feature, or business initiative, surfacing applicable regulations, required approvals, and risk areas. Use when launching a feature that touches personal data, when marketing or product proposes something with regulatory implications, or when you need to know which approvals and jurisdictional requirements apply before proceeding.",
+   "category": "Legal",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "legal/skills/compliance-check",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 14694,
+     "sha256": "8dff8ebe7eda9ad5e38f3faf1016a7fc1eeba65bcdb7f5ae45ea507824bbc1c2"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "legal/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "legal-risk-assessment",
+   "description": "Assess and classify legal risks using a severity-by-likelihood framework with escalation criteria. Use when evaluating contract risk, assessing deal exposure, classifying issues by severity, or determining whether a matter needs senior counsel or outside legal review.",
+   "category": "Legal",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "legal/skills/legal-risk-assessment",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 12581,
+     "sha256": "9f7985e3a98ac8419b52067cdaa1b72f754fa38c20489e7f0bf9de36347d4d89"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "legal/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "legal-response",
+   "description": "Generate a response to a common legal inquiry using configured templates, with built-in escalation checks for situations that shouldn't use a templated reply. Use when responding to data subject requests, litigation hold notices, vendor legal questions, NDA requests from business teams, or subpoenas.",
+   "category": "Legal",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "legal/skills/legal-response",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 16174,
+     "sha256": "b3a0585ee00a53ccb159fbf5b7dd4d4b45c39e5e65cc8f4f39cbb134fef493db"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "legal/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "meeting-briefing",
+   "description": "Prepare structured briefings for meetings with legal relevance and track resulting action items. Use when preparing for contract negotiations, board meetings, compliance reviews, or any meeting where legal context, background research, or action tracking is needed.",
+   "category": "Legal",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "legal/skills/meeting-briefing",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 8990,
+     "sha256": "4d19bc2ddb2138d1b306b150c5d0900ce0a398d5ab690b8eba8101ef33d98baa"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "legal/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "audit-support",
+   "description": "Support SOX 404 compliance with control testing methodology, sample selection, and documentation standards. Use when generating testing workpapers, selecting audit samples, classifying control deficiencies, or preparing for internal or external audits.",
+   "category": "Finance",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "finance/skills/audit-support",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 16801,
+     "sha256": "6e53c9529c42bb92c11d00a58af5119f7383903d9cb3b911625089fec2ff4784"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "finance/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "close-management",
+   "description": "Manage the month-end close process with task sequencing, dependencies, and status tracking. Use when planning the close calendar, tracking close progress, identifying blockers, or sequencing close activities by day.",
+   "category": "Finance",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "finance/skills/close-management",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 10278,
+     "sha256": "6c2df93bcd15eddf65017445fa44f3eb0b16a755711a5e0602d73ca595e73732"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "finance/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "financial-statements",
+   "description": "Generate financial statements (income statement, balance sheet, cash flow) with period-over-period comparison and variance analysis. Use when preparing a monthly or quarterly P&L, closing the books and need to flag material variances, comparing actuals to budget, building a financial summary for leadership review, or looking up GAAP presentation requirements and period-end adjustments.",
+   "category": "Finance",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "finance/skills/financial-statements",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 14699,
+     "sha256": "1a9ba1cc85495eef32fa250b8a4c05e4854430af574a290b855f919dbb557dfc"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "finance/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "journal-entry",
+   "description": "Prepare journal entries with proper debits, credits, and supporting detail. Use when booking month-end accruals (AP, payroll, prepaid), recording depreciation or amortization, posting revenue recognition or deferred revenue adjustments, or documenting an entry for audit review.",
+   "category": "Finance",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "finance/skills/journal-entry",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 5144,
+     "sha256": "c085de41feb0b8c74771cdd631fff1f668ec253938c69fee47b6a953fc03a266"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "finance/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "reconciliation",
+   "description": "Reconcile accounts by comparing GL balances to subledgers, bank statements, or third-party data. Use when performing bank reconciliations, GL-to-subledger recs, intercompany reconciliations, or identifying and categorizing reconciling items.",
+   "category": "Finance",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "finance/skills/reconciliation",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 8144,
+     "sha256": "aa17e90539f4d4d84130c910c7f527236bfaa71977c4c03493c8e8e515ddeea6"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "finance/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "sox-testing",
+   "description": "Generate SOX sample selections, testing workpapers, and control assessments. Use when planning quarterly or annual SOX 404 testing, pulling a sample for a control (revenue, P2P, ITGC, close), building a testing workpaper template, or evaluating and classifying a control deficiency.",
+   "category": "Finance",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "finance/skills/sox-testing",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 9306,
+     "sha256": "5e5939a070a25d9696b27aaec6c20e64084e6f58637994b2f7ec92744074ea23"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "finance/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "variance-analysis",
+   "description": "Decompose financial variances into drivers with narrative explanations and waterfall analysis. Use when analyzing budget vs. actual, period-over-period changes, revenue or expense variances, or preparing variance commentary for leadership.",
+   "category": "Finance",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "finance/skills/variance-analysis",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 11232,
+     "sha256": "467db7de3fb118550d013409254e2d4a9f87385a661e154655bf3431919b0ba1"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "finance/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "brand-review",
+   "description": "Review content against your brand voice, style guide, and messaging pillars, flagging deviations by severity with specific before/after fixes. Use when checking a draft before it ships, when auditing copy for voice consistency and terminology, or when screening for unsubstantiated claims, missing disclaimers, and other legal flags.",
+   "category": "Marketing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing/skills/brand-review",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 12936,
+     "sha256": "759f29397a908c32521080247292a4e1c52ac01643bea70ccd6e807e86c1fa4b"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "marketing/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "campaign-plan",
+   "description": "Generate a full campaign brief with objectives, audience, messaging, channel strategy, content calendar, and success metrics. Use when planning a product launch, lead-gen push, or awareness campaign, when you need a week-by-week content calendar with dependencies, or when translating a marketing goal into a structured, executable plan.",
+   "category": "Marketing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing/skills/campaign-plan",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 14153,
+     "sha256": "f0b146074b64ee0fd52f7864e30191eab83878c8c1e3e7cf24754e13c7dbfad3"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "marketing/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "competitive-brief",
+   "description": "Research competitors and generate a positioning and messaging comparison with content gaps, opportunities, and threats. Use when building sales battlecards, when finding positioning gaps and messaging angles competitors haven't claimed, or when a competitor makes a move and you need to assess the impact.",
+   "category": "Marketing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing/skills/competitive-brief",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 13150,
+     "sha256": "c1e5442facbc3206ac6a77392bef009fe9aff4ba7c2678e2f4118be2f6be82b3"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "marketing/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "content-creation",
+   "description": "Draft marketing content across channels \u2014 blog posts, social media, email newsletters, landing pages, press releases, and case studies. Use when writing any marketing content, when you need channel-specific formatting, SEO-optimized copy, headline options, or calls to action.",
+   "category": "Marketing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing/skills/content-creation",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 8830,
+     "sha256": "17f0bfd536502a91c760accaa1ae6c0c76c3812973571729664133e282c5dded"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "marketing/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "draft-content",
+   "description": "Draft blog posts, social media, email newsletters, landing pages, press releases, and case studies with channel-specific formatting and SEO recommendations. Use when writing any marketing content, when you need headline or subject line options, or when adapting a message for a specific platform, audience, and brand voice.",
+   "category": "Marketing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing/skills/draft-content",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 4612,
+     "sha256": "0bfe029dcc039ff71a76b0fec3c5d900fba0e447eb9dcd505ab25b14be3577fd"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "marketing/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "email-sequence",
+   "description": "Design and draft multi-email sequences with full copy, timing, branching logic, exit conditions, and performance benchmarks. Use when building onboarding, lead nurture, re-engagement, win-back, or product launch flows, when you need a complete drip campaign with A/B test suggestions, or when mapping a sequence end-to-end with a flow diagram.",
+   "category": "Marketing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing/skills/email-sequence",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 10627,
+     "sha256": "4303252cbe340b19945b3e58d46430fdf42ea47b3e26d985e3ef1d6da5e36021"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "marketing/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "performance-report",
+   "description": "Build a marketing performance report with key metrics, trend analysis, wins and misses, and prioritized optimization recommendations. Use when wrapping a campaign, when preparing weekly, monthly, or quarterly channel summaries for stakeholders, or when you need data translated into an executive summary with next-period priorities.",
+   "category": "Marketing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing/skills/performance-report",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 19213,
+     "sha256": "997397e23ba5124cdcbbf17e4be9f5cb36f2a2145b5648e02b2852c91c3cc140"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "marketing/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "seo-audit",
+   "description": "Run a comprehensive SEO audit \u2014 keyword research, on-page analysis, content gaps, technical checks, and competitor comparison. Use when assessing a site's SEO health, when finding keyword opportunities and content gaps competitors own, or when you need a prioritized action plan split into quick wins and strategic investments.",
+   "category": "Marketing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing/skills/seo-audit",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 9526,
+     "sha256": "25008ccdda6f4d9b7ba05f11120d0b9cc976c2d0b04f3d86605e63b1a54a8c40"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "marketing/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "capacity-plan",
+   "description": "Plan resource capacity \u2014 workload analysis and utilization forecasting. Use when heading into quarterly planning, the team feels overallocated and you need the numbers, deciding whether to hire or deprioritize, or stress-testing whether upcoming projects fit the people you have.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/capacity-plan",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3487,
+     "sha256": "3b8f1379471eae19e5be26c750681ad0c6054f4c8cdbf79c94309fcf46957ea8"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "change-request",
+   "description": "Create a change management request with impact analysis and rollback plan. Use when proposing a system or process change that needs approval, preparing a change record for CAB review, documenting risk and rollback steps before a deployment, or planning stakeholder communications for a rollout.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/change-request",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3764,
+     "sha256": "b1ee71cc1fecb22c7d27e2e00171f5d62fb54c405095b51098dacfea0447d8d7"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "compliance-tracking",
+   "description": "Track compliance requirements and audit readiness. Trigger with \"compliance\", \"audit prep\", \"SOC 2\", \"ISO 27001\", \"GDPR\", \"regulatory requirement\", or when the user needs help tracking, preparing for, or documenting compliance activities.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/compliance-tracking",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 1592,
+     "sha256": "644d393abdfddc8c37f7a7804f601e7bbd476e95571e6dcb4d916e478ba8ebd5"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "process-doc",
+   "description": "Document a business process \u2014 flowcharts, RACI, and SOPs. Use when formalizing a process that lives in someone's head, building a RACI to clarify who owns what, writing an SOP for a handoff or audit, or capturing the exceptions and edge cases of how work actually gets done.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/process-doc",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 2503,
+     "sha256": "fceeeddb363e813ba831f9f2de1adb4c7e45ad179366bbb9ea9e40377abe96a9"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "process-optimization",
+   "description": "Analyze and improve business processes. Trigger with \"this process is slow\", \"how can we improve\", \"streamline this workflow\", \"too many steps\", \"bottleneck\", or when the user describes an inefficient process they want to fix.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/process-optimization",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 1288,
+     "sha256": "14099838fdbfca24057e934fc22ed17f94629c5e9c9cec470f32e3063d0575f9"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "risk-assessment",
+   "description": "Identify, assess, and mitigate operational risks. Trigger with \"what are the risks\", \"risk assessment\", \"risk register\", \"what could go wrong\", or when the user is evaluating risks associated with a project, vendor, process, or decision.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/risk-assessment",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 1630,
+     "sha256": "82e29810a762c396a56f92bbd5c5afd252f7a07c6be69a246c28f7b82c4086d9"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "runbook",
+   "description": "Create or update an operational runbook for a recurring task or procedure. Use when documenting a task that on-call or ops needs to run repeatably, turning tribal knowledge into exact step-by-step commands, adding troubleshooting and rollback steps to an existing procedure, or writing escalation paths for when things go wrong.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/runbook",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 2519,
+     "sha256": "c5c3eaa4c22fff96ec7239ce67eb3e100661b20a2818749e2f7ee21787233185"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "status-report",
+   "description": "Generate a status report with KPIs, risks, and action items. Use when writing a weekly or monthly update for leadership, summarizing project health with green/yellow/red status, surfacing risks and decisions that need stakeholder attention, or turning a pile of project tracker activity into a readable narrative.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/status-report",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 2571,
+     "sha256": "8c3a21075294a5c5b7a1a7930613e53f0afbdbc12cf9e05d4bd08e6950c0a0d9"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "vendor-review",
+   "description": "Evaluate a vendor \u2014 cost analysis, risk assessment, and recommendation. Use when reviewing a new vendor proposal, deciding whether to renew or replace a contract, comparing two vendors side-by-side, or building a TCO breakdown and negotiation points before procurement sign-off.",
+   "category": "Operations",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations/skills/vendor-review",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3170,
+     "sha256": "c2a959a7ed068e34a83984cf223754062e6819deb0ba1ca33eb747b4cc808d5e"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "comp-analysis",
+   "description": "Analyze compensation \u2014 benchmarking, band placement, and equity modeling. Trigger with \"what should we pay a [role]\", \"is this offer competitive\", \"model this equity grant\", or when uploading comp data to find outliers and retention risks.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/comp-analysis",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3263,
+     "sha256": "1af196cd1c38cdb96565eadebcf13fa25e979469b3e06f4791e18baa7f2534a6"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "draft-offer",
+   "description": "Draft an offer letter with comp details and terms. Use when a candidate is ready for an offer, assembling a total comp package (base, equity, signing bonus), writing the offer letter text itself, or prepping negotiation guidance for the hiring manager.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/draft-offer",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 2359,
+     "sha256": "b50f677f4c8fb769b9cd0be51cd250e0e21a4530d579d5f400b7d7b1b1a63ea9"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "interview-prep",
+   "description": "Create structured interview plans with competency-based questions and scorecards. Trigger with \"interview plan for\", \"interview questions for\", \"how should we interview\", \"scorecard for\", or when the user is preparing to interview candidates.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/interview-prep",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 1436,
+     "sha256": "c687311babdeccf086aa5f6d86dcbfc3a9d1b8bb7124f072450ffa4315d98c4c"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "onboarding",
+   "description": "Generate an onboarding checklist and first-week plan for a new hire. Use when someone has a start date coming up, building the pre-start task list (accounts, equipment, buddy), scheduling Day 1 and Week 1, or setting 30/60/90-day goals for a new team member.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/onboarding",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3195,
+     "sha256": "c9210cdd00f8c2998a01c6d1310a8742aafa82a5861fb7c1c18686b72a56da97"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "org-planning",
+   "description": "Headcount planning, org design, and team structure optimization. Trigger with \"org planning\", \"headcount plan\", \"team structure\", \"reorg\", \"who should we hire next\", or when the user is thinking about team size, reporting structure, or organizational design.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/org-planning",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 1227,
+     "sha256": "b3c6e33d251487225485c7fe455586f0cd490b282d7e41054273fa60820891ea"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "people-report",
+   "description": "Generate headcount, attrition, diversity, or org health reports. Use when pulling a headcount snapshot for leadership, analyzing turnover trends by team, preparing diversity representation metrics, or assessing span of control and flight risk across the org.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/people-report",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 2782,
+     "sha256": "e68d00be15a681da288e6023df095a952add099db2c14873c47a69e3ab3634b8"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "performance-review",
+   "description": "Structure a performance review with self-assessment, manager template, and calibration prep. Use when review season kicks off and you need a self-assessment template, writing a manager review for a direct report, prepping rating distributions and promotion cases for calibration, or turning vague feedback into specific behavioral examples.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/performance-review",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 4910,
+     "sha256": "a34e3f49e7c8619f07fd218cb2b6a6d57572dd7a0a78c72977dcd1739578e588"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "policy-lookup",
+   "description": "Find and explain company policies in plain language. Trigger with \"what's our PTO policy\", \"can I work remotely from another country\", \"how do expenses work\", or any plain-language question about benefits, travel, leave, or handbook rules.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/policy-lookup",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 4199,
+     "sha256": "5fc79b5e81922431b5665d33552dcce7de499e2680b4a81720cb4e2a68015edf"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "recruiting-pipeline",
+   "description": "Track and manage recruiting pipeline stages. Trigger with \"recruiting update\", \"candidate pipeline\", \"how many candidates\", \"hiring status\", or when the user discusses sourcing, screening, interviewing, or extending offers.",
+   "category": "People & HR",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources/skills/recruiting-pipeline",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 1213,
+     "sha256": "a00b442f701faa6eb65b8ecc8fcf375d5a33ec827b987ba8b04edaef0e90b92f"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "metrics-review",
+   "description": "Review and analyze product metrics with trend analysis and actionable insights. Use when running a weekly, monthly, or quarterly metrics review, investigating a sudden spike or drop, comparing performance against targets, or turning raw numbers into a scorecard with recommended actions.",
+   "category": "Product",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "product-management/skills/metrics-review",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 18038,
+     "sha256": "e92f364b668074c72b36fd0f69a6adef2ead66640b2c17dc824c043fb613d278"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "product-management/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "product-brainstorming",
+   "description": "Brainstorm product ideas, explore problem spaces, and challenge assumptions as a thinking partner. Use when exploring a new opportunity, generating solutions to a product problem, stress-testing an idea, or when a PM needs to think out loud with a sharp sparring partner before converging on a direction.",
+   "category": "Product",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "product-management/skills/product-brainstorming",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 15944,
+     "sha256": "53ee71b6863b277aba87002d8a5bb58bd2a4172d7cfeb2e282a0161958edc8e7"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "product-management/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "roadmap-update",
+   "description": "Update, create, or reprioritize your product roadmap. Use when adding a new initiative and deciding what moves to make room, shifting priorities after new information comes in, moving timelines due to a dependency slip, or building a Now/Next/Later view from scratch.",
+   "category": "Product",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "product-management/skills/roadmap-update",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 12372,
+     "sha256": "bdb121e290b590d60b94bca84d1700a8803c78db9f68f2a28fd04ccfe8aceb9e"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "product-management/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "sprint-planning",
+   "description": "Plan a sprint \u2014 scope work, estimate capacity, set goals, and draft a sprint plan. Use when kicking off a new sprint, sizing a backlog against team availability (accounting for PTO and meetings), deciding what's P0 vs. stretch, or handling carryover from the last sprint.",
+   "category": "Product",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "product-management/skills/sprint-planning",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 4144,
+     "sha256": "c078d3f838c783e9ab53ca1a4b4c04dcd7930a55a995731b8c020cd656cb1edd"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "product-management/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "stakeholder-update",
+   "description": "Generate a stakeholder update tailored to audience and cadence. Use when writing a weekly or monthly status for leadership, announcing a launch, escalating a risk or blocker, or translating the same progress into exec-brief, engineering-detail, or customer-facing versions.",
+   "category": "Product",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "product-management/skills/stakeholder-update",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 14677,
+     "sha256": "bcdb8ee95dc34d025dcc3d98e7435c4dca45930581b3b7a8707f8770dd364e79"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "product-management/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "synthesize-research",
+   "description": "Synthesize user research from interviews, surveys, and feedback into structured insights. Use when you have a pile of interview notes, survey responses, or support tickets to make sense of, need to extract themes and rank findings by frequency and impact, or want to turn raw feedback into roadmap recommendations.",
+   "category": "Product",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "product-management/skills/synthesize-research",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 16135,
+     "sha256": "ae98c11102545c911a1ea5d8527be0e08a3db8e53327f2865f0db19bbb2d7e9c"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "product-management/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "write-spec",
+   "description": "Write a feature spec or PRD from a problem statement or feature idea. Use when turning a vague idea or user request into a structured document, scoping a feature with goals and non-goals, defining success metrics and acceptance criteria, or breaking a big ask into a phased spec.",
+   "category": "Product",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "product-management/skills/write-spec",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 12326,
+     "sha256": "ca6670913878b4ac4582727562bfced5271492a5a800d934f68c9e7bc1cd4dcc"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "product-management/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "build-dashboard",
+   "description": "Build an interactive HTML dashboard with charts, filters, and tables. Use when creating an executive overview with KPI cards, turning query results into a shareable self-contained report, building a team monitoring snapshot, or needing multiple charts with filters in one browser-openable file.",
+   "category": "Data & analytics",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "data/skills/build-dashboard",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 26002,
+     "sha256": "6f23faa0b266820a23096f76df9d83e6b67597af4fc8c3306b4eba7e9f409f99"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "data/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "create-viz",
+   "description": "Create publication-quality visualizations with Python. Use when turning query results or a DataFrame into a chart, selecting the right chart type for a trend or comparison, generating a plot for a report or presentation, or needing an interactive chart with hover and zoom.",
+   "category": "Data & analytics",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "data/skills/create-viz",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 5151,
+     "sha256": "3b13a9c2c9d2b1d36f9c323d952d93f578216f2094bc80d4be6fd4ccbfe9b77d"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "data/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "data-visualization",
+   "description": "Create effective data visualizations with Python (matplotlib, seaborn, plotly). Use when building charts, choosing the right chart type for a dataset, creating publication-quality figures, or applying design principles like accessibility and color theory.",
+   "category": "Data & analytics",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "data/skills/data-visualization",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 11051,
+     "sha256": "5811e8b3547cda6bc8af118aaf0d7589e8861cdc9facce6372dc78aea99ab87d"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "data/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "explore-data",
+   "description": "Profile and explore a dataset to understand its shape, quality, and patterns. Use when encountering a new table or file, checking null rates and column distributions, spotting data quality issues like duplicates or suspicious values, or deciding which dimensions and metrics to analyze.",
+   "category": "Data & analytics",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "data/skills/explore-data",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 11520,
+     "sha256": "af7590fa616360259da712b5ede5f79b817beb854c47a465f95774354988e8a2"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "data/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "sql-queries",
+   "description": "Write correct, performant SQL across all major data warehouse dialects (Snowflake, BigQuery, Databricks, PostgreSQL, etc.). Use when writing queries, optimizing slow SQL, translating between dialects, or building complex analytical queries with CTEs, window functions, or aggregations.",
+   "category": "Data & analytics",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "data/skills/sql-queries",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 11126,
+     "sha256": "dbd5a5e2d563d83ca6d4d033206f285f503296eabff4a35545cdb4cb5302bd9a"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "data/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "statistical-analysis",
+   "description": "Apply statistical methods including descriptive stats, trend analysis, outlier detection, and hypothesis testing. Use when analyzing distributions, testing for significance, detecting anomalies, computing correlations, or interpreting statistical results.",
+   "category": "Data & analytics",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "data/skills/statistical-analysis",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 10434,
+     "sha256": "91a15cfc144efffcd622b09827362a73993a3ff30e3a78114801832477c9f8a0"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "data/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "validate-data",
+   "description": "QA an analysis before sharing -- methodology, accuracy, and bias checks. Use when reviewing an analysis before a stakeholder presentation, spot-checking calculations and aggregation logic, verifying a SQL query's results look right, or assessing whether conclusions are actually supported by the data.",
+   "category": "Data & analytics",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "data/skills/validate-data",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 14916,
+     "sha256": "1e424822043480375b80aef9416227b1c8083af749ca536568716265f79ca54b"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "data/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "accessibility-review",
+   "description": "Run a WCAG 2.1 AA accessibility audit on a design or page. Trigger with \"audit accessibility\", \"check a11y\", \"is this accessible?\", or when reviewing a design for color contrast, keyboard navigation, touch target size, or screen reader behavior before handoff.",
+   "category": "Design",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "design/skills/accessibility-review",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 4278,
+     "sha256": "ef42982af0d51238dda2ab16d08626712891bdd41864876c32d1e7b13fb3124f"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "design-critique",
+   "description": "Get structured design feedback on usability, hierarchy, and consistency. Trigger with \"review this design\", \"critique this mockup\", \"what do you think of this screen?\", or when sharing a Figma link or screenshot for feedback at any stage from exploration to final polish.",
+   "category": "Design",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "design/skills/design-critique",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3923,
+     "sha256": "3a4f260eb9f60b431782bf6d90f22afb480c0c67860267a032df58a3e1bd19cd"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "design-handoff",
+   "description": "Generate developer handoff specs from a design. Use when a design is ready for engineering and needs a spec sheet covering layout, design tokens, component props, interaction states, responsive breakpoints, edge cases, and animation details.",
+   "category": "Design",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "design/skills/design-handoff",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3953,
+     "sha256": "38f1efc807928030654218443ad07f6a37ac82de6b4d627a03113a3568d787b7"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "design-system",
+   "description": "Audit, document, or extend your design system. Use when checking for naming inconsistencies or hardcoded values across components, writing documentation for a component's variants, states, and accessibility notes, or designing a new pattern that fits the existing system.",
+   "category": "Design",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "design/skills/design-system",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 5600,
+     "sha256": "fb31bd0144c43955106f01927126ae9fd2d4148be44c8d5887b3391f40c31445"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "research-synthesis",
+   "description": "Synthesize user research into themes, insights, and recommendations. Use when you have interview transcripts, survey results, usability test notes, support tickets, or NPS responses that need to be distilled into patterns, user segments, and prioritized next steps.",
+   "category": "Design",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "design/skills/research-synthesis",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3014,
+     "sha256": "40048615dc81fc8b9b06104769498214d61a35ae4518a0995a12bbbd0ab945a1"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "user-research",
+   "description": "Plan, conduct, and synthesize user research. Trigger with \"user research plan\", \"interview guide\", \"usability test\", \"survey design\", \"research questions\", or when the user needs help with any aspect of understanding their users through research.",
+   "category": "Design",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "design/skills/user-research",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 1751,
+     "sha256": "fa18fc13d0f44aa869102962ef9466417ade726d659465195a40fbcf08cee156"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "ux-copy",
+   "description": "Write or review UX copy \u2014 microcopy, error messages, empty states, CTAs. Trigger with \"write copy for\", \"what should this button say?\", \"review this error message\", or when naming a CTA, wording a confirmation dialog, filling an empty state, or writing onboarding text.",
+   "category": "Design",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "design/skills/ux-copy",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 3436,
+     "sha256": "d46a00a62ec637e9ca9d5f7823ea3e0a4ec26dffc53bb5035f59b48ebfcdcde7"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "LICENSE",
+     "size": 11607,
+     "sha256": "a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26"
+    }
+   ]
+  },
+  {
+   "name": "customer-escalation",
+   "description": "Package an escalation for engineering, product, or leadership with full context. Use when a bug needs engineering attention beyond normal support, multiple customers report the same issue, a customer is threatening to churn, or an issue has sat unresolved past its SLA.",
+   "category": "Customer support",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "customer-support/skills/customer-escalation",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 11205,
+     "sha256": "90c33574a41371e8e116aaf40237141adcd6075ef8bcb9de993de2b543867b3e"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "customer-support/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "customer-research",
+   "description": "Multi-source research on a customer question or topic with source attribution. Use when a customer asks something you need to look up, investigating whether a bug has been reported before, checking what was previously told to a specific account, or gathering background before drafting a response.",
+   "category": "Customer support",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "customer-support/skills/customer-research",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 10232,
+     "sha256": "9c504672d26dbb01ad4bb527a5352399760503aea0edf83bd3695e6bc346a128"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "customer-support/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "draft-response",
+   "description": "Draft a professional customer-facing response tailored to the situation and relationship. Use when answering a product question, responding to an escalation or outage, delivering bad news like a delay or won't-fix, declining a feature request, or replying to a billing issue.",
+   "category": "Customer support",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "customer-support/skills/draft-response",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 14581,
+     "sha256": "1a201228b75a98fc3b5d45090cb7443d50df204b2ee748bfc8970790a64f0026"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "customer-support/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "kb-article",
+   "description": "Draft a knowledge base article from a resolved issue or common question. Use when a ticket resolution is worth documenting for self-service, the same question keeps coming up, a workaround needs to be published, or a known issue should be communicated to customers.",
+   "category": "Customer support",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "customer-support/skills/kb-article",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 12274,
+     "sha256": "cfc300f5ecc5128910a8ff04514d565a45ca9178bf1dc2a40cc40e2ce4db9292"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "customer-support/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "ticket-triage",
+   "description": "Triage and prioritize a support ticket or customer issue. Use when a new ticket comes in and needs categorization, assigning P1-P4 priority, deciding which team should handle it, or checking whether it's a duplicate or known issue before routing.",
+   "category": "Customer support",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "customer-support/skills/ticket-triage",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 11276,
+     "sha256": "d0e5e95443e358ad2a74811b196071d10807ca95aa20351ab5760feeecee1294"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "customer-support/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "account-research",
+   "description": "Research a target company and optionally a specific contact - company overview, recent news, likely priorities, and fit against your ICP. Cross-references existing CRM records. Use when the user asks to \"research [company]\", \"look into [company]\", \"prospect research on [company]\", \"look up [person]\", \"intel on [prospect]\", \"who is [person] at [company]\", or \"tell me about [company]\" when the company is a prospect rather than an existing account.",
+   "category": "Sales",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "sales/skills/account-research",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 7788,
+     "sha256": "97e1e9884149f7801cfc60c3e9119f37a66c53b30f730ab7b4a2862eedabdb05"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "sales/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "call-summary",
+   "description": "Turn a call transcript or call notes into a customer follow-up email draft, an internal chat summary, and proposed CRM updates. Use when the user says \"call summary\", \"follow up on my [company] call\", \"summarize my call with [account]\", \"write the recap\", \"process this transcript\", \"process my call notes\", \"capture the objections and next steps\", or pastes rough notes or a transcript after a discovery, demo, or negotiation call.",
+   "category": "Sales",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "sales/skills/call-summary",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 9821,
+     "sha256": "23d174b441604a2f333aa671ec1b6130018c56018c6375620c8a41ed13e92819"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "sales/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "competitive-intelligence",
+   "description": "Competitive analysis two ways - the in-deal play against a named competitor, and win/loss patterns, competitor mentions, and battlecards across the book. Use when the user asks \"competitive intel\", \"research competitors\", \"how do we compare to [competitor]\", \"what's new with [competitor]\", \"battlecard for [competitor]\", \"how do we beat [competitor]\", \"what's the play against [competitor] in [deal]\", \"where are we losing to [competitor]\", \"win/loss patterns\", \"competitive analysis\", \"refresh the battlecards\", or on a weekly schedule.",
+   "category": "Sales",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "sales/skills/competitive-intelligence",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 8481,
+     "sha256": "4bac0057b05869c1d627b64f6950464e7ea2332e7544dcfd223f9a3d0830e0ca"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "sales/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "create-an-asset",
+   "description": "Build a customer deck, one-pager or leave-behind from your account data, call notes and approved materials, with no made-up numbers. Use when the user asks for a sales asset, one-pager, deck, leave-behind, \"create an asset for [prospect]\", or \"make something for [account]\".",
+   "category": "Sales",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "sales/skills/create-an-asset",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 8400,
+     "sha256": "8e9acec41654e245a229c2ed79915a952b628b1491df0c325197aa518175762b"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "sales/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "draft-outreach",
+   "description": "Draft a personalized outreach email or multi-touch sequence to a prospect, create it as an email draft for review, and add the contact to a sequence in your sales engagement tool when asked. Use when the user asks to \"draft outreach to [person/company]\", \"write a cold email to [prospect]\", \"re-engage [prospect]\", \"draft a 3-touch sequence\", or \"reach out to [person]\".",
+   "category": "Sales",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "sales/skills/draft-outreach",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 9692,
+     "sha256": "159a79d94036f3b3082975d3b01ae739691829fa939d16689a33dde16f6b6c47"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "sales/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
+  {
+   "name": "handle-objection",
+   "description": "Work through a live objection or competitive threat - what's really being said, the response that has worked before, and the proof points to use, grounded in your own win/loss history and customer quotes. Use when the user says \"they said we're too expensive\", \"how do I respond to [objection]\", \"[competitor] is in the deal\", \"help me handle this pushback\", or pastes an objection from an email or call.",
+   "category": "Sales",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "sales/skills/handle-objection",
+   "files": [
+    {
+     "path": "SKILL.md",
+     "size": 7702,
+     "sha256": "f8e922441acbff67b2c641079dda03cb9378fce04f8997893a980fad5a6d8b79"
+    },
+    {
+     "path": "LICENSE.txt",
+     "src": "sales/LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+   ]
+  },
   {
    "name": "algorithmic-art",
    "description": "Creating algorithmic art using p5.js with seeded randomness and interactive parameter exploration. Use this when users request creating art using code, generative art, algorithmic art, flow fields, or particle systems. Create original algorithmic art rather than copying existing artists' work to avoid copyright violations.",
+   "category": "Design & creative",
    "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/algorithmic-art",
    "files": [
     {
      "path": "LICENSE.txt",
@@ -32,7 +1598,11 @@
   {
    "name": "brand-guidelines",
    "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
+   "category": "Design & creative",
    "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/brand-guidelines",
    "files": [
     {
      "path": "LICENSE.txt",
@@ -49,7 +1619,11 @@
   {
    "name": "canvas-design",
    "description": "Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs, never copying existing artists' work to avoid copyright violations.",
+   "category": "Design & creative",
    "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/canvas-design",
    "files": [
     {
      "path": "LICENSE.txt",
@@ -469,9 +2043,13 @@
    ]
   },
   {
-   "name": "claude-api",
-   "description": "Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.\nTRIGGER \u2014 read BEFORE opening the target file; don't skip because it \"looks like a one-liner\" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens).\nSKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named \u2014 don't Read the file).",
+   "name": "slack-gif-creator",
+   "description": "Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like \"make me a GIF of X doing Y for Slack.\"",
+   "category": "Design & creative",
    "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/slack-gif-creator",
    "files": [
     {
      "path": "LICENSE.txt",
@@ -480,466 +2058,44 @@
     },
     {
      "path": "SKILL.md",
-     "size": 86198,
-     "sha256": "8227f0d1192594bfea04df6c9f1d9d727dd300c3f4b2c42d315dd9fe58b1a421"
+     "size": 7841,
+     "sha256": "2efca615ce55a3edd8fc05c779068a8085816617991987e446606403cd3abb22"
     },
     {
-     "path": "csharp/claude-api/README.md",
-     "size": 18417,
-     "sha256": "87deed4e878a7b5c573a216944846e82e3cb3a53973f2d44fb70f80ac06f1388"
+     "path": "core/easing.py",
+     "size": 6265,
+     "sha256": "60bc943449802541f0f0881a874faa7ef408aaaf0b758fde756664ada7740452"
     },
     {
-     "path": "csharp/claude-api/batches.md",
-     "size": 411,
-     "sha256": "6918e951d5a100b0e7dddf6e5e7c5ffa3ad4d45604a12534b833fd0e6ccda9d1"
+     "path": "core/frame_composer.py",
+     "size": 4548,
+     "sha256": "a127ea8f2a58893ea10a5c7b5cab4e2010af6515adc538676eb0cc14f5a03985"
     },
     {
-     "path": "csharp/claude-api/files-api.md",
-     "size": 900,
-     "sha256": "766ccf5dca9ef3caba8cefeddde10f6d171a7bd2ff4c97689462fad2d0d18e4b"
+     "path": "core/gif_builder.py",
+     "size": 9847,
+     "sha256": "b6f50d738c491ee0438a2e86e897f71cdab9792494ba4605f140befb0bddbf89"
     },
     {
-     "path": "csharp/claude-api/streaming.md",
-     "size": 789,
-     "sha256": "9b382189c6d2a8f31534188bc9533539e8fbf895781f727b955b3b7f01e65005"
+     "path": "core/validators.py",
+     "size": 3785,
+     "sha256": "56bd19e3aae05f8387d78ec8185d6098b3dc909d1fa041211753da37212528a3"
     },
     {
-     "path": "csharp/claude-api/tool-use.md",
-     "size": 6002,
-     "sha256": "d8ae6d64d6cc91395959b799bc441870034e3da45875fe5dc2b5a14e6669da3a"
-    },
-    {
-     "path": "curl/examples.md",
-     "size": 9318,
-     "sha256": "a6d5c75047e48c8ba1ea41a7620b56bfd236f376dfe9e5fbe62f5895fd900cdd"
-    },
-    {
-     "path": "curl/managed-agents.md",
-     "size": 8749,
-     "sha256": "e1fe01c98f270e08544b200d660c25fc6efb9b7caf3c321b29bab02d2ed01dc5"
-    },
-    {
-     "path": "go/claude-api/README.md",
-     "size": 7760,
-     "sha256": "54e6ee16e037258d0f341df2c38b07e32096f78bdc440f5559eafd360ceaf8d6"
-    },
-    {
-     "path": "go/claude-api/files-api.md",
-     "size": 936,
-     "sha256": "7bf67ece5e4d18b1fb07085a55b680420cc7bd4de94a1fb2bb73cb23f39c20f0"
-    },
-    {
-     "path": "go/claude-api/streaming.md",
-     "size": 1037,
-     "sha256": "c0bd4253dd0994b07d76e7358df6b163050f775268111a853369684a18c8d00c"
-    },
-    {
-     "path": "go/claude-api/tool-use.md",
-     "size": 8416,
-     "sha256": "d71df68e6ac84f7919f2e2ec15efd211e3f98fb11db6661d6b6b167abdd2cdfc"
-    },
-    {
-     "path": "go/managed-agents/README.md",
-     "size": 18937,
-     "sha256": "908ef55a20c6a8de2ffd7d21aa0700c6eb89dc4dca5f96985d04d3c6e2f55307"
-    },
-    {
-     "path": "java/claude-api/README.md",
-     "size": 11308,
-     "sha256": "a58f4a016915e5e084f62c403e45867a2ce71af5e225ef7920d4319d78e9387f"
-    },
-    {
-     "path": "java/claude-api/files-api.md",
-     "size": 1198,
-     "sha256": "1c792f3421de32f42a56235327f87807a5579340726bba677ec13e05f9b493c7"
-    },
-    {
-     "path": "java/claude-api/streaming.md",
-     "size": 659,
-     "sha256": "f3347630f70832796713fe954ef0efcd863406bb47618de3f405c41966596983"
-    },
-    {
-     "path": "java/claude-api/tool-use.md",
-     "size": 9521,
-     "sha256": "049802442b48ba336aa85e1b71f4c603cab72b5d93d560fbb78dda66d4579df5"
-    },
-    {
-     "path": "java/managed-agents/README.md",
-     "size": 16942,
-     "sha256": "7b6a6d205b06c59674bdccc340aff772a3ce38cea1c12b0d0608abcc536d77ec"
-    },
-    {
-     "path": "php/claude-api/README.md",
-     "size": 6113,
-     "sha256": "0449be03728dfc8e0b236cc0c263f319c1997629c0b1bcbe8586e28d98d2de96"
-    },
-    {
-     "path": "php/claude-api/batches.md",
-     "size": 445,
-     "sha256": "5f575dd2fa1c4d89ea097d3d0885ab367356e38ba5b8643b7ed4b366e1953fc6"
-    },
-    {
-     "path": "php/claude-api/files-api.md",
-     "size": 476,
-     "sha256": "0715a0d4cce88fd885f57bd33b4654071a9068d5f8a892143b062c78fe51afc9"
-    },
-    {
-     "path": "php/claude-api/streaming.md",
-     "size": 680,
-     "sha256": "0414d8c99283b3fe526ab0971cacad09af815b6da92eee2355b051393bf3f985"
-    },
-    {
-     "path": "php/claude-api/tool-use.md",
-     "size": 8081,
-     "sha256": "34abece0444f3e04276e2936173232e2bc8c5630bdffd3f2179e8e1f6732b5ae"
-    },
-    {
-     "path": "php/managed-agents/README.md",
-     "size": 13511,
-     "sha256": "347ee6bdcc6846b931ef9e730c20d007e4edbebfe7a26b071da642a16eeffda6"
-    },
-    {
-     "path": "python/claude-api/README.md",
-     "size": 20000,
-     "sha256": "45ccecc01bca35e6f316b21e25c6d6dbd1992a62714c2cb2c629ef93cc56efaf"
-    },
-    {
-     "path": "python/claude-api/batches.md",
-     "size": 5582,
-     "sha256": "e08591b12c75a7ed8e06b3aba551043ffd8ed696179c265b2129265deb81054a"
-    },
-    {
-     "path": "python/claude-api/files-api.md",
-     "size": 4493,
-     "sha256": "d3d8486cdf84cd7a73234dc258adcc75cffa78b43fcccd446ea771f72ef455f7"
-    },
-    {
-     "path": "python/claude-api/sdk-upgrade.md",
-     "size": 28716,
-     "sha256": "27f749d01b938c5802db7abcb8ea49b13b58b3272aedd068a5f5c525da833e4b"
-    },
-    {
-     "path": "python/claude-api/streaming.md",
-     "size": 6531,
-     "sha256": "00a1c046e8e8de1119f6921335e97d5653075862a8e03b649eae2d26febedb6f"
-    },
-    {
-     "path": "python/claude-api/tool-use.md",
-     "size": 19264,
-     "sha256": "0d710fdab90e2e4999d91b2e87937a762fce8f040deda9528d991f850f09f95a"
-    },
-    {
-     "path": "python/managed-agents/README.md",
-     "size": 10341,
-     "sha256": "f8d73686938429140b885823feab4c1ac10c256574de330b89c3c120923a7702"
-    },
-    {
-     "path": "ruby/claude-api/README.md",
-     "size": 4471,
-     "sha256": "77acd5f82553426b1c7669f80104b6e41999c1f96b1007103e8291df1bf2ee24"
-    },
-    {
-     "path": "ruby/claude-api/streaming.md",
-     "size": 233,
-     "sha256": "a2c667b3dc160b3aacb9468c83b7a0a7523db3876e2abe2770abc163552f0334"
-    },
-    {
-     "path": "ruby/claude-api/tool-use.md",
-     "size": 1061,
-     "sha256": "a545009aa563e9966b4f923eacb2af612df3c63af7f07bbe40def84b10282e38"
-    },
-    {
-     "path": "ruby/managed-agents/README.md",
-     "size": 10450,
-     "sha256": "2318b5c33862eb5d27fef1a00018eb4464d3e2764a40e64b374bcd2f86b6e5ac"
-    },
-    {
-     "path": "shared/admin-api.md",
-     "size": 11604,
-     "sha256": "50d79d03f3a4ccae038efb5b9805d9d21838486c601f2dfb7b212585c308ef64"
-    },
-    {
-     "path": "shared/agent-design.md",
-     "size": 8736,
-     "sha256": "9960728faf6976a2ddfceed02ed72af122d3b2558af573a9a0ea207b3adec2bc"
-    },
-    {
-     "path": "shared/anthropic-cli.md",
-     "size": 18162,
-     "sha256": "4f8b4319fc096b48f311eff782a3b818a872933852ecb3e811157352cb618210"
-    },
-    {
-     "path": "shared/claude-platform-on-aws.md",
-     "size": 4412,
-     "sha256": "d3ce9bc6ea5d9b9b6e9ec4f8aa8e28493a2a198a433c2297b377cbb84f86ad9d"
-    },
-    {
-     "path": "shared/cost-optimization.md",
-     "size": 44959,
-     "sha256": "b007478601b2bdabef41793ce2727ea4281544b64a443b04ac15fabfdbe58c2a"
-    },
-    {
-     "path": "shared/error-codes.md",
-     "size": 15474,
-     "sha256": "1bfe197bcf264c8b86c1815cf5ee367bdbfa80ba0ac20041713ffdfa504491c8"
-    },
-    {
-     "path": "shared/live-sources.md",
-     "size": 22559,
-     "sha256": "75aef376b170d5fb62d762f7287bf2bf8d2d7589f26323ad9765a3d9625b1022"
-    },
-    {
-     "path": "shared/managed-agents-api-reference.md",
-     "size": 33958,
-     "sha256": "abb04671f430a4542012d8d25bc8b3932704142302a1eeb4c4d7a33d46314595"
-    },
-    {
-     "path": "shared/managed-agents-client-patterns.md",
-     "size": 12043,
-     "sha256": "f3d752675e225892f97da4d7bffbefd430841d6655b2c53a926f212121759d55"
-    },
-    {
-     "path": "shared/managed-agents-core.md",
-     "size": 32573,
-     "sha256": "f375cdf6ec7e7106540408e0f788279ee84bf304af3d0ef2a13d13470a407e0f"
-    },
-    {
-     "path": "shared/managed-agents-environments.md",
-     "size": 12653,
-     "sha256": "faa3bb1a55a8bfc308d7884329ed2ed9fa2b9f64f39696bb51aeb3c69b86b264"
-    },
-    {
-     "path": "shared/managed-agents-events.md",
-     "size": 24955,
-     "sha256": "cf449696835d8188b6ec27f90a24c517b47756e3f6a5f8f957760ac2a060473e"
-    },
-    {
-     "path": "shared/managed-agents-memory.md",
-     "size": 11154,
-     "sha256": "9f14213db20c1fcd1547e7c4882f9adde50b7b3f602b29684e5d851bf06d370a"
-    },
-    {
-     "path": "shared/managed-agents-multiagent.md",
-     "size": 26194,
-     "sha256": "b937599363615432ba9f69c3cc53616d2e7844907fc5a3f744355a55b9d38a1c"
-    },
-    {
-     "path": "shared/managed-agents-onboarding.md",
-     "size": 10454,
-     "sha256": "d6f0fae12e1ec04e5a96863f928f9b62d09ab860c2653d13a62b6b282d832682"
-    },
-    {
-     "path": "shared/managed-agents-outcomes.md",
-     "size": 7244,
-     "sha256": "742b89e66d22dcb605c89a667aa5572ce768a6b81448f624a1f73efa2cedfca2"
-    },
-    {
-     "path": "shared/managed-agents-overview.md",
-     "size": 13165,
-     "sha256": "a250fd240dbddc63c5821612051f4a40fbc7fd40dbb6091299b708d0c594f89b"
-    },
-    {
-     "path": "shared/managed-agents-scheduled-deployments.md",
-     "size": 8734,
-     "sha256": "65312565b26ce16176c63185f9b392f0a93ffc4ef46180a5eff32ca3678a47d3"
-    },
-    {
-     "path": "shared/managed-agents-self-hosted-sandboxes.md",
-     "size": 27847,
-     "sha256": "3228ab72afbe3ab1a0ac0f5a41995e1764c947cf17ce22a858b41b67262b71ee"
-    },
-    {
-     "path": "shared/managed-agents-tools.md",
-     "size": 35652,
-     "sha256": "3238b1e2c76a31af87a2ed90a3dba5d0293a9682001fbc8c7c23947ab0bb6470"
-    },
-    {
-     "path": "shared/managed-agents-webhooks.md",
-     "size": 11321,
-     "sha256": "38746f77a3ee971f9b1f7d47cec9e753131bf271fd795aed5c3da1764c9a6ac1"
-    },
-    {
-     "path": "shared/model-migration.md",
-     "size": 245493,
-     "sha256": "a2d9c8e3f05dd4629b8708791b4f31770f5fdd91ab7940cb5f5f47385c5bd847"
-    },
-    {
-     "path": "shared/models.md",
-     "size": 13936,
-     "sha256": "247f3f7adb64943c70a78643e2d6ebc48baa8da3d5369e1329153bd9dbc952f0"
-    },
-    {
-     "path": "shared/platform-availability.md",
-     "size": 5537,
-     "sha256": "b11e6ef8162daeb15ce12dff4187f5e28055bb7cef47f2b104f2b806a873d8aa"
-    },
-    {
-     "path": "shared/prompt-audit.md",
-     "size": 34966,
-     "sha256": "571b08c181a8f3f0906a99045ff0bca88ca728d5a2d01afabb620b270c8048a2"
-    },
-    {
-     "path": "shared/prompt-caching.md",
-     "size": 31084,
-     "sha256": "07d3ee1266f2825adc1413c4e561b1a09ba9304617f4057f782b0c87a72640fd"
-    },
-    {
-     "path": "shared/token-counting.md",
-     "size": 1597,
-     "sha256": "b8be5d38127a79b35c0d79d3e4f1309abcdb6b15ea6917c991c14a7bb2a7d9dc"
-    },
-    {
-     "path": "shared/tool-use-concepts.md",
-     "size": 35290,
-     "sha256": "0c5db4fa5a0b60f0e47e473b7735bf94c62b35c6d345f2cfed06409deb9b8f2e"
-    },
-    {
-     "path": "typescript/claude-api/README.md",
-     "size": 15256,
-     "sha256": "3db156fc1c47bf9bf91e98d6425d4630672e2734a7e12e56267c2e3c6375cd12"
-    },
-    {
-     "path": "typescript/claude-api/batches.md",
-     "size": 2590,
-     "sha256": "2489eb1d61c0a731b503b0a176383d72234b51064295a3c8c066f2708cab466e"
-    },
-    {
-     "path": "typescript/claude-api/files-api.md",
-     "size": 2382,
-     "sha256": "2b19e3c499cb11243fbc13158e838f7a51ecad6e2542ecc6783e9d2605ee8249"
-    },
-    {
-     "path": "typescript/claude-api/streaming.md",
-     "size": 5825,
-     "sha256": "cd26b613d1198a602e47e43fd84e873c8d722afbc872a864621256a13f082d65"
-    },
-    {
-     "path": "typescript/claude-api/tool-use.md",
-     "size": 18877,
-     "sha256": "442c3562e6d8d835dcc634657b3eba450b275fde35b8503d49f37ad945b41fec"
-    },
-    {
-     "path": "typescript/managed-agents/README.md",
-     "size": 9828,
-     "sha256": "dfb701b1d49f2dec91464b1e6ab9bd5bcd0786736144711f7079464cff0a5a18"
-    }
-   ]
-  },
-  {
-   "name": "frontend-design",
-   "description": "Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults.",
-   "license": "Apache-2.0",
-   "files": [
-    {
-     "path": "LICENSE.txt",
-     "size": 10174,
-     "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
-    },
-    {
-     "path": "SKILL.md",
-     "size": 9390,
-     "sha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3"
-    }
-   ]
-  },
-  {
-   "name": "internal-comms",
-   "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).",
-   "license": "Apache-2.0",
-   "files": [
-    {
-     "path": "LICENSE.txt",
-     "size": 11345,
-     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
-    },
-    {
-     "path": "SKILL.md",
-     "size": 1511,
-     "sha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475"
-    },
-    {
-     "path": "examples/3p-updates.md",
-     "size": 3274,
-     "sha256": "087e4363c0f3513728a7e695eeb9ead5c3ecd12a4681b59340691180e65b68fc"
-    },
-    {
-     "path": "examples/company-newsletter.md",
-     "size": 3295,
-     "sha256": "30f81cfbdb03858a006169c72169024089c7c5d3d32611d337782da4f38c86b5"
-    },
-    {
-     "path": "examples/faq-answers.md",
-     "size": 2366,
-     "sha256": "5ecd3356cd6666937f2ebefa753253edfdbdca15e368d07baf398bfcced72484"
-    },
-    {
-     "path": "examples/general-comms.md",
-     "size": 602,
-     "sha256": "4d3a4bb198a77626bcf018e96b2b45a2dbabed172d4ade0fcd70d23ae8a47a47"
-    }
-   ]
-  },
-  {
-   "name": "mcp-builder",
-   "description": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).",
-   "license": "Apache-2.0",
-   "files": [
-    {
-     "path": "LICENSE.txt",
-     "size": 11345,
-     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
-    },
-    {
-     "path": "SKILL.md",
-     "size": 9092,
-     "sha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295"
-    },
-    {
-     "path": "reference/evaluation.md",
-     "size": 21663,
-     "sha256": "8c99479f8a2d22a636c38e274537aac3610879e26f34e0709825077c4576f427"
-    },
-    {
-     "path": "reference/mcp_best_practices.md",
-     "size": 7330,
-     "sha256": "80fb4369a349447cf18ecdd7494fe7938b6065377e9f08c077cec411093a3007"
-    },
-    {
-     "path": "reference/node_mcp_server.md",
-     "size": 28550,
-     "sha256": "c3ba35a4f599dd53be9c6555ae72c19a7bf412cd5426576c2c08d42755482c66"
-    },
-    {
-     "path": "reference/python_mcp_server.md",
-     "size": 25099,
-     "sha256": "2da52f77e675191014ca2e146a4b95aa04d0ca7dd7e2b100322df15ade685e80"
-    },
-    {
-     "path": "scripts/connections.py",
-     "size": 4875,
-     "sha256": "9403668a2041568772082a8b334122c1f88daf0541fb393af4522d0094a47a6e"
-    },
-    {
-     "path": "scripts/evaluation.py",
-     "size": 12579,
-     "sha256": "49ed1d17cdce5da101b210197740713f49b935c29d4f339542a14b132658e6f7"
-    },
-    {
-     "path": "scripts/example_evaluation.xml",
-     "size": 1194,
-     "sha256": "9272b348ddcc4b06ba562367ccd0770e018158c0068ac5116d5e34aaeff8777a"
-    },
-    {
-     "path": "scripts/requirements.txt",
-     "size": 29,
-     "sha256": "d5d7558b2368ecea9dfeed7d1fbc71ee9e0750bebd1282faa527d528a344c3c7"
+     "path": "requirements.txt",
+     "size": 66,
+     "sha256": "edc7108a0c6b56183566c71ee96830f6dc791e3b41952112d9cb56b33a6bd757"
     }
    ]
   },
   {
    "name": "theme-factory",
    "description": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can apply to any artifact that has been creating, or can generate a new theme on-the-fly.",
+   "category": "Design & creative",
    "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/theme-factory",
    "files": [
     {
      "path": "LICENSE.txt",
@@ -1005,6 +2161,600 @@
      "path": "themes/tech-innovation.md",
      "size": 547,
      "sha256": "183648163026dd5eeba3df5effa335b55ba333c3ee1fe215278605e55f40a52a"
+    }
+   ]
+  },
+  {
+   "name": "internal-comms",
+   "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).",
+   "category": "Writing",
+   "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/internal-comms",
+   "files": [
+    {
+     "path": "LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "SKILL.md",
+     "size": 1511,
+     "sha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475"
+    },
+    {
+     "path": "examples/3p-updates.md",
+     "size": 3274,
+     "sha256": "087e4363c0f3513728a7e695eeb9ead5c3ecd12a4681b59340691180e65b68fc"
+    },
+    {
+     "path": "examples/company-newsletter.md",
+     "size": 3295,
+     "sha256": "30f81cfbdb03858a006169c72169024089c7c5d3d32611d337782da4f38c86b5"
+    },
+    {
+     "path": "examples/faq-answers.md",
+     "size": 2366,
+     "sha256": "5ecd3356cd6666937f2ebefa753253edfdbdca15e368d07baf398bfcced72484"
+    },
+    {
+     "path": "examples/general-comms.md",
+     "size": 602,
+     "sha256": "4d3a4bb198a77626bcf018e96b2b45a2dbabed172d4ade0fcd70d23ae8a47a47"
+    }
+   ]
+  },
+  {
+   "name": "claude-api",
+   "description": "Reference for the Claude API / Anthropic SDK \u2014 model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration. TRIGGER \u2014 read BEFORE opening the target file; don't skip because it \"looks like a one-liner\" \u2014 whenever: the prompt names Claude/Anthropic in any form (Claude, Anthropic, Fable, Opus, Sonnet, Haiku, `anthropic`, `@anthropic-ai`, `claude-*`, `us.anthropic.*`, `[1m]`); the user asks about an LLM (pricing/model choice/limits/caching) \u2014 never answer from memory; OR the task is LLM-shaped with provider unstated (agent/MCP/tool-definition/multi-agent/RAG/LLM-judge/computer-use; generate/summarize/extract/classify/rewrite/converse over NL; debugging refusals/cutoffs/streaming/tool-calls/tokens). SKIP only when another provider is being worked on (overrides all triggers): OpenAI/GPT/Gemini/Llama/Mistral/Cohere/Ollama named in the query; OR `grep -rE 'openai|langchain_openai|google.generativeai|genai|mistralai|cohere|ollama'` over the project hits (run this grep FIRST if no provider named \u2014 don't Read the file).",
+   "category": "Developer",
+   "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/claude-api",
+   "files": [
+    {
+     "path": "LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "SKILL.md",
+     "size": 103457,
+     "sha256": "d2d78eb159724410f2996489f054b15e803ec030198d36ca35cb764ab80520c0"
+    },
+    {
+     "path": "csharp/claude-api/README.md",
+     "size": 18915,
+     "sha256": "5504328ce794dffe46ec2572113098271363c80e911022be0eb889f453f6e902"
+    },
+    {
+     "path": "csharp/claude-api/batches.md",
+     "size": 413,
+     "sha256": "ec276fccf21757ed00803dfa4bc35f14f334138629fa53c77a025d718eda96a1"
+    },
+    {
+     "path": "csharp/claude-api/files-api.md",
+     "size": 900,
+     "sha256": "766ccf5dca9ef3caba8cefeddde10f6d171a7bd2ff4c97689462fad2d0d18e4b"
+    },
+    {
+     "path": "csharp/claude-api/streaming.md",
+     "size": 787,
+     "sha256": "bc0100e50b3495e869901bcfb231870cb3483b936534af5fd3dddb5d07e4531e"
+    },
+    {
+     "path": "csharp/claude-api/tool-use.md",
+     "size": 5998,
+     "sha256": "d3d5e7f309316414d698146d0ea1e234642c957940e1c4e9bcf9176994c2176d"
+    },
+    {
+     "path": "curl/examples.md",
+     "size": 9714,
+     "sha256": "4520e447d37924e62fe982923f3eceea5338dbf3b3a0d25d0f914272c16b90a0"
+    },
+    {
+     "path": "curl/managed-agents.md",
+     "size": 8618,
+     "sha256": "0039b221a33b7b62462c18f3b68808ea15fec5501b64bc46009021dbbdf1fa2c"
+    },
+    {
+     "path": "go/claude-api/README.md",
+     "size": 8477,
+     "sha256": "a8e78588e8f11ef4d8f2dd1729739952ca79aefd7b1ebf07c411ee58c05d8231"
+    },
+    {
+     "path": "go/claude-api/files-api.md",
+     "size": 936,
+     "sha256": "7bf67ece5e4d18b1fb07085a55b680420cc7bd4de94a1fb2bb73cb23f39c20f0"
+    },
+    {
+     "path": "go/claude-api/streaming.md",
+     "size": 1026,
+     "sha256": "a523e992e438309ca1bbc075ded2b652eb257242fd0ce521afd3b8ea024ed94d"
+    },
+    {
+     "path": "go/claude-api/tool-use.md",
+     "size": 8393,
+     "sha256": "2053c347e13691b3785189b13e6bc7c41d577e893004e9c0f67817effdc91ef5"
+    },
+    {
+     "path": "go/managed-agents/README.md",
+     "size": 18939,
+     "sha256": "811570bde7e34d7326f9b83673aa4eac79f3b401518d41fd657e969b3ea0cb18"
+    },
+    {
+     "path": "java/claude-api/README.md",
+     "size": 11946,
+     "sha256": "cb6d395dc1d930371f828290132681541eff7f1a7e2739bb4c6655ebbb3b8c7f"
+    },
+    {
+     "path": "java/claude-api/files-api.md",
+     "size": 1198,
+     "sha256": "1c792f3421de32f42a56235327f87807a5579340726bba677ec13e05f9b493c7"
+    },
+    {
+     "path": "java/claude-api/streaming.md",
+     "size": 655,
+     "sha256": "de13bc9573b37edb5af69606853c4fde3d494ee10ff47d1a030ecef9cc17463b"
+    },
+    {
+     "path": "java/claude-api/tool-use.md",
+     "size": 9509,
+     "sha256": "58240638a66d67fee542978301841929fbefe7317487e12b86734281f6b649d6"
+    },
+    {
+     "path": "java/managed-agents/README.md",
+     "size": 16944,
+     "sha256": "5757f9b485ca073650b24bc8fd7e3efa9c9709d23ccd8444c38a380081720435"
+    },
+    {
+     "path": "php/claude-api/README.md",
+     "size": 6554,
+     "sha256": "00e2e88f3ea9a6cce812d3e6ae9e035bc36f88828a09e518bb73af91097a9d66"
+    },
+    {
+     "path": "php/claude-api/batches.md",
+     "size": 447,
+     "sha256": "6f82a29f718ff6e6b02aaaee3cfd6cda2feb82aca57d945f11a2c021214a699d"
+    },
+    {
+     "path": "php/claude-api/files-api.md",
+     "size": 476,
+     "sha256": "0715a0d4cce88fd885f57bd33b4654071a9068d5f8a892143b062c78fe51afc9"
+    },
+    {
+     "path": "php/claude-api/streaming.md",
+     "size": 682,
+     "sha256": "3b8ac667b21f17750eb3c1fc7dc166fd7b1f57a1d8b11e74489de4432e21d31d"
+    },
+    {
+     "path": "php/claude-api/tool-use.md",
+     "size": 8097,
+     "sha256": "319e8ecfe18c54770b697936c095dbfdfbb0c0987360151f10eaf48fed18c9c5"
+    },
+    {
+     "path": "php/managed-agents/README.md",
+     "size": 13513,
+     "sha256": "9bb9d9ca5d7c328c7203e9de63189a6118d4ed5f9046f4d0f9ec79673ee48060"
+    },
+    {
+     "path": "python/claude-api/README.md",
+     "size": 20491,
+     "sha256": "9ff90530827950140ff6c707374fc0d95a94de437ffbc2340b78a54140508c95"
+    },
+    {
+     "path": "python/claude-api/batches.md",
+     "size": 5588,
+     "sha256": "15d480b44e07b237a33eac50a5ae4d7c46b5c94c4462c992346f2b0818964f57"
+    },
+    {
+     "path": "python/claude-api/files-api.md",
+     "size": 4499,
+     "sha256": "2aa142978660d9ae3200d21a4d333531ca101898706f620834304e8a7d534580"
+    },
+    {
+     "path": "python/claude-api/sdk-upgrade.md",
+     "size": 28741,
+     "sha256": "408bdcabdd05aceca3765320b03684a00e1bd22f6da2d057db5c24b48804bef8"
+    },
+    {
+     "path": "python/claude-api/streaming.md",
+     "size": 11940,
+     "sha256": "8f73a54dbbb5e82c2c7690d7d866f17ad8c72f662a2be6dd788b5c0956714026"
+    },
+    {
+     "path": "python/claude-api/tool-use.md",
+     "size": 19786,
+     "sha256": "133934c24555f2e20297ff331c1e3303b14b1dc4824d2ec336e418caf162927f"
+    },
+    {
+     "path": "python/managed-agents/README.md",
+     "size": 11518,
+     "sha256": "c33922db0214431c858e50a8e60ab7b7b617411acfd2c338f23cf90ef4ad4696"
+    },
+    {
+     "path": "ruby/claude-api/README.md",
+     "size": 4843,
+     "sha256": "c7de89d236f22bc0b44a091a45ee186ec057caa021a71acd4d3849599cbf3b36"
+    },
+    {
+     "path": "ruby/claude-api/streaming.md",
+     "size": 235,
+     "sha256": "09b784f2ab0a5fd17e0589225408c618d26c6dd3cd601364ff92f409d5b104a0"
+    },
+    {
+     "path": "ruby/claude-api/tool-use.md",
+     "size": 1063,
+     "sha256": "9d4290be5e263eaee485f5d36e0ce8b87cafed19ed30fc045c484757efe29a22"
+    },
+    {
+     "path": "ruby/managed-agents/README.md",
+     "size": 10452,
+     "sha256": "022a5ea193d4864947bd4e3c6f41f160a6bebd1f7b29a9419df200b227dc2fd5"
+    },
+    {
+     "path": "shared/admin-api.md",
+     "size": 11606,
+     "sha256": "a69c53817391fca50c0a1848f46de9debf71fa3681298fccb0a6435b760bac2d"
+    },
+    {
+     "path": "shared/agent-design.md",
+     "size": 8736,
+     "sha256": "9960728faf6976a2ddfceed02ed72af122d3b2558af573a9a0ea207b3adec2bc"
+    },
+    {
+     "path": "shared/anthropic-cli.md",
+     "size": 23218,
+     "sha256": "d4d4c0a6ddd74224c366a9fa8d12a01763d1e1cd90a96de669211d381ee208ad"
+    },
+    {
+     "path": "shared/claude-platform-on-aws.md",
+     "size": 4420,
+     "sha256": "dec03193c61909167846c0526a4feacf011578b5e7ee29f76378141315cf97f5"
+    },
+    {
+     "path": "shared/cost-optimization.md",
+     "size": 57453,
+     "sha256": "1d996afeae295a698eab5df16ff9385054d8beedb3a6d74ff331ef1abb6f8702"
+    },
+    {
+     "path": "shared/error-codes.md",
+     "size": 19845,
+     "sha256": "9345972e355af8e50717e3e5b757d051972687192142223321a05e3588a13205"
+    },
+    {
+     "path": "shared/evals/build-eval.md",
+     "size": 54819,
+     "sha256": "50e3381b55b7bb913f84c2645a409802084c5caf01bab2d271d6bef0090dbd6c"
+    },
+    {
+     "path": "shared/evals/cost-hillclimb.md",
+     "size": 31574,
+     "sha256": "fe15b3bcce81613a98c80b309ddfba7881d5778e339dbb19e95aded5ca84283a"
+    },
+    {
+     "path": "shared/evals/eval-audit.md",
+     "size": 27892,
+     "sha256": "a013f8eb0452c51c5a31860df0fb47219dcdb4da507092fc98867225095026ba"
+    },
+    {
+     "path": "shared/evals/eval-hillclimb.md",
+     "size": 68773,
+     "sha256": "6e2c829294c6bfcc0b544352bca66d5e4c10e8de5a63b66d5e0ac9a861de8710"
+    },
+    {
+     "path": "shared/evals/report/SCHEMA.md",
+     "size": 16121,
+     "sha256": "9a83404a9b3c413113df39d9bdf08e003ff4d6a75386f4010887da3298766687"
+    },
+    {
+     "path": "shared/evals/report/build-report-lite.mjs",
+     "size": 27329,
+     "sha256": "af79ca5fa5f06747dbcaa1d40017c8c8e81e0aa11cb8e32b848043893cdb03c7"
+    },
+    {
+     "path": "shared/evals/report/runner-scaffold.mjs",
+     "size": 33142,
+     "sha256": "c3a87ba4b94b3018b83c075d5148ba7760580aa447699d513d45ab55b82a531a"
+    },
+    {
+     "path": "shared/live-sources.md",
+     "size": 22997,
+     "sha256": "9c37bff187cc74d2db49c3f697db7bd3db853b9c53e2d999d60ca61236379407"
+    },
+    {
+     "path": "shared/managed-agents-api-reference.md",
+     "size": 34401,
+     "sha256": "1e7762835f6fc83e5cb704daa08eda6201d4afd141ed789fde9d24dbec6ae098"
+    },
+    {
+     "path": "shared/managed-agents-client-patterns.md",
+     "size": 12043,
+     "sha256": "f3d752675e225892f97da4d7bffbefd430841d6655b2c53a926f212121759d55"
+    },
+    {
+     "path": "shared/managed-agents-core.md",
+     "size": 32852,
+     "sha256": "1d2e548fcdbf5291d20dde57a5463cbfbf7db22ce9ac1bb307af98c5d302451b"
+    },
+    {
+     "path": "shared/managed-agents-environments.md",
+     "size": 12870,
+     "sha256": "feb0018013b1a3de67fd322d1f31667495622edeba5c6c356395bba492ab2df8"
+    },
+    {
+     "path": "shared/managed-agents-events.md",
+     "size": 25029,
+     "sha256": "c3c4bde5dbc8ae5d283ed9df86a87871ec098f6cd60a27ff384df0d685eeb767"
+    },
+    {
+     "path": "shared/managed-agents-memory.md",
+     "size": 11362,
+     "sha256": "0dec5641630f97629ea75bbbe5c2bced861f9c16b0572a68c901849ea4d00bcb"
+    },
+    {
+     "path": "shared/managed-agents-multiagent.md",
+     "size": 26250,
+     "sha256": "11da64cd20c3e2fd53cd6e437c3b1ee5472bd19d7e388814cf7f0dc78b6bc778"
+    },
+    {
+     "path": "shared/managed-agents-onboarding-from-quickstart.md",
+     "size": 18411,
+     "sha256": "13da02dca5a7052565af839476dd224eb4ebc00393dd7801c4a905ce380be0d9"
+    },
+    {
+     "path": "shared/managed-agents-onboarding-from-url.md",
+     "size": 25783,
+     "sha256": "de9666779aab6ab1a51cbd79d7ee3b718c29105eb36e0c9b82ff291ac28a58df"
+    },
+    {
+     "path": "shared/managed-agents-onboarding.md",
+     "size": 15736,
+     "sha256": "faea6d7178bbdc0ec280f2beba43fcde28685e708ad6b5a1bfff28a59572cf83"
+    },
+    {
+     "path": "shared/managed-agents-outcomes.md",
+     "size": 8115,
+     "sha256": "82e18fe53fb41c38aab4d63b36d1e37767088f0650374f79c19fc176d5cb599f"
+    },
+    {
+     "path": "shared/managed-agents-overview.md",
+     "size": 13707,
+     "sha256": "05035bd75de5a25276c4cfb010088bfadb5ee6c798afe4e8ba080d5260d0346c"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/contract-tracker.md",
+     "size": 1806,
+     "sha256": "312ee5f886de59b6db4603d2df9766d66285db36973656c5b9ff0bcc1ed02279"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/data-analyst.md",
+     "size": 1561,
+     "sha256": "c2116bac43972f2b40311104bd7cd4e084cca806dd40a1ddf8462845d785bd57"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/deep-researcher.md",
+     "size": 2430,
+     "sha256": "a680856d874dff23cd3f016e36d0a58bc4db36c56d790d216743f236ee37a48c"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/field-monitor.md",
+     "size": 2105,
+     "sha256": "f17f26eee0109f4172134c5bea5761c52b8459e44ae03608c701cd3492f4a3af"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/incident-commander.md",
+     "size": 1723,
+     "sha256": "badd3622ffab0798ab44a55189f47e95c107107ce57eda9fa5357b1aded8fb2a"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/sprint-retro-facilitator.md",
+     "size": 2091,
+     "sha256": "8b5ed9895feb1ade54578a270493c63d0f57b3bb0fbc2eafcfa2e87d3130fa75"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/structured-extractor.md",
+     "size": 1541,
+     "sha256": "c278074c8c48d35fc6c68ed32eaa8704cae73a8e74035fd1d4a6abdcb9bd0fbd"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/support-agent.md",
+     "size": 1481,
+     "sha256": "da75c50edf207f5ef468fbbbfc2e77d56e7d906a6c2cda28756f896195e171c5"
+    },
+    {
+     "path": "shared/managed-agents-quickstarts/support-to-eng-escalator.md",
+     "size": 1842,
+     "sha256": "46720e5341808a9938825be44f936c91f83739ebdef9e1d17d9f0ec22738346b"
+    },
+    {
+     "path": "shared/managed-agents-scheduled-deployments.md",
+     "size": 9068,
+     "sha256": "eb1c8a1a6f428b3db634e6d37162fd8952c3d853920b7414be32a4943b70f227"
+    },
+    {
+     "path": "shared/managed-agents-self-hosted-sandboxes.md",
+     "size": 27847,
+     "sha256": "3228ab72afbe3ab1a0ac0f5a41995e1764c947cf17ce22a858b41b67262b71ee"
+    },
+    {
+     "path": "shared/managed-agents-tools.md",
+     "size": 35673,
+     "sha256": "17672bb414c3cccd0f5b040e1ab1c08f8b3d1de648615d9840b34c856be6c00b"
+    },
+    {
+     "path": "shared/managed-agents-webhooks.md",
+     "size": 11321,
+     "sha256": "38746f77a3ee971f9b1f7d47cec9e753131bf271fd795aed5c3da1764c9a6ac1"
+    },
+    {
+     "path": "shared/model-migration.md",
+     "size": 316954,
+     "sha256": "2accac3b1c1cd5c47a81d16e456cd3ebaac3139d3d86e92200f6e810c7a4cda8"
+    },
+    {
+     "path": "shared/models.md",
+     "size": 15969,
+     "sha256": "cffa80f693b484518d507bc7ac7f061aa41f5a73d7ae761e238ac7f829f79a52"
+    },
+    {
+     "path": "shared/platform-availability.md",
+     "size": 7415,
+     "sha256": "607997bc16de403970cb32c1dc1fa63e68f7f02328728be59397e7cefb2efed4"
+    },
+    {
+     "path": "shared/preserved-thinking-migration/causes.md",
+     "size": 37879,
+     "sha256": "f463aed849879c02f7105e11855fc65deb2a9b1bfbdca303b045825c1c68a0c9"
+    },
+    {
+     "path": "shared/preserved-thinking-migration/drop_block_probe.py",
+     "size": 64338,
+     "sha256": "de9f874ad4d57cdf12b4143cc5626d48d18b904f4c79c56c440cf0982e4823e9"
+    },
+    {
+     "path": "shared/preserved-thinking-migration/prefix_diff.py",
+     "size": 94008,
+     "sha256": "734934b81b5f26e9ed2f8f51f44fed6554233de4f37b22a8845ae4ffcb622ac0"
+    },
+    {
+     "path": "shared/preserved-thinking-migration.md",
+     "size": 63994,
+     "sha256": "479996bf10ba0a12c1a134a81f530afd85b8e35b6e7ee65d04b86ce3d7fd0d8e"
+    },
+    {
+     "path": "shared/prompt-audit.md",
+     "size": 48983,
+     "sha256": "c33200da181e10f1f31bd4625059cd30bc6922940aac49017d8ab0c2721878f2"
+    },
+    {
+     "path": "shared/prompt-caching.md",
+     "size": 33021,
+     "sha256": "92c0904c031831594187840231628d5986c4fd9e0e3415e41ac06bf9220e5c60"
+    },
+    {
+     "path": "shared/token-counting.md",
+     "size": 1603,
+     "sha256": "8674e246c165decdc13106a4861a254ededb0421caf7fa4015ed0fb36e6c60dc"
+    },
+    {
+     "path": "shared/tool-use-concepts.md",
+     "size": 44242,
+     "sha256": "bc5364fed0fe2a196a9f81cddf943d210adde53e3ad5be9b84057093fc8b28f5"
+    },
+    {
+     "path": "typescript/claude-api/README.md",
+     "size": 15739,
+     "sha256": "e1477b7d759734ba7189d094e002c171a68749f3e56f0aa5a4326ecac6825bd4"
+    },
+    {
+     "path": "typescript/claude-api/batches.md",
+     "size": 2594,
+     "sha256": "acc33bb981acd48b6ee9a6b2c2afeef9487c42ef2b117225da3949dc61efb464"
+    },
+    {
+     "path": "typescript/claude-api/files-api.md",
+     "size": 2384,
+     "sha256": "df8e4e433a4ded6d4c3eb40de9bc0782cf77aaa8e3e331a539aec1cff55d1316"
+    },
+    {
+     "path": "typescript/claude-api/streaming.md",
+     "size": 9514,
+     "sha256": "09db982effb0b7d14e29eddd5425b00040debfedccf3dd0db9af73f7d2da3e79"
+    },
+    {
+     "path": "typescript/claude-api/tool-use.md",
+     "size": 22670,
+     "sha256": "fdc6b6aa9cc076206d284cbe0844db4650b23d10dbb6a2b0b036fc802054ce9d"
+    },
+    {
+     "path": "typescript/managed-agents/README.md",
+     "size": 10989,
+     "sha256": "32a7123bb7f8462864c47b01f2bc8489ffd0841a05685747cd14858a4ae4049a"
+    }
+   ]
+  },
+  {
+   "name": "frontend-design",
+   "description": "Guidance for distinctive, intentional visual design when building new UI or reshaping an existing one. Helps with aesthetic direction, typography, and making choices that don't read as templated defaults.",
+   "category": "Developer",
+   "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/frontend-design",
+   "files": [
+    {
+     "path": "LICENSE.txt",
+     "size": 10174,
+     "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+    },
+    {
+     "path": "SKILL.md",
+     "size": 9390,
+     "sha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3"
+    }
+   ]
+  },
+  {
+   "name": "mcp-builder",
+   "description": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).",
+   "category": "Developer",
+   "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills/mcp-builder",
+   "files": [
+    {
+     "path": "LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "SKILL.md",
+     "size": 9092,
+     "sha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295"
+    },
+    {
+     "path": "reference/evaluation.md",
+     "size": 21663,
+     "sha256": "8c99479f8a2d22a636c38e274537aac3610879e26f34e0709825077c4576f427"
+    },
+    {
+     "path": "reference/mcp_best_practices.md",
+     "size": 7330,
+     "sha256": "80fb4369a349447cf18ecdd7494fe7938b6065377e9f08c077cec411093a3007"
+    },
+    {
+     "path": "reference/node_mcp_server.md",
+     "size": 28550,
+     "sha256": "c3ba35a4f599dd53be9c6555ae72c19a7bf412cd5426576c2c08d42755482c66"
+    },
+    {
+     "path": "reference/python_mcp_server.md",
+     "size": 25099,
+     "sha256": "2da52f77e675191014ca2e146a4b95aa04d0ca7dd7e2b100322df15ade685e80"
+    },
+    {
+     "path": "scripts/connections.py",
+     "size": 4875,
+     "sha256": "9403668a2041568772082a8b334122c1f88daf0541fb393af4522d0094a47a6e"
+    },
+    {
+     "path": "scripts/evaluation.py",
+     "size": 12579,
+     "sha256": "49ed1d17cdce5da101b210197740713f49b935c29d4f339542a14b132658e6f7"
+    },
+    {
+     "path": "scripts/example_evaluation.xml",
+     "size": 1194,
+     "sha256": "9272b348ddcc4b06ba562367ccd0770e018158c0068ac5116d5e34aaeff8777a"
+    },
+    {
+     "path": "scripts/requirements.txt",
+     "size": 29,
+     "sha256": "d5d7558b2368ecea9dfeed7d1fbc71ee9e0750bebd1282faa527d528a344c3c7"
     }
    ]
   }

@@ -865,15 +865,24 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
             </p>
           )}
           {catalog === null && !catalogError && <p className="text-sm text-[var(--muted)]">Loading...</p>}
-          {discover.map((entry) => (
-            <DiscoverRow key={entry.name} entry={entry} adding={adding === entry.name} onAdd={() => add(entry.name)} />
+          {[...new Set(discover.map((e) => e.category))].map((category) => (
+            <section key={category} className="mb-5">
+              <h3 className="flex items-center gap-2 text-[17px] font-medium">
+                {category} <CountBadge count={discover.filter((e) => e.category === category).length} />
+              </h3>
+              {discover
+                .filter((e) => e.category === category)
+                .map((entry) => (
+                  <DiscoverRow key={entry.name} entry={entry} adding={adding === entry.name} onAdd={() => add(entry.name)} />
+                ))}
+            </section>
           ))}
           {catalog !== null && discover.length === 0 && (
             <p className="py-6 text-center text-sm text-[var(--muted)]">No skills match "{search.trim()}".</p>
           )}
           {catalog !== null && (
             <p className="mt-4 text-xs text-[var(--muted)]">
-              Open-source skills from github.com/anthropics/skills (Apache License 2.0). Adding one downloads its folder.
+              Open-source skills from github.com/anthropics/skills and github.com/anthropics/knowledge-work-plugins (Apache License 2.0). Adding one downloads its folder.
             </p>
           )}
         </div>
