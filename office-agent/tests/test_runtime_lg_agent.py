@@ -300,17 +300,9 @@ async def test_anthropic_prompt_caching_middleware_tags_system_prompt_and_tools(
 
 
 def test_non_anthropic_model_is_not_tagged_and_raises_no_warning() -> None:
-    """build_langgraph_agent always appends AnthropicPromptCachingMiddleware
-    unconditionally (see its own comment) -- for the non-Anthropic model
-    that's this app's normal case (Gemini is the default; a user can
-    switch models on any thread), it must be a silent, total no-op: no
-    cache_control tag (there's nothing to check the request shape for
-    here, since _FakeModel doesn't expose one the way ChatAnthropic does,
-    but the absence of a crash already proves the tagging path never
-    ran), and critically no Python warning either -- build_langgraph_agent
-    passes unsupported_model_behavior="ignore" specifically so a routine
-    model switch to Gemini/OpenAI-compatible doesn't spam a warning on
-    every single turn (the middleware's own default is "warn")."""
+    """A non-Anthropic model (Gemini is the default; a user can switch models
+    on any thread) gets no AnthropicPromptCachingMiddleware, and no Python
+    warning either."""
     model = _FakeModel(responses=[AIMessage(content="ok")])
     agent = build_langgraph_agent(model, [], "be helpful", checkpointer=InMemorySaver())
     config = {"configurable": {"thread_id": "t1"}}
@@ -320,6 +312,23 @@ def test_non_anthropic_model_is_not_tagged_and_raises_no_warning() -> None:
         result = agent.invoke({"messages": [HumanMessage(content="hi")]}, config=config)
 
     assert result["messages"][-1].content == "ok"
+
+
+def test_the_anthropic_sdk_is_not_imported_for_a_model_that_is_not_anthropic() -> None:
+    """Importing it costs ~0.6s of every server start."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; from langgraph.checkpoint.memory import InMemorySaver\n"
+        "from langchain_core.language_models.fake_chat_models import FakeListChatModel\n"
+        "from coscribe.runtime_lg.agent import build_langgraph_agent\n"
+        "build_langgraph_agent(FakeListChatModel(responses=['x']), [], 'p',"
+        " checkpointer=InMemorySaver())\n"
+        "print('anthropic' in sys.modules)"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.stdout.strip() == "False", out.stderr
 
 
 class _RecordingModel(_FakeModel):

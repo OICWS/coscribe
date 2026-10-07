@@ -169,8 +169,9 @@ class Settings(BaseSettings):
     """When True, only `coordinator.CORE_TOOL_NAMES` stay bound to the
     top-level conversation's model by default -- everything else (most
     of coscribe's own 95 built-in tools, all MCP tools) is hidden until
-    the model calls `search_tools(query)` to find it, then stays
-    available for the rest of that conversation. See runtime_lg/
+    the model calls `search_tools(query)` to find it, and it runs the
+    tool with `use_tool(name, arguments)`, so the tool list the provider
+    caches never changes. See runtime_lg/
     tool_deferral.py's own module docstring for the full design and
     ROADMAP.md's Phase 8ap for the measured cost this addresses (~27k
     tokens of tool JSON schema alone, before this).
