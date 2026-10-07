@@ -69,6 +69,8 @@ export interface SubAgentTask {
   } | null;
   /** The parent went on without waiting for it. */
   background: boolean;
+  /** A code task that carries on from another one: that one's id. */
+  continues?: string;
 }
 
 export type SubAgentTasksResponse = SubAgentTask[];

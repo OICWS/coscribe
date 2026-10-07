@@ -506,6 +506,8 @@ class CodexThread:
         developer_instructions: str = "",
         context_window: int | None = None,
         stall_seconds: float = STALL_SECONDS,
+        fallback_context: str = "",
+        on_open: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._host = host
         self._model = model
@@ -514,6 +516,11 @@ class CodexThread:
         self._instructions = developer_instructions
         self._context_window = context_window
         self._stall_seconds = stall_seconds
+        # What a thread that couldn't be picked up again is told first, in
+        # place of the history it no longer has.
+        self._fallback_context = fallback_context
+        self._on_open = on_open
+        self.resumed = False
 
     def _thread_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -534,6 +541,7 @@ class CodexThread:
                 result = await server.request(
                     "thread/resume", {"threadId": self.thread_id, **self._thread_params()}
                 )
+                self.resumed = True
             except RequestFailed:
                 # Codex writes a thread down only once a turn of it ran; one
                 # whose first turn never got that far, or whose record is
@@ -558,6 +566,10 @@ class CodexThread:
         before = await asyncio.to_thread(_snapshot, self._cwd)
         async with self._host.use() as server:
             thread_id = await self._open(server)
+            if self._on_open is not None:
+                await self._on_open(thread_id)
+            if self._fallback_context and not self.resumed:
+                prompt = f"{self._fallback_context}\n\n{prompt}"
             turn = _Turn(decide, on_event, self._cwd)
             server.listen(thread_id, turn)
             try:

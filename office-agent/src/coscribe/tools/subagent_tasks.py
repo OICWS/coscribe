@@ -59,6 +59,11 @@ class SubAgentTask:
     reported: bool = False
     # "user" (the panel) or "assistant" (stop_subagent) for a stopped run.
     stopped_by: str = ""
+    # A code task: the Codex thread it ran in, so a later task can carry on
+    # in it, and the task it carries on from (its own record, not a rewrite
+    # of that one: the report, status and "reported" all describe one run).
+    codex_thread: str = ""
+    continues: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +86,8 @@ class SubAgentTask:
             "background": self.background,
             "reported": self.reported,
             "stopped_by": self.stopped_by,
+            "codex_thread": self.codex_thread,
+            "continues": self.continues,
         }
 
     @classmethod
@@ -109,6 +116,8 @@ class SubAgentTask:
             background=data.get("background", False),
             reported=data.get("reported", False),
             stopped_by=data.get("stopped_by", ""),
+            codex_thread=data.get("codex_thread", ""),
+            continues=data.get("continues", ""),
         )
 
 

@@ -23,7 +23,9 @@ from coscribe.code_runtime.launch import CodexHost, LaunchSpec
 from coscribe.config import Settings
 from coscribe.runtime import empty_hooks_config
 from coscribe.runtime_lg.code_agent import CODE_APPROVAL_RISKS, CODE_TASK_TOOL
+from coscribe.tools import subagent_tasks
 from coscribe.tools.subagent_tasks import (
+    SubAgentTask,
     SubAgentTaskStore,
     get_subagent_transcript,
     stop_subagent_task,
@@ -63,14 +65,13 @@ class _Model(BaseChatModel):
         return "fake-code-agent-model"
 
 
-def _replies(task: str) -> list[AIMessage]:
+def _replies(task: str, continue_task: str = "") -> list[AIMessage]:
     # A fresh message each time: one object reused keeps one id and
     # replaces itself in the history.
-    call = {
-        "name": CODE_TASK_TOOL,
-        "args": {"description": "Make a file", "task": task},
-        "id": "call_code",
-    }
+    args = {"description": "Make a file", "task": task}
+    if continue_task:
+        args["continue_task"] = continue_task
+    call = {"name": CODE_TASK_TOOL, "args": args, "id": "call_code"}
     return [AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
 
 
@@ -425,6 +426,143 @@ async def test_the_settings_switch_does_not_reach_a_scheduled_run_with_its_own_t
 
     assert [c["tool_name"] for c in socket.of("approval_required")] == ["run_code_command"]
     assert not (tmp_path / "workspace" / "made.txt").exists()
+
+
+def _records(tmp_path: Path) -> list[Any]:
+    return sorted(
+        SubAgentTaskStore(tmp_path / "state").list_for_thread("t1"), key=lambda r: r.started_at
+    )
+
+
+async def test_a_follow_up_carries_on_in_the_same_codex_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    first = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("count one")))
+    first_socket = _Socket()
+    await _run(first, first_socket)
+    [earlier] = _records(tmp_path)
+
+    second = _session(
+        tmp_path,
+        monkeypatch,
+        codex,
+        _Model(responses=_replies("count two", continue_task=earlier.task_id)),
+    )
+    second_socket = _Socket()
+    await _run(second, second_socket)
+    _, later = _records(tmp_path)
+
+    assert "turn 1" in _code_result(first_socket)
+    assert f'continue_task="{earlier.task_id}"' in _code_result(first_socket)
+    # The same thread, so it is the second turn of it.
+    assert "turn 2" in _code_result(second_socket)
+    assert (later.continues, later.codex_thread) == (earlier.task_id, earlier.codex_thread)
+    assert earlier.codex_thread and earlier.continues == ""
+    # The earlier record is left as the run it was.
+    assert (earlier.status, earlier.result) == ("succeeded", "turn 1")
+
+
+async def test_a_follow_up_to_a_thread_codex_lost_is_given_the_earlier_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("count one")))
+    await _run(session, _Socket())
+    [earlier] = _records(tmp_path)
+    earlier.codex_thread = "thr-gone"
+    SubAgentTaskStore(tmp_path / "state").save(earlier)
+
+    again = _session(
+        tmp_path,
+        monkeypatch,
+        codex,
+        _Model(responses=_replies("count two", continue_task=earlier.task_id)),
+    )
+    await _run(again, _Socket())
+
+    sent = [
+        json.loads(line)
+        for line in (tmp_path / "requests.jsonl").read_text().splitlines()
+        if '"turn/start"' in line
+    ]
+    prompt = sent[-1]["params"]["input"][0]["text"]
+    assert "count one" in prompt and "turn 1" in prompt and prompt.endswith("count two")
+    assert _records(tmp_path)[-1].codex_thread != "thr-gone"
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["nope", "../state/x", "other-conversation", "running", "sibling-running", "never-started"],
+)
+async def test_a_follow_up_needs_a_finished_code_task_of_this_conversation(
+    target: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    first = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("count one")))
+    await _run(first, _Socket())
+    [earlier] = _records(tmp_path)
+    store = SubAgentTaskStore(tmp_path / "state")
+    if target == "other-conversation":
+        earlier.thread_id = "t2"
+    elif target == "running":
+        earlier.status = "running"
+        # A run this process is driving, as opposed to one a restart cut off.
+        monkeypatch.setitem(
+            subagent_tasks._RUNNING, earlier.task_id, asyncio.get_running_loop().create_future()
+        )
+    elif target == "sibling-running":
+        # Another task of the same Codex thread is working: whichever is
+        # named, a second turn can't start in it.
+        sibling = SubAgentTask(
+            **{**earlier.__dict__, "task_id": "abcdef012345", "status": "running"}
+        )
+        store.save(sibling)
+        monkeypatch.setitem(
+            subagent_tasks._RUNNING, sibling.task_id, asyncio.get_running_loop().create_future()
+        )
+    elif target == "never-started":
+        earlier.codex_thread = ""
+    store.save(earlier)
+    wanted = earlier.task_id if target not in ("nope", "../state/x") else target
+
+    again = _session(
+        tmp_path, monkeypatch, codex, _Model(responses=_replies("count two", continue_task=wanted))
+    )
+    socket = _Socket()
+    await _run(again, socket)
+
+    assert "turn 2" not in _code_result(socket)
+    expected = {"other-conversation": 0, "sibling-running": 2}.get(target, 1)
+    assert len(store.list_for_thread("t1")) == expected
+    assert [r for r in store.list_for_thread("t1") if r.continues] == []
+
+
+async def test_two_follow_ups_chosen_in_one_message_do_not_share_a_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    first = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("count one")))
+    await _run(first, _Socket())
+    [earlier] = _records(tmp_path)
+    calls = [
+        {
+            "name": CODE_TASK_TOOL,
+            "args": {
+                "description": f"Change {n}",
+                "task": "count more",
+                "continue_task": earlier.task_id,
+            },
+            "id": f"call_{n}",
+        }
+        for n in (1, 2)
+    ]
+    both = _Model(responses=[AIMessage(content="", tool_calls=calls), AIMessage(content="done")])
+    session = _session(tmp_path, monkeypatch, codex, both)
+    socket = _Socket()
+
+    await _run(session, socket)
+
+    results = [r["result"] for r in socket.of("tool_result")]
+    assert sum("turn 2" in r for r in results) == 1
+    assert sum("still running" in r for r in results) == 1
+    assert len([r for r in _records(tmp_path) if r.continues]) == 1
 
 
 async def test_the_panel_hears_of_a_code_task_before_codex_is_ready(

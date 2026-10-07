@@ -1651,6 +1651,12 @@ and the chat hands over what needs real code.
   or `COSCRIBE_CODE_MODULE_ENABLED=true`), a chat can hand a programming
   task to it through `run_code_task`; the run shows in the Sub Agents panel,
   where you watch, approve and stop it.
+- **Follow-ups**: when you ask for changes to what a code task made, the
+  chat carries on from that task (`continue_task`): Codex resumes the same
+  thread, so it remembers what it did and sees its own files, and the chat
+  only says what to change. The follow-up is a task of its own in the Sub
+  Agents panel, listed next to the one it continues. If Codex no longer has
+  the thread, it is given the earlier task and its report instead.
 - **Models**: Codex only speaks OpenAI's Responses API -- OpenAI, or a
   custom provider that serves `/responses` (DeepSeek does). It runs on *Model
   for code* (`COSCRIBE_CODE_MODEL`), or the chat's own model when that's

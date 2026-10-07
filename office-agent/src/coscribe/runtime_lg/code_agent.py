@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -94,11 +95,13 @@ class _Run:
         store: SubAgentTaskStore,
         record: SubAgentTask,
         context: CodeTaskContext,
+        previous: SubAgentTask | None = None,
     ) -> None:
         self.host = host
         self.store = store
         self.record = record
         self.context = context
+        self.previous = previous
         self.entries: list[dict[str, Any]] = [{"kind": "user", "text": record.prompt}]
 
     async def save(self) -> None:
@@ -152,6 +155,10 @@ class _Run:
             self.record.tokens += int(data.get("totalTokens") or 0)
             await self.save()
 
+    async def opened(self, thread_id: str) -> None:
+        self.record.codex_thread = thread_id
+        await self.save()
+
     async def drive(self) -> None:
         record = self.record
         try:
@@ -159,12 +166,16 @@ class _Run:
             model = codex_model(self.context.model(), service.custom_providers())
             codex = await service.prepare()
             folder = self.context.folder()
+            previous = self.previous
             thread = CodexThread(
                 codex,
                 model,
                 folder,
+                thread_id=previous.codex_thread or None if previous else None,
                 developer_instructions=INSTRUCTIONS,
                 context_window=await asyncio.to_thread(self.context.context_window),
+                fallback_context=_earlier_work(previous) if previous else "",
+                on_open=self.opened,
             )
             result = await thread.run_turn(record.prompt, self.decide, self.on_event)
         except asyncio.CancelledError:
@@ -196,10 +207,68 @@ class _Run:
         await self.save()
 
 
+def _earlier_work(previous: SubAgentTask) -> str:
+    """What a follow-up is told when Codex no longer has the thread it carries
+    on: the earlier task and what came of it."""
+    outcome = previous.result or previous.error or "(no report)"
+    return (
+        "You are carrying on from an earlier task of this folder, whose history is no "
+        f"longer available.\nThe earlier task:\n{previous.prompt}\nIts report:\n{outcome}\n"
+        "What the user wants now:"
+    )
+
+
+_TASK_ID = re.compile(r"[0-9a-f]{12}")
+
+
+def _continuation(
+    store: SubAgentTaskStore, task_id: str, thread_id: str
+) -> tuple[SubAgentTask | None, str]:
+    """The task to carry on from, or why there isn't one. Everything here is
+    synchronous and the new record is saved before the caller first awaits, so
+    two follow-ups chosen in one message can't both pass."""
+    # The id is the model's, and names a file: only what this tool made.
+    previous = store.load(task_id) if _TASK_ID.fullmatch(task_id) else None
+    if (
+        previous is None
+        or previous.thread_id != thread_id
+        or not previous.model.startswith("codex:")
+    ):
+        return None, (
+            "continue_task isn't a code task of this conversation (it may have been cleared "
+            "from the Sub Agents panel). Start a new task instead."
+        )
+    if not previous.codex_thread:
+        return None, (
+            "That code task never got as far as starting, so there is nothing to carry on. "
+            "Start a new task with the full instructions."
+        )
+    # Two turns can't run in one Codex thread at once, whichever task of it
+    # is the one named.
+    if any(
+        sibling.codex_thread == previous.codex_thread
+        and sibling.status in ("running", "needs_approval")
+        for sibling in store.list_for_thread(thread_id)
+    ):
+        return None, "That code task is still running; wait for its report before continuing it."
+    return previous, ""
+
+
+def _report(record: SubAgentTask) -> str:
+    """The run's outcome for the conversation, with the id a follow-up needs."""
+    outcome = subagent_outcome(record)
+    if not record.codex_thread:
+        return outcome
+    return (
+        f"{outcome}\n\n(Code task {record.task_id}: to change or fix its work, call "
+        f'run_code_task again with continue_task="{record.task_id}".)'
+    )
+
+
 def build_code_task_tool(host: SubAgentHost, context: CodeTaskContext) -> Callable[..., Any]:
     store = SubAgentTaskStore(host.state_dir)
 
-    async def run_code_task(description: str, task: str) -> str:
+    async def run_code_task(description: str, task: str, continue_task: str = "") -> str:
         """Hand a programming task to the code module -- a coding agent
         that writes and runs code in this conversation's folder -- and wait
         for its report. Use it for work that needs real code: processing
@@ -213,11 +282,25 @@ def build_code_task_tool(host: SubAgentHost, context: CodeTaskContext) -> Callab
         the user watches it, and can stop it, in the Sub Agents panel. Only
         its report comes back, with the files it created or changed.
 
+        To change or fix what an earlier code task produced -- the user's
+        feedback on its work -- pass that task's id as `continue_task`: the
+        code module carries on in the same thread, remembering what it did
+        and seeing its own files, so `task` need only say what to change.
+        Don't continue for unrelated work; start a new task.
+
         Args:
             description: a few plain words for the panel, e.g. "Clean the
                 order export and total by region".
-            task: the complete task -- files, rules, outputs.
+            task: the complete task -- files, rules, outputs; for a
+                continuation, what to change.
+            continue_task: the id of an earlier, finished code task of this
+                conversation to carry on from, as its report gave it.
         """
+        previous: SubAgentTask | None = None
+        if continue_task.strip():
+            previous, problem = _continuation(store, continue_task.strip(), host.thread_id)
+            if problem:
+                return problem
         try:
             model = codex_model(context.model(), context.service().custom_providers())
         except CodexUnavailable as exc:
@@ -235,8 +318,10 @@ def build_code_task_tool(host: SubAgentHost, context: CodeTaskContext) -> Callab
             status="running",
             started_at=datetime.now(UTC).isoformat(),
             model=f"codex:{model.model}",
+            continues=previous.task_id if previous else "",
+            codex_thread=previous.codex_thread if previous else "",
         )
-        run = _Run(host, store, record, context)
+        run = _Run(host, store, record, context, previous)
         # A fresh context, as spawn_agent's runner gets: LangChain keeps the
         # running call's config in contextvars.
         runner = asyncio.create_task(run.drive(), context=contextvars.Context())
@@ -249,7 +334,7 @@ def build_code_task_tool(host: SubAgentHost, context: CodeTaskContext) -> Callab
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if current is None or not current.cancelling():
-                return subagent_outcome(record)
+                return _report(record)
             # The parent's turn is ending: a Stop stops this run too (the
             # session cancels it); a dropped connection leaves it running as
             # a background run whose report waits in the panel.
@@ -257,6 +342,6 @@ def build_code_task_tool(host: SubAgentHost, context: CodeTaskContext) -> Callab
                 record.background = True
                 store.save(record)
             raise
-        return subagent_outcome(record)
+        return _report(record)
 
     return tool_metadata(run_code_task, risk_category="READ", category="subagents")
