@@ -744,7 +744,8 @@ Scope this as a *generic* mechanism from the start (not GitHub-specific),
 since Slack's own token acquisition has the identical problem and
 shouldn't repeat the manual-paste pattern either.
 
-- [ ] **5a -- Generic local-connector OAuth flow**: a reusable connect
+- [x] **5a -- Generic local-connector OAuth flow** -- **done for remote servers in
+      Phase 8cx** (the MCP spec's own OAuth, not a per-provider flow); original text: a reusable connect
       mechanism (device flow preferred where a provider supports it,
       loopback redirect otherwise) that any catalog entry needing a token
       can opt into, replacing today's "prefill the Custom form, paste a
@@ -7555,9 +7556,11 @@ in code.
       schema, sent once. A real approval pause on the discovered
       `write_pptx` still showed the card under its real name.
       Checked in unit tests that the OpenAI and Anthropic adapters put the
-      `use_tool` form in every field they read a call from. Not checked
-      live: Gemini accepting `arguments` as an open object (the adapter
-      keeps it as a plain OBJECT, no key available here).
+      `use_tool` form in every field they read a call from. Checked live on
+      Gemini (`gemini-3.5-flash`, 2026-10-07): it accepts `arguments` as an
+      open object, ran `write_pptx` through `use_tool`, and after the
+      search 24,514 of 29,787 prompt tokens were still cached (the
+      14k-token message of the first turn plus its answer).
 - [x] **Start-up.** `import coscribe.web.app` 1.9-2.6s -> ~1.3s, start to
       first answer from `/api/tools` ~2.3s -> ~1.6s (3 runs each). The cost
       was `langchain_anthropic.middleware` pulling in the whole `anthropic`
@@ -7582,7 +7585,11 @@ instead, as Connectors have.
       `Get-Content`/`gc`/`cat`/`type`, `Select-String`/`sls`, `Get-Item`,
       `Get-Location`, `Test-Path`. Decided by coscribe's own word reading,
       never Codex's `commandActions`: a PowerShell "read" can go on to
-      `Remove-Item`. No pipes, `;`, `&&`, redirects, `$`, backticks,
+      `Remove-Item`. A path with a colon other than after one drive letter is
+      refused (`env:`, `HKLM:`, `Cert:` are providers -- `Get-Content
+      env:OPENAI_API_KEY` would otherwise pass as a file inside the folder --
+      and `a.txt:stream` is a hidden stream), as are Windows device names
+      (`CON`, `NUL`, `COM1`...). Found in review. No pipes, `;`, `&&`, redirects, `$`, backticks,
       sub-expressions, commas or `~`; every path stays inside the folder.
       Not yet run on a real Windows machine; the quoting Codex uses there is
       read from its source, not observed.
@@ -7591,8 +7598,11 @@ instead, as Connectors have.
       (task, action) in the session; a later task asks again.
 - [x] **Allow for good**: `code_permissions.json` in the state folder,
       Settings > Code > Approvals, two switches (commands, file changes),
-      `GET/PUT /api/code/permissions`. Checked after hooks, exec policy and
-      Plan mode, so none of them is bypassed; audit reason `code_allowed`.
+      `GET/PUT /api/code/permissions`. Checked after hooks and Plan mode, so
+      neither is bypassed (exec policy covers python/node scripts only and
+      never sees a code command); audit reason `code_allowed`. The switch
+      doesn't reach a scheduled run, whose task chose its own approval tier,
+      nor a turn nobody is watching.
 - [x] The code command card no longer says the script "can write only in the
       workspace": Codex runs with no sandbox.
 - [x] Tests: the word reader against 14 reads and 20 things it must refuse
@@ -7602,6 +7612,61 @@ instead, as Connectors have.
       permissions API. Driven in a browser against the fake Codex: one click
       on *Allow for this task* ran both commands; the settings switch ran
       them with no card.
+
+## Phase 8cx -- Connectors that sign in through the browser; a hosted-only catalog (built, awaiting your sign-in tests)
+
+Asked why Microsoft 365 doesn't open a login page the way GitHub did, and
+which connectors to add. Why: the Microsoft 365 entry ran a community
+server locally (needs Node) whose only sign-in was a device code the model
+had to read out; coscribe never opened anything. GitHub's page opened
+because coscribe itself ran that flow, and it was removed with that entry.
+
+- [x] **The rule for the curated list (yours, 2026-10-07):** only hosted
+      servers, signed in to by the user in their own browser, that work in
+      any environment: no local install, no app to register, no company IT
+      step. Example: a company on Teams may not let a third-party app into
+      its Microsoft 365 tenant, but its staff can open Canva themselves, so
+      Canva connects and Microsoft 365 doesn't. Microsoft 365 (and
+      anything else that needs a tenant's approval, a pre-registered app or
+      a Cloud project) stays addable by hand from the Custom tab.
+- [x] **Browser sign-in for a remote connector** (`runtime_lg/mcp_oauth.py`,
+      the MCP spec's OAuth 2.1 through the MCP SDK's `OAuthClientProvider`:
+      discovery, dynamic client registration, PKCE). Connect opens the
+      service's own page in the default browser; the redirect lands on
+      `GET /api/mcp/oauth/callback` of the running coscribe server, which
+      hands the code to the waiting connection. `mcp.json` holds only
+      `"auth": "oauth"`; tokens and the registered client go through
+      `runtime/secrets.py` (keychain, else a 0600 file) under
+      `state_dir/mcp_oauth/`. A restart reconnects with the saved tokens
+      and refreshes them without a browser; if they no longer work the
+      connector shows "Sign in" instead of opening a page at startup.
+      A client registered for another redirect address is registered
+      again, because the desktop app's server takes a new port each start.
+      The Connectors page shows the waiting sign-in with a link to the
+      page, then the tools once it connects. Also: a connection error that
+      anyio wraps in a task-group exception now shows its real reason.
+- [x] **Catalog, checked against the live servers** (registration accepted
+      and the sign-in page reached, with a loopback redirect): Canva,
+      Notion, Miro, monday.com. **Dropbox was dropped after that check**:
+      its metadata lists a registration address, but registering answers
+      "Only pre-registered MCP trusted partners are allowed". So a listed
+      registration endpoint isn't proof; only a real registration is.
+      Probed and left out: Slack (docs: pre-registered, directory-published
+      apps only), Google Workspace (you create the OAuth client; developer
+      preview), Box and HubSpot (no registration), Asana's v2 (not
+      confirmed), Microsoft's Work IQ servers (preview; needs the tenant),
+      Figma and Linear (advertise registration, but developer tools),
+      Atlassian (a company's own tenant; second batch), Zapier (advertises
+      registration; what it offers depends on what the user set up in
+      Zapier, so not tried).
+- [ ] **Needs your testing:** a real sign-in end to end for each of the
+      four, in the desktop app. Tested here: the whole flow against an
+      in-process spec-compliant OAuth MCP server (sign-in, saved sign-in
+      on reconnect, refresh of an expired token, a refused sign-in and a
+      retry, removal forgetting the credentials). Not tested here: a
+      provider accepting or refusing the final redirect to a loopback
+      address; a provider showing its own consent step; the desktop app
+      handing the address to the default browser.
 
 ## Later -- real intentions, not actively scheduled
 
@@ -7697,7 +7762,8 @@ a concrete reason to prioritize a new surface.
   of the prefix stays stable). Deliberately deferred -- explicitly not
   blocking on this ("暂时现在不管").
 
-- **A one-time font-swap flash on load** -- not started; noted here per
+- [x] **A one-time font-swap flash on load** -- **gone (reported by you,
+  2026-10-07)**; what fixed it was not recorded. Original note: not started; noted here per
   your request. Live-reported: a few seconds after the app becomes
   interactive, right around when the model picker/provider list finishes
   loading, the whole UI's font visibly flashes once. Not yet root-caused
@@ -7817,7 +7883,8 @@ a concrete reason to prioritize a new surface.
   above -- see "Explicitly not adopting" below for the scope that was
   rejected and why. Converged scope, four independent pieces, none
   requiring the sandbox work first since none of them run untrusted code:
-  1. **Curated office-relevant MCP connectors** -- extend the existing
+  1. **Curated office-relevant MCP connectors** -- **done differently in Phase 8cx**
+     (hosted servers only, browser sign-in); original plan: extend the existing
      hardcoded `MCP_CATALOG` in `web/app.py` (currently playwright/fetch/
      memory/sequential-thinking/time -- general-purpose/dev-oriented, not
      office-specific) with hand-picked, version-pinned entries (same

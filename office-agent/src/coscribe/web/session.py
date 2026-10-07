@@ -2624,12 +2624,17 @@ class ChatSessionLG:
         return trigger.approval_mode
 
     def _code_allows(self, name: str, websocket: Any) -> bool:
-        """Whether the user has allowed this kind of code-module action: in
-        Settings > Code for good, or on an earlier card for this task."""
+        """Whether the user has allowed this kind of code-module action: on
+        an earlier card for this task, or in Settings > Code for good."""
         if name not in CODE_APPROVAL_RISKS or not isinstance(websocket, _SubAgentApprovalChannel):
             return False
         if (websocket.task_id, name) in self._code_task_allowances:
             return True
+        # A switch set for the user at the keyboard doesn't reach a scheduled
+        # run, whose task chose its own approval tier, or a turn nobody is
+        # watching.
+        if self._effective_run_approval_mode() is not None or not websocket.can_resolve_approvals:
+            return False
         permissions = CodePermissions(self.settings.state_dir, tuple(CODE_APPROVAL_RISKS))
         return permissions.policy(name) == "allow"
 

@@ -9,6 +9,7 @@ import {
   reconnectMcpServer,
   removeMcpServer,
   setConnectorToolPolicies,
+  signInMcpServer,
 } from "../../lib/rest";
 import type {
   ConnectorTool,
@@ -63,7 +64,7 @@ function parseEnvLines(text: string): Record<string, string> {
 }
 
 type LocalServerArgs = { command: string; args: string[]; env?: Record<string, string> };
-type RemoteServerArgs = { server_url: string; headers?: Record<string, string> };
+type RemoteServerArgs = { server_url: string; headers?: Record<string, string>; auth?: "oauth" };
 
 /** A catalog entry, a connector someone added, or both. */
 interface ConnectorRow {
@@ -309,6 +310,32 @@ interface Notice {
   text: string;
   error: boolean;
   update?: { pkg: string; version: string };
+  /** A sign-in waiting in the user's browser; the notice goes away once it connects. */
+  signin?: { name: string; url: string };
+}
+
+const SIGN_IN_TEXT = "Finish signing in in your browser, a page was opened.";
+
+function NoticeText({ notice, onApplyUpdate }: { notice: Notice; onApplyUpdate?: (pkg: string, version: string) => void }) {
+  return (
+    <p role="status" className={`text-sm ${notice.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>
+      {notice.text}{" "}
+      {notice.update && onApplyUpdate && (
+        <button
+          type="button"
+          className="text-[var(--accent)] hover:underline"
+          onClick={() => onApplyUpdate(notice.update!.pkg, notice.update!.version)}
+        >
+          Update
+        </button>
+      )}
+      {notice.signin && (
+        <a href={notice.signin.url} target="_blank" rel="noreferrer" className="text-[var(--accent)] hover:underline">
+          Open the sign-in page
+        </a>
+      )}
+    </p>
+  );
 }
 
 /** An added connector: its tools and what each may do, and Disconnect. */
@@ -319,6 +346,7 @@ function ConnectorDetail({
   onBack,
   onDisconnect,
   onReconnect,
+  onSignIn,
   onCheckUpdate,
   onApplyUpdate,
   onPolicies,
@@ -329,6 +357,7 @@ function ConnectorDetail({
   onBack: () => void;
   onDisconnect: () => void;
   onReconnect: () => void;
+  onSignIn: () => void;
   onCheckUpdate: (pkg: string) => void;
   onApplyUpdate: (pkg: string, version: string) => void;
   onPolicies: (policies: Record<string, ConnectorToolPolicy>) => void;
@@ -361,29 +390,32 @@ function ConnectorDetail({
         </p>
       </div>
 
-      {notice && (
-        <p role="status" className={`text-sm ${notice.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>
-          {notice.text}{" "}
-          {notice.update && (
-            <button
-              type="button"
-              className="text-[var(--accent)] hover:underline"
-              onClick={() => onApplyUpdate(notice.update!.pkg, notice.update!.version)}
-            >
-              Update
-            </button>
-          )}
-        </p>
-      )}
+      {notice && <NoticeText notice={notice} onApplyUpdate={onApplyUpdate} />}
 
       {!info.connected ? (
         <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] px-4 py-3 text-sm">
           <span className="flex-1 text-[var(--muted)]">
-            {pending ? "Connecting…" : "Not connected. Its tools show up here once it connects."}
+            {pending
+              ? "Connecting…"
+              : info.signin
+                ? "Waiting for you to sign in in your browser."
+                : info.auth === "oauth"
+                  ? (info.signin_error ?? "Not signed in. Its tools show up here once you sign in.")
+                  : "Not connected. Its tools show up here once it connects."}
           </span>
+          {info.signin && (
+            <a href={info.signin.url} target="_blank" rel="noreferrer" className="text-[var(--accent)] hover:underline">
+              Open the sign-in page
+            </a>
+          )}
           <button type="button" className={secondaryButtonClass} disabled={pending} onClick={onReconnect}>
             Retry
           </button>
+          {info.auth === "oauth" && (
+            <button type="button" className={primaryButtonClass} disabled={pending} onClick={onSignIn}>
+              Sign in
+            </button>
+          )}
         </div>
       ) : (
         <section className="flex flex-col">
@@ -416,7 +448,7 @@ function CatalogConnectorPage({
   onConnect: () => void;
 }) {
   const title = entry.title ?? entry.name;
-  const pkg = findPinnedNpmPackage(entry.args);
+  const pkg = findPinnedNpmPackage(entry.args ?? []);
   return (
     <div className="flex flex-col gap-5">
       <button type="button" className="flex w-fit items-center gap-2 text-[15px] text-[var(--fg)] hover:opacity-70" onClick={onBack}>
@@ -437,11 +469,7 @@ function CatalogConnectorPage({
         </button>
       </div>
       <p className="text-[15px] leading-relaxed">{entry.description}</p>
-      {notice && (
-        <p role="status" className={`text-sm ${notice.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>
-          {notice.text}
-        </p>
-      )}
+      {notice && <NoticeText notice={notice} />}
       <div className="grid grid-cols-2 gap-6 border-t border-[var(--border)] pt-5 text-sm">
         {entry.made_by && (
           <div>
@@ -457,11 +485,14 @@ function CatalogConnectorPage({
         )}
         <div>
           <div className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
-            {pkg ? "Package" : "Command"}
+            {entry.server_url ? "Address" : pkg ? "Package" : "Command"}
           </div>
           <div className="mt-1 font-mono text-[13px]">
-            {pkg ? `${pkg.name} ${pkg.version}` : `${entry.command} ${entry.args.join(" ")}`}
+            {entry.server_url ?? (pkg ? `${pkg.name} ${pkg.version}` : `${entry.command} ${(entry.args ?? []).join(" ")}`)}
           </div>
+          {entry.auth === "oauth" && (
+            <div className="mt-2 text-xs text-[var(--muted)]">You sign in on the service's own page.</div>
+          )}
         </div>
       </div>
     </div>
@@ -704,6 +735,7 @@ export function ConnectorsTab({ active }: { active: boolean }) {
       const result = await addMcpServer(name, server);
       const rejected = Object.values(result.rejected);
       if (rejected.length > 0) setNotice({ text: `Not added -- ${rejected[0]}`, error: true });
+      else if (result.signin) setNotice({ text: SIGN_IN_TEXT, error: false, signin: { name, url: result.signin.url } });
       else if (result.connected) setNotice(null);
       else setNotice({ text: `Saved, but couldn't connect${result.error ? ` -- ${result.error}` : "."}`, error: true });
     });
@@ -714,8 +746,17 @@ export function ConnectorsTab({ active }: { active: boolean }) {
       setNotice({ text: `${entry.title ?? entry.name} needs its own token -- add it as a custom connector.`, error: false });
       return;
     }
-    void performAdd(entry.name, { command: entry.command, args: entry.args });
+    if (entry.server_url) void performAdd(entry.name, { server_url: entry.server_url, auth: entry.auth });
+    else void performAdd(entry.name, { command: entry.command ?? "", args: entry.args ?? [] });
   };
+
+  const signIn = (name: string) =>
+    withPending(name, async () => {
+      const result = await signInMcpServer(name);
+      if (result.signin) setNotice({ text: SIGN_IN_TEXT, error: false, signin: { name, url: result.signin.url } });
+      else if (result.connected) setNotice(null);
+      else setNotice({ text: `Couldn't sign in${result.error ? ` -- ${result.error}` : "."}`, error: true });
+    });
 
   const disconnect = async (name: string) => {
     await removeMcpServer(name);
@@ -764,6 +805,10 @@ export function ConnectorsTab({ active }: { active: boolean }) {
     pollLiveServers();
   };
 
+  useEffect(() => {
+    if (notice?.signin && effectiveServers[notice.signin.name]?.connected) setNotice(null);
+  }, [notice, effectiveServers]);
+
   const rows = buildRows(catalog, effectiveServers);
   const opened = openName ? rows.find((r) => r.name === openName) : undefined;
   const backToList = () => {
@@ -781,6 +826,7 @@ export function ConnectorsTab({ active }: { active: boolean }) {
         onBack={backToList}
         onDisconnect={() => void disconnect(opened.name)}
         onReconnect={() => void reconnect(opened.name)}
+        onSignIn={() => void signIn(opened.name)}
         onCheckUpdate={(pkg) => void checkUpdate(pkg, pinned?.version)}
         onApplyUpdate={(pkg, version) => void applyUpdate(opened.name, pkg, version)}
         onPolicies={(policies) => void setPolicies(opened.name, policies)}
@@ -889,7 +935,7 @@ export function ConnectorsTab({ active }: { active: boolean }) {
                   <span className="truncate text-[15px]">{row.title}</span>
                 </div>
                 <div className="flex items-center text-[15px]">
-                  {row.serverInfo?.server_url !== undefined ? "Web" : "Local"}
+                  {(row.serverInfo?.server_url ?? row.catalogEntry?.server_url) !== undefined ? "Web" : "Local"}
                   {!row.catalogEntry && (
                     <span className="ml-2 rounded-md bg-[var(--card-bg)] px-1.5 py-0.5 text-xs text-[var(--muted)]">Custom</span>
                   )}

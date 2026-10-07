@@ -51,6 +51,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hmac
+import html
 import inspect
 import json
 import logging
@@ -192,6 +193,15 @@ if TYPE_CHECKING:
     # actually need this module at runtime.
     from ..runtime_lg.mcp import McpServerConnection
 
+def _oauth_page(message: str) -> str:
+    """The page a connector's sign-in redirects the browser to."""
+    return (
+        "<!doctype html><meta charset=utf-8><title>coscribe</title>"
+        "<body style=\"font-family:system-ui,sans-serif;max-width:32rem;margin:20vh auto;"
+        f"padding:0 1rem\"><h2>coscribe</h2><p>{html.escape(message)}</p></body>"
+    )
+
+
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # office docs/PDFs, not video files
 _PREVIEW_NAME_RE = re.compile(r"[0-9a-f]{32}\.png")  # tools/_thumbnail.py's uuid4().hex naming
 # How long lifespan() blocks app startup on connect_mcp_tools_lg before
@@ -236,38 +246,55 @@ class _NoCacheStaticFiles(StaticFiles):
         return response
 
 
-# A small, curated, hardcoded list -- not a live marketplace. Every entry
-# is a stdio/local-command MCP server, matching tools/mcp.py's existing
-# schema.
+# A small, curated, hardcoded list -- not a live marketplace. Every entry is
+# a hosted (remote) MCP server the user signs in to in their own browser:
+# nothing is installed, no app is registered, and no company IT step is
+# needed, so it works wherever the person can already open the service
+# themselves. Each one was checked against the live server (2026-10-07): the
+# registration call is accepted and the sign-in page is reached. A server that
+# needs a pre-registered app -- Slack, Google Workspace, Box, HubSpot, and
+# Dropbox, which lists a registration address but answers "only pre-registered
+# trusted partners" -- or a company-approved app, like Microsoft 365 in a
+# tenant that doesn't allow third-party apps, is left out on purpose.
+# Anything else is still addable by hand from the Custom tab.
 MCP_CATALOG: list[dict[str, Any]] = [
     {
-        "name": "office365",
-        "title": "Microsoft 365",
-        "made_by": "Softeria (community)",
-        "homepage": "https://github.com/Softeria/ms-365-mcp-server",
-        "description": "Outlook mail and calendar, OneDrive files, Excel, OneNote, "
-        "To Do, Planner -- signs in through its own device-code flow (the agent "
-        "gives you a URL and a code to enter, no setup beforehand).",
-        "command": "npx",
-        # Community server (github.com/Softeria/ms-365-mcp-server), not an
-        # @modelcontextprotocol/ package -- included anyway (unlike the
-        # Postgres/Filesystem servers deliberately left out below) on real
-        # health signals: MIT-licensed, 288 published versions, built on
-        # Microsoft's own @azure/msal-node rather than a hand-rolled OAuth
-        # client. A genuinely better fit than it first looks: unlike
-        # Slack/Notion (paste a token) or Google Drive (Cloud Console app
-        # registration + OAuth client JSON), this one ships its own
-        # pre-registered Microsoft app and authenticates via MSAL's Device
-        # Code flow *entirely inside its own MCP tools* (`login`/`verify-
-        # login`) -- no coscribe-side OAuth mechanism, no Settings-tab
-        # config, not even needs_config: the agent calls `login`, shows the
-        # user a URL+code, done. The exact same flow shape as the removed
-        # GitHub catalog entry's device flow, just handled by the server
-        # itself instead of by coscribe. Personal-account tool set only
-        # (no `--org-mode`) -- Teams/SharePoint need a work/school account
-        # and a different invocation; addable by hand via the Custom tab
-        # for anyone who specifically wants that.
-        "args": ["@softeria/ms-365-mcp-server@0.148.2"],
+        "name": "canva",
+        "title": "Canva",
+        "made_by": "Canva",
+        "homepage": "https://www.canva.dev/docs/mcp/",
+        "description": "Search, create, autofill and export Canva designs: slides, "
+        "social posts and documents.",
+        "server_url": "https://mcp.canva.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "notion",
+        "title": "Notion",
+        "made_by": "Notion",
+        "homepage": "https://developers.notion.com/docs/get-started-with-mcp",
+        "description": "Search, read and edit the pages and databases of your Notion workspace.",
+        "server_url": "https://mcp.notion.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "miro",
+        "title": "Miro",
+        "made_by": "Miro",
+        "homepage": "https://developers.miro.com/docs/mcp-intro",
+        "description": "Read and search your Miro boards, build boards and diagrams, and "
+        "act on comments.",
+        "server_url": "https://mcp.miro.com/",
+        "auth": "oauth",
+    },
+    {
+        "name": "monday",
+        "title": "monday.com",
+        "made_by": "monday.com",
+        "homepage": "https://developer.monday.com/api-reference/docs/mondaycom-mcp",
+        "description": "Query your monday.com boards, create items and update their columns.",
+        "server_url": "https://mcp.monday.com/mcp",
+        "auth": "oauth",
     },
 ]
 
@@ -275,13 +302,9 @@ MCP_CATALOG: list[dict[str, Any]] = [
 # issues/PRs/repo search via GitHub's own remote MCP server + an OAuth
 # Device Flow sign-in) existed here and were removed -- coscribe's target
 # user is a general office file/task automation assistant, not a developer
-# tool, and neither is relevant to that audience by default. Still
-# addable by hand via the Connectors panel's Custom tab (name + command +
-# args) for anyone who specifically wants them; only the curated,
-# one-click catalog entries were removed, along with the GitHub-specific
-# OAuth Device Flow implementation that entry was the only caller of (see
-# git history for `web/github_oauth.py` if that flow is ever needed again
-# for a different provider).
+# tool. The Microsoft 365 entry (a community server run locally with npx,
+# signing in by device code) was removed for the reasons above. Still
+# addable by hand via the Connectors panel's Custom tab.
 
 # Well-maintained official MCP servers that exist but are deliberately left
 # out of MCP_CATALOG above -- these don't just need a path/token filled in
@@ -890,6 +913,8 @@ class MCPServerUpdate(BaseModel):
     env: dict[str, str] = {}
     server_url: str | None = None
     headers: dict[str, str] = {}
+    # "oauth": sign in through the server's own browser page; no headers.
+    auth: str | None = None
 
 
 class MCPVersionBump(BaseModel):
@@ -1109,6 +1134,12 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     # server disconnects/reconnects or the app shuts down, or its
     # subprocess (and, for Playwright, its browser) leaks past that point.
     mcp_connections: dict[str, McpServerConnection] = {}
+    # Deferred import for the same reason as runtime_lg.mcp (see the comment
+    # above MCP_STARTUP_TIMEOUT_SECONDS).
+    from ..runtime_lg.mcp_oauth import SIGN_IN_TIMEOUT_SECONDS, McpOAuth
+
+    mcp_oauth = McpOAuth(settings.state_dir)
+    sign_in_tasks: set[asyncio.Task[None]] = set()
 
     def _title_sidecar_path(thread_id: str) -> Path:
         # Per-thread sidecar-file convention (plain text keyed by
@@ -1302,7 +1333,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             await connection.close()
 
     async def _connect_and_register_mcp_server_lg(
-        name: str, config: Any
+        name: str, config: Any, connect_timeout: float | None = None
     ) -> tuple[bool, str | None]:
         """Connects one MCP server and registers its tools into
         extra_tools_holder. Returns (connected, error) -- error is a
@@ -1315,7 +1346,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         # Deferred import -- see the top-of-file comment above MCP_STARTUP_TIMEOUT_SECONDS.
         from ..runtime_lg.mcp import connect_one_mcp_server_lg
 
-        new_tools, connection, error = await connect_one_mcp_server_lg(name, config)
+        extra = {} if connect_timeout is None else {"connect_timeout": connect_timeout}
+        new_tools, connection, error = await connect_one_mcp_server_lg(
+            name, config, mcp_oauth.auth_for, **extra
+        )
         if not new_tools or connection is None:
             return False, error
         extra_tools_holder["tools"].extend(new_tools)
@@ -1528,7 +1562,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 from ..runtime_lg.mcp import connect_mcp_tools_lg
 
                 connect_task: asyncio.Task[Any] = asyncio.create_task(
-                    connect_mcp_tools_lg(settings.mcp_config_path)
+                    connect_mcp_tools_lg(settings.mcp_config_path, mcp_oauth.auth_for)
                 )
                 mcp_connect_task = connect_task
                 try:
@@ -2739,6 +2773,68 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     async def get_mcp_catalog() -> list[dict[str, Any]]:
         return MCP_CATALOG
 
+    async def _begin_oauth_sign_in(name: str, config: Any, request: Request) -> dict[str, Any]:
+        """Starts signing in to a connector and returns once there is
+        something to show: connected, failed, or the sign-in page's address
+        (already opened in the user's browser). The connection keeps
+        waiting for the redirect in the background; the Connectors page
+        sees the result through GET /api/mcp/servers."""
+        redirect_uri = f"{str(request.base_url).rstrip('/')}/api/mcp/oauth/callback"
+        flow = await mcp_oauth.begin(name, redirect_uri)
+        await _disconnect_mcp_server_lg(name)
+
+        async def connect() -> None:
+            connected, error = False, None
+            try:
+                connected, error = await _connect_and_register_mcp_server_lg(
+                    name, config, SIGN_IN_TIMEOUT_SECONDS + 30
+                )
+                await _refresh_all_sessions_extra_tools()
+            except Exception as exc:  # noqa: BLE001 -- shown to the user, not swallowed
+                error = str(exc) or type(exc).__name__
+            mcp_oauth.finish(flow, None if connected else error or "Couldn't sign in.")
+
+        task = asyncio.create_task(connect())
+        sign_in_tasks.add(task)
+        task.add_done_callback(sign_in_tasks.discard)
+        try:
+            await asyncio.wait_for(flow.url_ready.wait(), timeout=30)
+        except TimeoutError:
+            return {"connected": False, "error": "The server didn't offer a sign-in page."}
+        if flow.finished.is_set():
+            return {"connected": flow.error is None, "error": flow.error}
+        return {"connected": False, "signin": {"url": flow.url}}
+
+    @app.get("/api/mcp/oauth/callback", response_class=HTMLResponse)
+    async def mcp_oauth_callback(
+        state: str = "", code: str | None = None, error: str | None = None
+    ) -> HTMLResponse:
+        name = mcp_oauth.complete(state, code, error)
+        if name is None:
+            return HTMLResponse(
+                _oauth_page("This sign-in link has expired. Start again from coscribe."),
+                status_code=400,
+            )
+        if error:
+            return HTMLResponse(_oauth_page(f"Signing in to {name} didn't work: {error}."))
+        return HTMLResponse(
+            _oauth_page(
+                f"You're signed in to {name}. You can close this tab and go back to coscribe."
+            )
+        )
+
+    @app.post("/api/mcp/servers/{name}/signin")
+    async def sign_in_mcp_server(name: str, request: Request) -> dict[str, Any]:
+        """Signs in again to an OAuth connector whose saved sign-in no longer
+        works."""
+        if settings.mcp_config_path is None or not settings.mcp_config_path.is_file():
+            return {"error": "not found", "connected": False}
+        entry = _read_mcp_servers_raw(settings.mcp_config_path)["mcpServers"].get(name)
+        if entry is None or entry.get("auth") != "oauth":
+            return {"error": "not found", "connected": False}
+        config = validate_mcp_config({"type": "mcp", "name": name, **entry})
+        return await _begin_oauth_sign_in(name, config, request)
+
     @app.get("/api/mcp/servers")
     async def get_mcp_servers() -> dict[str, Any]:
         if settings.mcp_config_path is None or not settings.mcp_config_path.is_file():
@@ -2768,6 +2864,13 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "connected": connected,
                     "tools": _connector_tools(name),
                 }
+                if config.get("auth") == "oauth":
+                    waiting = mcp_oauth.pending(name)
+                    result[name]["auth"] = "oauth"
+                    result[name]["signin"] = (
+                        {"url": waiting.url} if waiting is not None and waiting.url else None
+                    )
+                    result[name]["signin_error"] = mcp_oauth.last_error(name)
             else:
                 result[name] = {
                     "command": config.get("command"),
@@ -2779,11 +2882,13 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         return result
 
     @app.post("/api/mcp/servers")
-    async def add_mcp_server(payload: MCPServerUpdate) -> dict[str, Any]:
+    async def add_mcp_server(payload: MCPServerUpdate, request: Request) -> dict[str, Any]:
         if payload.server_url:
             entry: dict[str, Any] = {"server_url": payload.server_url}
             if payload.headers:
                 entry["headers"] = payload.headers
+            if payload.auth:
+                entry["auth"] = payload.auth
         else:
             entry = {"command": payload.command, "args": payload.args}
             if payload.env:
@@ -2819,6 +2924,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             settings.mcp_config_path = path
             set_key(".env", "COSCRIBE_MCP_CONFIG_PATH", str(path))
 
+        if config.get("auth") == "oauth":
+            return {"rejected": {}, **await _begin_oauth_sign_in(payload.name, config, request)}
         await _disconnect_mcp_server_lg(payload.name)
         connected, error = await _connect_and_register_mcp_server_lg(payload.name, config)
         await _refresh_all_sessions_extra_tools()
@@ -2838,6 +2945,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             settings.mcp_config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
             harden_file_permissions(settings.mcp_config_path)
         ConnectorPermissions(settings.state_dir).forget(name)
+        mcp_oauth.forget(name)
         await _refresh_all_sessions_extra_tools()
         return {}
 

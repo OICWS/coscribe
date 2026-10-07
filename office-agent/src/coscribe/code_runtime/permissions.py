@@ -1,7 +1,9 @@
 """Settings > Code: whether the code module's commands and file changes ask
 first. "ask" (the default) leaves them to the permission mode and the
-approval cards; "allow" runs them without a card, once a plan-mode check
-and the user's hooks and exec policy have had their say.
+approval cards; "allow" runs them without a card, once the user's hooks and
+the plan-mode check have had their say. (Exec policy covers python and node
+scripts only, so it never sees a code command.) It applies to an attended
+conversation only, not to a scheduled run.
 
 Kept in the state folder, as connector permissions are, so a stray key can't
 break a config file the user edits by hand.

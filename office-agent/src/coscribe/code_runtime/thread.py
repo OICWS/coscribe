@@ -66,6 +66,11 @@ _POWERSHELL_READS = frozenset(
 # `*` and `?` stay: a wildcard in a name is how PowerShell lists a folder's
 # csv files, and the folder check below doesn't depend on what it matches.
 _POWERSHELL_SYNTAX = frozenset("|&;<>$`(){}[]~!\n\r,@#")
+_WINDOWS_DEVICES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{n}" for n in range(1, 10)}
+    | {f"LPT{n}" for n in range(1, 10)}
+)
 _POWERSHELL_FLAGS = frozenset({"-noprofile", "-nologo", "-noninteractive", "-nop", "-nol", "-noni"})
 _POWERSHELL_FLAGS_WITH_VALUE = frozenset({"-executionpolicy", "-ep"})
 # One `cd <dir> &&` in front; the directory is a plain word or a quoted
@@ -237,6 +242,20 @@ def _plain_read(script: str, base: Path, root: Path) -> bool:
     return all(path.resolve().is_relative_to(root) for path in paths)
 
 
+def _plain_powershell_path(word: str) -> bool:
+    """Whether `word` names a file, as the folder check assumes. A colon
+    makes it something else unless it follows a single drive letter:
+    `env:X`, `HKLM:\\x` and `Cert:\\` are providers (the environment, the
+    registry), `file.txt:stream` is a hidden stream, and Python would read
+    each as a plain name inside the folder. Device names hang or reach
+    hardware."""
+    colon = word.find(":")
+    if colon not in (-1, 1) or (colon == 1 and not word[0].isalpha()):
+        return False
+    names = word.replace("\\", "/").split("/")
+    return not any(name.split(".")[0].rstrip(" ").upper() in _WINDOWS_DEVICES for name in names)
+
+
 def _powershell_read(script: str, base: Path, root: Path) -> bool:
     if any(ch in _POWERSHELL_SYNTAX for ch in script):
         return False
@@ -250,8 +269,12 @@ def _powershell_read(script: str, base: Path, root: Path) -> bool:
             # and the word after one is looked at as the path it may be.
             value = word.partition(":")[2]
             if value:
+                if not _plain_powershell_path(value):
+                    return False
                 paths.append(base / value.replace("\\", "/"))
             continue
+        if not _plain_powershell_path(word):
+            return False
         paths.append(base / word.replace("\\", "/"))
     return all(path.resolve().is_relative_to(root) for path in paths)
 

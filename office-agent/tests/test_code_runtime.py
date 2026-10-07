@@ -564,6 +564,18 @@ def test_powershell_reads_of_the_folder_pass(script: str, tmp_path: Path) -> Non
         "Get-ChildItem `Remove-Item",
         "Get-ChildItem && Remove-Item x",
         "Get-Content a.csv, b.csv",
+        # Not files: providers, a hidden stream, a device.
+        "Get-ChildItem env:",
+        "Get-Content Env:\\OPENAI_API_KEY",
+        "Get-Content -Path:env:SECRET",
+        "Get-ChildItem HKLM:\\SOFTWARE",
+        "Get-ChildItem Cert:\\CurrentUser\\My",
+        "Get-ChildItem Variable:",
+        "Get-ChildItem function:",
+        "Get-Content summary.csv:hidden",
+        "Get-Content CON",
+        "Get-Content sub\\nul.txt",
+        "Get-Content COM1",
         # Outside the folder, or not a read at all.
         "Get-Content ..\\..\\secret.txt",
         "Get-ChildItem ..",

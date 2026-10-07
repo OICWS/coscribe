@@ -388,3 +388,18 @@ async def test_plan_mode_still_declines_what_settings_always_allow(
     await _run(session, socket)
 
     assert not (tmp_path / "workspace" / "made.txt").exists()
+
+
+async def test_the_settings_switch_does_not_reach_a_scheduled_run_with_its_own_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    _always_allow(tmp_path, run_code_command="allow")
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+    # "auto" approves local file edits and leaves running code to a person.
+    session.run_approval_mode = "auto"
+    socket = _Socket(answer=lambda payload: False)
+
+    await _run(session, socket)
+
+    assert [c["tool_name"] for c in socket.of("approval_required")] == ["run_code_command"]
+    assert not (tmp_path / "workspace" / "made.txt").exists()
