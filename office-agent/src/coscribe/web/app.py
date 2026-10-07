@@ -1463,8 +1463,13 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         new_tools, connection, error = await connect_one_mcp_server_lg(
             name, config, mcp_oauth.auth_for, **extra
         )
-        if not new_tools or connection is None:
+        if connection is None:
             return False, error
+        if not new_tools:
+            # Connected, but a connector with no tools is no use, and its
+            # session would otherwise stay open with nothing to close it.
+            await connection.close()
+            return False, "The server connected but offers no tools."
         extra_tools_holder["tools"].extend(new_tools)
         mcp_connections[name] = connection
         return True, None

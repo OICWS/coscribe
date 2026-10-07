@@ -8114,7 +8114,9 @@ def _wait_until(condition: Any, seconds: float = 20.0) -> None:
 
 
 @contextlib.contextmanager
-def _oauth_connector_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+def _oauth_connector_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_tool: bool = True
+) -> Any:
     """A running app, a running OAuth MCP server, and a "browser" that
     approves every sign-in; yields (client, server, opened pages)."""
     from coscribe.runtime_lg import mcp as lg_mcp
@@ -8125,7 +8127,7 @@ def _oauth_connector_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("", encoding="utf-8")
     with (
-        running_oauth_mcp_server() as server,
+        running_oauth_mcp_server(with_tool) as server,
         _client_lg(tmp_path, monkeypatch, FakeToolCallingChatModel(responses=[])) as client,
     ):
         monkeypatch.setattr("coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", real_connect)
@@ -8272,3 +8274,15 @@ def test_code_permissions_are_stored_and_checked_lg(
     assert initial == {"run_code_command": "ask", "apply_code_change": "ask"}
     assert saved.json() == after == {"run_code_command": "allow", "apply_code_change": "ask"}
     assert unknown.status_code == bad.status_code == 422
+
+
+def test_signing_in_to_a_server_with_no_tools_says_so_instead_of_pretending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _oauth_connector_client(tmp_path, monkeypatch, with_tool=False) as (client, server, _):
+        _add_oauth_connector(client, server)
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["signin_error"])
+
+        info = client.get("/api/mcp/servers").json()["docs"]
+        assert info["connected"] is False
+        assert info["signin_error"] == "The server connected but offers no tools."

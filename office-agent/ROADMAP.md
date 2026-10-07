@@ -7708,6 +7708,30 @@ because coscribe itself ran that flow, and it was removed with that entry.
       waits, the connector page shows one status line with "Open the sign-in
       page" and "Start over", instead of Retry and Sign in together.
 
+- [x] **Discover is the store (yours, 2026-10-07):** a connector opened
+      from Discover always shows its store page, connected or not: icon,
+      Connect (or Connected with Manage and Disconnect, or the waiting
+      sign-in with "Start over"), its tools, who makes it. Manage is the
+      way to its own page with the tool permissions; opening it from Yours
+      goes straight there. Before this, opening an added connector from
+      Discover jumped to the management page.
+- [x] **A connector that signs in but offers no tools now says so** ("The
+      server connected but offers no tools.") and its session is closed; it
+      used to read "Couldn't sign in", and the open session was never
+      closed. Found while looking at a Notion connector that showed nothing
+      after sign-in; the cause on that account is not established yet.
+- [ ] **More hosted connectors, probed 2026-10-07 by really registering a
+      client at each server** (not only reading its metadata). Accepted:
+      Airtable, Amplitude, Asana (its older endpoint), Atlassian, ClickUp,
+      Coda, Evernote, Fireflies, Granola, Intercom, Linear, Mixpanel,
+      PayPal, Sentry, Stripe, Todoist, Webflow, Wix, Zapier. Refused or
+      unavailable: Calendly and Gamma (a loopback redirect is refused),
+      Figma (403), and no registration at all at Slack, Box, HubSpot,
+      Dropbox, Zoom, Smartsheet, Xero, Zendesk. Public with no sign-in:
+      Microsoft Learn docs, Hugging Face, Cloudflare docs. Registration
+      only proves the first step; the sign-in page and the token exchange
+      still need a real account.
+
 ## Phase 8cy -- Found on Windows: Codex's PowerShell prefix, and the code commands' display (shipped)
 
 First real Windows run of the code module's approvals (8cw), in Auto mode, so
