@@ -600,7 +600,7 @@ def reviews_this_turn(messages: Sequence[Any]) -> list[str]:
 
 # What the work observed: script output and what was read or searched.
 # Bookkeeping tools (tasks, tool search, skills) show nothing about the data.
-_EVIDENCE_EXCLUDED = frozenset({"search_tools", "read_skill_file"})
+_EVIDENCE_EXCLUDED = frozenset({"search_tools", "use_tool", "read_skill_file"})
 _EVIDENCE_EXTRA = frozenset({"list_files", "get_file_info", "web_search", "read_web_page"})
 _EVIDENCE_CHARS = 24_000
 _EVIDENCE_MIN_ENTRY_CHARS = 300

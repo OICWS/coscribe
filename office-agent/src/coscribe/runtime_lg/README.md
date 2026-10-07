@@ -3613,3 +3613,25 @@ Sub-agents keep a fixed 20 (`subagents.SUBAGENT_MAX_STEPS`); they had been
 following the setting. A test fake that returns one `AIMessage` object
 twice gets the same message id both times, and the second replaces the
 first in the history, so the cap's tests script distinct replies.
+
+## Fixed tool list: `search_tools` + `use_tool` (2026-10-07)
+
+The remaining cache miss after a tool search was the tool list itself:
+`tool_deferral.py` used to bind each found tool for the rest of the
+conversation, and a changed tool list is a changed prefix. Now `search_tools`
+returns descriptions and parameter schemas, the model runs a found tool with
+`use_tool(name, arguments)`, and `DeferredToolMiddleware` (innermost
+`wrap_model_call`) does two translations: the model's `use_tool` call becomes
+the real call before `HumanInTheLoopMiddleware` and `ToolNode` see it, and a
+stored call to an unbound tool is shown to the model as `use_tool` again. The
+rewrite also covers the places an adapter may read a call from
+(`tool_calls`, Anthropic `tool_use` blocks, OpenAI's raw
+`additional_kwargs["tool_calls"]`); `tests/test_tool_deferral.py` builds the
+real OpenAI and Anthropic payloads to prove it. The web session reads tool
+rows from the finished model message, which already has the real name, but
+its streamed chunks still say `use_tool`, so `_flush_accumulated` unwraps
+them for the post-tool hooks. Numbers are in ROADMAP Phase 8cu.
+
+Same round: `AnthropicPromptCachingMiddleware` is imported only for an
+Anthropic model. `langchain_anthropic.middleware` pulled in the `anthropic`
+SDK, ~0.6s of the server's start-up for everyone else.

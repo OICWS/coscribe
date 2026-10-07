@@ -21,7 +21,6 @@ from langchain.agents.middleware import (
     SummarizationMiddleware,
     hook_config,
 )
-from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
@@ -30,7 +29,11 @@ from langgraph.errors import GraphBubbleUp
 from ..runtime.types import get_tool_metadata
 from .messages import starts_a_turn, steer_message
 from .tool_calls import answer_every_tool_call
-from .tool_deferral import DeferredToolMiddleware, build_search_tools_tool
+from .tool_deferral import (
+    DeferredToolMiddleware,
+    build_search_tools_tool,
+    build_use_tool_tool,
+)
 
 
 def tool_name(tool: Callable[..., Any] | BaseTool) -> str:
@@ -392,31 +395,23 @@ def build_langgraph_agent(
     # (it re-raises GraphBubbleUp untouched either way), but outermost is
     # the natural place for a catch-all.
     middleware: list[Any] = [_catch_tool_errors]
-    # Unconditional, not gated behind an `if model is anthropic` check here
-    # -- the middleware already does that check itself
-    # (AnthropicPromptCachingMiddleware._should_apply_caching), and this
-    # app switches models per-thread at runtime (ModelPicker), so any
-    # gating condition written here would need to be re-evaluated on
-    # every switch anyway. unsupported_model_behavior="ignore" (not the
-    # middleware's own "warn" default) because a non-Anthropic model is
-    # this app's *normal* case, not a misconfiguration worth a Python
-    # warning on every single turn -- Gemini/OpenAI-compatible models
-    # already get their own automatic, no-code-needed prefix caching from
-    # a stable system prompt (see current_date_note's docstring in
-    # messages.py); this middleware only has something to add for
-    # Anthropic specifically. Runs its wrap_model_call hook on every
-    # individual model call (not once at graph-build time), re-tagging
-    # the last system-prompt content block and the last tool definition
-    # with cache_control each time -- necessary since neither survives as
-    # a persisted object between calls, only the request is rebuilt fresh
-    # each time. What it does NOT cover: a breakpoint on the growing
-    # message history itself (Anthropic's "multi-turn conversations"
-    # placement pattern -- a breakpoint on the last block of the
-    # most-recently-appended turn, so each later request reuses the
-    # entire prior conversation prefix, not just system+tools). Real
-    # savings on a long conversation, but a separate, still-open piece --
-    # see ROADMAP.md's Phase 0.
-    middleware.append(AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"))
+    # Only for an Anthropic model: importing langchain_anthropic pulls in the
+    # whole anthropic SDK, ~0.6s of every server start for people who never
+    # use it. A model switch rebuilds this graph (ChatSessionLG.switch_model),
+    # so the check is re-made on each switch. The middleware also checks the
+    # model itself; unsupported_model_behavior="ignore" because a non-Anthropic
+    # model is never the middleware's concern here.
+    #
+    # Gemini/OpenAI-compatible models get their own automatic prefix caching
+    # from a stable system prompt (see current_date_note's docstring in
+    # messages.py); this middleware re-tags the last system-prompt block and
+    # the last tool definition with cache_control on every model call, which
+    # is what Anthropic needs on top. It does NOT place a breakpoint on the
+    # growing message history -- see ROADMAP.md's Phase 0.
+    if any(c.__module__.startswith("langchain_anthropic") for c in type(model).__mro__):
+        from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+        middleware.append(AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"))
     if approval_tool_names or question_tool_names_set:
         interrupt_on: dict[str, Any] = dict.fromkeys(approval_tool_names, True)
         interrupt_on.update(
@@ -439,12 +434,13 @@ def build_langgraph_agent(
         core_names = set(core_tool_names)
         deferred = [t for t in tools if tool_name(t) not in core_names]
         # Appended to the *full* tools list passed to create_agent below
-        # (not a separate, restricted one) -- ToolNode needs to recognize
-        # search_tools' own discoveries the moment they're called, same
-        # as every other tool here; only DeferredToolMiddleware's
-        # wrap_model_call, added last, ever narrows what a given request
-        # actually advertises.
+        # (not a separate, restricted one) -- ToolNode must recognize a
+        # deferred tool when the model runs it; only DeferredToolMiddleware's
+        # wrap_model_call, added last so it sits innermost, narrows what a
+        # request advertises and rewrites use_tool calls before the approval
+        # middleware reads them.
         final_tools.append(build_search_tools_tool(deferred))
+        final_tools.append(build_use_tool_tool())
         middleware.append(DeferredToolMiddleware(core_names))
 
     return create_agent(

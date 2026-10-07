@@ -6086,8 +6086,8 @@ limited to file edits, Auto decided by a reviewer model.
 - [x] **Live tool rows lost their arguments** after a turn's first model
       response (see the cache section above for the cause). Found while
       checking the running action list.
-- [ ] **Keeping the tool list fixed after a discovery** -- would remove
-      the remaining discovery misses. Deferred by decision (2026-09-26).
+- [x] **Keeping the tool list fixed after a discovery** -- done in Phase
+      8cu, in the direction chosen below. Deferred by decision (2026-09-26).
       When picked up, the chosen direction is the provider-neutral one:
       `search_tools` returns the found tools' descriptions and schemas as
       its result, and one fixed proxy tool runs them by name -- not
@@ -7532,7 +7532,44 @@ in code.
 - Not yet: a chat's `run_code_task` doesn't get it -- the chat writes that
   task, memory in view, and hands over everything the run needs.
 
-## Phase 8cv -- The code module's approvals: allow for a task, allow for good, PowerShell reads (shipped)
+## Phase 8cu -- The tool list stays fixed for the whole conversation; the server starts faster (shipped)
+
+- [x] **`use_tool`.** Finding a tool through `search_tools` used to bind it,
+      which changes the tool list and makes the provider re-read the whole
+      conversation uncached (Phase 8cj fixed that for DeepSeek's built-ins
+      by binding all of them; connectors on DeepSeek and every tool on other
+      providers still paid). Now `search_tools` returns each match's
+      description and parameter schema, and the model runs it with
+      `use_tool(name, arguments)`; every request sends the core tools plus
+      those two, always. Approvals, hooks, the audit log and the chat's tool
+      rows keep working on the real tool name because the middleware
+      rewrites the call as it leaves the model (before the approval
+      middleware reads it), and shows a stored call to an unbound tool back
+      to the model in its `use_tool` form. A mistaken name gets an error
+      from `use_tool` itself. It applies to every provider; DeepSeek still
+      binds its built-ins up front (a cost choice, not a cache one).
+      Same real DeepSeek task twice (a 14k-token message first, then "make
+      a deck", which needs `search_tools`), the request right after the
+      search: old 20,896 prompt tokens with 1,280 cached, new 17,358 with
+      14,208 cached. The 3.1k that are new there are the found tool's
+      schema, sent once. A real approval pause on the discovered
+      `write_pptx` still showed the card under its real name.
+      Checked in unit tests that the OpenAI and Anthropic adapters put the
+      `use_tool` form in every field they read a call from. Not checked
+      live: Gemini accepting `arguments` as an open object (the adapter
+      keeps it as a plain OBJECT, no key available here).
+- [x] **Start-up.** `import coscribe.web.app` 1.9-2.6s -> ~1.3s, start to
+      first answer from `/api/tools` ~2.3s -> ~1.6s (3 runs each). The cost
+      was `langchain_anthropic.middleware` pulling in the whole `anthropic`
+      SDK (~0.6s) for the caching middleware that only an Anthropic model
+      uses; it is now added only when the model is an Anthropic one (a
+      model switch rebuilds the graph, so it is re-decided each time).
+      The earlier note that the MCP client is imported unconditionally no
+      longer holds: `mcp`, `pptx`, `openpyxl` and the other heavy libraries
+      are not in `sys.modules` after the import. What is left is
+      structural: `fastapi.openapi.models` (~120ms), `langsmith.schemas`
+      (~80ms), `langgraph_sdk` (~60ms), the SQLite checkpointer (~175ms).
+## Phase 8cw -- The code module's approvals: allow for a task, allow for good, PowerShell reads (shipped)
 
 On Windows Codex runs PowerShell, which the read-only rule (bash only) didn't
 know, so every `Get-Content` asked. And a task that runs a dozen commands
@@ -7614,7 +7651,9 @@ a concrete reason to prioritize a new surface.
   to 1.0x, then 1.1x).
 
 - **Stop can't actually interrupt a Playwright MCP action already in
-  progress** -- not started; noted here per your request ("先记录到
+  progress** -- **no longer applies (2026-10-07)**: Playwright is not in the
+  connector catalog any more (it holds only Microsoft 365) and the AI uses
+  the built-in browser; kept for the research it records. Original note: not started; noted here per your request ("先记录到
   roadmap", explicitly "不投入" for now). Live-reported: `/stop` during a
   `playwright_browser_*` call left the tool visibly still running
   underneath a UI that showed the turn as stopped, until a hard app
@@ -7674,7 +7713,8 @@ a concrete reason to prioritize a new surface.
   automated, non-visual checks).
 
 - **Startup latency: MCP client imported unconditionally, even with zero
-  connectors configured** -- not started; noted here per your request
+  connectors configured** -- **re-measured and partly fixed in Phase 8cu**
+  (the real cost was the `anthropic` SDK, not MCP); original note: not started; noted here per your request
   ("先记录到roadmap"), found while investigating "coscribe starts slowly
   even with no connectors added" (asked directly, not guessed). Measured
   live with `python3 -X importtime -c "import coscribe.web.app"` in this
