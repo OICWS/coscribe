@@ -3,7 +3,7 @@ import { useCodeStatus } from "../../lib/useCodeStatus";
 import { useConfiguredModels } from "../../lib/useConfiguredModels";
 import { CodeDownload } from "../CodeModuleStatus";
 import { ToggleSwitch } from "../ToggleSwitch";
-import { CODE_MODEL_KEY, CODE_MODULE_ENABLED_KEY, CODE_SEES_MEMORY_KEY } from "./fields";
+import { CODE_MODEL_KEY, CODE_MODULE_ENABLED_KEY } from "./fields";
 import { SettingRow, SettingRows, SettingsSection, fieldClass } from "./SettingRow";
 
 interface CodeTabProps {
@@ -16,7 +16,7 @@ function CodeModelSelect({ value, onChange }: { value: string; onChange: (value:
   const options = value && !models.includes(value) ? [value, ...models] : models;
   return (
     <select aria-label="Model for code" className={`${fieldClass} w-64`} value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Same as the default model</option>
+      <option value="">Same as the chat's model</option>
       {options.map((model) => (
         <option key={model} value={model}>
           {model.split(":").slice(1).join(":")} · {model.split(":")[0]}
@@ -26,9 +26,8 @@ function CodeModelSelect({ value, onChange }: { value: string; onChange: (value:
   );
 }
 
-/** The code module: Codex as coscribe's second agent, in its own code
- * conversations and, when allowed, for tasks a chat hands it. How it may
- * act follows the permission mode, as a chat's tools do. */
+/** The code module: Codex, which a chat hands programming tasks to when
+ * allowed. How it may act follows the permission mode, as a chat's tools do. */
 export function CodeTab({ values, onChange }: CodeTabProps) {
   const code = useCodeStatus();
   const model = values[CODE_MODEL_KEY] ?? "";
@@ -50,33 +49,6 @@ export function CodeTab({ values, onChange }: CodeTabProps) {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Code conversations">
-        <SettingRows>
-          <SettingRow
-            label="Model for code"
-            description={
-              <>
-                What a new code conversation starts with; each can switch from its model picker. The code module works with
-                OpenAI models and providers that serve the Responses API (DeepSeek does).
-                {problem && <span className="mt-1 block text-[var(--danger)]">{problem}</span>}
-              </>
-            }
-            control={<CodeModelSelect value={model} onChange={(v) => onChange(CODE_MODEL_KEY, v)} />}
-          />
-          <SettingRow
-            label="Use your instructions and memory"
-            description="A new code conversation is told your instructions and what coscribe remembers, as a chat is. A change reaches code conversations started after it."
-            control={
-              <ToggleSwitch
-                label="Use your instructions and memory"
-                on={values[CODE_SEES_MEMORY_KEY] !== "false"}
-                onClick={() => onChange(CODE_SEES_MEMORY_KEY, values[CODE_SEES_MEMORY_KEY] === "false" ? "true" : "false")}
-              />
-            }
-          />
-        </SettingRows>
-      </SettingsSection>
-
       <SettingsSection title="In chats">
         <SettingRows>
           <SettingRow
@@ -89,6 +61,18 @@ export function CodeTab({ values, onChange }: CodeTabProps) {
                 onClick={() => onChange(CODE_MODULE_ENABLED_KEY, values[CODE_MODULE_ENABLED_KEY] === "true" ? "false" : "true")}
               />
             }
+          />
+          <SettingRow
+            label="Model for code"
+            description={
+              <>
+                What Codex runs on for these tasks. Left as the chat's model, it works when the chat uses an OpenAI model
+                or a provider that serves the Responses API (DeepSeek does); with Claude or Gemini in the chat, pick one
+                here.
+                {problem && <span className="mt-1 block text-[var(--danger)]">{problem}</span>}
+              </>
+            }
+            control={<CodeModelSelect value={model} onChange={(v) => onChange(CODE_MODEL_KEY, v)} />}
           />
         </SettingRows>
       </SettingsSection>

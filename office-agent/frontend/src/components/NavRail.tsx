@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { deleteScheduledTask, deleteThread } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
-import { startNewCodeThread, startNewThread } from "../lib/nav";
+import { startNewThread } from "../lib/nav";
 import { latestRun, RUN_STATUS_LABEL } from "../lib/runLabels";
 import { scheduleKindLabel } from "../lib/scheduleLabels";
 import type { RunStatus, ScheduledTask } from "../types/settings";
@@ -13,7 +13,6 @@ import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR } from "../lib/titleBar";
 import { AppMenuButton, HistoryButtons } from "./WindowControls";
 import {
   ClockIcon,
-  CodeIcon,
   MessageCircleIcon,
   MoreIcon,
   PencilIcon,
@@ -23,7 +22,7 @@ import {
   TrashIcon,
 } from "./icons";
 
-export type NavMode = "create" | "run" | "code";
+export type NavMode = "create" | "run";
 
 interface ScheduledTaskRowProps {
   task: ScheduledTask;
@@ -183,9 +182,9 @@ interface NavRailProps {
 }
 
 /** A narrow icon-only rail that expands into a full nav panel on hover
- * or when pinned. Collapsed, it shows the pin toggle; expanded, the mode
- * icons (chat / scheduled / code) join it, over a list of chat sessions,
- * scheduled tasks or code sessions, depending on mode. */
+ * or when pinned. Collapsed, it shows
+ * the pin toggle and the two mode icons (chat / scheduled); expanded, it
+ * lists either chat sessions or scheduled tasks, depending on mode. */
 export function NavRail({
   threadId,
   pinned,
@@ -224,8 +223,6 @@ export function NavRail({
     };
   }, [hovering, pinned]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
-  const chatThreads = threads.filter((t) => t.kind !== "code");
-  const codeThreads = threads.filter((t) => t.kind === "code");
 
   useEffect(() => {
     if (expanded) onThreadsChanged();
@@ -280,7 +277,6 @@ export function NavRail({
                 [
                   { value: "create", title: "Chat", Icon: MessageCircleIcon },
                   { value: "run", title: "Scheduled", Icon: ClockIcon },
-                  { value: "code", title: "Code", Icon: CodeIcon },
                 ] as const
               ).map(({ value, title, Icon }) => (
                 <button
@@ -321,29 +317,7 @@ export function NavRail({
                   New session
                 </button>
                 <ThreadList
-                  threads={chatThreads}
-                  currentId={threadId}
-                  onChanged={onThreadsChanged}
-                  onRenamed={onThreadRenamed}
-                  onDeleteRequest={setDeleteTarget}
-                />
-              </div>
-            )}
-
-            {mode === "code" && (
-              <div className="flex min-h-0 flex-1 flex-col gap-0.5">
-                <button
-                  type="button"
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-[var(--card-bg)]"
-                  onClick={startNewCodeThread}
-                >
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-fg)]">
-                    <PlusIcon className="h-3 w-3" />
-                  </span>
-                  New code session
-                </button>
-                <ThreadList
-                  threads={codeThreads}
+                  threads={threads}
                   currentId={threadId}
                   onChanged={onThreadsChanged}
                   onRenamed={onThreadRenamed}

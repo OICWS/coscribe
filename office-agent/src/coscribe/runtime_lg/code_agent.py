@@ -217,7 +217,10 @@ def build_code_task_tool(host: SubAgentHost, context: CodeTaskContext) -> Callab
         try:
             model = codex_model(context.model(), context.service().custom_providers())
         except CodexUnavailable as exc:
-            return f"The code module can't take this task: {exc}"
+            return (
+                f"The code module can't take this task: {exc} The user can pick a model "
+                "Codex can use in Settings > Code > Model for code."
+            )
         record = SubAgentTask(
             task_id=uuid.uuid4().hex[:12],
             thread_id=host.thread_id,

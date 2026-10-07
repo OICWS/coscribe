@@ -45,8 +45,7 @@ tools, and repeat work on a schedule. It needs only a model API key.
 - **Persistence.** Plain files under `state_dir` (JSON records, previews,
   tasks, memory) and a SQLite checkpointer for conversation state. No
   database server.
-- **Three modes in the nav rail.** Chat; Scheduled (tasks and workflows);
-  Code (an optional second agent, below).
+- **Two modes in the nav rail.** Chat, and Scheduled (tasks and workflows).
 
 ## Key decisions
 
@@ -141,13 +140,13 @@ one conversation, a task is a global record that starts its own.
 
 Programming work goes to Codex (`openai/codex`, Apache-2.0) run as an
 external process over its app-server JSON-RPC protocol (`code_runtime/`),
-rather than to a coding graph rebuilt inside `runtime_lg`. It has its own
-conversations in the Code mode, and a chat can hand it a task
-(`run_code_task`) that runs as a sub-agent. It is optional and off by
-default: the pinned binary is downloaded on first use, not bundled. Its
-commands and file changes come back through coscribe's approvals, as
-synthetic gated tools. Workflows never use it: a fixed run must not contain
-an autonomous agent.
+rather than to a coding graph rebuilt inside `runtime_lg`. It is the chat's
+assistant, not a mode of its own: the chat hands it a task (`run_code_task`)
+that runs as a sub-agent, so code ability comes to the conversation instead
+of a second place to work in. It is optional and off by default: the pinned
+binary is downloaded on first use, not bundled. Its commands and file
+changes come back through coscribe's approvals, as synthetic gated tools.
+Workflows never use it: a fixed run must not contain an autonomous agent.
 
 ### Cost is part of the design
 
