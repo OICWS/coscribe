@@ -193,18 +193,13 @@ class Settings(BaseSettings):
 
     code_module_enabled: bool = False
     """Whether a chat can hand programming tasks to the code module (Codex,
-    code_runtime/) as a sub-agent. Code conversations don't depend on it.
-    Off by default; the module downloads ~111 MB on first use and only
-    works with models served over the Responses API."""
-
-    code_sees_memory: bool = True
-    """Whether a new code conversation is told the user's instructions and
-    remembered facts (the memory file), as a chat is."""
+    code_runtime/) as a sub-agent. Off by default; the module downloads ~111 MB
+    on first use and only works with models served over the Responses API."""
 
     code_model: str | None = None
-    """What a new code conversation starts with ("provider:model"); unset,
-    the default model. Codex can't use every model the chat can, so it's
-    set apart."""
+    """The model Codex uses for a chat's code tasks ("provider:model"); unset,
+    the chat's own model. Codex can't use every model the chat can (Claude and
+    Gemini, for one), so it's set apart."""
 
     codex_wheel_url: str | None = None
     """Where to fetch the pinned Codex wheel instead of PyPI -- a mirror of

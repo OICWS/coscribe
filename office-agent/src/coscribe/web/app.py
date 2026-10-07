@@ -179,7 +179,6 @@ from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflo
 from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus, run_event
 from .browser_panel import BrowserPanelError, BrowserPanelSession
-from .code_session import CodeSession, codex_thread_path, is_code_thread
 from .session import ChatSessionLG
 from .thread_meta import ThreadMetaStore
 
@@ -816,7 +815,6 @@ COSCRIBE_ENV_VARS = [
     "COSCRIBE_DEFAULT_PERMISSION_MODE",
     "COSCRIBE_CODE_MODEL",
     "COSCRIBE_CODE_MODULE_ENABLED",
-    "COSCRIBE_CODE_SEES_MEMORY",
 ]
 
 # Settings update_config applies to the running server as well as .env.
@@ -826,7 +824,6 @@ LIVE_SETTINGS = {
     "COSCRIBE_DEFAULT_PERMISSION_MODE": "default_permission_mode",
     "COSCRIBE_CODE_MODEL": "code_model",
     "COSCRIBE_CODE_MODULE_ENABLED": "code_module_enabled",
-    "COSCRIBE_CODE_SEES_MEMORY": "code_sees_memory",
 }
 
 # Desktop-shell-consumed, not Settings-backed (see office-agent-desktop's
@@ -868,7 +865,7 @@ BLANK_UNSAFE_ENV_VARS = {
 }
 
 
-_BOOLEAN_CODE_KEYS = {"COSCRIBE_CODE_MODULE_ENABLED", "COSCRIBE_CODE_SEES_MEMORY"}
+_BOOLEAN_CODE_KEYS = {"COSCRIBE_CODE_MODULE_ENABLED"}
 
 
 def _mask(value: str) -> str:
@@ -1269,8 +1266,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             for command in hooks_config["SessionStart"]:
                 run_hook(command, session_start_payload)
             folders = _resolve_folders(thread_id, workspace_param)
-            session_class = CodeSession if is_code_thread(thread_id) else ChatSessionLG
-            sessions[thread_id] = session_class(
+            sessions[thread_id] = ChatSessionLG(
                 thread_id=thread_id,
                 settings=settings,
                 context_window_client=context_window_client,
@@ -1505,7 +1501,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         (settings.state_dir / f"{thread_id}.tasks.json").unlink(missing_ok=True)
         _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
         _title_sidecar_path(thread_id).unlink(missing_ok=True)
-        codex_thread_path(settings.state_dir, thread_id).unlink(missing_ok=True)
         ThreadMetaStore(settings.state_dir).delete(thread_id)
         sessions.pop(thread_id, None)
         return existed
@@ -1772,7 +1767,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "group": meta["group"],
                     "archived": meta["archived"],
                     "status": _thread_status(thread_id, waiting, meta),
-                    "kind": "code" if is_code_thread(thread_id) else "chat",
                 }
             )
         summaries.sort(key=lambda s: s["updated_at"] or "", reverse=True)
@@ -1796,7 +1790,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     def _thread_status(thread_id: str, waiting: set[str], meta: dict[str, Any]) -> str:
         """"needs_input" | "working" | "ready" | "idle"."""
         session = sessions.get(thread_id)
-        if thread_id in waiting or (isinstance(session, CodeSession) and session.asking):
+        if thread_id in waiting:
             return "needs_input"
         if session is not None and session.turn_running:
             return "working"
@@ -2670,7 +2664,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/code")
     async def code_status() -> dict[str, Any]:
         """The code module's download, and whether Codex can use the model
-        a new code conversation would start with."""
+        a chat's code task would run on (the chat's own, unless one is set)."""
         service = code_service(settings)
         model = settings.code_model or settings.default_model
         try:

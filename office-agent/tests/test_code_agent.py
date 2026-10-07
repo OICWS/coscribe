@@ -127,6 +127,7 @@ def _session(
     *,
     enabled: bool = True,
     default_model: str = "fake:model",
+    code_model: str | None = None,
 ) -> ChatSessionLG:
     monkeypatch.setattr(
         "coscribe.web.session.resolve_chat_model", lambda name, custom_providers=None: model
@@ -142,6 +143,7 @@ def _session(
         auto_title_threads=False,
         default_permission_mode="manual",
         code_module_enabled=enabled,
+        code_model=code_model,
     )
     folder = tmp_path / "workspace"
     folder.mkdir(parents=True, exist_ok=True)
@@ -271,7 +273,27 @@ async def test_a_model_codex_cant_use_gets_a_reason_and_no_run(
     await _run(session, socket)
 
     assert "Responses API" in _code_result(socket)
+    assert "Settings > Code" in _code_result(socket)
     assert SubAgentTaskStore(tmp_path / "state").list_for_thread("t1") == []
+
+
+async def test_the_code_model_setting_stands_in_for_a_chat_model_codex_cant_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(
+        tmp_path,
+        monkeypatch,
+        codex,
+        _Model(responses=_replies("approve")),
+        default_model="anthropic:claude",
+        code_model="fake:model",
+    )
+    socket = _Socket(answer=lambda payload: True)
+
+    await _run(session, socket)
+
+    [record] = SubAgentTaskStore(tmp_path / "state").list_for_thread("t1")
+    assert (record.status, record.model) == ("succeeded", "codex:model")
 
 
 async def test_stop_ends_the_run_in_codex_too(
