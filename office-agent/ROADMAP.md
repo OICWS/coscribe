@@ -7751,9 +7751,13 @@ the whole job. Decided with the user and the main-development session.
       code assumes a finished record doesn't change; reopening one as
       "running" would have needed all of it to cope.
 - [x] **Only a finished code task of this conversation**: unknown ids, other
-      conversations' tasks, a task still running, and one that never opened
-      a thread get a plain message and no run. Two turns can't run in one
-      thread at once.
+      conversations' tasks, and one that never opened a thread get a plain
+      message and no run. So does a task whose Codex thread has any task
+      still working (the named one or a follow-up of it): two turns can't
+      run in one thread at once, and two follow-ups chosen in one message
+      are told apart because the check and the new record happen with no
+      await between. The id is the model's and names a file, so only the
+      12-hex shape the tool makes is looked up. Found in review.
 - [x] **A thread Codex no longer has** (the record is gone) starts a new one,
       told the earlier task and its report in place of the history.
 - [x] **Panel**: a follow-up sits next to the task it continues, with

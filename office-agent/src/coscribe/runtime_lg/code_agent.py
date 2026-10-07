@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -217,22 +218,40 @@ def _earlier_work(previous: SubAgentTask) -> str:
     )
 
 
-def _cannot_continue(previous: SubAgentTask | None, thread_id: str) -> str:
-    """Why `previous` can't be carried on from, or "" when it can."""
+_TASK_ID = re.compile(r"[0-9a-f]{12}")
+
+
+def _continuation(
+    store: SubAgentTaskStore, task_id: str, thread_id: str
+) -> tuple[SubAgentTask | None, str]:
+    """The task to carry on from, or why there isn't one. Everything here is
+    synchronous and the new record is saved before the caller first awaits, so
+    two follow-ups chosen in one message can't both pass."""
+    # The id is the model's, and names a file: only what this tool made.
+    previous = store.load(task_id) if _TASK_ID.fullmatch(task_id) else None
     if (
         previous is None
         or previous.thread_id != thread_id
         or not previous.model.startswith("codex:")
     ):
-        return "continue_task isn't a code task of this conversation. Start a new task instead."
-    if previous.status in ("running", "needs_approval"):
-        return "That code task is still running; wait for its report before continuing it."
+        return None, (
+            "continue_task isn't a code task of this conversation (it may have been cleared "
+            "from the Sub Agents panel). Start a new task instead."
+        )
     if not previous.codex_thread:
-        return (
+        return None, (
             "That code task never got as far as starting, so there is nothing to carry on. "
             "Start a new task with the full instructions."
         )
-    return ""
+    # Two turns can't run in one Codex thread at once, whichever task of it
+    # is the one named.
+    if any(
+        sibling.codex_thread == previous.codex_thread
+        and sibling.status in ("running", "needs_approval")
+        for sibling in store.list_for_thread(thread_id)
+    ):
+        return None, "That code task is still running; wait for its report before continuing it."
+    return previous, ""
 
 
 def _report(record: SubAgentTask) -> str:
@@ -279,8 +298,7 @@ def build_code_task_tool(host: SubAgentHost, context: CodeTaskContext) -> Callab
         """
         previous: SubAgentTask | None = None
         if continue_task.strip():
-            previous = store.load(continue_task.strip())
-            problem = _cannot_continue(previous, host.thread_id)
+            previous, problem = _continuation(store, continue_task.strip(), host.thread_id)
             if problem:
                 return problem
         try:
