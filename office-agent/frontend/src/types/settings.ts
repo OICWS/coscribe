@@ -159,6 +159,8 @@ export interface McpCatalogEntry {
   about?: string;
   /** Tool names from the vendor's docs; the connected page lists the live ones. */
   tools?: string[];
+  /** Where `tools` comes from: the service itself (reported when connected) or the maker's documentation. */
+  tools_from?: "service" | "docs";
   links?: { label: string; url: string }[];
 }
 

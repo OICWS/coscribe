@@ -1,0 +1,610 @@
+"""The connectors Settings > Connectors > Discover offers: hosted (remote)
+MCP servers the user signs in to in their own browser, or that need no
+sign-in at all. Nothing is installed, no app is registered and no company IT
+step is needed, so each works wherever the person can already open the
+service themselves.
+
+Every sign-in entry was checked against its live server (2026-10-07): a
+client was really registered there (a listed registration address alone
+proved nothing: Dropbox lists one and refuses). Left out on purpose: servers
+that need a pre-registered app (Slack, Google Workspace, Box, HubSpot, Zoom,
+Asana's current server), ones that refuse a loopback sign-in address
+(Calendly, Gamma), and a company-approved app like Microsoft 365 in a tenant
+that doesn't allow third-party apps. Anything else is still addable by hand
+from Add > Add custom connector.
+
+`tools` is what the maker's own documentation (or, for the public servers,
+the live server) lists; the connected connector's own page, and the names a
+connection reported before, are authoritative when they differ. `links` holds
+only addresses that were found to exist.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+_CANVA_TOOLS = [
+    "upload-asset-from-url", "get-assets", "create-upload-url", "autofill-design",
+    "get-brand-template-dataset", "get-design-dataset", "search-brand-templates",
+    "list-brand-kits", "create-design-from-brand-template", "create-brand-template-draft",
+    "publish-brand-template", "comment-on-design", "reply-to-comment", "list-comments",
+    "list-replies", "search-designs", "get-design", "get-design-pages", "get-design-content",
+    "get-presenter-notes", "get-export-formats", "generate-design",
+    "create-design-from-candidate", "create-design", "get-create-design-async-job",
+    "copy-design", "merge-designs", "import-design-from-url", "resolve-shortlink",
+    "export-design", "generate-image", "get-generate-image-job", "remove-background",
+    "separate-image-layers", "get-separate-image-layers-job", "create-folder",
+    "list-folder-items", "search-folders", "move-item-to-folder", "resize-design",
+    "start-editing-transaction", "perform-editing-operations", "commit-editing-transaction",
+    "cancel-editing-transaction", "get-design-thumbnail", "help",
+]  # fmt: skip
+
+_NOTION_TOOLS = [
+    "notion-search", "notion-ai-search", "notion-get-tool-access", "notion-download-skill",
+    "notion-fetch", "notion-create-file-upload", "notion-create-attachment",
+    "notion-download-attachment", "notion-create-pages", "notion-update-page",
+    "notion-convert-page-to-skill", "notion-move-pages", "notion-duplicate-page",
+    "notion-create-database", "notion-create-folder", "notion-update-data-source",
+    "notion-create-view", "notion-update-view", "notion-query-data-sources",
+    "notion-query-meeting-notes", "notion-list-agents", "notion-search-agents",
+    "notion-query-sessions", "notion-search-sessions", "notion-spawn-session",
+    "notion-get-session-status", "notion-wait-session", "notion-stop-session",
+    "notion-send-message-to-session", "notion-list-session-events",
+    "notion-read-session-event", "notion-create-comment", "notion-get-comments",
+    "notion-get-teams", "notion-get-users", "notion-get-async-task",
+]  # fmt: skip
+
+_MIRO_TOOLS = [
+    "board_create", "layout_create", "layout_update", "context_get", "image_create",
+    "diagram_create", "doc_create", "table_create", "board_search_boards", "comment_reply",
+    "board_list_items", "context_explore", "image_get_url", "doc_update", "table_sync_rows",
+    "code_widget_create", "comment_list_comments", "comment_resolve", "layout_get_dsl",
+    "layout_read",
+]  # fmt: skip
+
+_MONDAY_TOOLS = [
+    "create_board", "get_board_info", "get_board_items_page", "get_board_activity",
+    "board_insights", "create_group", "create_column", "get_column_type_info", "create_item",
+    "change_item_column_values", "create_workspace", "update_workspace", "list_workspaces",
+    "workspace_info", "create_folder", "update_folder", "move_object", "create_doc",
+    "update_doc", "read_docs", "create_dashboard", "create_widget", "all_widgets_schema",
+    "create_view", "update_view", "create_view_table", "update_view_table", "create_form",
+    "get_form", "update_form", "form_questions_editor", "create_form_submission",
+    "get_user_context", "list_users_and_teams", "create_update", "get_updates",
+    "create_notification", "search", "get_assets", "get_asset_upload_url",
+    "finalize_asset_upload", "list_automations", "manage_automations", "create_automation",
+    "plan_workflow", "create_workflow", "update_workflow", "publish_workflow", "manage_agent",
+    "manage_agent_triggers", "manage_agent_skills", "manage_agent_knowledge", "agent_catalog",
+    "get_notetaker_meetings", "get_monday_dev_sprints_boards", "get_sprints_metadata",
+    "get_sprint_summary", "all_monday_api", "get_graphql_schema", "get_type_details",
+    "show_table", "show_chart", "show_battery", "show_assign",
+]  # fmt: skip
+
+_ATLASSIAN_TOOLS = [
+    "atlassianUserInfo", "getAccessibleAtlassianResources", "discover", "executeRead",
+    "executeWrite", "executeDestructive", "getContentFormatGuide", "getJiraIssue",
+    "listJiraProjects", "listJiraProjectIssueTypesMetadata", "getJiraIssueTypeMetaWithFields",
+    "listJiraIssueTransitions", "listJiraIssueLinkTypes", "listJiraIssueRemoteIssueLinks",
+    "listJiraIssueWorklogs", "lookupJiraAccountId", "listJiraIssueAssignableUsers",
+    "listJiraIssueComments", "listJiraIssueChangelogs", "getJiraCurrentUser", "getJiraUser",
+    "listJiraStatuses", "listJiraProjectComponents", "getJiraProjectVersions",
+    "getJiraProjectVersionRelatedWork", "listJiraBoards", "getJiraBoardConfig",
+    "getJiraBoardIssueData", "getJiraBoardSprintData", "listJiraBoardSprints",
+    "listJiraFilters", "listJiraDashboards", "getJiraEntityProperty",
+    "downloadJiraIssueAttachment", "createJiraIssue", "editJiraIssue", "transitionJiraIssue",
+    "addOrEditJiraIssueComment", "addOrEditJiraIssueWorklog", "createJiraIssueLink",
+    "manageJiraProjectVersion", "manageJiraProjectVersionRelatedWork", "manageJiraSprint",
+    "createJiraBoard", "watchJiraIssue", "uploadAttachmentToJiraIssue",
+    "editJiraEntityProperty", "createJiraIssueRemoteIssueLink", "convertJiraIssueHierarchy",
+    "searchJiraIssuesUsingJql", "deleteJiraIssue", "deleteJiraComment",
+    "deleteJiraIssueAttachment", "createJiraProject", "updateJiraProject", "getJiraWorkflows",
+    "getJiraWorkflowEditorLink", "getJiraScreen", "updateJiraScreen", "getConfluenceContent",
+    "listConfluenceContent", "listConfluenceSpaces", "getConfluenceSpace",
+    "getConfluenceSpaceInstructions", "getConfluencePersonalSpace", "listConfluenceComments",
+    "getConfluenceComment", "listConfluenceContentVersions", "getConfluenceContentVersion",
+    "diffConfluenceContentVersions", "listConfluenceAttachments", "getConfluenceAttachment",
+    "downloadConfluenceAttachment", "exportConfluenceContent",
+    "getConfluenceContentPermissions", "getConfluenceContentRestrictionState",
+    "getConfluencePublicLinkStatus", "getConfluenceReactions", "getConfluenceTask",
+    "listConfluenceTasks", "listConfluenceTemplates", "getConfluenceTemplate",
+    "resolveConfluenceContentMacros", "getConfluenceMauiApp", "createConfluenceContent",
+    "updateConfluenceContent", "createConfluenceSpace", "setConfluenceSpaceInstructions",
+    "copyConfluenceContent", "moveConfluenceContent", "archiveConfluenceContent",
+    "unarchiveConfluenceContent", "restoreConfluenceContentVersion",
+    "convertConfluenceContentMode", "setConfluenceContentStatus", "createConfluenceComment",
+    "updateConfluenceComment", "updateConfluenceCommentResolution",
+    "createConfluenceAttachment", "addLabelsToConfluenceContent", "addConfluenceReaction",
+    "addConfluenceContentPermissions", "removeConfluenceContentPermissions",
+    "replaceConfluenceContentPermissions", "setConfluenceContentRestrictionState",
+    "enableConfluencePublicLink", "disableConfluencePublicLink", "completeConfluenceTask",
+    "reopenConfluenceTask", "starConfluenceContent", "unstarConfluenceContent",
+    "starConfluenceSpace", "unstarConfluenceSpace", "watchConfluenceContent",
+    "unwatchConfluenceContent", "watchConfluenceSpace", "unwatchConfluenceSpace",
+    "watchConfluenceLabel", "unwatchConfluenceLabel", "createConfluenceInfographicForPage",
+    "editConfluenceInfographicForPage", "createConfluenceMauiApp", "editConfluenceMauiApp",
+    "searchConfluence", "getJsmOpsAlerts", "getJsmOpsScheduleInfo", "getJsmOpsTeamInfo",
+    "updateJsmOpsAlert", "listBitbucketWorkspaces", "getBitbucketWorkspace",
+    "listBitbucketRepositories", "getBitbucketRepository", "getBitbucketRepoDefaultReviewers",
+    "getBitbucketRepoFileContent", "getBitbucketRepoBranch", "getBitbucketRepoCommit",
+    "listBitbucketRepoCommitReports", "getBitbucketRepoCommitReport",
+    "getBitbucketRepoCommitReportAnnotations", "listBitbucketRepoPullRequests",
+    "getBitbucketRepoPullRequest", "getBitbucketRepoPullRequestDiff",
+    "listBitbucketRepoPullRequestComments", "listBitbucketRepoPullRequestTasks",
+    "listBitbucketRepoPipelines", "getBitbucketRepoPipeline", "listBitbucketRepoPipelineSteps",
+    "getBitbucketRepoPipelineStep", "getBitbucketRepoPipelineStepLog",
+    "listBitbucketRepoDeployments", "getBitbucketRepoDeployment",
+    "listBitbucketRepoEnvironments", "getBitbucketRepoEnvironment",
+    "createBitbucketRepoPullRequest", "updateBitbucketRepoPullRequest",
+    "mergeBitbucketRepoPullRequest", "approveBitbucketRepoPullRequest",
+    "requestChangesOnBitbucketRepoPullRequest", "addBitbucketRepoPullRequestComment",
+    "resolveBitbucketRepoPullRequestComment", "reopenBitbucketRepoPullRequestComment",
+    "createBitbucketRepoPullRequestTask", "setBitbucketRepoPullRequestTaskState",
+    "createBitbucketRepoBranch", "createBitbucketRepoCommit", "runBitbucketRepoPipeline",
+    "getTeamworkGraphContext", "getTeamworkGraphObject", "getPeopleInfo", "getWorkPortfolio",
+    "getWorkActivity", "getPullRequests", "getCollaborators", "addTeamworkGraphContext",
+    "search", "searchCode", "getCodeFile", "listCodeDirectory", "scanCodeRepo",
+    "getCodeSymbol", "diffCodeSymbols", "getAssetsObject", "getAssetsObjectsById",
+    "getAssetsObjectSchema", "getAssetsObjectType", "getAssetsServiceObjectsById",
+    "listAssetsObjectSchemas", "listAssetsObjectTypeAttributes", "queryAssetsObjects",
+    "queryAssetsObjectSchemaAttributes", "queryAssetsObjectsUsingAql",
+    "queryAssetsObjectTypes", "queryAssetsReferenceTypes", "searchAssetsObjects",
+    "getLoomVideo", "listLoomVideos", "listLoomVideosSharedWithMe", "getLoomVideoComments",
+    "getLoomMeetingActionItems", "getLoomVideoDownloadUrl", "listLoomFolders",
+    "createLoomVideoUpload", "publishLoomVideo", "updateLoomVideoTitle",
+    "updateLoomVideoPermissions", "shareLoomVideo", "createLoomVideoComment",
+    "createLoomVideoReaction", "createLoomFolder", "moveLoomVideoToFolder", "recoverLoomVideo",
+    "searchGoals", "getGoal", "getGoalUpdate", "getGoalTypes", "createGoal",
+    "createGoalUpdate", "addConnectionsToGoals", "searchProjects", "getProject",
+    "getProjectUpdate", "createProject", "createProjectUpdate", "addConnectionsToProjects",
+    "searchTeams", "getTeam", "createTeam", "updateTeam", "searchFocusAreas", "getFocusArea",
+    "getFocusAreaTypes", "createFocusArea", "updateFocusArea", "createFocusAreaStatusUpdate",
+    "linkToFocusArea", "getTalentUser", "getTalentFields", "searchTalentPositions",
+    "getTalentPosition", "getTalentPositionsByEntity", "getTalentGroupMetrics",
+    "createTalentSkill", "updateTalentWorkerSkillMappings",
+    "updateTalentPositionFocusAreaMappings", "getCapacityPlanAllocations",
+    "searchCapacityPlanNonProjectWork", "updateCapacityPlanAllocation",
+    "createCapacityPlanNonProjectWork", "updateCapacityPlanNonProjectWork",
+]  # fmt: skip
+
+_CLICKUP_TOOLS = [
+    "Search Workspace", "Search tasks by task type", "Search tasks by tag", "Create Task",
+    "Get Task", "Update Task", "Set Custom Fields", "Delete task", "Create Bulk Tasks",
+    "Update Bulk Tasks", "Attach File to Task", "Get Task Comments", "Get Threaded Replies",
+    "Create Task Comment", "Add Tag to Task", "Remove Tag from Task", "Add task link",
+    "Remove task link", "Add dependency", "Remove dependency", "Move task to a new List",
+    "Add task to another List", "Get Task Time Entries", "Get time entries for multiple tasks",
+    "Start Time Tracking", "Stop Time Tracking", "Add Time Entry", "Get Current Time Entry",
+    "Get Workspace Hierarchy", "Create List", "Create List in Folder", "Get List",
+    "Update List", "Get Folder", "Create Folder", "Update Folder", "Get Workspace Members",
+    "Find Member by Name", "Resolve Assignees", "Get Chat Channels", "Send Chat Message",
+    "Create Document", "List Document Pages", "Get Document Pages", "Create Document Page",
+    "Update Document Page", "Get Time in Status for a task",
+    "Get Time in Status for tasks in a List",
+]  # fmt: skip
+
+_MSLEARN_TOOLS = ["microsoft_docs_search", "microsoft_code_sample_search", "microsoft_docs_fetch"]
+_HUGGINGFACE_TOOLS = ["hf_whoami", "hub_repo_search", "hub_repo_details", "hf_fs"]
+_CLOUDFLARE_TOOLS = ["search_cloudflare_documentation", "migrate_pages_to_workers_guide"]
+
+MCP_CATALOG: list[dict[str, Any]] = [
+    {
+        "name": "canva",
+        "title": "Canva",
+        "made_by": "Canva",
+        "homepage": "https://www.canva.dev/docs/mcp/",
+        "category": "Design",
+        "description": "Search, create, autofill and export Canva designs.",
+        "about": "Find and open your Canva designs, create new ones, fill brand templates, "
+        "export to PDF, PNG, PPTX and more, and read or add comments. coscribe sees only "
+        "what the Canva account you sign in with can see.",
+        "tools": _CANVA_TOOLS,
+        "links": [
+            {"label": "Documentation", "url": "https://www.canva.dev/docs/mcp/"},
+            {
+                "label": "Support",
+                "url": "https://www.canva.dev/docs/apps/mcp/troubleshooting/",
+            },
+            {"label": "Privacy policy", "url": "https://www.canva.com/policies/privacy-policy/"},
+        ],
+        "server_url": "https://mcp.canva.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "notion",
+        "title": "Notion",
+        "made_by": "Notion",
+        "homepage": "https://developers.notion.com/guides/mcp/mcp",
+        "category": "Notes & docs",
+        "description": "Search, read and edit your Notion workspace.",
+        "about": "Search your workspace, read and edit pages and databases, create pages, "
+        "views and comments. coscribe sees only what the Notion account you sign in with "
+        "can see.",
+        "tools": _NOTION_TOOLS,
+        "links": [
+            {"label": "Documentation", "url": "https://developers.notion.com/guides/mcp/mcp"},
+            {"label": "Support", "url": "https://www.notion.com/help/notion-mcp"},
+        ],
+        "server_url": "https://mcp.notion.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "atlassian",
+        "title": "Atlassian",
+        "made_by": "Atlassian",
+        "homepage": "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/supported-tools/",
+        "category": "Project management",
+        "description": "Search and update Jira and Confluence.",
+        "about": "Search and summarize Jira work items and Confluence pages, create and update them, and work with Loom videos, goals and projects. coscribe sees only what the Atlassian account you sign in with can see.",
+        "tools": _ATLASSIAN_TOOLS,
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/supported-tools/",
+            },
+            {"label": "Support", "url": "https://support.atlassian.com/"},
+            {"label": "Privacy policy", "url": "https://www.atlassian.com/legal/privacy-policy"},
+        ],
+        "server_url": "https://mcp.atlassian.com/v1/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "clickup",
+        "title": "ClickUp",
+        "made_by": "ClickUp",
+        "homepage": "https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server",
+        "category": "Project management",
+        "description": "Search, create and update ClickUp tasks, docs and time entries.",
+        "about": "Search your workspace, create and update tasks, comments, docs and lists, track time, and send chat messages. coscribe sees only what the ClickUp account you sign in with can see.",
+        "tools": _CLICKUP_TOOLS,
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server",
+            },
+            {"label": "Tools", "url": "https://developer.clickup.com/docs/mcp-tools"},
+            {"label": "Privacy policy", "url": "https://clickup.com/terms/privacy"},
+        ],
+        "server_url": "https://mcp.clickup.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "miro",
+        "title": "Miro",
+        "made_by": "Miro",
+        "homepage": "https://developers.miro.com/docs/mcp-intro",
+        "category": "Whiteboards",
+        "description": "Read and search your Miro boards, build boards and diagrams.",
+        "about": "Search and read boards, create boards, diagrams, docs and tables, lay out "
+        "items, and reply to or resolve comments. coscribe sees only what the Miro account "
+        "you sign in with can see.",
+        "tools": _MIRO_TOOLS,
+        "links": [
+            {"label": "Documentation", "url": "https://developers.miro.com/docs/mcp-intro"},
+            {"label": "Support", "url": "https://github.com/miroapp/miro-ai/issues"},
+            {"label": "Privacy policy", "url": "https://miro.com/legal/privacy-policy/"},
+        ],
+        "server_url": "https://mcp.miro.com/",
+        "auth": "oauth",
+    },
+    {
+        "name": "monday",
+        "title": "monday.com",
+        "made_by": "monday.com",
+        "homepage": "https://developer.monday.com/api-reference/docs/mondaycom-mcp",
+        "category": "Project management",
+        "description": "Query your monday.com boards, create items and update columns.",
+        "about": "Read boards and items, create and update items, docs, dashboards and "
+        "forms, post updates, and manage workspaces and automations. coscribe sees only "
+        "what the monday.com account you sign in with can see.",
+        "tools": _MONDAY_TOOLS,
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://developer.monday.com/api-reference/docs/mondaycom-mcp",
+            },
+            {
+                "label": "Support",
+                "url": "https://support.monday.com/hc/en-us/articles/28515034903314-Get-started-with-monday-MCP",
+            },
+            {"label": "Privacy policy", "url": "https://monday.com/l/privacy/privacy-policy/"},
+        ],
+        "server_url": "https://mcp.monday.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "airtable",
+        "title": "Airtable",
+        "made_by": "Airtable",
+        "homepage": "https://airtable.com/developers/agents/mcp/getting-started",
+        "category": "Databases",
+        "description": "Search, create and update records in your Airtable bases.",
+        "about": "Find records across your bases and create or update them. coscribe sees only what the Airtable account you sign in with can see.",
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://airtable.com/developers/agents/mcp/getting-started",
+            },
+            {
+                "label": "Support",
+                "url": "https://support.airtable.com/docs/contacting-airtable-support",
+            },
+            {"label": "Privacy policy", "url": "https://www.airtable.com/company/privacy"},
+        ],
+        "server_url": "https://mcp.airtable.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "todoist",
+        "title": "Todoist",
+        "made_by": "Todoist",
+        "homepage": "https://developer.todoist.com/api/v1/",
+        "category": "Tasks",
+        "description": "Read, create and update your Todoist tasks and projects.",
+        "about": "Read, create and update the tasks and projects of your Todoist account. coscribe sees only what the Todoist account you sign in with can see.",
+        "links": [
+            {"label": "Documentation", "url": "https://developer.todoist.com/api/v1/"},
+            {"label": "Privacy policy", "url": "https://www.todoist.com/privacy"},
+        ],
+        "server_url": "https://ai.todoist.net/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "zapier",
+        "title": "Zapier",
+        "made_by": "Zapier",
+        "homepage": "https://docs.zapier.com/mcp/home",
+        "category": "Automation",
+        "description": "Use the apps you have connected to Zapier: over 9,000 apps and their actions.",
+        "about": "Zapier finds and enables the tools it needs during the conversation, across more than 9,000 apps; each tool call uses two tasks from your Zapier plan. Its tools depend on your Zapier account, so none are listed here.",
+        "links": [
+            {"label": "Documentation", "url": "https://docs.zapier.com/mcp/home"},
+            {"label": "Privacy policy", "url": "https://zapier.com/privacy"},
+        ],
+        "server_url": "https://mcp.zapier.com/api/mcp/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "granola",
+        "title": "Granola",
+        "made_by": "Granola",
+        "homepage": "https://docs.granola.ai/help-center/sharing/integrations/mcp",
+        "category": "Meetings",
+        "description": "Search and read your Granola meeting notes.",
+        "about": "Search your meetings and read their notes and transcripts. coscribe sees only what the Granola account you sign in with can see.",
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://docs.granola.ai/help-center/sharing/integrations/mcp",
+            },
+            {"label": "Privacy policy", "url": "https://www.granola.ai/privacy"},
+        ],
+        "server_url": "https://mcp.granola.ai/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "coda",
+        "title": "Coda",
+        "made_by": "Coda",
+        "homepage": "https://coda.io",
+        "category": "Notes & docs",
+        "description": "Read and edit your Coda docs.",
+        "about": "Find, read and edit the docs of your Coda account. coscribe sees only what the Coda account you sign in with can see.",
+        "server_url": "https://coda.io/apis/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "fireflies",
+        "title": "Fireflies",
+        "made_by": "Fireflies.ai",
+        "homepage": "https://docs.fireflies.ai/",
+        "category": "Meetings",
+        "description": "Search your meeting transcripts and notes in Fireflies.",
+        "about": "Search and read the transcripts and summaries of your recorded meetings. coscribe sees only what the Fireflies account you sign in with can see.",
+        "links": [
+            {"label": "Documentation", "url": "https://docs.fireflies.ai/"},
+            {"label": "Privacy policy", "url": "https://fireflies.ai/privacy-policy"},
+        ],
+        "server_url": "https://api.fireflies.ai/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "linear",
+        "title": "Linear",
+        "made_by": "Linear",
+        "homepage": "https://linear.app/docs/mcp",
+        "category": "Project management",
+        "description": "Find, create and update Linear issues and projects.",
+        "about": "Search issues and projects, create and update them, and comment. coscribe sees only what the Linear account you sign in with can see.",
+        "links": [
+            {"label": "Documentation", "url": "https://linear.app/docs/mcp"},
+            {"label": "Privacy policy", "url": "https://linear.app/privacy"},
+        ],
+        "server_url": "https://mcp.linear.app/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "stripe",
+        "title": "Stripe",
+        "made_by": "Stripe",
+        "homepage": "https://docs.stripe.com/mcp",
+        "category": "Finance",
+        "description": "Work with your Stripe account: customers, payments, invoices and subscriptions.",
+        "about": "Look up and manage the data of your Stripe account. coscribe sees only what the Stripe account you sign in with can see.",
+        "links": [
+            {"label": "Documentation", "url": "https://docs.stripe.com/mcp"},
+            {"label": "Privacy policy", "url": "https://stripe.com/privacy"},
+        ],
+        "server_url": "https://mcp.stripe.com",
+        "auth": "oauth",
+    },
+    {
+        "name": "intercom",
+        "title": "Intercom",
+        "made_by": "Intercom",
+        "homepage": "https://developers.intercom.com/docs/guides/mcp",
+        "category": "Customer support",
+        "description": "Search conversations and contacts in your Intercom workspace.",
+        "about": "Search and read the conversations and contacts of your Intercom workspace. coscribe sees only what the Intercom account you sign in with can see.",
+        "links": [
+            {"label": "Documentation", "url": "https://developers.intercom.com/docs/guides/mcp"},
+            {"label": "Privacy policy", "url": "https://www.intercom.com/legal/privacy"},
+        ],
+        "server_url": "https://mcp.intercom.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "paypal",
+        "title": "PayPal",
+        "made_by": "PayPal",
+        "homepage": "https://developer.paypal.com/tools/mcp-server/",
+        "category": "Finance",
+        "description": "Look up and manage payments and invoices in your PayPal account.",
+        "about": "Work with the payments and invoices of your PayPal account. coscribe sees only what the PayPal account you sign in with can see.",
+        "links": [
+            {"label": "Documentation", "url": "https://developer.paypal.com/tools/mcp-server/"},
+            {"label": "Privacy policy", "url": "https://www.paypal.com/us/legalhub/privacy-full"},
+        ],
+        "server_url": "https://mcp.paypal.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "webflow",
+        "title": "Webflow",
+        "made_by": "Webflow",
+        "homepage": "https://developers.webflow.com/mcp/reference/overview",
+        "category": "Websites",
+        "description": "Work with your Webflow sites and their content.",
+        "about": "Read and edit the sites and content of your Webflow account. coscribe sees only what the Webflow account you sign in with can see.",
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://developers.webflow.com/mcp/reference/overview",
+            },
+            {"label": "Privacy policy", "url": "https://www.webflow.com/legal/privacy"},
+        ],
+        "server_url": "https://mcp.webflow.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "wix",
+        "title": "Wix",
+        "made_by": "Wix",
+        "homepage": "https://www.wix.com",
+        "category": "Websites",
+        "description": "Work with your Wix sites.",
+        "about": "Work with the sites of your Wix account. coscribe sees only what the Wix account you sign in with can see.",
+        "links": [
+            {"label": "Privacy policy", "url": "https://www.wix.com/about/privacy"},
+        ],
+        "server_url": "https://mcp.wix.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "mixpanel",
+        "title": "Mixpanel",
+        "made_by": "Mixpanel",
+        "homepage": "https://docs.mixpanel.com/docs/mcp",
+        "category": "Analytics",
+        "description": "Ask questions of your Mixpanel product analytics.",
+        "about": "Query the product analytics data of your Mixpanel projects. coscribe sees only what the Mixpanel account you sign in with can see.",
+        "links": [
+            {"label": "Documentation", "url": "https://docs.mixpanel.com/docs/mcp"},
+            {"label": "Privacy policy", "url": "https://mixpanel.com/legal/privacy-policy/"},
+        ],
+        "server_url": "https://mcp.mixpanel.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "amplitude",
+        "title": "Amplitude",
+        "made_by": "Amplitude",
+        "homepage": "https://amplitude.com/docs/amplitude-ai/amplitude-mcp",
+        "category": "Analytics",
+        "description": "Ask questions of your Amplitude analytics.",
+        "about": "Query the analytics data of your Amplitude projects. coscribe sees only what the Amplitude account you sign in with can see.",
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://amplitude.com/docs/amplitude-ai/amplitude-mcp",
+            },
+            {"label": "Privacy policy", "url": "https://amplitude.com/privacy"},
+        ],
+        "server_url": "https://mcp.amplitude.com/mcp",
+        "auth": "oauth",
+    },
+    {
+        "name": "mslearn",
+        "title": "Microsoft Learn",
+        "made_by": "Microsoft",
+        "homepage": "https://learn.microsoft.com/training/support/mcp",
+        "category": "Documentation",
+        "description": "Search Microsoft and Azure documentation and code samples.",
+        "about": "Searches and reads the official Microsoft Learn documentation. No sign-in: it only reads public documentation.",
+        "tools": _MSLEARN_TOOLS,
+        "links": [
+            {"label": "Documentation", "url": "https://learn.microsoft.com/training/support/mcp"},
+            {"label": "Privacy policy", "url": "https://privacy.microsoft.com/privacystatement"},
+        ],
+        "server_url": "https://learn.microsoft.com/api/mcp",
+    },
+    {
+        "name": "huggingface",
+        "title": "Hugging Face",
+        "made_by": "Hugging Face",
+        "homepage": "https://huggingface.co/docs/hub/hf-mcp-server",
+        "category": "AI models",
+        "description": "Search models, datasets and Spaces on the Hugging Face Hub.",
+        "about": "Searches and reads public models, datasets and Spaces on the Hugging Face Hub. Works without signing in.",
+        "tools": _HUGGINGFACE_TOOLS,
+        "links": [
+            {"label": "Documentation", "url": "https://huggingface.co/docs/hub/hf-mcp-server"},
+            {"label": "Privacy policy", "url": "https://huggingface.co/privacy"},
+        ],
+        "server_url": "https://huggingface.co/mcp",
+    },
+    {
+        "name": "cloudflare",
+        "title": "Cloudflare Docs",
+        "made_by": "Cloudflare",
+        "homepage": "https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/",
+        "category": "Documentation",
+        "description": "Search the Cloudflare documentation.",
+        "about": "Searches the Cloudflare documentation. No sign-in: it only reads public documentation.",
+        "tools": _CLOUDFLARE_TOOLS,
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://developers.cloudflare.com/agents/model-context-protocol/mcp-servers-for-cloudflare/",
+            },
+            {"label": "Privacy policy", "url": "https://www.cloudflare.com/privacypolicy/"},
+        ],
+        "server_url": "https://docs.mcp.cloudflare.com/mcp",
+    },
+]
+
+
+class SeenTools:
+    """The tool names a connector reported when it was connected, kept so its
+    page in Discover can list what the service really offers, even before the
+    next connection and for a service whose documentation lists none."""
+
+    def __init__(self, state_dir: str | Path) -> None:
+        self.path = Path(state_dir) / "connector_tools_seen.json"
+
+    def load(self) -> dict[str, list[str]]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {k: v for k, v in data.items() if isinstance(v, list)}
+
+    def remember(self, name: str, tools: list[str]) -> None:
+        data = self.load()
+        if tools and data.get(name) != tools:
+            data[name] = tools
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps(data), encoding="utf-8")

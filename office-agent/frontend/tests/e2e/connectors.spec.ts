@@ -9,12 +9,17 @@ test("Discover lists hosted connectors with their icons, and a page shows tools 
   await expect(page.getByRole("button", { name: "Open Canva" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Discover", exact: true }).first().click();
-  for (const name of ["Canva", "Notion", "Miro", "monday.com"]) {
+  for (const name of ["Canva", "Notion", "Atlassian", "ClickUp", "Miro", "monday.com", "Zapier", "Microsoft Learn"]) {
     const card = page.getByRole("button", { name: `Open ${name}` });
     await expect(card).toBeVisible();
     // The service's own icon, not a letter.
     await expect(card.locator("img")).toHaveCount(1);
   }
+
+  // Every connector has its own icon, none a letter.
+  const cards = page.getByRole("button", { name: /^Open / });
+  expect(await cards.count()).toBeGreaterThan(20);
+  expect(await cards.locator("img").count()).toBe(await cards.count());
 
   await page.getByRole("button", { name: "Open Canva" }).click();
   await expect(page.getByRole("heading", { name: "Tools" })).toBeVisible();

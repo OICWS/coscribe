@@ -222,6 +222,10 @@ extend-exclude = [
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# Descriptions and addresses read better on one line each.
+"src/coscribe/web/connector_catalog.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

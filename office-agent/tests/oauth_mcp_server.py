@@ -108,7 +108,7 @@ class _Provider(OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken
 
 
 class OAuthMcpServer:
-    def __init__(self, port: int) -> None:
+    def __init__(self, port: int, with_tool: bool = True) -> None:
         self.provider = _Provider()
         self.url = f"http://127.0.0.1:{port}"
         mcp = FastMCP(
@@ -124,21 +124,23 @@ class OAuthMcpServer:
             ),
         )
 
-        @mcp.tool()
-        def whoami() -> str:
-            """Say who is signed in."""
-            return "signed-in-user"
+        if with_tool:
+
+            @mcp.tool()
+            def whoami() -> str:
+                """Say who is signed in."""
+                return "signed-in-user"
 
         self.mcp = mcp
         self.mcp_url = f"{self.url}/mcp"
 
 
 @contextmanager
-def running_oauth_mcp_server() -> Any:
+def running_oauth_mcp_server(with_tool: bool = True) -> Any:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    server = OAuthMcpServer(port)
+    server = OAuthMcpServer(port, with_tool)
     uv = uvicorn.Server(
         uvicorn.Config(
             server.mcp.streamable_http_app(), host="127.0.0.1", port=port, log_level="error"
