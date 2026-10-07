@@ -7555,9 +7555,11 @@ in code.
       schema, sent once. A real approval pause on the discovered
       `write_pptx` still showed the card under its real name.
       Checked in unit tests that the OpenAI and Anthropic adapters put the
-      `use_tool` form in every field they read a call from. Not checked
-      live: Gemini accepting `arguments` as an open object (the adapter
-      keeps it as a plain OBJECT, no key available here).
+      `use_tool` form in every field they read a call from. Checked live on
+      Gemini (`gemini-3.5-flash`, 2026-10-07): it accepts `arguments` as an
+      open object, ran `write_pptx` through `use_tool`, and after the
+      search 24,514 of 29,787 prompt tokens were still cached (the
+      14k-token message of the first turn plus its answer).
 - [x] **Start-up.** `import coscribe.web.app` 1.9-2.6s -> ~1.3s, start to
       first answer from `/api/tools` ~2.3s -> ~1.6s (3 runs each). The cost
       was `langchain_anthropic.middleware` pulling in the whole `anthropic`
