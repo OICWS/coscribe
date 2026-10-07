@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -121,6 +122,9 @@ class SubAgentTask:
         )
 
 
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
 class SubAgentTaskStore:
     """One JSON file per task."""
 
@@ -140,6 +144,8 @@ class SubAgentTaskStore:
         os.replace(tmp_path, path)
 
     def load(self, task_id: str) -> SubAgentTask | None:
+        if not _SAFE_ID.fullmatch(task_id):
+            return None
         path = self._path_for(task_id)
         if not path.exists():
             return None
@@ -178,9 +184,14 @@ class SubAgentTaskStore:
             return fresh
 
     def delete(self, task_id: str) -> None:
-        self._path_for(task_id).unlink(missing_ok=True)
+        if _SAFE_ID.fullmatch(task_id):
+            self._path_for(task_id).unlink(missing_ok=True)
 
     def _path_for(self, task_id: str) -> Path:
+        # An id arrives from the model or from a URL and names a file here:
+        # only what could have been made as one, never a path.
+        if not _SAFE_ID.fullmatch(task_id):
+            raise ValueError(f"Not a sub-agent task id: {task_id!r}")
         return self.root / f"{task_id}.json"
 
 

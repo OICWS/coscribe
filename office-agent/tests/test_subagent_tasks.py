@@ -88,6 +88,50 @@ def _pretend_running(monkeypatch: pytest.MonkeyPatch, task_id: str) -> None:
     monkeypatch.setitem(subagent_tasks._RUNNING, task_id, runner)
 
 
+@pytest.mark.parametrize(
+    "task_id", ["../outside", "..\\outside", "sub/../../outside", "/abs", "", "a.b"]
+)
+def test_an_id_that_is_not_one_the_store_could_have_made_names_no_file(
+    task_id: str, tmp_path: Path
+) -> None:
+    store = SubAgentTaskStore(tmp_path / "state")
+    outside = tmp_path / "state" / "outside.json"
+    outside.parent.mkdir(parents=True)
+    # A real running record, which reading would settle by rewriting it.
+    SubAgentTaskStore(tmp_path / "other").save(
+        SubAgentTask(
+            task_id="outside",
+            thread_id="t",
+            instructions="",
+            prompt="p",
+            tool_names="",
+            description="d",
+            status="running",
+            started_at=datetime.now(UTC).isoformat(),
+        )
+    )
+    outside.write_text((tmp_path / "other" / "subagent_tasks" / "outside.json").read_text())
+    before = outside.read_text()
+
+    assert store.load(task_id) is None
+    store.delete(task_id)
+
+    assert outside.read_text() == before
+    with pytest.raises(ValueError, match="Not a sub-agent task id"):
+        store.save(
+            SubAgentTask(
+                task_id=task_id,
+                thread_id="t",
+                instructions="",
+                prompt="p",
+                tool_names="",
+                description="d",
+                status="running",
+                started_at="now",
+            )
+        )
+
+
 async def test_a_run_cut_off_by_a_restart_reads_as_stopped(tmp_path: Path) -> None:
     SubAgentTaskStore(tmp_path).save(
         SubAgentTask(

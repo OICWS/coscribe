@@ -8332,3 +8332,17 @@ def test_signing_in_to_a_server_with_no_tools_says_so_instead_of_pretending(
         info = client.get("/api/mcp/servers").json()["docs"]
         assert info["connected"] is False
         assert info["signin_error"] == "The server connected but offers no tools."
+
+
+def test_the_sub_agent_endpoints_refuse_an_id_that_is_a_path_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        transcript = client.get("/api/subagents/..%5Coutside/transcript")
+        stop = client.post("/api/subagents/..%5Coutside/stop")
+
+    assert transcript.status_code == 404
+    assert stop.status_code == 404
