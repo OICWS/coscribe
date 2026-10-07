@@ -71,6 +71,13 @@ _WINDOWS_DEVICES = frozenset(
     | {f"COM{n}" for n in range(1, 10)}
     | {f"LPT{n}" for n in range(1, 10)}
 )
+# Codex puts this on every PowerShell command so output comes back as UTF-8.
+# It is brackets and a semicolon, which the read check would turn away, so it
+# comes off before the script is read (and before it is shown on a card).
+_POWERSHELL_UTF8 = re.compile(
+    r"\[Console\]::OutputEncoding\s*=\s*\[System\.Text\.Encoding\]::UTF8\s*(?:;|\r?\n)\s*",
+    re.IGNORECASE,
+)
 _POWERSHELL_FLAGS = frozenset({"-noprofile", "-nologo", "-noninteractive", "-nop", "-nol", "-noni"})
 _POWERSHELL_FLAGS_WITH_VALUE = frozenset({"-executionpolicy", "-ep"})
 # One `cd <dir> &&` in front; the directory is a plain word or a quoted
@@ -198,7 +205,9 @@ def _powershell_script(command: str) -> str | None:
             index += 2
         elif flag in ("-command", "-c"):
             # PowerShell joins whatever follows into one script.
-            return " ".join(words[index + 1 :]) or None
+            script = " ".join(words[index + 1 :])
+            prefix = _POWERSHELL_UTF8.match(script)
+            return (script[prefix.end() :] if prefix else script).strip() or None
         else:
             return None
     return None

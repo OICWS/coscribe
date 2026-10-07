@@ -281,11 +281,6 @@ function str(args: ArgRecord, key: string): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
-function firstLine(text: string | undefined): string | null {
-  const line = text?.split("\n").find((l) => l.trim());
-  return line ? line.trim() : null;
-}
-
 /** ask_user_question's first question; an older call asked one directly. */
 function firstQuestion(args: ArgRecord): string | undefined {
   const questions = args.questions;
@@ -435,9 +430,8 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
   ask_user_question: (a) => ({ verb: "Asked", object: firstQuestion(a) ?? "a question", glue: ": " }),
   spawn_agent: (a) => ({ verb: "Delegated to a sub-agent", object: str(a, "description") ?? null, glue: ": " }),
   run_code_task: (a) => ({ verb: "Handed a coding task to the code module", object: str(a, "description") ?? null, glue: ": " }),
-  // The code module's own commands carry the script in place of a
-  // description, so the row names it by its first line.
-  run_code_command: (a) => ({ verb: "Ran a command", object: firstLine(str(a, "description") || str(a, "script")), glue: ": " }),
+  // Named like the other commands; the script and its output are inside.
+  run_code_command: (a) => ({ verb: "Ran a command", object: str(a, "description") ?? null, glue: ": " }),
   apply_code_change: (a) => {
     const paths = Array.isArray(a.paths) ? a.paths.filter((p): p is string => typeof p === "string") : [];
     return paths.length > 0 ? { verb: "Changed", object: paths.map(basename).join(", ") } : { verb: "Changed files", object: null };

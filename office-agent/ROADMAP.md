@@ -7692,6 +7692,25 @@ because coscribe itself ran that flow, and it was removed with that entry.
       address; a provider showing its own consent step; the desktop app
       handing the address to the default browser.
 
+## Phase 8cy -- Found on Windows: Codex's PowerShell prefix, and the code commands' display (shipped)
+
+First real Windows run of the code module's approvals (8cw), in Auto mode, so
+the checks below were retested in Manual afterwards. Two findings:
+
+- [x] **Codex starts every PowerShell command with
+      `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`**, followed
+      by a newline or `;`. Brackets and a semicolon are exactly what the read
+      check refuses, so no PowerShell read could ever have passed without a
+      card. The prefix is taken off before the script is read, and before it
+      is shown on a card. Only that line: what follows is read as before.
+- [x] **A code command in the Sub Agents panel** was one dark line of its
+      first script line each, and a long task filled the panel with them.
+      Now it reads as the chat's commands do: "Ran a command" / "Ran 3
+      commands", and opened, the command and then its output.
+- Auto mode answers a code command through its reviewer, as it does any
+  action, so it shows no card there; the switches in Settings > Code and
+  *Allow for this task* matter in Manual and Accept-edits.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

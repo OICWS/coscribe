@@ -31,6 +31,7 @@ from coscribe.code_runtime.thread import (
     CodexThread,
     changed_files,
     reads_only,
+    shell_script,
 )
 
 FAKE = Path(__file__).with_name("fake_codex_app_server.py")
@@ -523,7 +524,11 @@ def test_changed_files_lists_new_and_modified_only() -> None:
 
 
 def _powershell(script: str, flags: str = "-NoProfile -Command") -> str:
-    return f"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe {flags} {script!r}"
+    quote = '"' if "'" in script else "'"
+    return (
+        f"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe {flags} "
+        f"{quote}{script}{quote}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -606,3 +611,24 @@ def test_a_powershell_wrapper_is_only_read_when_it_runs_a_command(tmp_path: Path
     assert not reads_only("powershell -EncodedCommand R2V0LUNoaWxkSXRlbQ==", folder, tmp_path)
     assert not reads_only("powershell -WindowStyle Hidden -Command Get-ChildItem", folder, tmp_path)
     assert not reads_only("powershell", folder, tmp_path)
+
+
+_UTF8 = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8"
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r\n", "; "])
+def test_the_utf8_line_codex_puts_on_every_powershell_command_is_set_aside(
+    separator: str, tmp_path: Path
+) -> None:
+    folder = str(tmp_path)
+
+    assert reads_only(_powershell(f"{_UTF8}{separator}Get-Content summary.csv"), folder, tmp_path)
+    assert shell_script(_powershell(f"{_UTF8}{separator}Get-ChildItem")) == "Get-ChildItem"
+    # Only that line: what follows it is still read for what it does.
+    assert not reads_only(
+        _powershell(f"{_UTF8}{separator}Remove-Item summary.csv"), folder, tmp_path
+    )
+    assert not reads_only(
+        _powershell(f"{_UTF8}{separator}Get-Content summary.csv ; Remove-Item x"), folder, tmp_path
+    )
+    assert not reads_only(_powershell(_UTF8), folder, tmp_path)
