@@ -71,6 +71,13 @@ _WINDOWS_DEVICES = frozenset(
     | {f"COM{n}" for n in range(1, 10)}
     | {f"LPT{n}" for n in range(1, 10)}
 )
+# Codex puts this on every PowerShell command so output comes back as UTF-8.
+# It is brackets and a semicolon, which the read check would turn away, so it
+# comes off before the script is read (and before it is shown on a card).
+_POWERSHELL_UTF8 = re.compile(
+    r"\[Console\]::OutputEncoding\s*=\s*\[System\.Text\.Encoding\]::UTF8\s*(?:;|\r?\n)\s*",
+    re.IGNORECASE,
+)
 _POWERSHELL_FLAGS = frozenset({"-noprofile", "-nologo", "-noninteractive", "-nop", "-nol", "-noni"})
 _POWERSHELL_FLAGS_WITH_VALUE = frozenset({"-executionpolicy", "-ep"})
 # One `cd <dir> &&` in front; the directory is a plain word or a quoted
@@ -155,50 +162,79 @@ def changed_files(
     return sorted(path for path, state in after.items() if before.get(path) != state)
 
 
-def _words(line: str) -> list[str] | None:
-    """The words of a command line. Quotes group, backslashes are ordinary:
-    on Windows they are the path separator, which shlex would eat."""
-    words: list[str] = []
+def _word_spans(line: str) -> list[tuple[int, str]] | None:
+    """The words of a command line, each with where it starts. Quotes group,
+    backslashes are ordinary: on Windows they are the path separator, which
+    shlex would eat."""
+    words: list[tuple[int, str]] = []
     current: list[str] = []
+    start = 0
     quote = ""
     started = False
-    for char in line:
+    for index, char in enumerate(line):
         if quote:
             if char == quote:
                 quote = ""
             else:
                 current.append(char)
         elif char in "\"'":
+            if not started and not current:
+                start = index
             quote = char
             started = True
         elif char.isspace():
             if started or current:
-                words.append("".join(current))
+                words.append((start, "".join(current)))
                 current, started = [], False
         else:
+            if not started and not current:
+                start = index
             current.append(char)
     if quote:
         return None
     if started or current:
-        words.append("".join(current))
+        words.append((start, "".join(current)))
     return words
 
 
+def _words(line: str) -> list[str] | None:
+    spans = _word_spans(line)
+    return None if spans is None else [word for _, word in spans]
+
+
+def _unquoted(text: str) -> str:
+    """`text` without the one pair of quotes that wraps it, as the wrapper's
+    own quoting put them there: shlex writes a quote inside single quotes as
+    '"'"', a Windows command line writes one inside double quotes as \\"."""
+    if len(text) >= 2 and text[0] == text[-1] == "'":
+        return text[1:-1].replace("'\"'\"'", "'")
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        return text[1:-1].replace('\\"', '"')
+    return text
+
+
 def _powershell_script(command: str) -> str | None:
-    """The script inside a `powershell -NoProfile -Command <script>` wrapper."""
-    words = _words(command)
-    if not words or PureWindowsPath(words[0]).name.lower() not in _POWERSHELLS:
+    """The script inside a `powershell -NoProfile -Command <script>` wrapper,
+    as it was written, quotes and all."""
+    spans = _word_spans(command)
+    if not spans or PureWindowsPath(spans[0][1]).name.lower() not in _POWERSHELLS:
         return None
     index = 1
-    while index < len(words):
-        flag = words[index].lower()
+    while index < len(spans):
+        flag = spans[index][1].lower()
         if flag in _POWERSHELL_FLAGS:
             index += 1
         elif flag in _POWERSHELL_FLAGS_WITH_VALUE:
             index += 2
         elif flag in ("-command", "-c"):
+            if index + 1 >= len(spans):
+                return None
             # PowerShell joins whatever follows into one script.
-            return " ".join(words[index + 1 :]) or None
+            script = command[spans[index + 1][0] :].strip()
+            if index + 2 == len(spans):
+                script = _unquoted(script)
+            prefix = _POWERSHELL_UTF8.match(script)
+            return (script[prefix.end() :] if prefix else script).strip() or None
         else:
             return None
     return None

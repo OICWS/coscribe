@@ -173,6 +173,13 @@ def run_turn(thread_id: str, turn_id: str, prompt: str, cwd: str) -> None:
     _keep(thread_id)
     if scenario == "approve":
         command(thread_id, turn_id, cwd)
+    elif scenario == "long":
+        long = (
+            'python -c "import io,csv,sys; p=r\'C:\\Users\\Allen\\Desktop\\a-very-long-folder-name'
+            '\\orders-with-a-long-file-name-2026.csv\'; t=open(p,encoding=\'utf-8-sig\').read(); '
+            'print(len(t.splitlines()), t.splitlines()[0], sorted(set(t.splitlines())))"'
+        )
+        command(thread_id, turn_id, cwd, long)
     elif scenario == "twice":
         command(thread_id, turn_id, cwd)
         command(thread_id, turn_id, cwd, "echo more > made2.txt", "call-2", "made2.txt")

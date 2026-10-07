@@ -698,6 +698,7 @@ function ToolDetail({
       </div>
     );
   }
+  if (item.toolName === "run_code_command") return <CodeCommandDetail item={item} />;
   if (item.result === undefined) {
     return <p className="px-3 py-2 text-[var(--muted)]">No result yet.</p>;
   }
@@ -705,6 +706,28 @@ function ToolDetail({
     <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all bg-[var(--code-bg)] px-3 py-2 font-mono text-xs leading-relaxed">
       {typeof item.result === "string" ? item.result : JSON.stringify(item.result, null, 2)}
     </pre>
+  );
+}
+
+/** A code-module command opened: the command, then what it printed. */
+function CodeCommandDetail({ item }: { item: Extract<ToolOrApprovalItem, { kind: "tool" }> }) {
+  const script = typeof item.arguments.script === "string" ? item.arguments.script : "";
+  const result = item.result;
+  const record = result !== null && typeof result === "object" ? (result as Record<string, unknown>) : null;
+  const output = record ? String(record.output ?? "") : result === undefined ? "" : String(result);
+  const exitCode = record && typeof record.exit_code === "number" ? record.exit_code : null;
+  return (
+    <div className="flex flex-col font-mono text-xs leading-relaxed">
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all px-3 py-2">{script}</pre>
+      {result === undefined ? (
+        <p className="border-t border-[var(--border)] px-3 py-2 font-sans text-[var(--muted)]">No result yet.</p>
+      ) : (
+        <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all border-t border-[var(--border)] bg-[var(--code-bg)] px-3 py-2">
+          {output || "(no output)"}
+          {exitCode ? `\n(exit code ${exitCode})` : ""}
+        </pre>
+      )}
+    </div>
   );
 }
 
