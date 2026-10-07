@@ -45,6 +45,7 @@ import {
   patchScheduledTask,
   type WorkflowDraftResult,
 } from "./lib/rest";
+import { useRunningSubAgents } from "./lib/useRunningSubAgents";
 import {
   goToThread,
   readPage,
@@ -383,6 +384,12 @@ function App() {
   const selectedTask = scheduledTasks.find((t) => t.trigger_id === selectedTaskId) ?? null;
   // Browser and Sub Agents belong to a conversation, not the Scheduled pages.
   const inConversation = navMode === "create" && !onHome;
+  const subAgents = useRunningSubAgents(threadId, subAgentsTick, inConversation);
+  let subAgentsTitle = "Sub Agents";
+  if (subAgents.running > 0) {
+    subAgentsTitle += ` (${subAgents.running} running`;
+    subAgentsTitle += subAgents.waiting > 0 ? `, ${subAgents.waiting} waiting for you)` : ")";
+  }
 
   findAvailable.current = inConversation;
   menuHandler.current = (command) => {
@@ -875,11 +882,27 @@ function App() {
               </button>
               <button
                 type="button"
-                title="Sub Agents"
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${subAgentsPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
+                title={subAgentsTitle}
+                className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-[var(--card-bg)] hover:text-[var(--fg)] ${subAgentsPanelOpen ? "bg-[var(--card-bg)] text-[var(--fg)]" : "text-[var(--muted)]"}`}
                 onClick={() => toggleSidePanel("subagents")}
               >
                 <SubAgentsIcon className="h-[18px] w-[18px]" />
+                {subAgents.running > 0 && (
+                  <span
+                    aria-label={
+                      subAgents.waiting > 0
+                        ? `${subAgents.running} running, ${subAgents.waiting} waiting for you`
+                        : `${subAgents.running} running`
+                    }
+                    className={`absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-medium leading-none ${
+                      subAgents.waiting > 0
+                        ? "bg-[var(--warning)] text-[var(--bg)]"
+                        : "bg-[var(--accent)] text-[var(--accent-fg)] motion-safe:animate-pulse"
+                    }`}
+                  >
+                    {subAgents.running}
+                  </span>
+                )}
               </button>
             </>
           )}

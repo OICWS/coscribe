@@ -563,3 +563,30 @@ async def test_two_follow_ups_chosen_in_one_message_do_not_share_a_thread(
     assert sum("turn 2" in r for r in results) == 1
     assert sum("still running" in r for r in results) == 1
     assert len([r for r in _records(tmp_path) if r.continues]) == 1
+
+
+async def test_the_panel_hears_of_a_code_task_before_codex_is_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+    release = asyncio.Event()
+
+    class Slow(_Service):
+        async def prepare(self) -> CodexHost:
+            await release.wait()
+            return await super().prepare()
+
+    monkeypatch.setattr("coscribe.web.session.code_service", lambda settings: Slow(codex))
+    socket = _Socket(answer=lambda payload: True)
+    socket.session = session
+    session._live_websocket = socket  # type: ignore[assignment]
+    turn = asyncio.create_task(session.handle_user_message("go", socket))  # type: ignore[arg-type]
+
+    async def heard() -> None:
+        while not [m for m in socket.of("subagents_changed") if m["status"] == "running"]:
+            await asyncio.sleep(0.05)
+
+    await asyncio.wait_for(heard(), 10)
+    assert not release.is_set()
+    release.set()
+    await asyncio.wait_for(turn, 30)

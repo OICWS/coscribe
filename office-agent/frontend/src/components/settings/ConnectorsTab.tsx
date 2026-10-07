@@ -453,16 +453,25 @@ function ExternalLink({ href, children }: { href: string; children: string }) {
  * do, who makes it, and Connect. */
 function CatalogConnectorPage({
   entry,
+  info,
   pending,
   notice,
   onBack,
   onConnect,
+  onSignIn,
+  onManage,
+  onDisconnect,
 }: {
   entry: McpCatalogEntry;
+  /** Set once the connector was added. */
+  info: McpServerInfo | null;
   pending: boolean;
   notice: Notice | null;
   onBack: () => void;
   onConnect: () => void;
+  onSignIn: () => void;
+  onManage: () => void;
+  onDisconnect: () => void;
 }) {
   const title = entry.title ?? entry.name;
   const pkg = findPinnedNpmPackage(entry.args ?? []);
@@ -481,46 +490,101 @@ function CatalogConnectorPage({
           <div className="text-2xl font-semibold">{title}</div>
           <div className="mt-1 text-[15px] text-[var(--muted)]">{entry.description}</div>
         </div>
-        <button
-          type="button"
-          disabled={pending}
-          className={`${primaryButtonClass} ${pending ? "running-wave-ring" : ""}`}
-          onClick={onConnect}
-        >
-          {pending ? "Connecting…" : "Connect"}
-        </button>
+        {info?.connected && !pending ? (
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 px-2 text-sm text-[var(--muted)]">
+              <CheckIcon className="h-4 w-4" /> Connected
+            </span>
+            <button type="button" className={secondaryButtonClass} onClick={onManage}>
+              Manage
+            </button>
+            <button type="button" className={secondaryButtonClass} onClick={onDisconnect}>
+              Disconnect
+            </button>
+          </div>
+        ) : info?.signin ? (
+          <div className="flex items-center gap-2">
+            <button type="button" className={secondaryButtonClass} onClick={onSignIn}>
+              Start over
+            </button>
+            <button type="button" className={secondaryButtonClass} onClick={onDisconnect}>
+              Cancel
+            </button>
+          </div>
+        ) : info && !pending ? (
+          <div className="flex items-center gap-2">
+            <button type="button" className={primaryButtonClass} onClick={info.auth === "oauth" ? onSignIn : onConnect}>
+              {info.auth === "oauth" ? "Sign in" : "Reconnect"}
+            </button>
+            <button type="button" className={secondaryButtonClass} onClick={onDisconnect}>
+              Remove
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={pending}
+            className={`${primaryButtonClass} ${pending ? "running-wave-ring" : ""}`}
+            onClick={onConnect}
+          >
+            {pending ? "Connecting…" : "Connect"}
+          </button>
+        )}
       </div>
-      {notice && <NoticeText notice={notice} />}
+      {info?.signin ? (
+        <p role="status" className="text-sm text-[var(--muted)]">
+          Waiting for you to sign in in your browser.{" "}
+          <a href={info.signin.url} target="_blank" rel="noreferrer" className="text-[var(--accent)] hover:underline">
+            Open the sign-in page
+          </a>
+        </p>
+      ) : info && !info.connected && !pending ? (
+        <p role="status" className="text-sm text-[var(--danger)]">
+          {info.signin_error ?? "Not connected."}
+        </p>
+      ) : (
+        notice && <NoticeText notice={notice} />
+      )}
       {entry.about && <p className="max-w-[46rem] text-[15px] leading-relaxed">{entry.about}</p>}
 
-      {tools.length > 0 && (
-        <section>
-          <h3 className="flex items-center gap-2 text-xl font-semibold">
-            Tools
+      <section>
+        <h3 className="flex items-center gap-2 text-xl font-semibold">
+          Tools
+          {tools.length > 0 && (
             <span className="rounded-md bg-[var(--card-bg)] px-1.5 text-xs font-normal text-[var(--muted)]">{tools.length}</span>
-          </h3>
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {shown.map((tool) => (
-              <span key={tool} className="truncate rounded-lg bg-[var(--card-bg)] px-3 py-1.5 text-[13px]" title={tool}>
-                {tool}
-              </span>
-            ))}
-          </div>
-          {tools.length > TOOLS_SHOWN && (
-            <button
-              type="button"
-              className="mt-3 text-sm text-[var(--accent)] hover:underline"
-              onClick={() => setAllTools((v) => !v)}
-            >
-              {allTools ? "Show fewer" : `Show all ${tools.length}`}
-            </button>
           )}
-          <p className="mt-3 text-xs text-[var(--muted)]">
-            From the maker's documentation. Once connected, this page lists what the service offers now, and lets you
-            choose which tools may run.
+        </h3>
+        {tools.length > 0 ? (
+          <>
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {shown.map((tool) => (
+                <span key={tool} className="truncate rounded-lg bg-[var(--card-bg)] px-3 py-1.5 text-[13px]" title={tool}>
+                  {tool}
+                </span>
+              ))}
+            </div>
+            {tools.length > TOOLS_SHOWN && (
+              <button
+                type="button"
+                className="mt-3 text-sm text-[var(--accent)] hover:underline"
+                onClick={() => setAllTools((v) => !v)}
+              >
+                {allTools ? "Show fewer" : `Show all ${tools.length}`}
+              </button>
+            )}
+            <p className="mt-3 text-xs text-[var(--muted)]">
+              {entry.tools_from === "service"
+                ? "As the service reported them when it was last connected."
+                : "From the maker's documentation. Once connected, this page lists what the service offers now."}{" "}
+              The connector's own page lets you choose which tools may run.
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            The maker doesn't publish a list. Once you connect, the service reports its tools and they show here.
           </p>
-        </section>
-      )}
+        )}
+      </section>
 
       <div className="grid grid-cols-1 gap-x-12 gap-y-6 border-t border-[var(--border)] pt-6 text-sm sm:grid-cols-2">
         {entry.made_by && (
@@ -925,6 +989,23 @@ export function ConnectorsTab({ active }: { active: boolean }) {
     setNotice(null);
   };
 
+  // Discover is the store: a connector opened there shows its store page
+  // whether or not it was added; Yours opens the page that manages it.
+  if (opened?.catalogEntry && (tab === "discover" || !opened.serverInfo)) {
+    return (
+      <CatalogConnectorPage
+        entry={opened.catalogEntry}
+        info={opened.serverInfo}
+        pending={pendingConnectorAdds.has(opened.name)}
+        notice={notice}
+        onBack={backToList}
+        onConnect={() => connectCatalog(opened.catalogEntry!)}
+        onSignIn={() => void signIn(opened.name)}
+        onManage={() => setTab("yours")}
+        onDisconnect={() => void disconnect(opened.name)}
+      />
+    );
+  }
   if (opened?.serverInfo) {
     const pinned = findPinnedNpmPackage(opened.serverInfo.args ?? []);
     return (
@@ -939,17 +1020,6 @@ export function ConnectorsTab({ active }: { active: boolean }) {
         onCheckUpdate={(pkg) => void checkUpdate(pkg, pinned?.version)}
         onApplyUpdate={(pkg, version) => void applyUpdate(opened.name, pkg, version)}
         onPolicies={(policies) => void setPolicies(opened.name, policies)}
-      />
-    );
-  }
-  if (opened?.catalogEntry) {
-    return (
-      <CatalogConnectorPage
-        entry={opened.catalogEntry}
-        pending={pendingConnectorAdds.has(opened.name)}
-        notice={notice}
-        onBack={backToList}
-        onConnect={() => connectCatalog(opened.catalogEntry!)}
       />
     );
   }

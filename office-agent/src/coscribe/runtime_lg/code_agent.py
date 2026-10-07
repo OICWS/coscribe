@@ -328,6 +328,8 @@ def build_code_task_tool(host: SubAgentHost, context: CodeTaskContext) -> Callab
         register_subagent_run(record.task_id, runner, lambda: list(run.entries))
         store.save(record)
         try:
+            # The panel's badge and list learn of it now, not at the first update.
+            await host.changed(record)
             await asyncio.shield(runner)
         except asyncio.CancelledError:
             current = asyncio.current_task()
