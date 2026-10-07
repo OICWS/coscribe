@@ -1,11 +1,12 @@
 """Skills a user can add from Settings > Skills > Discover, and which skills
 are switched on.
 
-Discover lists Apache-2.0 skills from github.com/anthropics/skills, pinned to
-one commit in `skill_catalog.json` (regenerate with
-scripts/build_skill_catalog.py). Nothing is bundled: Add downloads a skill's
-files at that commit into the user's skills directory and checks each against
-the catalog's SHA-256, so a changed or truncated download never lands.
+Discover lists Apache-2.0 skills from github.com/anthropics/skills and
+github.com/anthropics/knowledge-work-plugins, each pinned to one commit in
+`skill_catalog.json` (regenerate with scripts/build_skill_catalog.py). Nothing
+is bundled: Add downloads a skill's files at its commit into the user's skills
+directory and checks each against the catalog's SHA-256, so a changed or
+truncated download never lands.
 
 On/off is one global setting per skill, stored in `<state_dir>/skills.json`
 as the set of switched-off names; every skill not in it is offered to the
@@ -29,7 +30,7 @@ CATALOG_PATH = Path(__file__).resolve().parent.parent / "skill_catalog.json"
 # to have come from the catalog (it can be removed and added back).
 SOURCE_MARKER = ".coscribe-source.json"
 _STATE_FILE = "skills.json"
-_RAW_URL = "https://raw.githubusercontent.com/{repo}/{commit}/skills/{name}/{path}"
+_RAW_URL = "https://raw.githubusercontent.com/{repo}/{commit}/{src}"
 
 SkillSource = Literal["builtin", "anthropic", "custom"]
 
@@ -128,9 +129,16 @@ def install_catalog_skill(
     # failure part-way never leaves a half-written skill that would load.
     staging = Path(tempfile.mkdtemp(prefix=f".{name}-", dir=root))
     try:
+        # An entry names its own repository, commit and folder; one that
+        # doesn't is in the catalog's default repository under skills/<name>.
+        repo = entry.get("repo", catalog["repo"])
+        commit = entry.get("commit", catalog["commit"])
+        folder = entry.get("path", f"skills/{name}")
         for file in entry["files"]:
+            # `src` is where a file lives when that isn't inside the skill's
+            # folder (a plugin's license file).
             url = _RAW_URL.format(
-                repo=catalog["repo"], commit=catalog["commit"], name=name, path=file["path"]
+                repo=repo, commit=commit, src=file.get("src", f"{folder}/{file['path']}")
             )
             try:
                 data = fetch(url)
@@ -144,7 +152,7 @@ def install_catalog_skill(
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
         (staging / SOURCE_MARKER).write_text(
-            json.dumps({"repo": catalog["repo"], "commit": catalog["commit"], "name": name}),
+            json.dumps({"repo": repo, "commit": commit, "name": name}),
             encoding="utf-8",
         )
         staging.rename(target)
