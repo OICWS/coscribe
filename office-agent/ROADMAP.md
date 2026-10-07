@@ -7532,6 +7532,40 @@ in code.
 - Not yet: a chat's `run_code_task` doesn't get it -- the chat writes that
   task, memory in view, and hands over everything the run needs.
 
+## Phase 8cv -- The code module's approvals: allow for a task, allow for good, PowerShell reads (shipped)
+
+On Windows Codex runs PowerShell, which the read-only rule (bash only) didn't
+know, so every `Get-Content` asked. And a task that runs a dozen commands
+asked a dozen times. Decided with the user: no per-conversation menu (once
+code conversations are gone, hard to find, hard to audit); two layers
+instead, as Connectors have.
+
+- [x] **PowerShell reads** (`code_runtime/thread.py`): `powershell`/`pwsh`
+      `-Command` wrappers, and `Get-ChildItem`/`gci`/`dir`/`ls`,
+      `Get-Content`/`gc`/`cat`/`type`, `Select-String`/`sls`, `Get-Item`,
+      `Get-Location`, `Test-Path`. Decided by coscribe's own word reading,
+      never Codex's `commandActions`: a PowerShell "read" can go on to
+      `Remove-Item`. No pipes, `;`, `&&`, redirects, `$`, backticks,
+      sub-expressions, commas or `~`; every path stays inside the folder.
+      Not yet run on a real Windows machine; the quoting Codex uses there is
+      read from its source, not observed.
+- [x] **Allow for this task**: a second button on a code command's or file
+      change's card, `approval_response` with `scope: "task"`. Kept per
+      (task, action) in the session; a later task asks again.
+- [x] **Allow for good**: `code_permissions.json` in the state folder,
+      Settings > Code > Approvals, two switches (commands, file changes),
+      `GET/PUT /api/code/permissions`. Checked after hooks, exec policy and
+      Plan mode, so none of them is bypassed; audit reason `code_allowed`.
+- [x] The code command card no longer says the script "can write only in the
+      workspace": Codex runs with no sandbox.
+- [x] Tests: the word reader against 14 reads and 20 things it must refuse
+      (mutation-checked: removing `;` from the syntax set fails the spaced
+      `Get-ChildItem ; Remove-Item` case); task and settings allowances,
+      plan mode, file changes unaffected by a commands switch; the
+      permissions API. Driven in a browser against the fake Codex: one click
+      on *Allow for this task* ran both commands; the settings switch ran
+      them with no card.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

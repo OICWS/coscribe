@@ -41,6 +41,7 @@ Reason = Literal[
     "plan_mode",
     "auto_review_block",
     "exec_policy",
+    "code_allowed",
     AutoApproveReason,
     "human",
     "stopped",

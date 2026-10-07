@@ -678,9 +678,9 @@ function App() {
 
   const onLocalError = (message: string) => dispatch({ type: "error", message });
 
-  const onApprove = (id: string, approved: boolean) => {
+  const onApprove = (id: string, approved: boolean, scope?: "task") => {
     dispatch({ type: "local_approval_resolved", id, approved });
-    socketRef.current?.send({ type: "approval_response", id, approved });
+    socketRef.current?.send({ type: "approval_response", id, approved, ...(scope ? { scope } : {}) });
   };
 
   const onAnswerPlan = (item: PlanItem, choice: PlanChoice, feedback: string) => {

@@ -78,6 +78,7 @@ from .. import __version__
 from ..cli import _dotenv_path, _load_settings_or_none
 from ..code_runtime.install import CodexUnavailable
 from ..code_runtime.launch import codex_model
+from ..code_runtime.permissions import CodePermissions
 from ..code_runtime.service import code_service, shutdown_code_services
 from ..config import PermissionMode, Settings
 from ..coordinator import build_coordinator_agent
@@ -108,6 +109,7 @@ from ..runtime_lg import (
     stop_run,
     strip_mode_note,
 )
+from ..runtime_lg.code_agent import CODE_APPROVAL_RISKS
 from ..tools import (
     SkillInfo,
     SkillUploadError,
@@ -2628,6 +2630,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         )
         return {"restart_required": restart_required, "rejected": rejected}
 
+    def _code_permissions() -> CodePermissions:
+        return CodePermissions(settings.state_dir, tuple(CODE_APPROVAL_RISKS))
+
     @app.get("/api/code")
     async def code_status() -> dict[str, Any]:
         """The code module's download, and whether Codex can use the model
@@ -2640,6 +2645,17 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         except CodexUnavailable as exc:
             model_problem = str(exc)
         return {**service.status(), "model": model, "model_problem": model_problem}
+
+    @app.get("/api/code/permissions")
+    async def get_code_permissions() -> dict[str, Any]:
+        return _code_permissions().load()
+
+    @app.put("/api/code/permissions")
+    async def put_code_permissions(payload: dict[str, str]) -> Any:
+        try:
+            return _code_permissions().update(payload)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
 
     @app.post("/api/code/install")
     async def install_code() -> Any:
@@ -3306,7 +3322,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     # regardless since it only ever awaits _turn_lock.
                     asyncio.create_task(session.handle_rewind_message(data["index"], websocket))
                 elif message_type == "approval_response":
-                    session.resolve_approval(data["id"], bool(data.get("approved")))
+                    session.resolve_approval(
+                        data["id"], bool(data.get("approved")), data.get("scope")
+                    )
                 elif message_type == "question_response":
                     answers = data.get("answers")
                     if data.get("dismissed"):

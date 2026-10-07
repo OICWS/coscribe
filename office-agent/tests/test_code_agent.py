@@ -75,15 +75,18 @@ def _replies(task: str) -> list[AIMessage]:
 
 
 class _Socket:
-    def __init__(self, answer: Callable[[dict[str, Any]], bool] | None = None) -> None:
+    def __init__(
+        self, answer: Callable[[dict[str, Any]], bool] | None = None, scope: str | None = None
+    ) -> None:
         self.sent: list[dict[str, Any]] = []
         self.answer = answer
+        self.scope = scope
         self.session: ChatSessionLG | None = None
 
     async def send_json(self, payload: dict[str, Any]) -> None:
         self.sent.append(payload)
         if payload.get("type") == "approval_required" and self.answer and self.session:
-            self.session.resolve_approval(payload["id"], self.answer(payload))
+            self.session.resolve_approval(payload["id"], self.answer(payload), self.scope)
 
     def of(self, kind: str) -> list[dict[str, Any]]:
         return [p for p in self.sent if p.get("type") == kind]
@@ -316,4 +319,72 @@ async def test_stopping_a_run_from_the_panel_leaves_no_card_waiting(
 
     assert session._pending_approvals == {}
     assert SubAgentTaskStore(tmp_path / "state").load(task.task_id).status == "stopped"  # type: ignore[union-attr]
+    assert not (tmp_path / "workspace" / "made.txt").exists()
+
+
+async def test_each_command_asks_unless_the_task_was_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("twice")))
+    socket = _Socket(answer=lambda payload: True)
+
+    await _run(session, socket)
+
+    assert len(socket.of("approval_required")) == 2
+
+
+async def test_allowing_a_kind_of_action_for_the_task_stops_the_cards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("twice")))
+    socket = _Socket(answer=lambda payload: True, scope="task")
+
+    await _run(session, socket)
+
+    assert len(socket.of("approval_required")) == 1
+    assert (tmp_path / "workspace" / "made2.txt").exists()
+    [(_, action)] = session._code_task_allowances
+    assert action == "run_code_command"
+
+
+def _always_allow(tmp_path: Path, **policies: str) -> None:
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state" / "code_permissions.json").write_text(json.dumps(policies))
+
+
+async def test_always_allowing_commands_in_settings_runs_them_without_cards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    _always_allow(tmp_path, run_code_command="allow")
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("twice")))
+    socket = _Socket(answer=lambda payload: False)
+
+    await _run(session, socket)
+
+    assert socket.of("approval_required") == []
+    assert (tmp_path / "workspace" / "made2.txt").exists()
+
+
+async def test_always_allowing_commands_leaves_file_changes_to_ask(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    _always_allow(tmp_path, run_code_command="allow")
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("file")))
+    socket = _Socket(answer=lambda payload: True)
+
+    await _run(session, socket)
+
+    assert [c["tool_name"] for c in socket.of("approval_required")] == ["apply_code_change"]
+
+
+async def test_plan_mode_still_declines_what_settings_always_allow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    _always_allow(tmp_path, run_code_command="allow")
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+    session._toggle_mode("plan")
+    socket = _Socket(answer=lambda payload: True)
+
+    await _run(session, socket)
+
     assert not (tmp_path / "workspace" / "made.txt").exists()

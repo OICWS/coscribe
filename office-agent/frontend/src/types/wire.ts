@@ -396,6 +396,8 @@ export interface ApprovalResponseOut {
   type: "approval_response";
   id: string;
   approved: boolean;
+  /** "task": allow this kind of action for the rest of the code task. */
+  scope?: "task";
 }
 
 /** A plan or task draft answers with `answer`. ask_user_question answers

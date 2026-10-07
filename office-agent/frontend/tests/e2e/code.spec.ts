@@ -37,3 +37,18 @@ test("Settings has a Code section", async ({ page }) => {
     "true",
   );
 });
+
+test("Settings > Code can allow commands and file changes for good", async ({ page }) => {
+  await page.goto(freshThreadPath("code-approvals"));
+  await waitForConnected(page);
+
+  await page.getByTitle("Settings").click();
+  await page.getByRole("button", { name: "Code", exact: true }).click();
+
+  const commands = page.getByRole("switch", { name: "Run commands without asking" });
+  await expect(commands).toHaveAttribute("aria-checked", "false");
+  await commands.click();
+  await expect(commands).toHaveAttribute("aria-checked", "true");
+  await commands.click();
+  await expect(commands).toHaveAttribute("aria-checked", "false");
+});
