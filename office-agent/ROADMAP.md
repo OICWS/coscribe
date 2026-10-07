@@ -7666,7 +7666,8 @@ a concrete reason to prioritize a new surface.
   of the prefix stays stable). Deliberately deferred -- explicitly not
   blocking on this ("暂时现在不管").
 
-- **A one-time font-swap flash on load** -- not started; noted here per
+- [x] **A one-time font-swap flash on load** -- **gone (reported by you,
+  2026-10-07)**; what fixed it was not recorded. Original note: not started; noted here per
   your request. Live-reported: a few seconds after the app becomes
   interactive, right around when the model picker/provider list finishes
   loading, the whole UI's font visibly flashes once. Not yet root-caused
