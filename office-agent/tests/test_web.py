@@ -3634,7 +3634,7 @@ def test_get_mcp_catalog_returns_curated_entries(
     assert response.status_code == 200
     entries = response.json()
     names = {entry["name"] for entry in entries}
-    assert {"canva", "notion", "miro", "monday"} <= names
+    assert {"canva", "notion", "miro", "monday", "atlassian", "clickup", "zapier"} <= names
     assert "playwright" not in names
     # What coscribe already covers itself (reading pages, memory, the
     # date) isn't offered as a connector, nor is anything that can't be
@@ -3643,12 +3643,58 @@ def test_get_mcp_catalog_returns_curated_entries(
     left_out = {"fetch", "memory", "sequential-thinking", "time", "slack", "office365", "dropbox"}
     assert not names & left_out
     for entry in entries:
-        assert entry["server_url"].startswith("https://") and entry["auth"] == "oauth"
+        assert entry["server_url"].startswith("https://")
         assert not {"command", "args", "env", "needs_config"} & entry.keys()
-        # What its page in Discover shows before it is connected.
-        assert entry["category"] and entry["about"] and entry["tools"]
-        assert len(set(entry["tools"])) == len(entry["tools"])
-        assert all(link["url"].startswith("https://") for link in entry["links"])
+        assert entry["category"] and entry["about"]
+        assert len(set(entry.get("tools", []))) == len(entry.get("tools", []))
+        assert all(link["url"].startswith("https://") for link in entry.get("links", []))
+    # Public documentation servers need no sign-in; every other one signs in.
+    public = {e["name"] for e in entries if "auth" not in e}
+    assert public == {"mslearn", "huggingface", "cloudflare"}
+    assert all(e["auth"] == "oauth" for e in entries if e["name"] not in public)
+
+
+def test_every_catalog_connector_has_its_own_icon() -> None:
+    from coscribe.web.connector_catalog import MCP_CATALOG
+
+    icons = Path(__file__).parent.parent / "frontend" / "src" / "assets" / "connectors"
+    have = {p.stem for p in icons.iterdir()}
+    assert {entry["name"] for entry in MCP_CATALOG} <= have
+
+
+def test_the_catalog_lists_the_tools_a_connector_reported_when_it_was_connected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The maker's documentation lists 46 Canva tools and the live server 48,
+    and some services list none: what the service said wins, and is kept."""
+    from coscribe.runtime_lg import mcp as lg_mcp
+    from tests.oauth_mcp_server import running_oauth_mcp_server
+
+    real_connect = lg_mcp.connect_one_mcp_server_lg
+    monkeypatch.delenv("COSCRIBE_MCP_CONFIG_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    with (
+        running_oauth_mcp_server() as server,
+        _client_lg(tmp_path, monkeypatch, FakeToolCallingChatModel(responses=[])) as client,
+    ):
+        monkeypatch.setattr("coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", real_connect)
+        opened: list[str] = []
+        monkeypatch.setattr("webbrowser.open", _sign_in_like_a_browser(client, opened))
+        before = {e["name"]: e for e in client.get("/api/mcp/catalog").json()}["canva"]
+        assert before["tools_from"] == "docs" and len(before["tools"]) == 46
+
+        client.post(
+            "/api/mcp/servers",
+            json={"name": "canva", "server_url": server.mcp_url, "auth": "oauth"},
+        )
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["canva"]["connected"])
+        after = {e["name"]: e for e in client.get("/api/mcp/catalog").json()}["canva"]
+        assert after["tools"] == ["whoami"] and after["tools_from"] == "service"
+
+        client.delete("/api/mcp/servers/canva")
+        kept = {e["name"]: e for e in client.get("/api/mcp/catalog").json()}["canva"]
+        assert kept["tools"] == ["whoami"]
 
 
 def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(

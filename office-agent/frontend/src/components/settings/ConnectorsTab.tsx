@@ -547,34 +547,44 @@ function CatalogConnectorPage({
       )}
       {entry.about && <p className="max-w-[46rem] text-[15px] leading-relaxed">{entry.about}</p>}
 
-      {tools.length > 0 && (
-        <section>
-          <h3 className="flex items-center gap-2 text-xl font-semibold">
-            Tools
+      <section>
+        <h3 className="flex items-center gap-2 text-xl font-semibold">
+          Tools
+          {tools.length > 0 && (
             <span className="rounded-md bg-[var(--card-bg)] px-1.5 text-xs font-normal text-[var(--muted)]">{tools.length}</span>
-          </h3>
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {shown.map((tool) => (
-              <span key={tool} className="truncate rounded-lg bg-[var(--card-bg)] px-3 py-1.5 text-[13px]" title={tool}>
-                {tool}
-              </span>
-            ))}
-          </div>
-          {tools.length > TOOLS_SHOWN && (
-            <button
-              type="button"
-              className="mt-3 text-sm text-[var(--accent)] hover:underline"
-              onClick={() => setAllTools((v) => !v)}
-            >
-              {allTools ? "Show fewer" : `Show all ${tools.length}`}
-            </button>
           )}
-          <p className="mt-3 text-xs text-[var(--muted)]">
-            From the maker's documentation. Once connected, this page lists what the service offers now, and lets you
-            choose which tools may run.
+        </h3>
+        {tools.length > 0 ? (
+          <>
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {shown.map((tool) => (
+                <span key={tool} className="truncate rounded-lg bg-[var(--card-bg)] px-3 py-1.5 text-[13px]" title={tool}>
+                  {tool}
+                </span>
+              ))}
+            </div>
+            {tools.length > TOOLS_SHOWN && (
+              <button
+                type="button"
+                className="mt-3 text-sm text-[var(--accent)] hover:underline"
+                onClick={() => setAllTools((v) => !v)}
+              >
+                {allTools ? "Show fewer" : `Show all ${tools.length}`}
+              </button>
+            )}
+            <p className="mt-3 text-xs text-[var(--muted)]">
+              {entry.tools_from === "service"
+                ? "As the service reported them when it was last connected."
+                : "From the maker's documentation. Once connected, this page lists what the service offers now."}{" "}
+              The connector's own page lets you choose which tools may run.
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            The maker doesn't publish a list. Once you connect, the service reports its tools and they show here.
           </p>
-        </section>
-      )}
+        )}
+      </section>
 
       <div className="grid grid-cols-1 gap-x-12 gap-y-6 border-t border-[var(--border)] pt-6 text-sm sm:grid-cols-2">
         {entry.made_by && (

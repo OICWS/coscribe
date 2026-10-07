@@ -7720,17 +7720,34 @@ because coscribe itself ran that flow, and it was removed with that entry.
       used to read "Couldn't sign in", and the open session was never
       closed. Found while looking at a Notion connector that showed nothing
       after sign-in; the cause on that account is not established yet.
-- [ ] **More hosted connectors, probed 2026-10-07 by really registering a
-      client at each server** (not only reading its metadata). Accepted:
-      Airtable, Amplitude, Asana (its older endpoint), Atlassian, ClickUp,
-      Coda, Evernote, Fireflies, Granola, Intercom, Linear, Mixpanel,
-      PayPal, Sentry, Stripe, Todoist, Webflow, Wix, Zapier. Refused or
-      unavailable: Calendly and Gamma (a loopback redirect is refused),
-      Figma (403), and no registration at all at Slack, Box, HubSpot,
-      Dropbox, Zoom, Smartsheet, Xero, Zendesk. Public with no sign-in:
-      Microsoft Learn docs, Hugging Face, Cloudflare docs. Registration
-      only proves the first step; the sign-in page and the token exchange
-      still need a real account.
+- [x] **19 more connectors, 23 in all, each with its own icon (2026-10-07).**
+      Probed by really registering a client at each server, not only reading
+      its metadata. Added with a sign-in: Atlassian, ClickUp, Airtable,
+      Todoist, Zapier, Granola, Coda, Fireflies, Linear, Stripe, Intercom,
+      PayPal, Webflow, Wix, Mixpanel, Amplitude. Added with no sign-in (public
+      servers; Connect only adds them): Microsoft Learn, Hugging Face,
+      Cloudflare Docs. These three were connected for real through the app
+      and Microsoft Learn answered a question through a model. The catalog is
+      its own module now (`web/connector_catalog.py`). Tool names come from
+      the vendors' docs where they list them (Atlassian 249, ClickUp 48 --
+      its own display names) or from the live server (the three public
+      ones); for the rest the page says the maker publishes no list, and
+      once a connector has been connected the page lists the tools it
+      reported (kept in `state_dir/connector_tools_seen.json`), which also
+      replaces a documented list that differs (Canva: 46 documented, 48
+      served). Icons are the sites' own app icons (largest the site offers;
+      Intercom's is 48px and a little soft).
+- [x] **Left out after checking:** Asana. Its old server (`/sse`) still
+      accepts a registration but is documented as sunset on 2026-05-11, and
+      the current one (`/v2/mcp`) asks for a registered app, so neither is a
+      one-click connector. Not added though probed fine: Sentry (a developer
+      tool). Calendly, Gamma, Figma, Slack, Box, HubSpot, Dropbox, Zoom,
+      Smartsheet, Xero, Zendesk as above.
+- [ ] **Needs your testing, all at once:** the sign-in of each new connector
+      with a real account. Only the registration step was tried. Two things
+      may differ per service: a site admin may have to allow the app first
+      (Atlassian's own docs say registration is handled for allowed domains),
+      and a service may refuse the loopback sign-in address at the last step.
 
 ## Phase 8cy -- Found on Windows: Codex's PowerShell prefix, and the code commands' display (shipped)
 

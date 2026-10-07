@@ -179,6 +179,7 @@ from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflo
 from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus, run_event
 from .browser_panel import BrowserPanelError, BrowserPanelSession
+from .connector_catalog import MCP_CATALOG, SeenTools
 from .session import ChatSessionLG
 from .thread_meta import ThreadMetaStore
 
@@ -256,164 +257,6 @@ class _NoCacheStaticFiles(StaticFiles):
 # trusted partners" -- or a company-approved app, like Microsoft 365 in a
 # tenant that doesn't allow third-party apps, is left out on purpose.
 # Anything else is still addable by hand from the Custom tab.
-# What each server offers, from the vendor's own tool reference (2026-10-07),
-# for the page that describes a connector before it is connected. The
-# connected connector's own page lists what the live server reports, which
-# is authoritative when the two differ.
-_CANVA_TOOLS = [
-    "upload-asset-from-url", "get-assets", "create-upload-url", "autofill-design",
-    "get-brand-template-dataset", "get-design-dataset", "search-brand-templates",
-    "list-brand-kits", "create-design-from-brand-template", "create-brand-template-draft",
-    "publish-brand-template", "comment-on-design", "reply-to-comment", "list-comments",
-    "list-replies", "search-designs", "get-design", "get-design-pages", "get-design-content",
-    "get-presenter-notes", "get-export-formats", "generate-design",
-    "create-design-from-candidate", "create-design", "get-create-design-async-job",
-    "copy-design", "merge-designs", "import-design-from-url", "resolve-shortlink",
-    "export-design", "generate-image", "get-generate-image-job", "remove-background",
-    "separate-image-layers", "get-separate-image-layers-job", "create-folder",
-    "list-folder-items", "search-folders", "move-item-to-folder", "resize-design",
-    "start-editing-transaction", "perform-editing-operations", "commit-editing-transaction",
-    "cancel-editing-transaction", "get-design-thumbnail", "help",
-]  # fmt: skip
-_NOTION_TOOLS = [
-    "notion-search", "notion-ai-search", "notion-get-tool-access", "notion-download-skill",
-    "notion-fetch", "notion-create-file-upload", "notion-create-attachment",
-    "notion-download-attachment", "notion-create-pages", "notion-update-page",
-    "notion-convert-page-to-skill", "notion-move-pages", "notion-duplicate-page",
-    "notion-create-database", "notion-create-folder", "notion-update-data-source",
-    "notion-create-view", "notion-update-view", "notion-query-data-sources",
-    "notion-query-meeting-notes", "notion-list-agents", "notion-search-agents",
-    "notion-query-sessions", "notion-search-sessions", "notion-spawn-session",
-    "notion-get-session-status", "notion-wait-session", "notion-stop-session",
-    "notion-send-message-to-session", "notion-list-session-events",
-    "notion-read-session-event", "notion-create-comment", "notion-get-comments",
-    "notion-get-teams", "notion-get-users", "notion-get-async-task",
-]  # fmt: skip
-_MIRO_TOOLS = [
-    "board_create", "layout_create", "layout_update", "context_get", "image_create",
-    "diagram_create", "doc_create", "table_create", "board_search_boards", "comment_reply",
-    "board_list_items", "context_explore", "image_get_url", "doc_update", "table_sync_rows",
-    "code_widget_create", "comment_list_comments", "comment_resolve", "layout_get_dsl",
-    "layout_read",
-]  # fmt: skip
-_MONDAY_TOOLS = [
-    "create_board", "get_board_info", "get_board_items_page", "get_board_activity",
-    "board_insights", "create_group", "create_column", "get_column_type_info", "create_item",
-    "change_item_column_values", "create_workspace", "update_workspace", "list_workspaces",
-    "workspace_info", "create_folder", "update_folder", "move_object", "create_doc",
-    "update_doc", "read_docs", "create_dashboard", "create_widget", "all_widgets_schema",
-    "create_view", "update_view", "create_view_table", "update_view_table", "create_form",
-    "get_form", "update_form", "form_questions_editor", "create_form_submission",
-    "get_user_context", "list_users_and_teams", "create_update", "get_updates",
-    "create_notification", "search", "get_assets", "get_asset_upload_url",
-    "finalize_asset_upload", "list_automations", "manage_automations", "create_automation",
-    "plan_workflow", "create_workflow", "update_workflow", "publish_workflow", "manage_agent",
-    "manage_agent_triggers", "manage_agent_skills", "manage_agent_knowledge", "agent_catalog",
-    "get_notetaker_meetings", "get_monday_dev_sprints_boards", "get_sprints_metadata",
-    "get_sprint_summary", "all_monday_api", "get_graphql_schema", "get_type_details",
-    "show_table", "show_chart", "show_battery", "show_assign",
-]  # fmt: skip
-
-# A small, curated, hardcoded list -- not a live marketplace. Every entry is
-# a hosted (remote) MCP server the user signs in to in their own browser:
-# nothing is installed, no app is registered, and no company IT step is
-# needed, so it works wherever the person can already open the service
-# themselves. Each one was checked against the live server (2026-10-07): the
-# registration call is accepted and the sign-in page is reached. A server that
-# needs a pre-registered app -- Slack, Google Workspace, Box, HubSpot, and
-# Dropbox, which lists a registration address but answers "only pre-registered
-# trusted partners" -- or a company-approved app, like Microsoft 365 in a
-# tenant that doesn't allow third-party apps, is left out on purpose.
-# Anything else is still addable by hand from the Custom tab. `links` holds
-# only addresses that exist: a vendor's own docs, and a support or privacy
-# page where one was found.
-MCP_CATALOG: list[dict[str, Any]] = [
-    {
-        "name": "canva",
-        "title": "Canva",
-        "made_by": "Canva",
-        "homepage": "https://www.canva.dev/docs/mcp/",
-        "category": "Design",
-        "description": "Search, create, autofill and export Canva designs.",
-        "about": "Find and open your Canva designs, create new ones, fill brand templates, "
-        "export to PDF, PNG, PPTX and more, and read or add comments. coscribe sees only "
-        "what the Canva account you sign in with can see.",
-        "tools": _CANVA_TOOLS,
-        "links": [
-            {"label": "Documentation", "url": "https://www.canva.dev/docs/mcp/"},
-            {
-                "label": "Support",
-                "url": "https://www.canva.dev/docs/apps/mcp/troubleshooting/",
-            },
-            {"label": "Privacy policy", "url": "https://www.canva.com/policies/privacy-policy/"},
-        ],
-        "server_url": "https://mcp.canva.com/mcp",
-        "auth": "oauth",
-    },
-    {
-        "name": "notion",
-        "title": "Notion",
-        "made_by": "Notion",
-        "homepage": "https://developers.notion.com/guides/mcp/mcp",
-        "category": "Notes & docs",
-        "description": "Search, read and edit your Notion workspace.",
-        "about": "Search your workspace, read and edit pages and databases, create pages, "
-        "views and comments. coscribe sees only what the Notion account you sign in with "
-        "can see.",
-        "tools": _NOTION_TOOLS,
-        "links": [
-            {"label": "Documentation", "url": "https://developers.notion.com/guides/mcp/mcp"},
-            {"label": "Support", "url": "https://www.notion.com/help/notion-mcp"},
-        ],
-        "server_url": "https://mcp.notion.com/mcp",
-        "auth": "oauth",
-    },
-    {
-        "name": "miro",
-        "title": "Miro",
-        "made_by": "Miro",
-        "homepage": "https://developers.miro.com/docs/mcp-intro",
-        "category": "Whiteboards",
-        "description": "Read and search your Miro boards, build boards and diagrams.",
-        "about": "Search and read boards, create boards, diagrams, docs and tables, lay out "
-        "items, and reply to or resolve comments. coscribe sees only what the Miro account "
-        "you sign in with can see.",
-        "tools": _MIRO_TOOLS,
-        "links": [
-            {"label": "Documentation", "url": "https://developers.miro.com/docs/mcp-intro"},
-            {"label": "Support", "url": "https://github.com/miroapp/miro-ai/issues"},
-            {"label": "Privacy policy", "url": "https://miro.com/legal/privacy-policy/"},
-        ],
-        "server_url": "https://mcp.miro.com/",
-        "auth": "oauth",
-    },
-    {
-        "name": "monday",
-        "title": "monday.com",
-        "made_by": "monday.com",
-        "homepage": "https://developer.monday.com/api-reference/docs/mondaycom-mcp",
-        "category": "Project management",
-        "description": "Query your monday.com boards, create items and update columns.",
-        "about": "Read boards and items, create and update items, docs, dashboards and "
-        "forms, post updates, and manage workspaces and automations. coscribe sees only "
-        "what the monday.com account you sign in with can see.",
-        "tools": _MONDAY_TOOLS,
-        "links": [
-            {
-                "label": "Documentation",
-                "url": "https://developer.monday.com/api-reference/docs/mondaycom-mcp",
-            },
-            {
-                "label": "Support",
-                "url": "https://support.monday.com/hc/en-us/articles/28515034903314-Get-started-with-monday-MCP",
-            },
-            {"label": "Privacy policy", "url": "https://monday.com/l/privacy/privacy-policy/"},
-        ],
-        "server_url": "https://mcp.monday.com/mcp",
-        "auth": "oauth",
-    },
-]
-
 # git/github catalog entries (local git ops via mcp-server-git; GitHub
 # issues/PRs/repo search via GitHub's own remote MCP server + an OAuth
 # Device Flow sign-in) existed here and were removed -- coscribe's target
@@ -2887,7 +2730,25 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/mcp/catalog")
     async def get_mcp_catalog() -> list[dict[str, Any]]:
-        return MCP_CATALOG
+        """The catalog, each entry's tools being what the service reported
+        when it was connected if that ever happened, else what the maker's
+        documentation lists."""
+        seen = SeenTools(settings.state_dir)
+        for entry in MCP_CATALOG:
+            name = entry["name"]
+            if name in mcp_connections:
+                seen.remember(name, [t["name"][len(name) + 1 :] for t in _connector_tools(name)])
+        remembered = seen.load()
+        result = []
+        for entry in MCP_CATALOG:
+            tools = remembered.get(entry["name"])
+            if tools:
+                result.append({**entry, "tools": tools, "tools_from": "service"})
+            elif entry.get("tools"):
+                result.append({**entry, "tools_from": "docs"})
+            else:
+                result.append(entry)
+        return result
 
     async def _begin_oauth_sign_in(name: str, config: Any, request: Request) -> dict[str, Any]:
         """Starts signing in to a connector and returns once there is
