@@ -7776,6 +7776,31 @@ the checks below were retested in Manual afterwards. Two findings:
   action, so it shows no card there; the switches in Settings > Code and
   *Allow for this task* matter in Manual and Accept-edits.
 
+## Phase 8cz -- A count on the Sub Agents button while any are running (shipped)
+
+With the panel closed there was no sign that a sub-agent was still working:
+a code task can run for minutes, and a background one outlives the turn.
+
+- [x] **A badge with the number running** on the header's Sub Agents button,
+      pulsing (not under reduced motion). When any of them waits on the user
+      it turns amber and stops pulsing: that is not working, it is waiting
+      for you. The label and the tooltip give both counts.
+- [x] **The server says a sub-agent has started** (`subagents_changed` from
+      `spawn_agent`, `spawn_agent_background` and `run_code_task` as the
+      record is made): a code task can spend its first half minute
+      downloading Codex before it sends anything. The hook re-reads on that,
+      and every 10 s while any is running as a backstop. A first version
+      polled every 4 s during every turn; review pointed out that each read
+      parses every task record of every conversation, so that cost grew with
+      the records kept and ran for chats that never spawn anything.
+- [x] The count is kept per conversation: switching threads never shows the
+      last one's count while the new one is read, or if reading fails.
+- [x] Driven in a browser against a fake Codex that hangs: the badge showed
+      "1" within seconds without polling, did not follow a switch to another
+      conversation, and went when the task was stopped; a waiting approval
+      showed amber. A test holds Codex's start back and checks the panel
+      hears of the task before it is ready (fails without the new event).
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

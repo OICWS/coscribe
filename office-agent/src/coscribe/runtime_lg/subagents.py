@@ -449,6 +449,7 @@ def build_delegation_tools(
         """
         task, runner = start(description, prompt, instructions, model, tool_names, False)
         try:
+            await host.changed(task)
             await asyncio.shield(runner)
         except asyncio.CancelledError:
             current = asyncio.current_task()
@@ -488,6 +489,7 @@ def build_delegation_tools(
                 gives it all of them.
         """
         task, _runner = start(description, prompt, instructions, model, tool_names, True)
+        await host.changed(task)
         return {"task_id": task.task_id, "status": task.status, "description": task.description}
 
     for delegate in (spawn_agent, spawn_agent_background):
