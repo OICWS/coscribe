@@ -3635,3 +3635,24 @@ them for the post-tool hooks. Numbers are in ROADMAP Phase 8cu.
 Same round: `AnthropicPromptCachingMiddleware` is imported only for an
 Anthropic model. `langchain_anthropic.middleware` pulled in the `anthropic`
 SDK, ~0.6s of the server's start-up for everyone else.
+
+## Browser sign-in for remote connectors (2026-10-07)
+
+`mcp_oauth.py` wraps the MCP SDK's `OAuthClientProvider` (discovery, dynamic
+client registration, PKCE) as an `httpx.Auth` handed to
+`MultiServerMCPClient`'s `streamable_http` connection (`auth=`).
+`McpOAuth.begin()` marks one sign-in as active; only while it is active may
+the provider's redirect handler open a browser, otherwise it raises
+`NeedsSignIn` (a restart must never open a page nobody is waiting for). The
+redirect handler records the authorize URL by its `state`, and
+`GET /api/mcp/oauth/callback` completes the matching future, which the SDK's
+callback handler awaits; the SDK itself checks that the returned `state`
+is the one it generated. `tests/oauth_mcp_server.py` is a real spec-compliant
+OAuth MCP server (the SDK's own server-side provider interface) that the
+web tests sign in to with a simulated browser.
+
+Two findings from the live servers: a listed `registration_endpoint` is not
+proof a client may register (Dropbox lists one and answers "only
+pre-registered MCP trusted partners"), and anyio wraps a failed connect in an
+`ExceptionGroup` whose message is "unhandled errors in a TaskGroup", so
+`McpServerConnection` reports the innermost exception.

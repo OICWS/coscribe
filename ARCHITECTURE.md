@@ -180,7 +180,10 @@ an autonomous agent.
 ### Extension points
 
 - **MCP**: the `mcpServers` format Claude Desktop and Claude Code use; a
-  "connector" is a pre-filled MCP configuration.
+  "connector" is a pre-filled MCP configuration. The curated list holds only
+  hosted servers the user signs in to in their own browser (MCP's OAuth,
+  dynamic client registration): nothing to install, no app to register, no
+  company IT step, so each works wherever the service itself can be opened.
 - **Skills**: `SKILL.md` folders loaded on demand. Built-in: pptx, excel,
   word and skill-creator; users add their own in `skills_dir`.
 - **Hooks**: scripts on lifecycle events (above).

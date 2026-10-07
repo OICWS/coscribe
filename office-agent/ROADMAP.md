@@ -744,7 +744,8 @@ Scope this as a *generic* mechanism from the start (not GitHub-specific),
 since Slack's own token acquisition has the identical problem and
 shouldn't repeat the manual-paste pattern either.
 
-- [ ] **5a -- Generic local-connector OAuth flow**: a reusable connect
+- [x] **5a -- Generic local-connector OAuth flow** -- **done for remote servers in
+      Phase 8cx** (the MCP spec's own OAuth, not a per-provider flow); original text: a reusable connect
       mechanism (device flow preferred where a provider supports it,
       loopback redirect otherwise) that any catalog entry needing a token
       can opt into, replacing today's "prefill the Custom form, paste a
@@ -7572,6 +7573,61 @@ in code.
       structural: `fastapi.openapi.models` (~120ms), `langsmith.schemas`
       (~80ms), `langgraph_sdk` (~60ms), the SQLite checkpointer (~175ms).
 
+## Phase 8cx -- Connectors that sign in through the browser; a hosted-only catalog (built, awaiting your sign-in tests)
+
+Asked why Microsoft 365 doesn't open a login page the way GitHub did, and
+which connectors to add. Why: the Microsoft 365 entry ran a community
+server locally (needs Node) whose only sign-in was a device code the model
+had to read out; coscribe never opened anything. GitHub's page opened
+because coscribe itself ran that flow, and it was removed with that entry.
+
+- [x] **The rule for the curated list (yours, 2026-10-07):** only hosted
+      servers, signed in to by the user in their own browser, that work in
+      any environment: no local install, no app to register, no company IT
+      step. Example: a company on Teams may not let a third-party app into
+      its Microsoft 365 tenant, but its staff can open Canva themselves, so
+      Canva connects and Microsoft 365 doesn't. Microsoft 365 (and
+      anything else that needs a tenant's approval, a pre-registered app or
+      a Cloud project) stays addable by hand from the Custom tab.
+- [x] **Browser sign-in for a remote connector** (`runtime_lg/mcp_oauth.py`,
+      the MCP spec's OAuth 2.1 through the MCP SDK's `OAuthClientProvider`:
+      discovery, dynamic client registration, PKCE). Connect opens the
+      service's own page in the default browser; the redirect lands on
+      `GET /api/mcp/oauth/callback` of the running coscribe server, which
+      hands the code to the waiting connection. `mcp.json` holds only
+      `"auth": "oauth"`; tokens and the registered client go through
+      `runtime/secrets.py` (keychain, else a 0600 file) under
+      `state_dir/mcp_oauth/`. A restart reconnects with the saved tokens
+      and refreshes them without a browser; if they no longer work the
+      connector shows "Sign in" instead of opening a page at startup.
+      A client registered for another redirect address is registered
+      again, because the desktop app's server takes a new port each start.
+      The Connectors page shows the waiting sign-in with a link to the
+      page, then the tools once it connects. Also: a connection error that
+      anyio wraps in a task-group exception now shows its real reason.
+- [x] **Catalog, checked against the live servers** (registration accepted
+      and the sign-in page reached, with a loopback redirect): Canva,
+      Notion, Miro, monday.com. **Dropbox was dropped after that check**:
+      its metadata lists a registration address, but registering answers
+      "Only pre-registered MCP trusted partners are allowed". So a listed
+      registration endpoint isn't proof; only a real registration is.
+      Probed and left out: Slack (docs: pre-registered, directory-published
+      apps only), Google Workspace (you create the OAuth client; developer
+      preview), Box and HubSpot (no registration), Asana's v2 (not
+      confirmed), Microsoft's Work IQ servers (preview; needs the tenant),
+      Figma and Linear (advertise registration, but developer tools),
+      Atlassian (a company's own tenant; second batch), Zapier (advertises
+      registration; what it offers depends on what the user set up in
+      Zapier, so not tried).
+- [ ] **Needs your testing:** a real sign-in end to end for each of the
+      four, in the desktop app. Tested here: the whole flow against an
+      in-process spec-compliant OAuth MCP server (sign-in, saved sign-in
+      on reconnect, refresh of an expired token, a refused sign-in and a
+      retry, removal forgetting the credentials). Not tested here: a
+      provider accepting or refusing the final redirect to a loopback
+      address; a provider showing its own consent step; the desktop app
+      handing the address to the default browser.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
@@ -7787,7 +7843,8 @@ a concrete reason to prioritize a new surface.
   above -- see "Explicitly not adopting" below for the scope that was
   rejected and why. Converged scope, four independent pieces, none
   requiring the sandbox work first since none of them run untrusted code:
-  1. **Curated office-relevant MCP connectors** -- extend the existing
+  1. **Curated office-relevant MCP connectors** -- **done differently in Phase 8cx**
+     (hosted servers only, browser sign-in); original plan: extend the existing
      hardcoded `MCP_CATALOG` in `web/app.py` (currently playwright/fetch/
      memory/sequential-thinking/time -- general-purpose/dev-oriented, not
      office-specific) with hand-picked, version-pinned entries (same

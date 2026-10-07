@@ -57,6 +57,7 @@ class MCPConfig(TypedDict, total=False):
     cwd: str
     server_url: str
     headers: dict[str, str]
+    auth: str
 
 
 def validate_mcp_config(config: dict[str, Any]) -> MCPConfig:
@@ -110,6 +111,12 @@ def validate_mcp_config(config: dict[str, Any]) -> MCPConfig:
             if not isinstance(headers, dict):
                 raise ValueError(f"MCP 'headers' must be a dict, got: {type(headers)}")
             normalized["headers"] = headers
+        if "auth" in config:
+            if config["auth"] != "oauth":
+                raise ValueError(f"MCP 'auth' must be 'oauth' if given, got: {config['auth']!r}")
+            if "headers" in config:
+                raise ValueError("MCP 'auth' and 'headers' can't be used together")
+            normalized["auth"] = "oauth"
 
     return normalized
 

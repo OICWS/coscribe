@@ -395,7 +395,7 @@ def _client_lg(
     # specific test overrides this when it needs to prove tools actually
     # got spliced in).
     async def _fake_connect_one_mcp_server_lg(
-        name: str, config: Any
+        name: str, config: Any, *args: Any, **kwargs: Any
     ) -> tuple[list[Any], None, None]:
         return [], None, None
 
@@ -3636,18 +3636,17 @@ def test_get_mcp_catalog_returns_curated_entries(
     assert response.status_code == 200
     entries = response.json()
     names = {entry["name"] for entry in entries}
-    assert "office365" in names
+    assert {"canva", "notion", "miro", "monday"} <= names
     assert "playwright" not in names
     # What coscribe already covers itself (reading pages, memory, the
-    # date) isn't offered as a connector.
-    assert not names & {"fetch", "memory", "sequential-thinking", "time", "slack"}
-
-    office365 = next(entry for entry in entries if entry["name"] == "office365")
-    # One-click -- its own MCP server handles the device-code sign-in
-    # through its own login/verify-login tools, no coscribe-side config
-    # to prefill.
-    assert "needs_config" not in office365
-    assert "env" not in office365
+    # date) isn't offered as a connector, nor is anything that can't be
+    # signed in to with one click (a local install, or an app someone must
+    # register or approve first).
+    left_out = {"fetch", "memory", "sequential-thinking", "time", "slack", "office365", "dropbox"}
+    assert not names & left_out
+    for entry in entries:
+        assert entry["server_url"].startswith("https://") and entry["auth"] == "oauth"
+        assert not {"command", "args", "env", "needs_config"} & entry.keys()
 
 
 def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(
@@ -3717,7 +3716,9 @@ def test_post_mcp_server_reconnect_retries_a_previously_failed_add(
             async def close(self) -> None:
                 pass
 
-        async def _fake_connect_succeeds(name: str, config: Any) -> tuple[list[Any], Any, None]:
+        async def _fake_connect_succeeds(
+            name: str, config: Any, *args: Any, **kwargs: Any
+        ) -> tuple[list[Any], Any, None]:
             from coscribe.runtime.types import tool_metadata
 
             def _tool(x: str = "") -> str:
@@ -3766,7 +3767,9 @@ def test_get_mcp_servers_connected_reflects_a_real_live_connection(
         async def close(self) -> None:
             pass
 
-    async def _fake_connect_returns_a_tool(name: str, config: Any) -> tuple[list[Any], Any, None]:
+    async def _fake_connect_returns_a_tool(
+        name: str, config: Any, *args: Any, **kwargs: Any
+    ) -> tuple[list[Any], Any, None]:
         from coscribe.runtime.types import tool_metadata
 
         def _tool(x: str = "") -> str:
@@ -3917,7 +3920,9 @@ def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
     release = threading.Event()
     finished = threading.Event()
 
-    async def _slow_connect_mcp_tools_lg(config_path: Path) -> tuple[list[Any], dict[str, Any]]:
+    async def _slow_connect_mcp_tools_lg(
+        config_path: Path, *args: Any
+    ) -> tuple[list[Any], dict[str, Any]]:
         await asyncio.to_thread(release.wait, 10)
         finished.set()
         return [_fake_tool_fn], {"fetch": _FakeConnection()}
@@ -3988,7 +3993,9 @@ def test_post_mcp_server_splices_tools_into_both_new_and_already_open_sessions(
         async def close(self) -> None:
             pass
 
-    async def _fake_connect_returns_a_tool(name: str, config: Any) -> tuple[list[Any], Any, None]:
+    async def _fake_connect_returns_a_tool(
+        name: str, config: Any, *args: Any, **kwargs: Any
+    ) -> tuple[list[Any], Any, None]:
         return [_fake_tool_fn], _FakeConnection(), None
 
     monkeypatch.chdir(tmp_path)
@@ -7976,7 +7983,9 @@ def test_connector_tool_permissions_change_what_a_conversation_may_do_lg(
         async def close(self) -> None:
             pass
 
-    async def _connect(name: str, config: Any) -> tuple[list[Any], Any, None]:
+    async def _connect(
+        name: str, config: Any, *args: Any, **kwargs: Any
+    ) -> tuple[list[Any], Any, None]:
         return tools, _FakeConnection(), None
 
     monkeypatch.chdir(tmp_path)
@@ -8118,3 +8127,179 @@ def test_the_code_settings_are_checked_and_apply_live_lg(
     assert "deepseek" in chosen["model_problem"]
     assert (chosen["installed"], chosen["preparing"]) == (False, False)
     assert default["model"] == "fake:model"
+
+
+# -- Connectors that sign in through the browser -------------------------------
+
+
+def _sign_in_like_a_browser(client: Any, opened: list[str], approve: bool = True) -> Any:
+    """What webbrowser.open does in a test: follow the provider's sign-in
+    page, which redirects back to coscribe, and visit that address as the
+    browser would."""
+    from urllib.parse import parse_qs, urlparse
+
+    import httpx
+
+    def open_page(url: str) -> None:
+        opened.append(url)
+
+        def visit() -> None:
+            location = httpx.get(url, follow_redirects=False).headers["location"]
+            if not approve:
+                state = parse_qs(urlparse(location).query)["state"][0]
+                location = f"{location.split('?')[0]}?error=access_denied&state={state}"
+            client.get(location.replace("http://testserver", ""))
+
+        threading.Thread(target=visit, daemon=True).start()
+
+    return open_page
+
+
+def _wait_until(condition: Any, seconds: float = 20.0) -> None:
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.1)
+
+
+@contextlib.contextmanager
+def _oauth_connector_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """A running app, a running OAuth MCP server, and a "browser" that
+    approves every sign-in; yields (client, server, opened pages)."""
+    from coscribe.runtime_lg import mcp as lg_mcp
+    from tests.oauth_mcp_server import running_oauth_mcp_server
+
+    real_connect = lg_mcp.connect_one_mcp_server_lg
+    monkeypatch.delenv("COSCRIBE_MCP_CONFIG_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    with (
+        running_oauth_mcp_server() as server,
+        _client_lg(tmp_path, monkeypatch, FakeToolCallingChatModel(responses=[])) as client,
+    ):
+        monkeypatch.setattr("coscribe.runtime_lg.mcp.connect_one_mcp_server_lg", real_connect)
+        opened: list[str] = []
+        monkeypatch.setattr("webbrowser.open", _sign_in_like_a_browser(client, opened))
+        yield client, server, opened
+
+
+def _add_oauth_connector(client: Any, server: Any) -> dict[str, Any]:
+    response = client.post(
+        "/api/mcp/servers",
+        json={"name": "docs", "server_url": server.mcp_url, "auth": "oauth"},
+    )
+    assert response.status_code == 200
+    result: dict[str, Any] = response.json()
+    return result
+
+
+def test_an_oauth_connector_signs_in_through_the_browser_and_keeps_the_sign_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, server, opened):
+        result = _add_oauth_connector(client, server)
+
+        assert result["connected"] is False
+        assert result["signin"]["url"].startswith(f"{server.url}/authorize?")
+        assert opened == [result["signin"]["url"]]
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["connected"])
+
+        info = client.get("/api/mcp/servers").json()["docs"]
+        assert info["auth"] == "oauth" and info["signin"] is None
+        assert [t["name"] for t in info["tools"]] == ["docs_whoami"]
+        # No secret in the connector list, and only the choice of OAuth in mcp.json.
+        assert json.loads((tmp_path / "mcp.json").read_text())["mcpServers"]["docs"] == {
+            "server_url": server.mcp_url,
+            "auth": "oauth",
+        }
+        assert server.provider.registrations == 1
+
+        # A restart: the saved sign-in is used, no browser opens.
+        reconnected = client.post("/api/mcp/servers/docs/reconnect").json()
+        assert reconnected["connected"] is True and len(opened) == 1
+        assert server.provider.registrations == 1
+
+
+def test_an_expired_oauth_sign_in_is_refreshed_without_the_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, server, opened):
+        server.provider.token_lifetime = 1
+        _add_oauth_connector(client, server)
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["connected"])
+        time.sleep(2)
+
+        assert client.post("/api/mcp/servers/docs/reconnect").json()["connected"] is True
+        assert len(opened) == 1
+
+
+def test_a_refused_oauth_sign_in_says_so_and_can_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, server, opened):
+        monkeypatch.setattr("webbrowser.open", _sign_in_like_a_browser(client, opened, False))
+        _add_oauth_connector(client, server)
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["signin_error"])
+
+        info = client.get("/api/mcp/servers").json()["docs"]
+        assert info["connected"] is False and info["signin"] is None
+        assert "access_denied" in info["signin_error"]
+
+        monkeypatch.setattr("webbrowser.open", _sign_in_like_a_browser(client, opened))
+        assert client.post("/api/mcp/servers/docs/signin").json()["signin"]["url"]
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["connected"])
+        assert client.get("/api/mcp/servers").json()["docs"]["signin_error"] is None
+
+
+def test_reconnecting_without_a_saved_sign_in_asks_for_one_instead_of_opening_a_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, server, opened):
+        _add_oauth_connector(client, server)
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["connected"])
+        (tmp_path / "state" / "mcp_oauth" / "docs.json").unlink()
+
+        result = client.post("/api/mcp/servers/docs/reconnect").json()
+
+        assert result["connected"] is False and "sign in" in result["error"].lower()
+        assert len(opened) == 1
+
+
+def test_removing_an_oauth_connector_forgets_its_sign_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, server, _opened):
+        _add_oauth_connector(client, server)
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["connected"])
+        assert (tmp_path / "state" / "mcp_oauth" / "docs.json").is_file()
+
+        client.delete("/api/mcp/servers/docs")
+
+        assert not (tmp_path / "state" / "mcp_oauth" / "docs.json").exists()
+
+
+def test_an_oauth_redirect_nobody_is_waiting_for_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _client_lg(tmp_path, monkeypatch, FakeToolCallingChatModel(responses=[])) as client:
+        response = client.get("/api/mcp/oauth/callback?state=nope&code=x")
+
+        assert response.status_code == 400
+        assert "expired" in response.text
+
+
+def test_signing_in_again_while_a_sign_in_waits_replaces_it_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, server, opened):
+        ignored: list[str] = []
+        monkeypatch.setattr("webbrowser.open", ignored.append)
+        _add_oauth_connector(client, server)
+        assert client.get("/api/mcp/servers").json()["docs"]["signin"] is not None
+
+        monkeypatch.setattr("webbrowser.open", _sign_in_like_a_browser(client, opened))
+        assert client.post("/api/mcp/servers/docs/signin").json()["signin"]["url"]
+
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["connected"])
+        info = client.get("/api/mcp/servers").json()["docs"]
+        assert info["signin"] is None and info["signin_error"] is None

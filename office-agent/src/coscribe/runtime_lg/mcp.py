@@ -74,10 +74,11 @@ import asyncio
 import logging
 import os
 import shutil
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
 from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import Connection
@@ -95,6 +96,10 @@ logger = logging.getLogger(__name__)
 # initialize handshake can legitimately take tens of seconds on a slow
 # connection.
 _CONNECT_TIMEOUT_SECONDS = 60.0
+
+# (connector name, server url) -> the httpx auth that signs a remote server's
+# requests in; see runtime_lg/mcp_oauth.py.
+AuthFactory = Callable[[str, str], Awaitable[httpx.Auth]]
 
 
 def _forwarded_network_env() -> dict[str, str]:
@@ -138,7 +143,7 @@ def _forwarded_network_env() -> dict[str, str]:
     return forwarded
 
 
-def _to_lg_connection(config: Mapping[str, Any]) -> Connection:
+def _to_lg_connection(config: Mapping[str, Any], auth: httpx.Auth | None = None) -> Connection:
     """Translate one of tools/mcp.py's already-validated MCPConfig entries
     into the shape MultiServerMCPClient expects. Only the two transports
     tools/mcp.py's own catalog ever configures (see web/app.py's
@@ -197,6 +202,8 @@ def _to_lg_connection(config: Mapping[str, Any]) -> Connection:
     connection = {"transport": "streamable_http", "url": config["server_url"]}
     if "headers" in config:
         connection["headers"] = config["headers"]
+    if auth is not None:
+        connection["auth"] = auth
     return cast("Connection", connection)
 
 
@@ -323,6 +330,15 @@ def _collapse_non_nullable_anyof(schema: Any) -> None:
             _collapse_non_nullable_anyof(item)
 
 
+def _innermost(exc: BaseException) -> BaseException:
+    """The transport runs in an anyio task group, which wraps whatever went
+    wrong in an exception group whose message ("unhandled errors in a
+    TaskGroup") says nothing; the user needs the actual reason."""
+    while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        exc = exc.exceptions[0]
+    return exc
+
+
 class McpServerConnection:
     """Owns one MCP server's persistent session -- see module docstring for
     why this exists instead of MultiServerMCPClient.get_tools()'s default
@@ -335,9 +351,17 @@ class McpServerConnection:
     leave." Safe to `close()` more than once or before `connect()` ever
     succeeded."""
 
-    def __init__(self, name: str, config: Mapping[str, Any]) -> None:
+    def __init__(
+        self,
+        name: str,
+        config: Mapping[str, Any],
+        auth_factory: AuthFactory | None = None,
+        connect_timeout: float = _CONNECT_TIMEOUT_SECONDS,
+    ) -> None:
         self.name = name
         self._config = config
+        self._auth_factory = auth_factory
+        self._connect_timeout = connect_timeout
         self._stop = asyncio.Event()
         self._ready = asyncio.Event()
         self._tools: list[BaseTool] = []
@@ -348,8 +372,13 @@ class McpServerConnection:
 
     async def _run(self) -> None:
         try:
+            auth = None
+            if self._config.get("auth") == "oauth":
+                if self._auth_factory is None:
+                    raise RuntimeError(f"{self.name} signs in through the coscribe app.")
+                auth = await self._auth_factory(self.name, self._config["server_url"])
             client = MultiServerMCPClient(
-                {self.name: _to_lg_connection(self._config)}, tool_name_prefix=True
+                {self.name: _to_lg_connection(self._config, auth)}, tool_name_prefix=True
             )
             async with client.session(self.name) as session:
                 tools = await load_mcp_tools(
@@ -381,15 +410,15 @@ class McpServerConnection:
                 self._ready.set()
                 await self._stop.wait()
         except Exception as exc:  # noqa: BLE001 -- surfaced to connect() below, not swallowed
-            self._error = exc
+            self._error = _innermost(exc)
             self._ready.set()
 
     async def connect(self) -> list[BaseTool]:
         try:
-            await asyncio.wait_for(self._ready.wait(), timeout=_CONNECT_TIMEOUT_SECONDS)
+            await asyncio.wait_for(self._ready.wait(), timeout=self._connect_timeout)
         except TimeoutError:
             raise TimeoutError(
-                f"Timed out after {_CONNECT_TIMEOUT_SECONDS:.0f}s waiting for "
+                f"Timed out after {self._connect_timeout:.0f}s waiting for "
                 f"{self.name!r} to connect -- the server process may be stuck "
                 "(a stalled package download, no network access, ...)"
             ) from None
@@ -405,7 +434,10 @@ class McpServerConnection:
 
 
 async def connect_one_mcp_server_lg(
-    name: str, config: Mapping[str, Any]
+    name: str,
+    config: Mapping[str, Any],
+    auth_factory: AuthFactory | None = None,
+    connect_timeout: float = _CONNECT_TIMEOUT_SECONDS,
 ) -> tuple[list[BaseTool], McpServerConnection | None, str | None]:
     """Connect a single already-validated server config, returning its
     tagged LangChain tools plus the McpServerConnection backing them (None
@@ -424,7 +456,7 @@ async def connect_one_mcp_server_lg(
     shutdown) -- otherwise its subprocess (and, for Playwright, its
     browser) leaks past that point. See app.py's mcp_connections holder.
     """
-    connection = McpServerConnection(name, config)
+    connection = McpServerConnection(name, config, auth_factory, connect_timeout)
     try:
         tools = await connection.connect()
     except Exception as exc:
@@ -439,7 +471,7 @@ async def connect_one_mcp_server_lg(
 
 
 async def connect_mcp_tools_lg(
-    config_path: Path,
+    config_path: Path, auth_factory: AuthFactory | None = None
 ) -> tuple[list[BaseTool], dict[str, McpServerConnection]]:
     """Connect to every configured MCP server and return the combined,
     tagged tool list plus a {name: connection} map (for the caller to close
@@ -467,7 +499,10 @@ async def connect_mcp_tools_lg(
         return [], {}
     configs = load_mcp_server_configs(config_path)
     results = await asyncio.gather(
-        *(connect_one_mcp_server_lg(name, config) for name, config in configs.items())
+        *(
+            connect_one_mcp_server_lg(name, config, auth_factory)
+            for name, config in configs.items()
+        )
     )
     tools: list[BaseTool] = []
     connections: dict[str, McpServerConnection] = {}

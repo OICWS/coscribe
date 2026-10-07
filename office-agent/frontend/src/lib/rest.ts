@@ -188,7 +188,7 @@ export const addMcpServer = (
   name: string,
   server:
     | { command: string; args: string[]; env?: Record<string, string> }
-    | { server_url: string; headers?: Record<string, string> },
+    | { server_url: string; headers?: Record<string, string>; auth?: "oauth" },
 ) => postJson<McpServerUpdateResult>("/api/mcp/servers", { name, ...server });
 export const removeMcpServer = (name: string) => del<Record<string, never>>(`/api/mcp/servers/${encodeURIComponent(name)}`);
 export const setConnectorToolPolicies = (name: string, tools: Record<string, ConnectorToolPolicy>) =>
@@ -197,6 +197,8 @@ export const setConnectorToolPolicies = (name: string, tools: Record<string, Con
   });
 export const reconnectMcpServer = (name: string) =>
   postJson<McpReconnectResult>(`/api/mcp/servers/${encodeURIComponent(name)}/reconnect`, {});
+export const signInMcpServer = (name: string) =>
+  postJson<McpReconnectResult>(`/api/mcp/servers/${encodeURIComponent(name)}/signin`, {});
 export const getNpmLatestVersion = (pkg: string) =>
   getJson<NpmLatestVersionResponse>(`/api/mcp/npm-latest-version?package=${encodeURIComponent(pkg)}`);
 export const bumpMcpVersion = (name: string, pkg: string, version: string) =>

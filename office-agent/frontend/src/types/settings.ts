@@ -145,10 +145,14 @@ export interface McpCatalogEntry {
   /** What people call it, e.g. "Microsoft 365"; `name` is its config key. */
   title?: string;
   description: string;
-  command: string;
-  args: string[];
+  /** A local server: the command that starts it. */
+  command?: string;
+  args?: string[];
   env?: Record<string, string>;
   needs_config?: boolean;
+  /** A hosted server, signed in to in the browser (`auth` is "oauth"). */
+  server_url?: string;
+  auth?: "oauth";
   made_by?: string;
   homepage?: string;
 }
@@ -171,6 +175,12 @@ export interface McpServerInfo {
    * (streamable_http) entry, e.g. a hand-configured Custom-tab server. */
   server_url?: string;
   masked_headers?: Record<string, string>;
+  /** "oauth": signed in through the server's own page, no token to paste. */
+  auth?: "oauth";
+  /** Set while a sign-in is waiting for the user in their browser. */
+  signin?: { url: string } | null;
+  /** Why the last sign-in didn't work. */
+  signin_error?: string | null;
   /** Live signal, not derived from the static config the rest of this
    * entry comes from -- whether this server is currently connected in
    * the running coscribe-web process (see web/app.py's mcp_connections). */
@@ -188,6 +198,8 @@ export interface McpServerUpdateResult {
    * or when `rejected` already explains the outcome (a local validation
    * failure, caught before any connect was attempted). */
   error: string | null;
+  /** A sign-in is waiting for the user in their browser. */
+  signin?: { url: string };
 }
 
 export type NpmLatestVersionResponse = { package: string; latest: string } | { error: string };
@@ -197,7 +209,11 @@ export type NpmLatestVersionResponse = { package: string; latest: string } | { e
 // pattern (error non-null covers a thrown validate_mcp_config failure or
 // "not found" too, not just a failed connect attempt).
 export type McpVersionBumpResult = { connected: boolean; error: string | null };
-export type McpReconnectResult = { connected: boolean; error: string | null };
+export type McpReconnectResult = {
+  connected: boolean;
+  error: string | null;
+  signin?: { url: string };
+};
 
 // ---------------------------------------------------------------------
 // Providers tab
