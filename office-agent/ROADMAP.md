@@ -7723,6 +7723,14 @@ the checks below were retested in Manual afterwards. Two findings:
       first script line each, and a long task filled the panel with them.
       Now it reads as the chat's commands do: "Ran a command" / "Ran 3
       commands", and opened, the command and then its output.
+- [x] **A PowerShell script is shown as it was written.** Reading the
+      wrapper's words had dropped the quotes, so a card read
+      `python -c \import io,csv...`; the script is now the text after
+      `-Command`, with only the wrapper's own outer quotes taken off.
+- [x] **Codex is told to look at files with one plain listing or reading
+      command** (`Get-ChildItem`, `Get-Content`, `Select-String`; `ls`,
+      `cat`...), not `python -c`, which cannot be told from any other code
+      and so asks. Reading an xlsx/docx/pdf still needs python and asks.
 - Auto mode answers a code command through its reviewer, as it does any
   action, so it shows no card there; the switches in Settings > Code and
   *Allow for this task* matter in Manual and Accept-edits.

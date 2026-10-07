@@ -632,3 +632,19 @@ def test_the_utf8_line_codex_puts_on_every_powershell_command_is_set_aside(
         _powershell(f"{_UTF8}{separator}Get-Content summary.csv ; Remove-Item x"), folder, tmp_path
     )
     assert not reads_only(_powershell(_UTF8), folder, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("command", "script"),
+    [
+        ("powershell.exe -Command 'python -c \"print(1)\"'", 'python -c "print(1)"'),
+        ('powershell.exe -Command "python -c \\"print(1)\\""', 'python -c "print(1)"'),
+        ("pwsh -c 'Write-Output '\"'\"'hi'\"'\"''", "Write-Output 'hi'"),
+        ("powershell.exe -Command python -c \"print(1)\"", 'python -c "print(1)"'),
+    ],
+)
+def test_a_powershell_script_is_shown_as_it_was_written(
+    command: str, script: str, tmp_path: Path
+) -> None:
+    assert shell_script(command) == script
+    assert not reads_only(command, str(tmp_path), tmp_path)
