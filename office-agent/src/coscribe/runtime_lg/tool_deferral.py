@@ -1,62 +1,43 @@
 """Deferred tool loading for the top-level coordinator graph: a small,
-always-bound "core" tool set plus a `search_tools(query)` gateway that
-discovers the rest on demand -- the fix for the real, measured cost
-`runtime_lg/README.md`'s "Tool-loading context cost" section already
+always-bound "core" tool set plus a `search_tools(query)` gateway and a
+`use_tool(name, arguments)` runner for the rest -- the fix for the real,
+measured cost `runtime_lg/README.md`'s "Tool-loading context cost" section
 found (~27k tokens of tool JSON schema alone, out of coscribe's own 95
-built-in tools) and the design ROADMAP.md's Phase 8ap already grounded
-against real prior art before any of this was written: Anthropic's own
-Tool Search Tool, this environment's own `ToolSearch`, and
-`claude-code-best/claude-code`'s real (cloned, read) `CORE_TOOLS` +
-`SearchExtraTools`/`ExecuteExtraTool` pair all independently converge on
-the identical two-tier shape.
+built-in tools). The two-tier shape follows Anthropic's Tool Search Tool,
+this environment's own `ToolSearch`, and `claude-code-best/claude-code`'s
+`CORE_TOOLS` + `SearchExtraTools`/`ExecuteExtraTool` pair.
+
+**Why the tool list never changes mid-conversation.** Providers cache the
+prompt by prefix and the tool list comes before the messages, so binding a
+tool that `search_tools` found made the provider re-read the whole
+conversation uncached (22-56% of a long DeepSeek task, ROADMAP Phase 8cj).
+So `search_tools` returns the found tools' descriptions *and parameter
+schemas* as its result, and the model runs one through `use_tool`. What a
+request sends is the core set plus those two tools, always.
+
+**Why every other layer still sees the real tool name.** Approvals, hooks,
+the audit log and the chat's tool rows are all keyed on the name of the
+call that ends up in the message history. The middleware therefore does
+two translations around each model call: the model's `use_tool(name, args)`
+becomes `name(args)` as it comes back (before the approval middleware
+reads it), and a stored call to a tool that isn't bound is shown to the
+model as `use_tool(name, args)` again, so what it reads back matches what
+it wrote. Both are pure functions of the message list, so they hold across
+replays, resumes and reconnects with no new state to checkpoint.
 
 **Why this restricts `ModelRequest.tools`, not `create_agent`'s own
-`tools=` list.** `create_agent`'s `tools` parameter fixes the *complete*
-set `ToolNode` will ever recognize and execute for this graph -- pass
-the full 95-tool set there, always, or a genuinely deferred tool could
-never run once discovered. `DeferredToolMiddleware.wrap_model_call`
-instead narrows `request.tools` -- what actually gets sent to the
-model/provider for one specific call -- via `request.override(tools=...)`,
-LangChain's own documented mechanism for exactly this (the same one
-`langchain.agents.middleware.ProviderToolSearchMiddleware`/
-`LLMToolSelectorMiddleware` both already use, confirmed by reading their
-real source in this installed langchain version). Verified live before
-writing this file for real (a throwaway script, not assumed): a tool
-excluded from `request.tools` really is hidden from `model.bind_tools`
-on the first call, really does reappear once `search_tools` finds it,
-and an excluded-then-discovered tool that also requires approval still
-correctly pauses `HumanInTheLoopMiddleware` -- interrupt gating is
-computed once from the *full* tool list at graph-build time
-(`build_langgraph_agent`'s own `approval_tool_names`), entirely
-independent of what any single request happened to advertise.
+`tools=` list.** `create_agent`'s `tools` fixes the *complete* set
+`ToolNode` will recognize and run; a deferred tool must be in it or it could
+never execute. `request.override(tools=...)` narrows what one request
+advertises -- the mechanism `langchain.agents.middleware`'s own
+`LLMToolSelectorMiddleware` uses. Interrupt gating is computed once from the
+full tool list at graph-build time (`build_langgraph_agent`'s
+`approval_tool_names`), independent of what a request advertised.
 
-**Why "discovered so far" is derived fresh from message history, not
-tracked in mutable middleware state.** A custom `AgentMiddleware.
-state_schema` field updated imperatively would raise the exact replay-
-safety question this session already got burned by once
-(`runtime_lg/subagents.py`'s `spawn_agent` child_checkpointer bug, see
-that module's own docstring) -- LangGraph's documented re-run-from-the-
-node-start semantics on a resume make "did this mutation already
-happen" a real question for anything stateful. Scanning `request.
-messages` for every completed `search_tools` `ToolMessage` and unioning
-their own JSON results instead is a *pure* function of data LangGraph
-already checkpoints (the message history itself), so it's automatically
-correct across every replay/resume/reconnect with no new checkpointing
-concern to reason about at all.
-
-**Why lexical scoring, not embeddings.** At coscribe's real scale (95
-built-in tools total; ~15-20 stay in `coordinator.py`'s `CORE_TOOL_NAMES`,
-the rest deferred), an embedding model/vector store is real added
-infrastructure for no measurable benefit over plain term overlap --
-`claude-code-best`'s own real, shipped implementation (TF-IDF, read live
-from its source) reaches the identical conclusion at a comparable scale.
-coscribe's own tool names are also unusually literal/prefixed
-(`add_pptx_*`, `edit_pptx_*`, `read_*`/`write_*`) -- a query like "pptx"
-or "add a chart" hits a name substring directly far more often than it
-would in a less regularly-named API, so a substring-match bonus on top
-of plain token overlap (mirroring `claude-code-best`'s own name-weighted-
-3x-over-description scoring) covers the common case well without needing
-IDF/BM25's extra bookkeeping.
+**Why lexical scoring, not embeddings.** At ~115 built-in tools, with names
+unusually literal (`add_pptx_*`, `read_*`), term overlap plus a
+name-substring bonus finds the right tool; `claude-code-best`'s shipped
+TF-IDF implementation reaches the same conclusion at a similar scale.
 """
 
 from __future__ import annotations
@@ -64,19 +45,23 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    AnyMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool
 
-# The tool this whole module hangs off of -- always allowed, alongside
-# whatever CORE_TOOL_NAMES the caller passes in, regardless of what
-# has been discovered yet (there would be no way to discover anything
-# else if this one were ever itself deferred).
+# Always sent, alongside the caller's core tools: without them nothing
+# deferred could be found or run.
 SEARCH_TOOLS_NAME = "search_tools"
+USE_TOOL_NAME = "use_tool"
 
 # Name tokens count 3x a description token's weight -- same ratio
 # `claude-code-best`'s own real `SearchExtraToolsTool` search index uses
@@ -90,13 +75,11 @@ _DESCRIPTION_TOKEN_WEIGHT = 1.0
 # could produce for a single short query, so it reliably wins ties.
 _NAME_SUBSTRING_BONUS = 5.0
 _MAX_RESULTS = 8
-# Every tool a search returns is bound for the rest of the conversation,
-# so a weak match costs its schema on every later request, and binding it
-# changes the tool list, which makes the provider re-read the whole
-# conversation uncached. Measured on the real catalog: without these, a
-# search for "run python script" also bound add_pptx_hyperlink and
-# delete_file. Matches under this share of the best match's score, or
-# under the floor, are left out.
+# A result carries each match's full parameter schema, so a weak match costs
+# tokens for nothing. Measured on the real catalog: without these, a search
+# for "run python script" also returned add_pptx_hyperlink and delete_file.
+# Matches under this share of the best match's score, or under the floor,
+# are left out.
 _MIN_SHARE_OF_BEST = 0.4
 _MIN_SCORE = 2.0
 
@@ -159,6 +142,16 @@ def _score(entry: _ToolEntry, query_tokens: Sequence[str], query_lower: str) -> 
     return score
 
 
+def _parameters_schema(tool: Callable[..., Any] | BaseTool) -> dict[str, Any]:
+    """The tool's argument schema the way the model would have been sent it
+    as a bound tool: ToolNode wraps a plain function with `tool()` too."""
+    from langchain_core.tools import tool as create_tool
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    wrapped = tool if isinstance(tool, BaseTool) else create_tool(tool)
+    return dict(convert_to_openai_tool(wrapped)["function"].get("parameters", {}))
+
+
 def build_search_tools_tool(
     deferred_tools: Sequence[Callable[..., Any] | BaseTool],
 ) -> Callable[..., Any]:
@@ -169,16 +162,16 @@ def build_search_tools_tool(
     tool count, but no reason to re-tokenize every description on every
     query within one conversation."""
     entries = [_build_entry(tool) for tool in deferred_tools]
+    tools_by_name = {_tool_name(tool): tool for tool in deferred_tools}
     index = _catalog_index(deferred_tools)
 
     def search_tools(query: str) -> str:
-        """Find a tool that isn't currently available by keyword -- most
-        tools start hidden to keep this conversation's context small;
-        this searches the full catalog and makes any match available for
-        you to call directly (by its real name, with its real arguments)
-        starting with your very next tool call. Always try this before
-        assuming something can't be done -- it almost certainly has a
-        tool, just not one bound yet.
+        """Find a tool that isn't in your tool list by keyword -- most
+        tools start hidden to keep this conversation's context small. Each
+        match comes back with its description and parameter schema; run it
+        with use_tool(name, arguments). Always try this before assuming
+        something can't be done -- it almost certainly has a tool, just
+        not one listed yet.
 
         Args:
             query: keywords describing what you need, e.g. "pptx chart"
@@ -194,9 +187,15 @@ def build_search_tools_tool(
         matches = sorted(
             (pair for pair in scored if pair[0] >= floor), key=lambda pair: pair[0], reverse=True
         )
-        top = matches[:_MAX_RESULTS]
         return json.dumps(
-            [{"name": entry.name, "description": entry.description} for _, entry in top]
+            [
+                {
+                    "name": entry.name,
+                    "description": entry.description,
+                    "parameters": _parameters_schema(tools_by_name[entry.name]),
+                }
+                for _, entry in matches[:_MAX_RESULTS]
+            ]
         )
 
     if index:
@@ -204,6 +203,28 @@ def build_search_tools_tool(
         # map of what's hidden (not the schemas) costs little context.
         search_tools.__doc__ = (search_tools.__doc__ or "") + "\n\n" + index
     return search_tools
+
+
+def build_use_tool_tool() -> Callable[..., Any]:
+    """The `use_tool` tool. A call to a known tool never runs this body --
+    the middleware rewrites it to the real call as it leaves the model -- so
+    only a mistaken name reaches it."""
+
+    def use_tool(name: str, arguments: dict[str, Any]) -> str:
+        """Run a tool that search_tools found, by its exact name, with the
+        arguments its parameter schema describes.
+
+        Args:
+            name: the tool's name, as search_tools returned it.
+            arguments: the tool's arguments as an object, matching its
+                parameter schema.
+        """
+        return (
+            f"There is no tool named {name!r}. Use search_tools to find the exact name "
+            "of what you need."
+        )
+
+    return use_tool
 
 
 _INDEX_EXAMPLES = 6
@@ -231,35 +252,109 @@ def _catalog_index(tools: Sequence[Callable[..., Any] | BaseTool]) -> str:
     return "\n".join(lines)
 
 
-def bound_tool_names(core_tool_names: Iterable[str], messages: Sequence[BaseMessage]) -> set[str]:
-    """The tools whose schemas a request actually sends: the core set,
-    search_tools itself, and whatever search_tools has surfaced so far."""
-    return {*core_tool_names, SEARCH_TOOLS_NAME, *_discovered_tool_names(messages)}
+def bound_tool_names(core_tool_names: Iterable[str]) -> set[str]:
+    """The tools whose schemas every request sends."""
+    return {*core_tool_names, SEARCH_TOOLS_NAME, USE_TOOL_NAME}
 
 
-def _discovered_tool_names(messages: Sequence[BaseMessage]) -> list[str]:
-    """Every tool name any `search_tools` call in this conversation has
-    ever surfaced, in the order first surfaced, derived fresh from the
-    message history each time -- see this module's own docstring for why
-    that's the replay-safe choice over tracking it as mutable middleware
-    state."""
-    found: dict[str, None] = {}
-    for message in messages:
-        if not isinstance(message, ToolMessage) or message.name != SEARCH_TOOLS_NAME:
-            continue
-        content = message.content
-        if not isinstance(content, str):
-            continue
+def unwrap_use_tool_call(name: str, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """The (name, args) a `use_tool` call stands for; any other call, or a
+    malformed `use_tool` one, comes back unchanged."""
+    if name != USE_TOOL_NAME:
+        return name, args
+    inner = args.get("name")
+    inner_args = args.get("arguments")
+    if isinstance(inner_args, str):
+        # Some models send the arguments object as a JSON string.
         try:
-            entries = json.loads(content)
+            inner_args = json.loads(inner_args)
         except json.JSONDecodeError:
-            continue
-        if not isinstance(entries, list):
-            continue
-        for entry in entries:
-            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
-                found.setdefault(entry["name"], None)
-    return list(found)
+            return name, args
+    if isinstance(inner, str) and inner != USE_TOOL_NAME and isinstance(inner_args, dict):
+        return inner, inner_args
+    return name, args
+
+
+def _retarget_calls(
+    message: AIMessage, targets: dict[str, tuple[str, dict[str, Any]]]
+) -> AIMessage:
+    """A copy of `message` whose tool calls with these ids carry the given
+    name and arguments, in every place a provider adapter might read them
+    from: `tool_calls`, Anthropic's `tool_use` content blocks, and
+    OpenAI's raw `additional_kwargs["tool_calls"]`."""
+    calls = [
+        {**call, "name": targets[call["id"]][0], "args": targets[call["id"]][1]}
+        if call["id"] in targets
+        else call
+        for call in message.tool_calls
+    ]
+    update: dict[str, Any] = {"tool_calls": calls}
+    if isinstance(message.content, list):
+        update["content"] = [
+            {**block, "name": targets[block["id"]][0], "input": targets[block["id"]][1]}
+            if isinstance(block, dict)
+            and block.get("type") == "tool_use"
+            and block.get("id") in targets
+            else block
+            for block in message.content
+        ]
+    raw = message.additional_kwargs.get("tool_calls")
+    if isinstance(raw, list):
+        update["additional_kwargs"] = {
+            **message.additional_kwargs,
+            "tool_calls": [
+                {
+                    **item,
+                    "function": {
+                        **item.get("function", {}),
+                        "name": targets[item["id"]][0],
+                        "arguments": json.dumps(targets[item["id"]][1], ensure_ascii=False),
+                    },
+                }
+                if isinstance(item, dict) and item.get("id") in targets
+                else item
+                for item in raw
+            ],
+        }
+    if isinstance(message, AIMessageChunk):
+        update["tool_call_chunks"] = []
+    return message.model_copy(update=update)
+
+
+def run_found_tools_directly(message: AIMessage, known_names: set[str]) -> AIMessage:
+    """Turns the model's `use_tool(name, arguments)` calls into `name(arguments)`
+    for tools that exist, so everything after the model sees the real call.
+    An unknown name stays a `use_tool` call and gets its error from the tool."""
+    targets: dict[str, tuple[str, dict[str, Any]]] = {}
+    for call in message.tool_calls:
+        name, args = unwrap_use_tool_call(call["name"], call["args"])
+        if name != call["name"] and name in known_names and call["id"]:
+            targets[call["id"]] = (name, args)
+    return _retarget_calls(message, targets) if targets else message
+
+
+def show_unbound_calls_as_use_tool(
+    messages: Sequence[AnyMessage], bound_names: set[str]
+) -> list[AnyMessage]:
+    """The history as the model should read it: calls to tools that aren't in
+    the request's tool list, and their results, as the `use_tool` calls it
+    made them with."""
+    shown: list[AnyMessage] = []
+    proxied: set[str] = set()
+    for message in messages:
+        if isinstance(message, AIMessage) and message.tool_calls:
+            targets = {
+                call["id"]: (USE_TOOL_NAME, {"name": call["name"], "arguments": call["args"]})
+                for call in message.tool_calls
+                if call["name"] not in bound_names and call["id"]
+            }
+            if targets:
+                proxied.update(targets)
+                message = _retarget_calls(message, targets)
+        elif isinstance(message, ToolMessage) and message.tool_call_id in proxied:
+            message = message.model_copy(update={"name": USE_TOOL_NAME})
+        shown.append(message)
+    return shown
 
 
 def _request_tool_allowed(tool: Any, allowed_names: set[str]) -> bool:
@@ -275,39 +370,43 @@ def _request_tool_allowed(tool: Any, allowed_names: set[str]) -> bool:
 
 
 class DeferredToolMiddleware(AgentMiddleware):
-    """Narrows `request.tools` to `core_tool_names` plus whatever
-    `search_tools` has discovered so far in this conversation -- see
-    this module's own docstring for the full design and what was
-    verified live before writing it. Filters whatever `request.tools`
-    already contains rather than holding its own copy of the full tool
-    list, so it can never drift from what `create_agent` was actually
-    given."""
+    """Narrows `request.tools` to `core_tool_names` plus `search_tools` and
+    `use_tool`, and translates between the model's `use_tool` calls and the
+    real tool calls everything else sees -- see this module's own docstring.
+    Filters whatever `request.tools` already contains rather than holding its
+    own copy of the full tool list, so it can never drift from what
+    `create_agent` was actually given."""
 
     def __init__(self, core_tool_names: Iterable[str]) -> None:
         super().__init__()
-        self._core_names = set(core_tool_names) | {SEARCH_TOOLS_NAME}
+        self._bound = bound_tool_names(core_tool_names)
 
-    def _filtered_tools(self, request: ModelRequest[Any]) -> list[Any]:
-        # Providers cache the prompt by prefix, and the tool list comes
-        # before the conversation. A newly found tool goes after every tool
-        # already sent, so what was sent before stays byte-identical.
-        core = [tool for tool in request.tools if _request_tool_allowed(tool, self._core_names)]
-        by_name = {getattr(tool, "name", None): tool for tool in request.tools}
-        found = [
-            by_name[name]
-            for name in _discovered_tool_names(request.messages)
-            if name in by_name and name not in self._core_names
+    def _narrowed(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
+        return request.override(
+            tools=[tool for tool in request.tools if _request_tool_allowed(tool, self._bound)],
+            messages=show_unbound_calls_as_use_tool(request.messages, self._bound),
+        )
+
+    def _translated(
+        self, request: ModelRequest[Any], response: ModelResponse[Any] | AIMessage
+    ) -> ModelResponse[Any] | AIMessage:
+        known = {name for tool in request.tools if (name := getattr(tool, "name", None))}
+        if isinstance(response, AIMessage):
+            return run_found_tools_directly(response, known)
+        result = [
+            run_found_tools_directly(m, known) if isinstance(m, AIMessage) else m
+            for m in response.result
         ]
-        return core + found
+        return replace(response, result=result)
 
     def wrap_model_call(
         self, request: ModelRequest[Any], handler: Callable[[ModelRequest[Any]], ModelResponse[Any]]
     ) -> ModelResponse[Any] | AIMessage:
-        return handler(request.override(tools=self._filtered_tools(request)))
+        return self._translated(request, handler(self._narrowed(request)))
 
     async def awrap_model_call(
         self,
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any] | AIMessage]],
     ) -> ModelResponse[Any] | AIMessage:
-        return await handler(request.override(tools=self._filtered_tools(request)))
+        return self._translated(request, await handler(self._narrowed(request)))

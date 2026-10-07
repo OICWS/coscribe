@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("langgraph", reason="needs the langgraph_spike extra installed")
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCall
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCall, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -22,10 +22,13 @@ from coscribe.runtime.types import tool_metadata
 from coscribe.runtime_lg.agent import build_langgraph_agent
 from coscribe.runtime_lg.tool_deferral import (
     SEARCH_TOOLS_NAME,
-    _discovered_tool_names,
+    USE_TOOL_NAME,
     _score,
     _tokenize,
     build_search_tools_tool,
+    run_found_tools_directly,
+    show_unbound_calls_as_use_tool,
+    unwrap_use_tool_call,
 )
 
 
@@ -57,6 +60,7 @@ class FakeToolCallingChatModel(BaseChatModel):
     responses: list[AIMessage]
     i: int = 0
     bound_tool_names: list[list[str]] = []
+    seen_messages: list[list[BaseMessage]] = []
 
     def bind_tools(self, tools: Any, *, tool_choice: str | None = None, **kwargs: Any) -> Any:
         self.bound_tool_names.append(sorted(getattr(t, "name", "") for t in tools))
@@ -65,6 +69,7 @@ class FakeToolCallingChatModel(BaseChatModel):
     def _generate(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> ChatResult:
+        self.seen_messages.append(list(messages))
         message = self.responses[self.i]
         self.i += 1
         return ChatResult(generations=[ChatGeneration(message=message)])
@@ -72,6 +77,7 @@ class FakeToolCallingChatModel(BaseChatModel):
     def _stream(
         self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
     ) -> Any:
+        self.seen_messages.append(list(messages))
         message = self.responses[self.i]
         self.i += 1
         chunk = AIMessageChunk(content=message.content or "", tool_calls=message.tool_calls)
@@ -117,14 +123,12 @@ def test_search_tools_returns_empty_list_for_no_match() -> None:
     assert result == []
 
 
-class _FakeTool:
-    """A minimal stand-in with just the attributes _build_entry actually
-    reads (`.name`/`.description`) -- lighter than 20 real functions for
-    a test that only needs the count, not any of their behavior."""
+def _FakeTool(name: str, description: str) -> Any:
+    """A real, argument-less tool: lighter than 20 real functions for a test
+    that only needs names and descriptions."""
+    from langchain_core.tools import StructuredTool
 
-    def __init__(self, name: str, description: str) -> None:
-        self.name = name
-        self.description = description
+    return StructuredTool.from_function(func=lambda: "", name=name, description=description)
 
 
 def test_search_tools_caps_at_max_results() -> None:
@@ -144,52 +148,129 @@ def test_search_tools_leaves_out_weak_matches() -> None:
     assert names == ["run_python_script"]
 
 
-# -- _discovered_tool_names -----------------------------------------------
+# -- use_tool translation -------------------------------------------------
 
 
-def test_discovered_tool_names_parses_search_tools_results() -> None:
-    from langchain_core.messages import ToolMessage
+def test_search_tools_returns_each_matchs_parameter_schema() -> None:
+    search_tools = build_search_tools_tool([write_pptx_chart, unrelated_thing])
+    (match,) = json.loads(search_tools("chart"))
+    assert match["name"] == "write_pptx_chart"
+    assert match["parameters"]["properties"]["text"]["type"] == "string"
+    assert match["parameters"]["required"] == ["text"]
 
-    messages = [
-        ToolMessage(
-            content=json.dumps([{"name": "write_pptx_chart", "description": "x"}]),
-            tool_call_id="c1",
-            name=SEARCH_TOOLS_NAME,
-        ),
-        ToolMessage(content="not json at all", tool_call_id="c2", name=SEARCH_TOOLS_NAME),
-        ToolMessage(content="irrelevant", tool_call_id="c3", name="some_other_tool"),
+
+def test_unwrap_use_tool_call() -> None:
+    assert unwrap_use_tool_call(USE_TOOL_NAME, {"name": "a", "arguments": {"x": 1}}) == (
+        "a",
+        {"x": 1},
+    )
+    assert unwrap_use_tool_call(USE_TOOL_NAME, {"name": "a", "arguments": '{"x": 1}'}) == (
+        "a",
+        {"x": 1},
+    )
+    assert unwrap_use_tool_call("a", {"x": 1}) == ("a", {"x": 1})
+    for malformed in (
+        {"name": "a", "arguments": "not json"},
+        {"name": "a"},
+        {"name": USE_TOOL_NAME, "arguments": {}},
+    ):
+        assert unwrap_use_tool_call(USE_TOOL_NAME, malformed) == (USE_TOOL_NAME, malformed)
+
+
+def test_use_tool_call_to_a_known_tool_becomes_the_real_call() -> None:
+    message = AIMessage(
+        content="",
+        tool_calls=[
+            ToolCall(name=USE_TOOL_NAME, args={"name": "a", "arguments": {"x": 1}}, id="c1"),
+            ToolCall(name=USE_TOOL_NAME, args={"name": "nope", "arguments": {}}, id="c2"),
+            ToolCall(name="b", args={}, id="c3"),
+        ],
+    )
+    rewritten = run_found_tools_directly(message, {"a", "b"})
+    names = [(c["name"], c["args"]) for c in rewritten.tool_calls]
+    assert names == [
+        ("a", {"x": 1}),
+        (USE_TOOL_NAME, {"name": "nope", "arguments": {}}),
+        ("b", {}),
     ]
-    assert _discovered_tool_names(messages) == ["write_pptx_chart"]
 
 
-def test_found_tools_are_sent_after_every_tool_already_sent() -> None:
-    from types import SimpleNamespace
+def test_stored_calls_to_unbound_tools_read_back_as_use_tool() -> None:
+    history: list[BaseMessage] = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                ToolCall(name="a", args={"x": 1}, id="c1"),
+                ToolCall(name="core", args={}, id="c2"),
+            ],
+        ),
+        ToolMessage(content="r1", tool_call_id="c1", name="a"),
+        ToolMessage(content="r2", tool_call_id="c2", name="core"),
+    ]
+    shown = show_unbound_calls_as_use_tool(history, {"core", SEARCH_TOOLS_NAME, USE_TOOL_NAME})
 
-    from langchain_core.messages import ToolMessage
+    assert [(c["name"], c["args"]) for c in shown[0].tool_calls] == [  # type: ignore[attr-defined]
+        (USE_TOOL_NAME, {"name": "a", "arguments": {"x": 1}}),
+        ("core", {}),
+    ]
+    assert [m.name for m in shown[1:]] == [USE_TOOL_NAME, "core"]  # type: ignore[attr-defined]
+    assert history[0].tool_calls[0]["name"] == "a", "the stored history is left alone"  # type: ignore[attr-defined]
 
-    from coscribe.runtime_lg.tool_deferral import DeferredToolMiddleware
 
-    def found(*names: str) -> ToolMessage:
-        entries = [{"name": name, "description": ""} for name in names]
-        return ToolMessage(content=json.dumps(entries), tool_call_id="c", name=SEARCH_TOOLS_NAME)
+def test_provider_payloads_carry_the_use_tool_form() -> None:
+    """The adapters read a call from more than one field; every one of them
+    must say use_tool, or the request contradicts itself."""
+    from langchain_anthropic import ChatAnthropic
+    from langchain_openai import ChatOpenAI
 
-    tools = [SimpleNamespace(name=name) for name in ["a", "x", "b", "y", "z"]]
-    request = SimpleNamespace(tools=tools, messages=[found("z"), found("x", "z")])
-    sent = DeferredToolMiddleware(["a", "b"])._filtered_tools(request)  # type: ignore[arg-type]
+    call = ToolCall(name="a", args={"x": 1}, id="c1")
+    history: list[BaseMessage] = [
+        AIMessage(
+            content=[{"type": "tool_use", "id": "c1", "name": "a", "input": {"x": 1}}],
+            tool_calls=[call],
+            additional_kwargs={
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "a", "arguments": '{"x": 1}'},
+                    }
+                ]
+            },
+        ),
+        ToolMessage(content="r", tool_call_id="c1", name="a"),
+    ]
+    shown = show_unbound_calls_as_use_tool(history, {USE_TOOL_NAME})
 
-    assert [tool.name for tool in sent] == ["a", "b", "z", "x"]
+    openai_payload = ChatOpenAI(model="m", api_key="k")._get_request_payload(shown)  # type: ignore[arg-type]
+    (sent,) = openai_payload["messages"][0]["tool_calls"]
+    assert sent["function"]["name"] == USE_TOOL_NAME
+    assert json.loads(sent["function"]["arguments"]) == {"name": "a", "arguments": {"x": 1}}
+
+    anthropic_payload = ChatAnthropic(model="claude-sonnet-5-5", api_key="k")._get_request_payload(  # type: ignore[arg-type]
+        shown
+    )
+    (block,) = [
+        b for b in anthropic_payload["messages"][0]["content"] if b.get("type") == "tool_use"
+    ]
+    assert block["name"] == USE_TOOL_NAME
+    assert block["input"] == {"name": "a", "arguments": {"x": 1}}
 
 
 # -- End-to-end: build_langgraph_agent(defer_tools=True) ------------------
 
 
-async def test_deferred_tool_is_hidden_until_search_tools_finds_it() -> None:
+async def test_the_tool_list_never_changes_and_a_found_tool_runs_under_its_real_name() -> None:
     search_call = ToolCall(name="search_tools", args={"query": "pptx chart"}, id="c1")
-    write_call = ToolCall(name="write_pptx_chart", args={"text": "hi"}, id="c2")
+    use_call = ToolCall(
+        name=USE_TOOL_NAME,
+        args={"name": "write_pptx_chart", "arguments": {"text": "hi"}},
+        id="c2",
+    )
     model = FakeToolCallingChatModel(
         responses=[
             AIMessage(content="", tool_calls=[search_call]),
-            AIMessage(content="", tool_calls=[write_call]),
+            AIMessage(content="", tool_calls=[use_call]),
             AIMessage(content="done"),
         ]
     )
@@ -205,21 +286,36 @@ async def test_deferred_tool_is_hidden_until_search_tools_finds_it() -> None:
         {"messages": [{"role": "user", "content": "add a chart"}]},
         config={"configurable": {"thread_id": "t1"}},
     )
+
     assert result["messages"][-1].content == "done"
-    first_call_tools, second_call_tools, third_call_tools = model.bound_tool_names
-    assert "write_pptx_chart" not in first_call_tools
-    assert "edit_pptx_theme" not in first_call_tools
-    assert "unrelated_thing" not in first_call_tools
-    assert "read_thing" in first_call_tools
-    assert SEARCH_TOOLS_NAME in first_call_tools
-    assert "write_pptx_chart" in second_call_tools
-    assert "write_pptx_chart" in third_call_tools
+    fixed = sorted(["read_thing", SEARCH_TOOLS_NAME, USE_TOOL_NAME])
+    assert model.bound_tool_names == [fixed, fixed, fixed]
+    # Stored under the real name, with the tool's real output.
+    stored_call = result["messages"][3]
+    assert [(c["name"], c["args"]) for c in stored_call.tool_calls] == [
+        ("write_pptx_chart", {"text": "hi"})
+    ]
+    assert (result["messages"][4].name, result["messages"][4].content) == (
+        "write_pptx_chart",
+        "chart: hi",
+    )
+    # The model reads its own call back in the form it wrote it.
+    shown = [m for m in model.seen_messages[2] if isinstance(m, AIMessage) and m.tool_calls]
+    assert [c["name"] for m in shown for c in m.tool_calls] == [SEARCH_TOOLS_NAME, USE_TOOL_NAME]
+    assert shown[1].tool_calls[0]["args"] == {
+        "name": "write_pptx_chart",
+        "arguments": {"text": "hi"},
+    }
 
 
 async def test_deferred_and_approval_gated_tool_still_pauses_once_discovered() -> None:
     risky_tool = tool_metadata(write_pptx_chart, risk_category="WRITE_LOCAL")
     search_call = ToolCall(name="search_tools", args={"query": "chart"}, id="c1")
-    write_call = ToolCall(name="write_pptx_chart", args={"text": "hi"}, id="c2")
+    write_call = ToolCall(
+        name=USE_TOOL_NAME,
+        args={"name": "write_pptx_chart", "arguments": {"text": "hi"}},
+        id="c2",
+    )
     model = FakeToolCallingChatModel(
         responses=[
             AIMessage(content="", tool_calls=[search_call]),
@@ -240,6 +336,8 @@ async def test_deferred_and_approval_gated_tool_still_pauses_once_discovered() -
         {"messages": [{"role": "user", "content": "add a chart"}]}, config=config
     )
     assert agent.get_state(config).next, "should be paused on approval for the discovered tool"
+    pending = agent.get_state(config).tasks[0].interrupts[0].value["action_requests"]
+    assert [(r["name"], r["args"]) for r in pending] == [("write_pptx_chart", {"text": "hi"})]
 
     # Same resume shape session.py's own _resolve_pending_approvals uses:
     # keyed by the interrupt's own id (not the tool_call_id), value a
@@ -251,6 +349,65 @@ async def test_deferred_and_approval_gated_tool_still_pauses_once_discovered() -
         Command(resume={interrupt.id: {"decisions": decisions}}), config=config
     )
     assert resumed["messages"][-1].content == "done"
+
+
+async def test_use_tool_with_an_unknown_name_gets_an_error_back() -> None:
+    wrong = ToolCall(
+        name=USE_TOOL_NAME, args={"name": "no_such_tool", "arguments": {}}, id="c1"
+    )
+    model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[wrong]), AIMessage(content="done")]
+    )
+    agent = build_langgraph_agent(
+        model,
+        [read_thing, write_pptx_chart],
+        "test",
+        checkpointer=InMemorySaver(),
+        defer_tools=True,
+        core_tool_names={"read_thing"},
+    )
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": "go"}]},
+        config={"configurable": {"thread_id": "t1"}},
+    )
+
+    assert "no tool named 'no_such_tool'" in result["messages"][2].content
+    assert result["messages"][-1].content == "done"
+
+
+async def test_a_streamed_turn_announces_the_real_tool_name() -> None:
+    """The session reads tool rows and approvals from the finished model
+    message, which must already carry the real name."""
+    use_call = ToolCall(
+        name=USE_TOOL_NAME,
+        args={"name": "write_pptx_chart", "arguments": {"text": "hi"}},
+        id="c1",
+    )
+    model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[use_call]), AIMessage(content="done")]
+    )
+    agent = build_langgraph_agent(
+        model,
+        [read_thing, write_pptx_chart],
+        "test",
+        checkpointer=InMemorySaver(),
+        defer_tools=True,
+        core_tool_names={"read_thing"},
+    )
+    announced: list[str] = []
+    async for update in agent.astream(
+        {"messages": [{"role": "user", "content": "go"}]},
+        config={"configurable": {"thread_id": "t1"}},
+        stream_mode="updates",
+    ):
+        for node_update in update.values():
+            if not isinstance(node_update, dict):
+                continue
+            for message in node_update.get("messages", []):
+                if isinstance(message, AIMessage):
+                    announced += [call["name"] for call in message.tool_calls]
+
+    assert announced == ["write_pptx_chart"]
 
 
 async def test_core_tools_never_hidden_even_with_no_search() -> None:

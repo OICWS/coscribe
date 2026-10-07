@@ -154,6 +154,10 @@ an autonomous agent.
 - **Prompt caching works by prefix**, so nothing that differs between
   conversations goes into the system prompt: folders and remembered facts
   are a note on the user's message, sent again only when they change.
+- The tool list is fixed for the whole conversation: most tools start
+  hidden, `search_tools` returns the ones the model asks for with their
+  parameters, and it runs them through `use_tool`, so finding a tool never
+  changes the cached prefix.
 - Provider quirks that break the cache are handled per provider (DeepSeek
   needs its reasoning sent back; there, all built-in tools are bound up
   front instead of discovered).

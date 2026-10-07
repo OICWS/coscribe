@@ -142,14 +142,11 @@ def keeps_tool_list_fixed(model: str, custom_providers: dict[str, dict[str, str]
     """Whether every built-in tool should be bound from the first request
     instead of found through search_tools.
 
-    The tool list is sent before the conversation, so binding a found tool
-    makes the provider re-read the whole conversation uncached: on DeepSeek
-    that was 22-56% of what a long task cost (ROADMAP Phase 8cj). Binding
-    all ~115 built-ins up front costs ~35k more tokens per request instead,
+    Binding all ~115 built-ins up front costs ~35k more tokens per request,
     which only pays off where a cache hit is nearly free and the window is
     large: DeepSeek charges 2% of a miss for a hit (deepseek-flash, ¥0.02
-    vs ¥1 per 1M, checked 2026-10-05) and has a 1M-token window. Other
-    providers keep deferral until their numbers are checked the same way."""
+    vs ¥1 per 1M, checked 2026-10-05) and has a 1M-token window. The
+    list stays fixed either way; this only decides how much of it is sent."""
     provider_key = model.split(":", 1)[0]
     return _is_deepseek(custom_providers.get(provider_key, {}).get("base_url", ""))
 

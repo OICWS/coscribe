@@ -119,7 +119,12 @@ from ..runtime_lg.providers import keeps_tool_list_fixed, with_prompt_cache_key
 from ..runtime_lg.selfwake import SilentSocket
 from ..runtime_lg.subagents import SUBAGENT_MAX_STEPS, subagent_report
 from ..runtime_lg.tool_calls import ORPHANED_TOOL_CALL_NOTE, answer_every_tool_call
-from ..runtime_lg.tool_deferral import bound_tool_names, build_search_tools_tool
+from ..runtime_lg.tool_deferral import (
+    bound_tool_names,
+    build_search_tools_tool,
+    build_use_tool_tool,
+    unwrap_use_tool_call,
+)
 from ..tools import (
     QUESTION_TOOL_NAMES,
     format_skill_listing,
@@ -394,13 +399,13 @@ _COMPACT_NOTE_PREFIX = "[Earlier conversation compacted to save context.]"
 # when to reach for it, since most tools are hidden from its own tool
 # list by default in that mode (see runtime_lg/tool_deferral.py).
 _SEARCH_TOOLS_NOTE = (
-    "Most tools beyond the basics aren't in your tool list yet -- this "
-    "keeps this conversation's context small. If what you need isn't "
-    "there (a PPTX/XLSX edit tool, a background script, a scheduled-task tool, "
+    "Most tools beyond the basics aren't in your tool list -- this keeps "
+    "this conversation's context small. If what you need isn't there (a "
+    "PPTX/XLSX edit tool, a background script, a scheduled-task tool, "
     'etc.), call search_tools(query) first -- e.g. search_tools("pptx '
-    'chart") -- it makes any match callable by its real name starting '
-    "with your very next tool call. Don't assume something can't be done "
-    "just because you don't see a tool for it yet; search before giving up "
+    'chart") -- it returns each match with its parameters. Run one with '
+    "use_tool(name, arguments). Don't assume something can't be done "
+    "just because you don't see a tool for it; search before giving up "
     "or falling back to a workaround."
 )
 
@@ -1709,12 +1714,10 @@ class ChatSessionLG:
         if defer:
             # Only what a request sends counts; the rest waits behind
             # search_tools.
-            state = await self.lg_agent.aget_state(self.config)
-            messages = list(state.values.get("messages", [])) if state.values else []
-            bound = bound_tool_names(core_names, messages)
+            bound = bound_tool_names(core_names)
             deferred = [t for t in [*base_tools, *mcp_tools] if tool_name(t) not in bound]
             base_tools = [t for t in base_tools if tool_name(t) in bound]
-            base_tools.append(build_search_tools_tool(deferred))
+            base_tools.extend([build_search_tools_tool(deferred), build_use_tool_tool()])
             mcp_tools = [t for t in mcp_tools if tool_name(t) in bound]
         return await asyncio.to_thread(
             build_context_breakdown,
@@ -1987,7 +1990,10 @@ class ChatSessionLG:
             for call in accumulated.tool_calls:
                 call_id = call["id"]
                 if call_id is not None and call_id not in registered_ids:
-                    self._pending_tool_args[call["name"]].append(call["args"])
+                    # The stream carries the model's own use_tool call; the
+                    # tool's result comes back under the real name.
+                    name, args = unwrap_use_tool_call(call["name"], call["args"])
+                    self._pending_tool_args[name].append(args)
                     registered_ids.add(call_id)
             # Providers number each response's tool calls from index 0 and
             # send a call's later argument pieces without its id; adding
