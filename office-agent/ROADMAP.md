@@ -7637,7 +7637,7 @@ instead, as Connectors have.
       on *Allow for this task* ran both commands; the settings switch ran
       them with no card.
 
-## Phase 8cx -- Connectors that sign in through the browser; a hosted-only catalog (built, awaiting your sign-in tests)
+## Phase 8cx -- Connectors that sign in through the browser; a hosted-only catalog; Yours and Discover (shipped)
 
 Asked why Microsoft 365 doesn't open a login page the way GitHub did, and
 which connectors to add. Why: the Microsoft 365 entry ran a community
@@ -7683,14 +7683,30 @@ because coscribe itself ran that flow, and it was removed with that entry.
       Atlassian (a company's own tenant; second batch), Zapier (advertises
       registration; what it offers depends on what the user set up in
       Zapier, so not tried).
-- [ ] **Needs your testing:** a real sign-in end to end for each of the
-      four, in the desktop app. Tested here: the whole flow against an
-      in-process spec-compliant OAuth MCP server (sign-in, saved sign-in
-      on reconnect, refresh of an expired token, a refused sign-in and a
-      retry, removal forgetting the credentials). Not tested here: a
-      provider accepting or refusing the final redirect to a loopback
-      address; a provider showing its own consent step; the desktop app
-      handing the address to the default browser.
+- [x] **Real sign-ins, tested by you in the desktop app (2026-10-07):**
+      Canva signed in through the browser, the redirect page said "signed
+      in", and the model then listed the account's folder and designs; the
+      other three worked too. The live server reported 48 Canva tools
+      against the 46 in its documentation, so the connected page, not the
+      docs, is the authority on what a connector offers.
+- [x] **Connectors page after Claude's, from your four screenshots:**
+      Settings > Connectors has Yours and Discover like Skills. Yours lists
+      only what was added (Connector / Type / Status: connected, waiting for
+      sign-in, sign in, not connected); a custom connector shows there with
+      a "Custom" tag. Discover is a grid of cards (icon, name, one line,
+      "by ...", a + that connects, a check once added); a card opens that
+      connector's page: icon, description and Connect, a longer
+      description, its Tools (first 18, "Show all N"), then Made by,
+      Connector URL, Category, Sign-in, and More info links (Documentation,
+      Support, Privacy policy). Every connector shows its service's own app
+      icon (the 128px site icons, bundled in `frontend/src/assets/
+      connectors/`, so nothing is fetched at run time); only a custom
+      connector falls back to its first letter. The catalog entries carry
+      `category`, `about`, `tools` and `links`; tool names are from each
+      vendor's own tool reference, links only where the address exists, so
+      Notion has no privacy link (its page returned 404). While a sign-in
+      waits, the connector page shows one status line with "Open the sign-in
+      page" and "Start over", instead of Retry and Sign in together.
 
 ## Later -- real intentions, not actively scheduled
 

@@ -3645,6 +3645,10 @@ def test_get_mcp_catalog_returns_curated_entries(
     for entry in entries:
         assert entry["server_url"].startswith("https://") and entry["auth"] == "oauth"
         assert not {"command", "args", "env", "needs_config"} & entry.keys()
+        # What its page in Discover shows before it is connected.
+        assert entry["category"] and entry["about"] and entry["tools"]
+        assert len(set(entry["tools"])) == len(entry["tools"])
+        assert all(link["url"].startswith("https://") for link in entry["links"])
 
 
 def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(

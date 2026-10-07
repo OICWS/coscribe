@@ -154,6 +154,12 @@ export interface McpCatalogEntry {
   auth?: "oauth";
   made_by?: string;
   homepage?: string;
+  category?: string;
+  /** What it does, in a few sentences, for its own page. */
+  about?: string;
+  /** Tool names from the vendor's docs; the connected page lists the live ones. */
+  tools?: string[];
+  links?: { label: string; url: string }[];
 }
 
 export type ConnectorToolPolicy = "allow" | "ask" | "block";

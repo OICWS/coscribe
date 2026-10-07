@@ -25,11 +25,13 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CloseIcon,
+  ExternalLinkIcon,
   HandIcon,
   MoreIcon,
   PlusIcon,
   SearchIcon,
 } from "../icons";
+import { ConnectorIcon } from "./ConnectorIcon";
 import { FetchRetry } from "./FetchRetry";
 import { fieldClass, primaryButtonClass, secondaryButtonClass } from "./SettingRow";
 import { useClickOutside } from "../../lib/useClickOutside";
@@ -87,18 +89,6 @@ function buildRows(catalog: McpCatalogEntry[], servers: McpServersResponse): Con
     }
   }
   return rows;
-}
-
-function ConnectorBadge({ title, large }: { title: string; large?: boolean }) {
-  return (
-    <span
-      className={`flex shrink-0 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--field-bg)] font-medium text-[var(--muted)] ${
-        large ? "h-11 w-11 text-base" : "h-7 w-7 text-xs"
-      }`}
-    >
-      {title.slice(0, 1).toUpperCase()}
-    </span>
-  );
 }
 
 const POLICIES: {
@@ -372,7 +362,7 @@ function ConnectorDetail({
         <ArrowLeftIcon className="h-4 w-4" /> Your connectors
       </button>
       <div className="flex items-center gap-4">
-        <ConnectorBadge title={row.title} large />
+        <ConnectorIcon name={row.name} title={row.title} size="md" />
         <div className="min-w-0 flex-1 truncate text-lg font-semibold">{row.title}</div>
         <button type="button" className={secondaryButtonClass} onClick={onDisconnect}>
           Disconnect
@@ -390,7 +380,7 @@ function ConnectorDetail({
         </p>
       </div>
 
-      {notice && <NoticeText notice={notice} onApplyUpdate={onApplyUpdate} />}
+      {notice && !(notice.signin && info.signin) && <NoticeText notice={notice} onApplyUpdate={onApplyUpdate} />}
 
       {!info.connected ? (
         <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] px-4 py-3 text-sm">
@@ -408,13 +398,21 @@ function ConnectorDetail({
               Open the sign-in page
             </a>
           )}
-          <button type="button" className={secondaryButtonClass} disabled={pending} onClick={onReconnect}>
-            Retry
-          </button>
-          {info.auth === "oauth" && (
-            <button type="button" className={primaryButtonClass} disabled={pending} onClick={onSignIn}>
-              Sign in
+          {info.signin ? (
+            <button type="button" className={secondaryButtonClass} disabled={pending} onClick={onSignIn}>
+              Start over
             </button>
+          ) : (
+            <>
+              <button type="button" className={secondaryButtonClass} disabled={pending} onClick={onReconnect}>
+                Retry
+              </button>
+              {info.auth === "oauth" && (
+                <button type="button" className={primaryButtonClass} disabled={pending} onClick={onSignIn}>
+                  Sign in
+                </button>
+              )}
+            </>
           )}
         </div>
       ) : (
@@ -433,7 +431,26 @@ function ConnectorDetail({
   );
 }
 
-/** A catalog connector not added yet: what it is, and Connect. */
+const TOOLS_SHOWN = 18;
+
+const infoLabel = "text-xs font-medium uppercase tracking-wide text-[var(--muted)]";
+
+function ExternalLink({ href, children }: { href: string; children: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex w-fit items-center gap-1 text-[var(--accent)] underline-offset-2 hover:underline"
+    >
+      {children}
+      <ExternalLinkIcon className="h-3.5 w-3.5" />
+    </a>
+  );
+}
+
+/** A connector from Discover that isn't added yet: what it is, what it can
+ * do, who makes it, and Connect. */
 function CatalogConnectorPage({
   entry,
   pending,
@@ -449,15 +466,20 @@ function CatalogConnectorPage({
 }) {
   const title = entry.title ?? entry.name;
   const pkg = findPinnedNpmPackage(entry.args ?? []);
+  const tools = entry.tools ?? [];
+  const [allTools, setAllTools] = useState(false);
+  const shown = allTools ? tools : tools.slice(0, TOOLS_SHOWN);
+  const address = entry.server_url ?? (pkg ? `${pkg.name} ${pkg.version}` : `${entry.command ?? ""} ${(entry.args ?? []).join(" ")}`);
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <button type="button" className="flex w-fit items-center gap-2 text-[15px] text-[var(--fg)] hover:opacity-70" onClick={onBack}>
-        <ArrowLeftIcon className="h-4 w-4" /> Your connectors
+        <ArrowLeftIcon className="h-4 w-4" /> Connectors
       </button>
-      <div className="flex items-center gap-4 rounded-xl bg-[var(--card-bg)] px-5 py-5">
-        <ConnectorBadge title={title} large />
+      <div className="flex items-center gap-5 rounded-xl bg-[var(--card-bg)] px-6 py-6">
+        <ConnectorIcon name={entry.name} title={title} size="lg" />
         <div className="min-w-0 flex-1">
-          <div className="text-xl font-semibold">{title}</div>
+          <div className="text-2xl font-semibold">{title}</div>
+          <div className="mt-1 text-[15px] text-[var(--muted)]">{entry.description}</div>
         </div>
         <button
           type="button"
@@ -468,33 +490,128 @@ function CatalogConnectorPage({
           {pending ? "Connecting…" : "Connect"}
         </button>
       </div>
-      <p className="text-[15px] leading-relaxed">{entry.description}</p>
       {notice && <NoticeText notice={notice} />}
-      <div className="grid grid-cols-2 gap-6 border-t border-[var(--border)] pt-5 text-sm">
+      {entry.about && <p className="max-w-[46rem] text-[15px] leading-relaxed">{entry.about}</p>}
+
+      {tools.length > 0 && (
+        <section>
+          <h3 className="flex items-center gap-2 text-xl font-semibold">
+            Tools
+            <span className="rounded-md bg-[var(--card-bg)] px-1.5 text-xs font-normal text-[var(--muted)]">{tools.length}</span>
+          </h3>
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {shown.map((tool) => (
+              <span key={tool} className="truncate rounded-lg bg-[var(--card-bg)] px-3 py-1.5 text-[13px]" title={tool}>
+                {tool}
+              </span>
+            ))}
+          </div>
+          {tools.length > TOOLS_SHOWN && (
+            <button
+              type="button"
+              className="mt-3 text-sm text-[var(--accent)] hover:underline"
+              onClick={() => setAllTools((v) => !v)}
+            >
+              {allTools ? "Show fewer" : `Show all ${tools.length}`}
+            </button>
+          )}
+          <p className="mt-3 text-xs text-[var(--muted)]">
+            From the maker's documentation. Once connected, this page lists what the service offers now, and lets you
+            choose which tools may run.
+          </p>
+        </section>
+      )}
+
+      <div className="grid grid-cols-1 gap-x-12 gap-y-6 border-t border-[var(--border)] pt-6 text-sm sm:grid-cols-2">
         {entry.made_by && (
-          <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">Made by</div>
-            {entry.homepage ? (
-              <a href={entry.homepage} target="_blank" rel="noreferrer" className="mt-1 block text-[var(--accent)] hover:underline">
-                {entry.made_by}
-              </a>
-            ) : (
-              <div className="mt-1">{entry.made_by}</div>
-            )}
+          <div className="flex flex-col gap-1">
+            <div className={infoLabel}>Made by</div>
+            {entry.homepage ? <ExternalLink href={entry.homepage}>{entry.made_by}</ExternalLink> : <div>{entry.made_by}</div>}
           </div>
         )}
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-[var(--muted)]">
-            {entry.server_url ? "Address" : pkg ? "Package" : "Command"}
-          </div>
-          <div className="mt-1 font-mono text-[13px]">
-            {entry.server_url ?? (pkg ? `${pkg.name} ${pkg.version}` : `${entry.command} ${(entry.args ?? []).join(" ")}`)}
-          </div>
-          {entry.auth === "oauth" && (
-            <div className="mt-2 text-xs text-[var(--muted)]">You sign in on the service's own page.</div>
-          )}
+        <div className="flex flex-col gap-1">
+          <div className={infoLabel}>{entry.server_url ? "Connector URL" : pkg ? "Package" : "Command"}</div>
+          <div className="break-all font-mono text-[13px]">{address}</div>
         </div>
+        {entry.category && (
+          <div className="flex flex-col gap-1">
+            <div className={infoLabel}>Category</div>
+            <span className="w-fit rounded-lg border border-[var(--border)] px-2.5 py-1 text-[13px]">{entry.category}</span>
+          </div>
+        )}
+        <div className="flex flex-col gap-1">
+          <div className={infoLabel}>Sign-in</div>
+          <div>{entry.auth === "oauth" ? "Required. You sign in on the service's own page, in your browser." : "Not required"}</div>
+        </div>
+        {entry.links && entry.links.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <div className={infoLabel}>More info</div>
+            {entry.links.map((link) => (
+              <ExternalLink key={link.url} href={link.url}>
+                {link.label}
+              </ExternalLink>
+            ))}
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** One connector in Discover's grid. */
+function DiscoverCard({
+  entry,
+  added,
+  pending,
+  onOpen,
+  onAdd,
+}: {
+  entry: McpCatalogEntry;
+  added: boolean;
+  pending: boolean;
+  onOpen: () => void;
+  onAdd: () => void;
+}) {
+  const title = entry.title ?? entry.name;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${title}`}
+      className="relative flex cursor-pointer gap-4 rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-4 outline-none hover:border-[var(--muted)] focus-visible:border-[var(--focus)]"
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      <ConnectorIcon name={entry.name} title={title} size="md" />
+      <div className="min-w-0 flex-1 pr-8">
+        <div className="text-[15px] font-medium">{title}</div>
+        <div className="mt-0.5 line-clamp-2 text-sm text-[var(--fg)]">{entry.description}</div>
+        {entry.made_by && <div className="mt-1.5 text-sm text-[var(--muted)]">by {entry.made_by}</div>}
+      </div>
+      {added ? (
+        <CheckIcon aria-label="Added" className="absolute right-4 top-4 h-4 w-4 text-[var(--muted)]" />
+      ) : (
+        <button
+          type="button"
+          aria-label={`Add ${title}`}
+          disabled={pending}
+          className={`absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg)] hover:bg-[var(--card-bg)] ${
+            pending ? "running-wave-ring" : ""
+          }`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd();
+          }}
+        >
+          <PlusIcon className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -644,24 +761,15 @@ function AddCustomConnectorDialog({
   );
 }
 
-function StatusCell({ row, pending, onConnect }: { row: ConnectorRow; pending: boolean; onConnect: () => void }) {
+function StatusCell({ row, pending }: { row: ConnectorRow; pending: boolean }) {
+  const info = row.serverInfo;
   if (pending) {
     return <span className="running-wave-ring rounded-md px-2.5 py-1 text-sm">Connecting…</span>;
   }
-  if (row.serverInfo?.connected) return <CheckIcon aria-label="Connected" className="h-4 w-4" />;
-  if (row.serverInfo) return <span className="text-sm text-[var(--danger)]">Not connected</span>;
-  return (
-    <button
-      type="button"
-      className={secondaryButtonClass}
-      onClick={(e) => {
-        e.stopPropagation();
-        onConnect();
-      }}
-    >
-      Connect
-    </button>
-  );
+  if (info?.connected) return <CheckIcon aria-label="Connected" className="h-4 w-4" />;
+  if (info?.signin) return <span className="text-sm text-[var(--muted)]">Waiting for sign-in</span>;
+  if (info?.auth === "oauth") return <span className="text-sm text-[var(--danger)]">Sign in</span>;
+  return <span className="text-sm text-[var(--danger)]">Not connected</span>;
 }
 
 // Header and rows share it, so each column lines up with its heading.
@@ -673,6 +781,7 @@ const EMPTY: { catalog: McpCatalogEntry[]; servers: McpServersResponse } = { cat
  * their permissions), and adding a custom one. */
 export function ConnectorsTab({ active }: { active: boolean }) {
   const [, forceRender] = useState(0);
+  const [tab, setTab] = useState<"yours" | "discover">("yours");
   const [openName, setOpenName] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -846,12 +955,30 @@ export function ConnectorsTab({ active }: { active: boolean }) {
   }
 
   const q = search.trim().toLowerCase();
-  const visible = q ? rows.filter((r) => `${r.title} ${r.name}`.toLowerCase().includes(q)) : rows;
+  const matches = (r: ConnectorRow) => `${r.title} ${r.name} ${r.catalogEntry?.description ?? ""}`.toLowerCase().includes(q);
+  const yours = rows.filter((r) => r.serverInfo !== null && (!q || matches(r)));
+  const discover = rows.filter((r) => r.catalogEntry !== null && (!q || matches(r)));
+  const segment = (on: boolean) =>
+    `rounded-md px-3.5 py-1 text-[15px] ${
+      on ? "bg-[var(--bg)] text-[var(--fg)] shadow-sm ring-1 ring-[var(--border)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
+    }`;
+  const openRow = (name: string) => {
+    setNotice(null);
+    setOpenName(name);
+  };
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="mr-1 text-[22px] font-semibold">Connectors</h2>
+        <div className="flex rounded-lg bg-[var(--card-bg)] p-0.5">
+          <button type="button" aria-pressed={tab === "yours"} className={segment(tab === "yours")} onClick={() => setTab("yours")}>
+            Yours
+          </button>
+          <button type="button" aria-pressed={tab === "discover"} className={segment(tab === "discover")} onClick={() => setTab("discover")}>
+            Discover
+          </button>
+        </div>
         <div className="flex-1" />
         <div className="flex h-9 w-60 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--field-bg)] px-3 focus-within:border-[var(--focus)] focus-within:ring-2 focus-within:ring-[var(--focus)]/15">
           <SearchIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" />
@@ -884,6 +1011,17 @@ export function ConnectorsTab({ active }: { active: boolean }) {
                 className="flex w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
                 onClick={() => {
                   setAddMenuOpen(false);
+                  setTab("discover");
+                }}
+              >
+                Browse Discover
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full px-3 py-1.5 text-left text-sm hover:bg-[var(--card-bg)]"
+                onClick={() => {
+                  setAddMenuOpen(false);
                   setAdding(true);
                 }}
               >
@@ -894,44 +1032,44 @@ export function ConnectorsTab({ active }: { active: boolean }) {
         </div>
       </div>
 
-      {notice && (
-        <p role="status" className={`text-sm ${notice.error ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}>
-          {notice.text}
-        </p>
-      )}
+      {notice && <NoticeText notice={notice} />}
 
       <FetchRetry status={status} onRetry={refresh} />
-      {status === "success" && visible.length === 0 && (
-        <p className="text-sm text-[var(--muted)]">{q ? "No connectors match." : "No connectors yet."}</p>
+      {tab === "yours" && status === "success" && yours.length === 0 && (
+        <p className="py-6 text-center text-sm text-[var(--muted)]">
+          {q ? "No connectors match." : "No connectors yet. Add one from "}
+          {!q && (
+            <button type="button" className="text-[var(--accent)] hover:underline" onClick={() => setTab("discover")}>
+              Discover
+            </button>
+          )}
+          {!q && "."}
+        </p>
       )}
-      {status === "success" && visible.length > 0 && (
+      {tab === "yours" && status === "success" && yours.length > 0 && (
         <div className="flex flex-col">
           <div className={`${ROW_GRID} border-b border-[var(--border)] pb-2 text-[13px] text-[var(--muted)]`}>
             <span>Connector</span>
             <span>Type</span>
             <span>Status</span>
           </div>
-          {visible.map((row) => (
+          {yours.map((row) => (
             <div key={row.name} className="border-b border-[var(--border)] py-1 last:border-b-0">
               <div
                 role="button"
                 tabIndex={0}
                 aria-label={`Open ${row.title}`}
                 className={`${ROW_GRID} cursor-pointer rounded-lg py-2 outline-none hover:bg-[var(--card-bg)] focus-visible:bg-[var(--card-bg)]`}
-                onClick={() => {
-                  setNotice(null);
-                  setOpenName(row.name);
-                }}
+                onClick={() => openRow(row.name)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    setNotice(null);
-                    setOpenName(row.name);
+                    openRow(row.name);
                   }
                 }}
               >
                 <div className="flex min-w-0 items-center gap-3">
-                  <ConnectorBadge title={row.title} />
+                  <ConnectorIcon name={row.name} title={row.title} />
                   <span className="truncate text-[15px]">{row.title}</span>
                 </div>
                 <div className="flex items-center text-[15px]">
@@ -941,15 +1079,39 @@ export function ConnectorsTab({ active }: { active: boolean }) {
                   )}
                 </div>
                 <div className="flex items-center">
-                  <StatusCell
-                    row={row}
-                    pending={pendingConnectorAdds.has(row.name)}
-                    onConnect={() => row.catalogEntry && connectCatalog(row.catalogEntry)}
-                  />
+                  <StatusCell row={row} pending={pendingConnectorAdds.has(row.name)} />
                 </div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === "discover" && status === "success" && (
+        <div className="flex flex-col gap-4">
+          <h3 className="flex items-center gap-2 text-[17px] font-medium">
+            Connectors <span className="rounded-md bg-[var(--card-bg)] px-1.5 text-xs text-[var(--muted)]">{discover.length}</span>
+          </h3>
+          {discover.length === 0 ? (
+            <p className="py-6 text-center text-sm text-[var(--muted)]">No connectors match "{search.trim()}".</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {discover.map((row) => (
+                <DiscoverCard
+                  key={row.name}
+                  entry={row.catalogEntry!}
+                  added={row.serverInfo !== null}
+                  pending={pendingConnectorAdds.has(row.name)}
+                  onOpen={() => openRow(row.name)}
+                  onAdd={() => connectCatalog(row.catalogEntry!)}
+                />
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-[var(--muted)]">
+            Hosted services you sign in to in your own browser: nothing to install, no app to register. Anything else can
+            be added with Add &gt; Add custom connector.
+          </p>
         </div>
       )}
 
