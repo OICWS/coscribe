@@ -7880,7 +7880,7 @@ READMEs.
       `vercel-labs/agent-skills` (frontend and deployment) and
       `ComposioHQ/awesome-claude-skills` (864 files but no license at its
       root). Any of these can still be added from Skills > Add > Upload.
-## Phase 8db -- A sub-agent task id never names a file outside the store (shipped)
+## Phase 8dc -- A sub-agent task id never names a file outside the store (shipped)
 
 Found reviewing 8da: a task id is the model's (`check_subagent_task`,
 `stop_subagent`) or a URL's (`/api/subagents/{id}/...`), and
