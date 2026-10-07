@@ -8250,3 +8250,21 @@ def test_signing_in_again_while_a_sign_in_waits_replaces_it_cleanly(
         _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["connected"])
         info = client.get("/api/mcp/servers").json()["docs"]
         assert info["signin"] is None and info["signin_error"] is None
+
+
+def test_code_permissions_are_stored_and_checked_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        initial = client.get("/api/code/permissions").json()
+        saved = client.put("/api/code/permissions", json={"run_code_command": "allow"})
+        after = client.get("/api/code/permissions").json()
+        unknown = client.put("/api/code/permissions", json={"delete_everything": "allow"})
+        bad = client.put("/api/code/permissions", json={"apply_code_change": "sometimes"})
+
+    assert initial == {"run_code_command": "ask", "apply_code_change": "ask"}
+    assert saved.json() == after == {"run_code_command": "allow", "apply_code_change": "ask"}
+    assert unknown.status_code == bad.status_code == 422

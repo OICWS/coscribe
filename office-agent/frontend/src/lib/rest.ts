@@ -25,6 +25,8 @@ import type {
   ScriptEnvInterpreterInfo,
   ScriptEnvPackage,
   CatalogSkill,
+  CodePermissions,
+  CodePolicy,
   CodeStatus,
   SkillFileContentResult,
   SkillFilesResponse,
@@ -119,6 +121,9 @@ export const getConfig = () => getJson<ConfigResponse>("/api/config");
 // -- The code module ----------------------------------------------------
 
 export const getCodeStatus = () => getJson<CodeStatus>("/api/code");
+export const getCodePermissions = () => getJson<CodePermissions>("/api/code/permissions");
+export const setCodePermission = (action: keyof CodePermissions, policy: CodePolicy) =>
+  sendForResult<CodePermissions>("/api/code/permissions", "PUT", { [action]: policy });
 export const installCode = () => sendForResult<CodeStatus>("/api/code/install", "POST", {});
 export const removeCode = () => sendForResult<CodeStatus>("/api/code/install", "DELETE", {});
 export const updateConfig = (updates: Record<string, string>) =>

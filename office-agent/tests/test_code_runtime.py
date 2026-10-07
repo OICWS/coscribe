@@ -287,7 +287,9 @@ def test_a_read_outside_the_folder_or_from_outside_it_is_asked_about(tmp_path: P
 
     assert not reads_only("/bin/bash -lc 'ls'", str(tmp_path), folder)
     assert not reads_only("/bin/bash -lc 'cat link/secret'", str(folder), folder)
-    assert not reads_only("powershell.exe -Command Get-ChildItem", str(folder), folder)
+    assert reads_only("powershell.exe -Command Get-ChildItem", str(folder), folder)
+    assert not reads_only("powershell.exe -Command Get-ChildItem", str(tmp_path), folder)
+    assert not reads_only("powershell.exe -Command Get-Content link/secret", str(folder), folder)
 
 
 async def test_a_file_change_is_asked_about_too(host: CodexHost, workdir: Path) -> None:
@@ -518,3 +520,89 @@ def test_changed_files_lists_new_and_modified_only() -> None:
     after = {"a.txt": (1, 10), "b.txt": (3, 30), "c.txt": (1, 40)}
 
     assert changed_files(before, after) == ["b.txt", "c.txt"]
+
+
+def _powershell(script: str, flags: str = "-NoProfile -Command") -> str:
+    return f"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe {flags} {script!r}"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "Get-ChildItem",
+        "Get-ChildItem -Recurse -Filter *.csv",
+        "gci sub",
+        "dir",
+        "Get-Content summary.csv",
+        "Get-Content -Path summary.csv -TotalCount 5",
+        "Get-Content -Path:summary.csv",
+        "gc 'my file.csv'",
+        "type sub\\a.csv",
+        "Select-String -Path summary.csv -Pattern North",
+        "sls North summary.csv",
+        "Get-Item summary.csv",
+        "Get-Location",
+        "Test-Path summary.csv",
+    ],
+)
+def test_powershell_reads_of_the_folder_pass(script: str, tmp_path: Path) -> None:
+    (tmp_path / "sub").mkdir()
+
+    assert reads_only(_powershell(script), str(tmp_path), tmp_path)
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        # A read that goes on to do something else.
+        "Get-Content summary.csv | Set-Content copy.csv",
+        "Get-ChildItem; Remove-Item summary.csv",
+        "Get-ChildItem ; Remove-Item summary.csv",
+        "Get-Content summary.csv > copy.csv",
+        "Get-ChildItem -Path (Get-Location)",
+        "Get-Content $env:USERPROFILE\\.ssh\\id_rsa",
+        "Get-ChildItem `Remove-Item",
+        "Get-ChildItem && Remove-Item x",
+        "Get-Content a.csv, b.csv",
+        # Not files: providers, a hidden stream, a device.
+        "Get-ChildItem env:",
+        "Get-Content Env:\\OPENAI_API_KEY",
+        "Get-Content -Path:env:SECRET",
+        "Get-ChildItem HKLM:\\SOFTWARE",
+        "Get-ChildItem Cert:\\CurrentUser\\My",
+        "Get-ChildItem Variable:",
+        "Get-ChildItem function:",
+        "Get-Content summary.csv:hidden",
+        "Get-Content CON",
+        "Get-Content sub\\nul.txt",
+        "Get-Content COM1",
+        # Outside the folder, or not a read at all.
+        "Get-Content ..\\..\\secret.txt",
+        "Get-ChildItem ..",
+        "Get-Content /etc/passwd",
+        "Get-Content ~\\.netrc",
+        "Get-Content \\\\server\\share\\x",
+        "Remove-Item summary.csv",
+        "Set-Content summary.csv x",
+        "Invoke-WebRequest http://example.com",
+        "Get-Process",
+        ".\\Get-Content x",
+        "Get-Content 'unclosed",
+    ],
+)
+def test_other_powershell_is_asked_about(script: str, tmp_path: Path) -> None:
+    assert not reads_only(_powershell(script), str(tmp_path), tmp_path)
+
+
+def test_a_powershell_wrapper_is_only_read_when_it_runs_a_command(tmp_path: Path) -> None:
+    folder = str(tmp_path)
+
+    for flags in ("-NoProfile -NonInteractive -Command", "-ExecutionPolicy Bypass -Command"):
+        assert reads_only(_powershell("Get-ChildItem", flags), folder, tmp_path)
+    assert reads_only("powershell -Command Get-Content summary.csv", folder, tmp_path)
+    assert reads_only('pwsh -c "Get-Content summary.csv"', folder, tmp_path)
+    # A script file, an encoded command, or a flag coscribe doesn't know.
+    assert not reads_only("powershell -File read.ps1", folder, tmp_path)
+    assert not reads_only("powershell -EncodedCommand R2V0LUNoaWxkSXRlbQ==", folder, tmp_path)
+    assert not reads_only("powershell -WindowStyle Hidden -Command Get-ChildItem", folder, tmp_path)
+    assert not reads_only("powershell", folder, tmp_path)

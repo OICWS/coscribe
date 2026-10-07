@@ -1661,10 +1661,15 @@ and the chat hands over what needs real code.
   directory the first time it's used, or from Settings > Code, which can
   also remove it. `COSCRIBE_CODEX_WHEEL_URL` points it at a mirror of the
   same file (the pinned hashes still have to match).
-- **Approvals**: there is no sandbox -- every command and file change comes
-  to you as an approval, under the permission mode, except plain reads of
-  the folder (`ls`, `cat`, `grep`, ... with nothing that writes, chains or
-  leaves the folder). Its commands use the same Python environment as
+- **Approvals**: there is no sandbox -- every command and file change
+  comes to you as an approval, under the permission mode, except plain
+  reads of the folder (`ls`, `cat`, `grep`, ... or on Windows
+  `Get-ChildItem`, `Get-Content`, `Select-String`, ... with nothing that
+  writes, chains or leaves the folder; coscribe decides this itself, not
+  Codex). *Approve* answers one card; *Allow for this task* answers that kind
+  of action for the rest of the task. *Run commands without asking* and
+  *Change files without asking* in Settings > Code allow it for good (Plan
+  mode still declines). Its commands use the same Python environment as
   `run_python_script`. Stop ends the commands it started.
 
 Not there yet: a run on real Windows.

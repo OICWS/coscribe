@@ -66,6 +66,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from ..cli import INIT_PROMPT
+from ..code_runtime.permissions import CodePermissions
 from ..code_runtime.service import code_service
 from ..config import Settings
 from ..coordinator import CORE_TOOL_NAMES, build_coordinator_agent, conversation_context
@@ -447,6 +448,10 @@ class _SubAgentApprovalChannel:
         return self._task.prompt
 
     @property
+    def task_id(self) -> str:
+        return self._task.task_id
+
+    @property
     def can_resolve_approvals(self) -> bool:
         socket = self._session._live_websocket or self._session._turn_websocket
         return socket is not None and _can_resolve_approvals(socket)
@@ -520,6 +525,10 @@ class ChatSessionLG:
         self._context_window_client = context_window_client
         self._context_window: int | None = None
         self._pending_approvals: dict[str, Future[bool]] = {}
+        # The code module's approvals: which (task, action) a pending card
+        # is for, and what the person has allowed for a whole task.
+        self._code_requests: dict[str, tuple[str, str]] = {}
+        self._code_task_allowances: set[tuple[str, str]] = set()
         # A question's answer is one entry per question, or None when the
         # user closed them; the other requests (plans, drafts) and a stop
         # answer with a string.
@@ -1161,7 +1170,12 @@ class ChatSessionLG:
         defer = self.settings.defer_tools and any(tool_name(t) not in core for t in tools)
         return core, defer
 
-    def resolve_approval(self, request_id: str, approved: bool) -> None:
+    def resolve_approval(self, request_id: str, approved: bool, scope: str | None = None) -> None:
+        # "task": the person allowed this kind of action for the rest of the
+        # code task that asked, not only this once.
+        code_request = self._code_requests.get(request_id)
+        if approved and scope == "task" and code_request is not None:
+            self._code_task_allowances.add(code_request)
         future = self._pending_approvals.get(request_id)
         if future is not None and not future.done():
             future.set_result(approved)
@@ -2455,6 +2469,17 @@ class ChatSessionLG:
             )
             await self._send_tool_started(name, args, websocket)
             return {"type": "approve"}
+        if self._code_allows(name, websocket):
+            record_decision(
+                audit_log,
+                thread_id=self.thread_id,
+                tool_name=name,
+                arguments=args,
+                decision="approve",
+                reason="code_allowed",
+            )
+            await self._send_tool_started(name, args, websocket)
+            return {"type": "approve"}
         auto_reason = self._auto_approves(name)
         if auto_reason is not None:
             record_decision(
@@ -2537,6 +2562,8 @@ class ChatSessionLG:
         self._pending_approvals[request_id] = future
         if isinstance(websocket, _SubAgentApprovalChannel):
             self._subagent_request_ids.add(request_id)
+            if name in CODE_APPROVAL_RISKS:
+                self._code_requests[request_id] = (websocket.task_id, name)
         # Only worth building for a socket that can actually show it to
         # someone -- for an unattended selfwake/Scheduled Task turn (see
         # _can_resolve_approvals's own docstring), this would just spend a
@@ -2563,6 +2590,7 @@ class ChatSessionLG:
         finally:
             self._pending_approvals.pop(request_id, None)
             self._subagent_request_ids.discard(request_id)
+            self._code_requests.pop(request_id, None)
         if approved and self._auto_paused:
             self._auto_paused = False
             self._auto_blocks_in_row = 0
@@ -2593,6 +2621,21 @@ class ChatSessionLG:
         if run is None or run.status != "needs_approval":
             return None
         return trigger.approval_mode
+
+    def _code_allows(self, name: str, websocket: Any) -> bool:
+        """Whether the user has allowed this kind of code-module action: on
+        an earlier card for this task, or in Settings > Code for good."""
+        if name not in CODE_APPROVAL_RISKS or not isinstance(websocket, _SubAgentApprovalChannel):
+            return False
+        if (websocket.task_id, name) in self._code_task_allowances:
+            return True
+        # A switch set for the user at the keyboard doesn't reach a scheduled
+        # run, whose task chose its own approval tier, or a turn nobody is
+        # watching.
+        if self._effective_run_approval_mode() is not None or not websocket.can_resolve_approvals:
+            return False
+        permissions = CodePermissions(self.settings.state_dir, tuple(CODE_APPROVAL_RISKS))
+        return permissions.policy(name) == "allow"
 
     def _auto_approves(self, name: str) -> AutoApproveReason | None:
         """Why a gated call may go ahead without asking anyone, or None.

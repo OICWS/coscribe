@@ -386,3 +386,11 @@ export interface CodeStatus {
   /** Why the code module can't use that model; null when it can. */
   model_problem: string | null;
 }
+
+/** Whether the code module's commands and file changes ask first. */
+export type CodePolicy = "ask" | "allow";
+
+export interface CodePermissions {
+  run_code_command: CodePolicy;
+  apply_code_change: CodePolicy;
+}

@@ -209,7 +209,7 @@ function SubAgentDetail({
   refreshKey: number;
   busy: boolean;
   onStop: (task: SubAgentTask) => void;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
 }) {
   const [task, setTask] = useState<SubAgentTask | null>(null);
   const [items, setItems] = useState<LogItem[]>([]);
@@ -248,9 +248,9 @@ function SubAgentDetail({
       <TranscriptItems
         items={shown}
         live={isActive(task)}
-        onApprove={(id, approved) => {
+        onApprove={(id, approved, scope) => {
           setAnswered(id);
-          onApprove(id, approved);
+          onApprove(id, approved, scope);
         }}
       />
       {task.status === "failed" && task.error && (
@@ -272,7 +272,7 @@ interface SubAgentsPanelProps {
   refreshKey: number;
   /** A run to open, e.g. one that just asked for approval. */
   focusTaskId: string | null;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onClose: () => void;
 }
 

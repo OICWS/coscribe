@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useCodePermissions } from "../../lib/useCodePermissions";
 import { useCodeStatus } from "../../lib/useCodeStatus";
 import { useConfiguredModels } from "../../lib/useConfiguredModels";
 import { CodeDownload } from "../CodeModuleStatus";
@@ -30,6 +31,7 @@ function CodeModelSelect({ value, onChange }: { value: string; onChange: (value:
  * allowed. How it may act follows the permission mode, as a chat's tools do. */
 export function CodeTab({ values, onChange }: CodeTabProps) {
   const code = useCodeStatus();
+  const approvals = useCodePermissions();
   const model = values[CODE_MODEL_KEY] ?? "";
   const { refresh } = code;
   // Settings save a moment after a change; re-check the model after that.
@@ -76,6 +78,43 @@ export function CodeTab({ values, onChange }: CodeTabProps) {
           />
         </SettingRows>
       </SettingsSection>
+
+      {approvals.permissions && (
+        <SettingsSection
+          title="Approvals"
+          description="Codex asks before each command and file change, under the permission mode; plain reads of your folder never ask. Allowing here skips the question for good, except in Plan mode. An Approve card can also allow it for one task only."
+        >
+          <SettingRows>
+            <SettingRow
+              label="Run commands without asking"
+              description="Commands can do anything this app can, and nothing keeps them inside your folder."
+              control={
+                <ToggleSwitch
+                  label="Run commands without asking"
+                  on={approvals.permissions.run_code_command === "allow"}
+                  onClick={() =>
+                    approvals.set("run_code_command", approvals.permissions?.run_code_command === "allow" ? "ask" : "allow")
+                  }
+                />
+              }
+            />
+            <SettingRow
+              label="Change files without asking"
+              description="Edits Codex makes with its own patch tool. Accept-edits mode already allows these."
+              control={
+                <ToggleSwitch
+                  label="Change files without asking"
+                  on={approvals.permissions.apply_code_change === "allow"}
+                  onClick={() =>
+                    approvals.set("apply_code_change", approvals.permissions?.apply_code_change === "allow" ? "ask" : "allow")
+                  }
+                />
+              }
+            />
+          </SettingRows>
+          {approvals.error && <p className="mt-2 text-sm text-[var(--danger)]">{approvals.error}</p>}
+        </SettingsSection>
+      )}
     </div>
   );
 }

@@ -133,16 +133,23 @@ def complete(thread_id: str, turn_id: str, status: str, error: str | None = None
     )
 
 
-def command(thread_id: str, turn_id: str, cwd: str, script: str = "echo made > made.txt") -> None:
+def command(
+    thread_id: str,
+    turn_id: str,
+    cwd: str,
+    script: str = "echo made > made.txt",
+    call: str = "call-1",
+    out: str = "made.txt",
+) -> None:
     base = {"threadId": thread_id, "turnId": turn_id}
-    item = {"type": "commandExecution", "id": "call-1", "command": f"/bin/bash -lc '{script}'"}
+    item = {"type": "commandExecution", "id": call, "command": f"/bin/bash -lc '{script}'"}
     notify("item/started", {**base, "item": {**item, "status": "inProgress"}})
     reply = ask(
         "item/commandExecution/requestApproval",
         {
             **base,
             "kind": "command",
-            "itemId": "call-1",
+            "itemId": call,
             "startedAtMs": 0,
             "environmentId": "local",
             "command": item["command"],
@@ -153,7 +160,7 @@ def command(thread_id: str, turn_id: str, cwd: str, script: str = "echo made > m
     )
     accepted = reply.get("result", {}).get("decision") == "accept"
     if accepted:
-        Path(cwd, "made.txt").write_text("made\n", encoding="utf-8")
+        Path(cwd, out).write_text("made\n", encoding="utf-8")
     status = "completed" if accepted else "declined"
     notify("item/completed", {**base, "item": {**item, "status": status, "exitCode": 0}})
     message(thread_id, turn_id, "ran it" if accepted else "was declined")
@@ -166,6 +173,9 @@ def run_turn(thread_id: str, turn_id: str, prompt: str, cwd: str) -> None:
     _keep(thread_id)
     if scenario == "approve":
         command(thread_id, turn_id, cwd)
+    elif scenario == "twice":
+        command(thread_id, turn_id, cwd)
+        command(thread_id, turn_id, cwd, "echo more > made2.txt", "call-2", "made2.txt")
     elif scenario == "read":
         command(thread_id, turn_id, cwd, "ls -la")
     elif scenario == "readout":

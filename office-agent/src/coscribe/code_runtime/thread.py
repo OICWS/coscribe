@@ -24,7 +24,7 @@ import re
 import shlex
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
 
 from .client import AppServer, AppServerClosed, RequestFailed
@@ -48,6 +48,31 @@ _READ_PROGRAMS = frozenset(
 _SHELL_SYNTAX = frozenset("|&;<>$`(){}[]*?~!\\\n\r")
 _FIND_ACTIONS = ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fls")
 _SHELLS = frozenset({"bash", "sh", "zsh"})
+# On Windows Codex runs PowerShell. Its read cmdlets and their aliases, none
+# of which takes a parameter that writes; anything a script might chain onto
+# one (`; Remove-Item`, a pipe, a sub-expression) is shell syntax and is
+# turned away before the words are read.
+_POWERSHELLS = frozenset({"powershell", "powershell.exe", "pwsh", "pwsh.exe"})
+_POWERSHELL_READS = frozenset(
+    {
+        "get-childitem", "gci", "dir", "ls",
+        "get-content", "gc", "cat", "type",
+        "select-string", "sls",
+        "get-item", "gi",
+        "get-location", "gl", "pwd",
+        "test-path",
+    }
+)  # fmt: skip
+# `*` and `?` stay: a wildcard in a name is how PowerShell lists a folder's
+# csv files, and the folder check below doesn't depend on what it matches.
+_POWERSHELL_SYNTAX = frozenset("|&;<>$`(){}[]~!\n\r,@#")
+_WINDOWS_DEVICES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{n}" for n in range(1, 10)}
+    | {f"LPT{n}" for n in range(1, 10)}
+)
+_POWERSHELL_FLAGS = frozenset({"-noprofile", "-nologo", "-noninteractive", "-nop", "-nol", "-noni"})
+_POWERSHELL_FLAGS_WITH_VALUE = frozenset({"-executionpolicy", "-ep"})
 # One `cd <dir> &&` in front; the directory is a plain word or a quoted
 # string with nothing in it the shell would expand.
 _CD_PREFIX = re.compile(
@@ -130,8 +155,61 @@ def changed_files(
     return sorted(path for path, state in after.items() if before.get(path) != state)
 
 
+def _words(line: str) -> list[str] | None:
+    """The words of a command line. Quotes group, backslashes are ordinary:
+    on Windows they are the path separator, which shlex would eat."""
+    words: list[str] = []
+    current: list[str] = []
+    quote = ""
+    started = False
+    for char in line:
+        if quote:
+            if char == quote:
+                quote = ""
+            else:
+                current.append(char)
+        elif char in "\"'":
+            quote = char
+            started = True
+        elif char.isspace():
+            if started or current:
+                words.append("".join(current))
+                current, started = [], False
+        else:
+            current.append(char)
+    if quote:
+        return None
+    if started or current:
+        words.append("".join(current))
+    return words
+
+
+def _powershell_script(command: str) -> str | None:
+    """The script inside a `powershell -NoProfile -Command <script>` wrapper."""
+    words = _words(command)
+    if not words or PureWindowsPath(words[0]).name.lower() not in _POWERSHELLS:
+        return None
+    index = 1
+    while index < len(words):
+        flag = words[index].lower()
+        if flag in _POWERSHELL_FLAGS:
+            index += 1
+        elif flag in _POWERSHELL_FLAGS_WITH_VALUE:
+            index += 2
+        elif flag in ("-command", "-c"):
+            # PowerShell joins whatever follows into one script.
+            return " ".join(words[index + 1 :]) or None
+        else:
+            return None
+    return None
+
+
 def shell_script(command: str) -> str | None:
-    """The shell script inside Codex's `/bin/bash -lc '<script>'` wrapper."""
+    """The shell script inside Codex's `/bin/bash -lc '<script>'` wrapper
+    (or its PowerShell equivalent on Windows)."""
+    powershell = _powershell_script(command)
+    if powershell is not None:
+        return powershell
     try:
         argv = shlex.split(command)
     except ValueError:
@@ -164,6 +242,43 @@ def _plain_read(script: str, base: Path, root: Path) -> bool:
     return all(path.resolve().is_relative_to(root) for path in paths)
 
 
+def _plain_powershell_path(word: str) -> bool:
+    """Whether `word` names a file, as the folder check assumes. A colon
+    makes it something else unless it follows a single drive letter:
+    `env:X`, `HKLM:\\x` and `Cert:\\` are providers (the environment, the
+    registry), `file.txt:stream` is a hidden stream, and Python would read
+    each as a plain name inside the folder. Device names hang or reach
+    hardware."""
+    colon = word.find(":")
+    if colon not in (-1, 1) or (colon == 1 and not word[0].isalpha()):
+        return False
+    names = word.replace("\\", "/").split("/")
+    return not any(name.split(".")[0].rstrip(" ").upper() in _WINDOWS_DEVICES for name in names)
+
+
+def _powershell_read(script: str, base: Path, root: Path) -> bool:
+    if any(ch in _POWERSHELL_SYNTAX for ch in script):
+        return False
+    words = _words(script)
+    if not words or words[0].lower() not in _POWERSHELL_READS:
+        return False
+    paths = [base]
+    for word in words[1:]:
+        if word.startswith("-"):
+            # `-Path:value` carries its value; other parameters stand alone
+            # and the word after one is looked at as the path it may be.
+            value = word.partition(":")[2]
+            if value:
+                if not _plain_powershell_path(value):
+                    return False
+                paths.append(base / value.replace("\\", "/"))
+            continue
+        if not _plain_powershell_path(word):
+            return False
+        paths.append(base / word.replace("\\", "/"))
+    return all(path.resolve().is_relative_to(root) for path in paths)
+
+
 def reads_only(command: str, cwd: str, folder: Path) -> bool:
     """Whether `command` is one read-only program reading only inside
     `folder` -- optionally after one `cd <dir> &&` into a folder inside it,
@@ -173,6 +288,8 @@ def reads_only(command: str, cwd: str, folder: Path) -> bool:
         return False
     root = folder.resolve()
     base = Path(cwd) if cwd else root
+    if _powershell_script(command) is not None:
+        return _powershell_read(script, base, root)
     prefix = _CD_PREFIX.fullmatch(script)
     if prefix is not None:
         word = prefix["dir"]

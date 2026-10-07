@@ -7596,6 +7596,46 @@ the chat able to do more rather than offering a second place to work.
       gets points the user to Settings > Code > Model for code.
 - [x] Tests: the setting stands in for a chat model Codex can't use; the
       message names Settings > Code. e2e: no Code mode in the nav rail.
+## Phase 8cw -- The code module's approvals: allow for a task, allow for good, PowerShell reads (shipped)
+
+On Windows Codex runs PowerShell, which the read-only rule (bash only) didn't
+know, so every `Get-Content` asked. And a task that runs a dozen commands
+asked a dozen times. Decided with the user: no per-conversation menu (once
+code conversations are gone, hard to find, hard to audit); two layers
+instead, as Connectors have.
+
+- [x] **PowerShell reads** (`code_runtime/thread.py`): `powershell`/`pwsh`
+      `-Command` wrappers, and `Get-ChildItem`/`gci`/`dir`/`ls`,
+      `Get-Content`/`gc`/`cat`/`type`, `Select-String`/`sls`, `Get-Item`,
+      `Get-Location`, `Test-Path`. Decided by coscribe's own word reading,
+      never Codex's `commandActions`: a PowerShell "read" can go on to
+      `Remove-Item`. A path with a colon other than after one drive letter is
+      refused (`env:`, `HKLM:`, `Cert:` are providers -- `Get-Content
+      env:OPENAI_API_KEY` would otherwise pass as a file inside the folder --
+      and `a.txt:stream` is a hidden stream), as are Windows device names
+      (`CON`, `NUL`, `COM1`...). Found in review. No pipes, `;`, `&&`, redirects, `$`, backticks,
+      sub-expressions, commas or `~`; every path stays inside the folder.
+      Not yet run on a real Windows machine; the quoting Codex uses there is
+      read from its source, not observed.
+- [x] **Allow for this task**: a second button on a code command's or file
+      change's card, `approval_response` with `scope: "task"`. Kept per
+      (task, action) in the session; a later task asks again.
+- [x] **Allow for good**: `code_permissions.json` in the state folder,
+      Settings > Code > Approvals, two switches (commands, file changes),
+      `GET/PUT /api/code/permissions`. Checked after hooks and Plan mode, so
+      neither is bypassed (exec policy covers python/node scripts only and
+      never sees a code command); audit reason `code_allowed`. The switch
+      doesn't reach a scheduled run, whose task chose its own approval tier,
+      nor a turn nobody is watching.
+- [x] The code command card no longer says the script "can write only in the
+      workspace": Codex runs with no sandbox.
+- [x] Tests: the word reader against 14 reads and 20 things it must refuse
+      (mutation-checked: removing `;` from the syntax set fails the spaced
+      `Get-ChildItem ; Remove-Item` case); task and settings allowances,
+      plan mode, file changes unaffected by a commands switch; the
+      permissions API. Driven in a browser against the fake Codex: one click
+      on *Allow for this task* ran both commands; the settings switch ran
+      them with no card.
 
 ## Phase 8cx -- Connectors that sign in through the browser; a hosted-only catalog (built, awaiting your sign-in tests)
 

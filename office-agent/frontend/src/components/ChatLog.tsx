@@ -73,7 +73,7 @@ interface ChatLogProps {
   turnInFlight?: boolean;
   /** The connected connectors' tool names, counted as "used N tools". */
   connectorTools?: ReadonlySet<string>;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onAnswerPlan?: (item: PlanItem, choice: PlanChoice, feedback: string) => void;
   /** Undefined while a turn is in flight -- editing mid-turn would race
    * the very history the edit is about to truncate, so the affordance is
@@ -345,7 +345,7 @@ function TurnView({
   isLastTurn?: boolean;
   /** This turn is the one a reply is still being generated for. */
   live?: boolean;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onAnswerPlan?: (item: PlanItem, choice: PlanChoice, feedback: string) => void;
   onEditMessage?: (turnIndex: number, text: string) => void;
   onRewindMessage?: (turnIndex: number, text: string) => void;
@@ -437,7 +437,7 @@ export function TranscriptItems({
 }: {
   items: LogItem[];
   live: boolean;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
 }) {
   const entries = groupToolRuns(items);
   return (
@@ -539,7 +539,7 @@ function ToolRunGroupView({
 }: {
   group: ToolRunGroup;
   live: boolean;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -621,7 +621,7 @@ function ToolStepRow({
   item: ToolOrApprovalItem;
   running: boolean;
   first: boolean;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -688,7 +688,7 @@ function ToolDetail({
   onPptxShapePicked,
 }: {
   item: ToolOrApprovalItem;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   if (item.kind === "approval") {
@@ -716,7 +716,7 @@ function ToolCallRow({
   onPptxShapePicked,
 }: {
   item: ToolOrApprovalItem;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const [open, setOpen] = useState(() => item.kind === "approval" && item.status === "pending");
@@ -833,7 +833,7 @@ function ApprovalDetail({
   onPptxShapePicked,
 }: {
   item: Extract<LogItem, { kind: "approval" }>;
-  onApprove: (id: string, approved: boolean) => void;
+  onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const isScript =
@@ -844,6 +844,8 @@ function ApprovalDetail({
   const scriptArgs = item.arguments;
   const hasPreview = Boolean(item.beforePreview || item.afterPreview);
   const pptxTarget = pptxOverlayTargetOf(item.arguments);
+  // The code module's actions can be allowed for the rest of their task.
+  const codeAction = item.toolName === "run_code_command" || item.toolName === "apply_code_change";
   return (
     <>
       {item.reviewerNote && item.status === "pending" && (
@@ -866,9 +868,9 @@ function ApprovalDetail({
             {typeof scriptArgs.script === "string" ? scriptArgs.script : JSON.stringify(scriptArgs.script)}
           </pre>
           <div className="text-xs text-[var(--muted)]">
-            This script isn’t sandboxed: it can read any file this app can and use the network. It can write only
-            in the workspace and folders you added -- a safeguard against mistakes, not a security boundary. Review
-            it before approving.
+            {item.toolName === "run_code_command"
+              ? "The code module runs this with this app's own access and no sandbox: it can read and change any file this app can and use the network. Review it before approving."
+              : "This script isn’t sandboxed: it can read any file this app can and use the network. It can write only in the workspace and folders you added -- a safeguard against mistakes, not a security boundary. Review it before approving."}
           </div>
         </div>
       ) : (
@@ -883,6 +885,15 @@ function ApprovalDetail({
           >
             Approve
           </button>
+          {codeAction && (
+            <button
+              type="button"
+              className="rounded-md border border-[var(--border)] px-3 py-1 text-sm"
+              onClick={() => onApprove(item.id, true, "task")}
+            >
+              Allow for this task
+            </button>
+          )}
           <button
             type="button"
             className="rounded-md border border-[var(--border)] px-3 py-1 text-sm"
