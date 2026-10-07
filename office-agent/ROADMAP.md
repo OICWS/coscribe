@@ -7735,6 +7735,21 @@ the checks below were retested in Manual afterwards. Two findings:
   action, so it shows no card there; the switches in Settings > Code and
   *Allow for this task* matter in Manual and Accept-edits.
 
+## Phase 8cz -- A count on the Sub Agents button while any are running (shipped)
+
+With the panel closed there was no sign that a sub-agent was still working:
+a code task can run for minutes, and a background one outlives the turn.
+
+- [x] **A badge with the number running** on the header's Sub Agents button,
+      pulsing (not under reduced motion); the tooltip adds how many wait on
+      the user. It goes when the last one ends or is stopped.
+- [x] The count is read when the server says the list changed, and every
+      4 s while any is running or a turn is under way: a task that starts
+      and then prints nothing sends no change, so waiting for one would
+      never show it.
+- [x] Driven in a browser against a fake Codex that hangs: the badge showed
+      "1" within a few seconds, and stopped the task, it went.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
