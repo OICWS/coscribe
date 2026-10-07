@@ -37,7 +37,6 @@ export interface ConfigResponse {
   COSCRIBE_MAX_TURNS: string | null;
   COSCRIBE_CODE_MODEL: string | null;
   COSCRIBE_CODE_MODULE_ENABLED: string | null;
-  COSCRIBE_CODE_SEES_MEMORY: string | null;
   /** Desktop-shell-only, Rust-consumed (see office-agent-desktop's
    * lib.rs) -- "false" opts out of the default hide-on-close/keep-
    * running-in-background behavior. Absent/null/anything but exactly
@@ -382,7 +381,7 @@ export interface CodeStatus {
   progress: number | null;
   /** Bytes on disk once downloaded; null where there's no build. */
   size: number | null;
-  /** What a new code conversation starts with. */
+  /** What a chat's code task runs on. */
   model: string;
   /** Why the code module can't use that model; null when it can. */
   model_problem: string | null;

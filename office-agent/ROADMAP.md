@@ -7374,7 +7374,7 @@ nothing changes.
       failed)", and frames 350 ms apart show the band moving through the
       text.
 
-## Phase 8cq -- Code module, part 3: its own conversations and a Settings section
+## Phase 8cq -- Code module, part 3: its own conversations and a Settings section (conversations removed in 8cv)
 
 The third mode the nav rail promised: `</>` after Chat and Scheduled, with
 its own list of code sessions. A code conversation is a conversation with
@@ -7504,7 +7504,7 @@ Codex itself -- every message one Codex turn in the conversation's folder
       at peak prices; the main loop hit the cache at 99% with the note in
       the middle of the turn.
 
-## Phase 8ct -- Code conversations see the user's instructions and memory
+## Phase 8ct -- Code conversations see the user's instructions and memory (removed with them in 8cv)
 
 The open question from 8cq (the code module's part 3), decided: yes. A chat is told the memory file
 (the user's instructions plus what `remember` kept) with its messages; a
@@ -7572,6 +7572,30 @@ in code.
       are not in `sys.modules` after the import. What is left is
       structural: `fastapi.openapi.models` (~120ms), `langsmith.schemas`
       (~80ms), `langgraph_sdk` (~60ms), the SQLite checkpointer (~175ms).
+## Phase 8cv -- Code folds into the chat (shipped)
+
+8cq gave Codex a third nav mode with conversations of its own; 8ct let them
+see the user's memory. Used for real, they came out as a chat with a
+different engine, and what an office user needs from it -- code when a task
+calls for it -- is already `run_code_task`. Dedicated coding tools (Codex,
+Claude Code) exist for people who want a coding session; rebuilding one
+here is not the product. Codex stays as the chat's assistant, which makes
+the chat able to do more rather than offering a second place to work.
+
+- [x] **Removed**: `CodeSession`, `code-` threads, the `</>` nav mode and
+      its Code home page, the `kind` field of `/api/threads`, the `.codex`
+      sidecar, `COSCRIBE_CODE_SEES_MEMORY`. The chat's own agent already
+      knows the memory and writes the task for Codex, which sees nothing
+      else.
+- [x] **Kept**: `code_runtime/`, `run_code_task`, Settings > Code
+      (download, hand-over switch, model), the approval cards and the
+      Sub Agents panel, `thread/backgroundTerminals/clean` on Stop.
+- [x] **`COSCRIBE_CODE_MODEL` now names what Codex runs on for a chat's
+      tasks.** Unset, it follows the chat's model; a chat on Claude or
+      Gemini would otherwise find the module unusable, so the message it
+      gets points the user to Settings > Code > Model for code.
+- [x] Tests: the setting stands in for a chat model Codex can't use; the
+      message names Settings > Code. e2e: no Code mode in the nav rail.
 
 ## Phase 8cx -- Connectors that sign in through the browser; a hosted-only catalog (built, awaiting your sign-in tests)
 

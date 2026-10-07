@@ -52,8 +52,6 @@ from openpyxl import Workbook, load_workbook
 from pptx import Presentation
 from pptx.util import Inches
 
-from coscribe.code_runtime.launch import LaunchSpec
-from coscribe.code_runtime.service import CodeService
 from coscribe.config import Settings
 from coscribe.runtime import secrets as secrets_module
 from coscribe.runtime_lg.audit import AuditLog
@@ -8038,54 +8036,6 @@ def test_connector_tool_permissions_change_what_a_conversation_may_do_lg(
     assert refused.status_code == 422
 
 
-def _fake_codex(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The app's own code module, running tests/fake_codex_app_server.py
-    with nothing to download."""
-    fake = Path(__file__).with_name("fake_codex_app_server.py")
-    home = tmp_path / "codex-home"
-    spec = LaunchSpec(
-        argv=(sys.executable, str(fake)),
-        env={**os.environ, "CODEX_HOME": str(home)},
-        config="",
-        home=home,
-        log_path=tmp_path / "app-server.log",
-    )
-
-    async def prepare(self: CodeService) -> Any:
-        return self.host
-
-    monkeypatch.setattr(CodeService, "_spec", lambda self: spec)
-    monkeypatch.setattr(CodeService, "prepare", prepare)
-    monkeypatch.setattr(
-        CodeService,
-        "custom_providers",
-        lambda self: {"fake": {"base_url": "http://127.0.0.1:9/v1", "api_key": "k"}},
-    )
-
-
-def test_a_code_thread_is_a_code_conversation_lg(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _fake_codex(monkeypatch, tmp_path)
-    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        with client.websocket_connect("/ws/code-abc") as ws:
-            _receive_until(ws, "history")
-            ws.send_json({"type": "user_message", "text": "basic"})
-            code_turn = _receive_until(ws, "agent_message")
-        with client.websocket_connect("/ws/chat1") as ws:
-            _receive_until(ws, "history")
-            ws.send_json({"type": "user_message", "text": "hello"})
-            _receive_until(ws, "agent_message")
-        threads = client.get("/api/threads").json()
-        deleted = client.delete("/api/threads/code-abc")
-
-    assert code_turn[-1]["text"] == "Hello from Codex"
-    assert {t["thread_id"]: t["kind"] for t in threads} == {"code-abc": "code", "chat1": "chat"}
-    assert deleted.status_code == 200
-    assert not (tmp_path / "state" / "code-abc.codex").exists()
-
-
 def test_the_code_settings_are_checked_and_apply_live_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -8099,7 +8049,6 @@ def test_the_code_settings_are_checked_and_apply_live_lg(
                 "updates": {
                     "COSCRIBE_CODE_MODEL": "deepseek-flash",
                     "COSCRIBE_CODE_MODULE_ENABLED": "yes",
-                    "COSCRIBE_CODE_SEES_MEMORY": "maybe",
                 }
             },
         )
@@ -8109,7 +8058,6 @@ def test_the_code_settings_are_checked_and_apply_live_lg(
                 "updates": {
                     "COSCRIBE_CODE_MODEL": "deepseek:deepseek-flash",
                     "COSCRIBE_CODE_MODULE_ENABLED": "true",
-                    "COSCRIBE_CODE_SEES_MEMORY": "false",
                 }
             },
         )
@@ -8120,7 +8068,6 @@ def test_the_code_settings_are_checked_and_apply_live_lg(
     assert set(bad.json()["rejected"]) == {
         "COSCRIBE_CODE_MODEL",
         "COSCRIBE_CODE_MODULE_ENABLED",
-        "COSCRIBE_CODE_SEES_MEMORY",
     }
     assert good.json() == {"restart_required": False, "rejected": {}}
     assert chosen["model"] == "deepseek:deepseek-flash"

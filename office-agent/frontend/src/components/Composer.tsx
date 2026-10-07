@@ -77,7 +77,6 @@ interface ComposerProps {
   totalTokens: number;
   workflowTest?: { done: number; total: number } | null;
   commands: CommandInfo[];
-  placeholder?: string;
   modePill: ReactNode;
   folderPicker: ReactNode;
   modelPicker: ReactNode;
@@ -116,7 +115,6 @@ export function Composer({
   totalTokens,
   workflowTest = null,
   commands,
-  placeholder = "Type / for commands",
   modePill,
   folderPicker,
   modelPicker,
@@ -552,7 +550,7 @@ export function Composer({
           className="max-h-40 w-full resize-none bg-transparent px-0.5 pr-9 text-[0.9rem] leading-normal outline-none"
           rows={1}
           value={value}
-          placeholder={placeholder}
+          placeholder="Type / for commands"
           onChange={(event) => {
             setValue(event.target.value);
             updateAutocomplete(event.target.value);
