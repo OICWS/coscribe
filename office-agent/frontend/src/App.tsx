@@ -384,7 +384,7 @@ function App() {
   const selectedTask = scheduledTasks.find((t) => t.trigger_id === selectedTaskId) ?? null;
   // Browser and Sub Agents belong to a conversation, not the Scheduled pages.
   const inConversation = navMode === "create" && !onHome;
-  const subAgents = useRunningSubAgents(threadId, subAgentsTick, inConversation, state.turnInFlight);
+  const subAgents = useRunningSubAgents(threadId, subAgentsTick, inConversation);
   let subAgentsTitle = "Sub Agents";
   if (subAgents.running > 0) {
     subAgentsTitle += ` (${subAgents.running} running`;
@@ -889,8 +889,16 @@ function App() {
                 <SubAgentsIcon className="h-[18px] w-[18px]" />
                 {subAgents.running > 0 && (
                   <span
-                    aria-label={`${subAgents.running} running`}
-                    className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-medium leading-none text-[var(--accent-fg)] motion-safe:animate-pulse"
+                    aria-label={
+                      subAgents.waiting > 0
+                        ? `${subAgents.running} running, ${subAgents.waiting} waiting for you`
+                        : `${subAgents.running} running`
+                    }
+                    className={`absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-medium leading-none ${
+                      subAgents.waiting > 0
+                        ? "bg-[var(--warning)] text-[var(--bg)]"
+                        : "bg-[var(--accent)] text-[var(--accent-fg)] motion-safe:animate-pulse"
+                    }`}
                   >
                     {subAgents.running}
                   </span>
