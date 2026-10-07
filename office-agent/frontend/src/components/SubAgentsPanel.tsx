@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { formatElapsed, formatTokenCount } from "../lib/format";
 import { clearFinishedSubAgents, getSubAgentTasks, getSubAgentTranscript, stopSubAgentTask } from "../lib/rest";
+import { followUpOf, orderFollowUps } from "../lib/subagentOrder";
 import { summarizeItemParts } from "../lib/transcriptGrouping";
 import { historyToItems, type LogItem } from "../state/reducer";
 import type { SubAgentTask } from "../types/session";
@@ -82,14 +83,21 @@ function StopButton({ onStop, busy }: { onStop: () => void; busy: boolean }) {
   );
 }
 
+/** Which task a follow-up carries on from. */
+function FollowUpNote({ of }: { of: string }) {
+  return <span className="min-w-0 truncate text-xs text-[var(--muted)]">Follow-up to “{of}”</span>;
+}
+
 function RunningCard({
   task,
+  followsUp,
   now,
   busy,
   onStop,
   onOpen,
 }: {
   task: SubAgentTask;
+  followsUp: string | null;
   now: number;
   busy: boolean;
   onStop: () => void;
@@ -102,6 +110,7 @@ function RunningCard({
         <span className="min-w-0 text-[15px] leading-snug">{task.description}</span>
         <StopButton onStop={onStop} busy={busy} />
       </div>
+      {followsUp && <FollowUpNote of={followsUp} />}
       <div className="flex items-center gap-2 text-[13px] text-[var(--muted)]">
         <span>Agent</span>
         <span className="tabular-nums">{formatElapsed(now - new Date(task.started_at).getTime())}</span>
@@ -122,7 +131,15 @@ function RunningCard({
   );
 }
 
-function FinishedRow({ task, onOpen }: { task: SubAgentTask; onOpen: () => void }) {
+function FinishedRow({
+  task,
+  followsUp,
+  onOpen,
+}: {
+  task: SubAgentTask;
+  followsUp: string | null;
+  onOpen: () => void;
+}) {
   const icon =
     task.status === "succeeded" ? (
       <CheckCircleIcon className="h-3.5 w-3.5 text-[var(--muted)]" />
@@ -144,6 +161,11 @@ function FinishedRow({ task, onOpen }: { task: SubAgentTask; onOpen: () => void 
           {relativeTime(task.finished_at ?? task.started_at)}
         </span>
       </span>
+      {followsUp && (
+        <span className="flex pl-[22px]">
+          <FollowUpNote of={followsUp} />
+        </span>
+      )}
       <span className="pl-[22px]">
         <Facts task={task} />
       </span>
@@ -305,8 +327,8 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
     };
   }, [threadId, refreshKey]);
 
-  const running = tasks.filter(isActive).reverse();
-  const finished = tasks.filter((task) => !isActive(task)).reverse();
+  const running = orderFollowUps(tasks.filter(isActive).reverse());
+  const finished = orderFollowUps(tasks.filter((task) => !isActive(task)).reverse());
 
   useEffect(() => {
     if (running.length === 0) return;
@@ -385,6 +407,7 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
                   <RunningCard
                     key={task.task_id}
                     task={task}
+                    followsUp={followUpOf(task, tasks)}
                     now={now}
                     busy={busyId === task.task_id}
                     onStop={() => stop(task)}
@@ -419,7 +442,12 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
                 </div>
                 {showFinished &&
                   finished.map((task) => (
-                    <FinishedRow key={task.task_id} task={task} onOpen={() => setOpenId(task.task_id)} />
+                    <FinishedRow
+                      key={task.task_id}
+                      task={task}
+                      followsUp={followUpOf(task, tasks)}
+                      onOpen={() => setOpenId(task.task_id)}
+                    />
                   ))}
               </div>
             )}

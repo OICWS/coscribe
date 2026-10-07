@@ -7735,6 +7735,36 @@ the checks below were retested in Manual afterwards. Two findings:
   action, so it shows no card there; the switches in Settings > Code and
   *Allow for this task* matter in Manual and Accept-edits.
 
+## Phase 8da -- The chat can send changes back to the same Codex thread (shipped)
+
+A code task was one-shot: "make the total two decimals" after a finished task
+meant a new task that knew nothing of the first, so the chat had to restate
+the whole job. Decided with the user and the main-development session.
+
+- [x] **`run_code_task(..., continue_task=<id>)`**: the report ends with the
+      task's id and how to continue it. The follow-up resumes the Codex
+      thread (`thread/resume`), so Codex remembers its work and sees its own
+      files; the chat's `task` says only what to change.
+- [x] **A new record, not an edit of the old one**: `SubAgentTask` gets
+      `continues` (the earlier task's id) and `codex_thread`. Status, report
+      and "reported" all describe one run, and the reporting and reconnect
+      code assumes a finished record doesn't change; reopening one as
+      "running" would have needed all of it to cope.
+- [x] **Only a finished code task of this conversation**: unknown ids, other
+      conversations' tasks, a task still running, and one that never opened
+      a thread get a plain message and no run. Two turns can't run in one
+      thread at once.
+- [x] **A thread Codex no longer has** (the record is gone) starts a new one,
+      told the earlier task and its report in place of the history.
+- [x] **Panel**: a follow-up sits next to the task it continues, with
+      "Follow-up to ..." under its title.
+- [x] "Allow for this task" (8cw) is per task, so a follow-up asks again.
+- [x] Tests: same thread (the fake's turn counter reads "turn 2"),
+      mutation-checked; the lost thread; the four refusals. Live, deepseek-
+      flash, off-peak: a hello.py task, then "change it to print Hello,
+      coscribe" -- the chat chose `continue_task` itself, and the second
+      record carried the first's id and Codex thread.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
