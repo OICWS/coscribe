@@ -7998,6 +7998,24 @@ the person through a one-time setup and keeps the credentials safe.
       (the note naming them goes to the model; only image thumbnails are shown),
       and the file picker takes one file at a time (drag and drop takes several).
 
+## Phase 8df -- A connector call can no longer hang a turn (shipped, cause not reproduced)
+
+Reported: asking about the Hugging Face connector ran `hf_whoami` and the turn
+never ended (a note sent meanwhile was never read); after stopping it, later
+calls came back blank. Against the live server the same call works here
+(directly, through the connector layer, and through the whole approval flow),
+so the cause on that machine is unknown; the server does keep an HTTP session
+and answers a dead one with "Session terminated", and nothing limited how long
+a call could wait.
+
+- [x] Every connector call has a 120 s limit. A call that times out or fails
+      comes back to the model as a readable error, and the connector is
+      reconnected in the background (one at a time per connector); a call that
+      returns nothing says "returned no content" instead of a blank result.
+- [ ] Not found: why the built-in browser panel opened during the same use. The
+      panel opens only when the AI uses a browser tool or a link is clicked in
+      the app; neither shows in that conversation.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

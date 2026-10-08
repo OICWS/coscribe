@@ -96,6 +96,10 @@ logger = logging.getLogger(__name__)
 # initialize handshake can legitimately take tens of seconds on a slow
 # connection.
 _CONNECT_TIMEOUT_SECONDS = 60.0
+# A connector call that has not answered by now never will: the session it
+# rides on (an HTTP session the service dropped while idle, a local process
+# that died) is gone, and without a limit the whole turn waits on it for good.
+_CALL_TIMEOUT_SECONDS = 120.0
 
 # (connector name, server url) -> the httpx auth that signs a remote server's
 # requests in; see runtime_lg/mcp_oauth.py.
@@ -357,8 +361,12 @@ class McpServerConnection:
         config: Mapping[str, Any],
         auth_factory: AuthFactory | None = None,
         connect_timeout: float = _CONNECT_TIMEOUT_SECONDS,
+        on_stale: Callable[[str], None] | None = None,
+        call_timeout: float = _CALL_TIMEOUT_SECONDS,
     ) -> None:
         self.name = name
+        self._on_stale = on_stale
+        self._call_timeout = call_timeout
         self._config = config
         self._auth_factory = auth_factory
         self._connect_timeout = connect_timeout
@@ -406,12 +414,45 @@ class McpServerConnection:
                         risk_category="EXTERNAL",
                         category=f"mcp:{self.name}",
                     )
+                    self._guard(tool)
                 self._tools = tools
                 self._ready.set()
                 await self._stop.wait()
         except Exception as exc:  # noqa: BLE001 -- surfaced to connect() below, not swallowed
             self._error = _innermost(exc)
             self._ready.set()
+
+    def _guard(self, tool: BaseTool) -> None:
+        """Makes a call that hangs or hits a dead session come back as an
+        error the model can read, and has the connection re-made, instead of
+        leaving the turn waiting for good."""
+        original = getattr(tool, "coroutine", None)
+        if original is None:
+            return
+
+        async def guarded(*args: Any, **kwargs: Any) -> Any:
+            try:
+                result = await asyncio.wait_for(original(*args, **kwargs), self._call_timeout)
+                content = result[0] if isinstance(result, tuple) else result
+                if content in ("", [], None):
+                    # A blank answer reads as "nothing happened"; say it.
+                    note = f"The {self.name} connector returned no content."
+                    return (note, result[1] if isinstance(result, tuple) else None)
+                return result
+            except TimeoutError:
+                reason = f"didn't answer within {self._call_timeout:.0f} seconds"
+            except Exception as exc:  # noqa: BLE001 -- told to the model, which can retry
+                reason = f"failed ({_innermost(exc)})"
+            logger.warning("MCP server %r %s; reconnecting it", self.name, reason)
+            if self._on_stale is not None:
+                self._on_stale(self.name)
+            return (
+                f"The {self.name} connector {reason}. It is being reconnected; "
+                "try the same call again in a moment.",
+                None,
+            )
+
+        tool.coroutine = guarded
 
     async def connect(self) -> list[BaseTool]:
         try:
@@ -438,6 +479,7 @@ async def connect_one_mcp_server_lg(
     config: Mapping[str, Any],
     auth_factory: AuthFactory | None = None,
     connect_timeout: float = _CONNECT_TIMEOUT_SECONDS,
+    on_stale: Callable[[str], None] | None = None,
 ) -> tuple[list[BaseTool], McpServerConnection | None, str | None]:
     """Connect a single already-validated server config, returning its
     tagged LangChain tools plus the McpServerConnection backing them (None
@@ -456,7 +498,7 @@ async def connect_one_mcp_server_lg(
     shutdown) -- otherwise its subprocess (and, for Playwright, its
     browser) leaks past that point. See app.py's mcp_connections holder.
     """
-    connection = McpServerConnection(name, config, auth_factory, connect_timeout)
+    connection = McpServerConnection(name, config, auth_factory, connect_timeout, on_stale)
     try:
         tools = await connection.connect()
     except Exception as exc:
@@ -471,7 +513,9 @@ async def connect_one_mcp_server_lg(
 
 
 async def connect_mcp_tools_lg(
-    config_path: Path, auth_factory: AuthFactory | None = None
+    config_path: Path,
+    auth_factory: AuthFactory | None = None,
+    on_stale: Callable[[str], None] | None = None,
 ) -> tuple[list[BaseTool], dict[str, McpServerConnection]]:
     """Connect to every configured MCP server and return the combined,
     tagged tool list plus a {name: connection} map (for the caller to close
@@ -500,7 +544,7 @@ async def connect_mcp_tools_lg(
     configs = load_mcp_server_configs(config_path)
     results = await asyncio.gather(
         *(
-            connect_one_mcp_server_lg(name, config, auth_factory)
+            connect_one_mcp_server_lg(name, config, auth_factory, on_stale=on_stale)
             for name, config in configs.items()
         )
     )
