@@ -255,3 +255,24 @@ async def test_the_service_reports_downloads_and_removes_codex(
     assert not install.installed(tmp_path)
     # Codex's own threads stay, so code conversations carry on afterwards.
     assert (tmp_path / "codex" / "home" / "config.toml").exists()
+
+
+def test_stale_code_conversation_sidecars_are_removed_and_nothing_else(tmp_path: Path) -> None:
+    from coscribe.code_runtime.service import remove_stale_code_sidecars  # noqa: PLC0415
+
+    (tmp_path / "code-abc.codex").write_text("thread-1")
+    (tmp_path / "code-def.codex").write_text("thread-2")
+    (tmp_path / "chat1.meta.json").write_text("{}")
+    (tmp_path / "notes.codex").write_text("keep")
+    (tmp_path / "codex").mkdir()
+    (tmp_path / "code-dir.codex").mkdir()
+
+    assert remove_stale_code_sidecars(tmp_path) == 2
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "chat1.meta.json",
+        "code-dir.codex",
+        "codex",
+        "notes.codex",
+    ]
+    assert remove_stale_code_sidecars(tmp_path) == 0
