@@ -7978,6 +7978,26 @@ the person through a one-time setup and keeps the credentials safe.
       Slack (its MCP is limited to Marketplace/internal apps, per a third-party
       guide) is still not offered.
 
+## Phase 8de -- Attachments shown as files; softer question cards (shipped)
+
+- [x] **Attachment cards.** A file attached in the composer is a square card:
+      an image fills it, a PDF shows its first page with a PDF tag, anything
+      else shows its name and a type tag (DOCX, XLSX...). Click opens a dialog:
+      an image or every page of a PDF (with the page count), or, for any other
+      type, "File previews are not supported for this file type". Right-click on
+      an image or a PDF page offers Copy Image / Copy Image Address / Copy /
+      Select All; other files have no menu. Pages are rendered by PDFium
+      (`GET /api/attachment/pdf`, `/api/attachment/pdf/page`, the file must be a
+      .pdf inside the conversation's workspace), so no LibreOffice or poppler is
+      needed. A sent message's image thumbnails use the same dialog.
+- [x] **Question cards.** The question panel and the answered record use the
+      softer scheme: a light card, rounded rows that grey out on hover with their
+      divider hidden, grey number chips (no black fill for the chosen one), and
+      the record in the page colour with the question in grey over the answer.
+- [ ] **Not done:** a sent message doesn't keep its attached files as cards
+      (the note naming them goes to the model; only image thumbnails are shown),
+      and the file picker takes one file at a time (drag and drop takes several).
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

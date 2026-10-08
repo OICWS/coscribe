@@ -37,9 +37,9 @@ export function QuestionPanel({
   if (!question) return null;
   return (
     <div className="mx-auto w-full max-w-[880px] px-4 pb-2">
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] shadow-sm">
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--bg)] shadow-sm">
         <div className="flex items-start justify-between gap-3 px-5 pb-1.5 pt-4">
-          <div className="min-w-0 text-[15px] font-medium">{question.question}</div>
+          <div className="min-w-0 text-[16px]">{question.question}</div>
           <div className="flex shrink-0 items-center gap-1 text-sm text-[var(--muted)]">
             {questions.length > 1 && (
               <>
@@ -89,13 +89,14 @@ export function QuestionPanel({
 function OptionText({ label, description }: { label: string; description: string }) {
   return (
     <span className="min-w-0">
-      <span className="block text-sm">{label}</span>
-      {description && <span className="block text-xs text-[var(--muted)]">{description}</span>}
+      <span className="block text-[15px]">{label}</span>
+      {description && <span className="block text-[13px] text-[var(--muted)]">{description}</span>}
     </span>
   );
 }
 
-const ROW = "flex w-full items-center gap-3 border-b border-[var(--border)] px-2 py-2.5 text-left";
+const ROW = "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left";
+const ROW_WRAP = "border-b border-[var(--border)] hover:border-transparent has-[:hover]:border-transparent";
 
 function SingleChoice({
   question,
@@ -117,25 +118,26 @@ function SingleChoice({
       {question.options.map((option, i) => {
         const chosen = previous === option.label;
         return (
-          <button
-            key={option.label}
-            type="button"
-            className={`${ROW} hover:bg-[var(--card-bg)] ${chosen ? "bg-[var(--card-bg)]" : ""}`}
-            onClick={() => onAnswer(option.label)}
-          >
-            <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm ${
-                chosen ? "bg-[var(--accent)] text-[var(--accent-fg)]" : "bg-[var(--card-bg)] text-[var(--muted)]"
-              }`}
+          <div key={option.label} className={ROW_WRAP}>
+            <button
+              type="button"
+              className={`${ROW} group hover:bg-[var(--card-bg)] ${chosen ? "bg-[var(--card-bg)]" : ""}`}
+              onClick={() => onAnswer(option.label)}
             >
-              {i + 1}
-            </span>
-            <OptionText label={option.label} description={option.description} />
-          </button>
+              <span
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[15px] text-[var(--muted)] group-hover:bg-[var(--border)] ${
+                  chosen ? "bg-[var(--border)]" : "bg-[var(--card-bg)]"
+                }`}
+              >
+                {i + 1}
+              </span>
+              <OptionText label={option.label} description={option.description} />
+            </button>
+          </div>
         );
       })}
-      <div className="flex items-center gap-3 px-2 pt-2.5">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--card-bg)] text-[var(--muted)]">
+      <div className="flex items-center gap-3 px-3 pt-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--card-bg)] text-[var(--muted)]">
           <PencilIcon className="h-3.5 w-3.5" />
         </span>
         {typing ? (
@@ -199,17 +201,14 @@ function MultiChoice({
     <>
       <div className="px-3 pb-3">
         {question.options.map((option) => (
-          <button
-            key={option.label}
-            type="button"
-            className={`${ROW} hover:bg-[var(--card-bg)]`}
-            onClick={() => toggle(option.label)}
-          >
-            <Checkbox checked={picked.has(option.label)} />
-            <OptionText label={option.label} description={option.description} />
-          </button>
+          <div key={option.label} className={ROW_WRAP}>
+            <button type="button" className={`${ROW} hover:bg-[var(--card-bg)]`} onClick={() => toggle(option.label)}>
+              <Checkbox checked={picked.has(option.label)} />
+              <OptionText label={option.label} description={option.description} />
+            </button>
+          </div>
         ))}
-        <div className="flex items-center gap-3 px-2 pt-2.5">
+        <div className="flex items-center gap-3 px-3 pt-2.5">
           <button type="button" aria-label="Something else" onClick={() => setTyping(!typing)}>
             <Checkbox checked={typing} />
           </button>
@@ -250,7 +249,7 @@ function Checkbox({ checked }: { checked: boolean }) {
   return (
     <span
       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
-        checked ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]" : "border-[var(--border)]"
+        checked ? "border-[var(--muted)] bg-[var(--border)] text-[var(--fg)]" : "border-[var(--border)]"
       }`}
     >
       {checked && <CheckIcon className="h-3 w-3" />}
@@ -288,7 +287,7 @@ function SendButton({ onClick, disabled = false }: { onClick: () => void; disabl
  * the answer it got. */
 export function QuestionRecord({ item }: { item: QuestionItem }) {
   return (
-    <div className="self-start w-full max-w-[560px] rounded-[14px] border border-[var(--border)] bg-[var(--card-bg)] px-4 py-3 text-sm">
+    <div className="w-full max-w-[560px] self-start rounded-3xl border border-[var(--border)] bg-[var(--bg)] px-5 py-4 text-[15px]">
       {item.answers === null ? (
         <>
           {item.questions.map((q, i) => (
@@ -300,9 +299,9 @@ export function QuestionRecord({ item }: { item: QuestionItem }) {
         </>
       ) : (
         item.questions.map((q, i) => (
-          <div key={i} className={i > 0 ? "mt-2.5" : ""}>
+          <div key={i} className={i > 0 ? "mt-3.5" : ""}>
             <div className="text-[var(--muted)]">{q.question}</div>
-            <div className="mt-0.5">{item.answers?.[i] ?? <span className="text-[var(--muted)]">(skipped)</span>}</div>
+            <div className="mt-1">{item.answers?.[i] ?? <span className="text-[var(--muted)]">(skipped)</span>}</div>
           </div>
         ))
       )}

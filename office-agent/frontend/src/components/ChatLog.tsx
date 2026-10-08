@@ -19,7 +19,8 @@ import type { LogItem } from "../state/reducer";
 import { CopyButton } from "./CopyButton";
 import { EmptyState } from "./EmptyState";
 import { ChevronRightIcon, PencilIcon, RetryIcon, RewindIcon } from "./icons";
-import { ImageLightbox } from "./ImageLightbox";
+import { AttachmentDialog } from "./Attachments";
+import { ThreadIdContext } from "./threadContext";
 import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { type PlanChoice, PlanCard, type PlanItem } from "./PlanCard";
 import { QuestionRecord } from "./QuestionCard";
@@ -983,6 +984,7 @@ function UserMessageView({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
+  const threadId = useContext(ThreadIdContext);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [textExpanded, setTextExpanded] = useState(false);
   const isLongText = item.text.length > LONG_MESSAGE_COLLAPSE_CHARS;
@@ -1081,7 +1083,11 @@ function UserMessageView({
         </button>
       )}
       {lightboxSrc && (
-        <ImageLightbox src={lightboxSrc} alt="Attachment preview" onClose={() => setLightboxSrc(null)} />
+        <AttachmentDialog
+          view={{ kind: "image", name: "Attachment", src: lightboxSrc }}
+          threadId={threadId}
+          onClose={() => setLightboxSrc(null)}
+        />
       )}
     </div>
   );

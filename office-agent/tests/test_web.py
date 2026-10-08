@@ -4985,6 +4985,43 @@ def test_skill_plugins_can_be_previewed_then_added_with_connectors_matched_to_ou
     assert after[0]["added"] == 2
 
 
+def test_an_attached_pdf_can_be_previewed_page_by_page_and_nothing_else_can(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer)
+    for number in (1, 2):
+        pdf.drawString(100, 700, f"page {number}")
+        pdf.showPage()
+    pdf.save()
+
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        uploaded = client.post(
+            "/api/upload", files={"file": ("cv.pdf", buffer.getvalue(), "application/pdf")}
+        ).json()
+        text = client.post("/api/upload", files={"file": ("a.txt", b"hi", "text/plain")}).json()
+        info = client.get("/api/attachment/pdf", params={"path": uploaded["path"]})
+        page = client.get(
+            "/api/attachment/pdf/page", params={"path": uploaded["path"], "page": 2, "width": 300}
+        )
+        past_end = client.get(
+            "/api/attachment/pdf/page", params={"path": uploaded["path"], "page": 3}
+        )
+        not_pdf = client.get("/api/attachment/pdf", params={"path": text["path"]})
+        outside = client.get("/api/attachment/pdf", params={"path": "../../etc/passwd"})
+
+    assert info.json() == {"pages": 2}
+    assert page.headers["content-type"] == "image/png" and page.content.startswith(b"\x89PNG")
+    assert past_end.status_code == 404
+    assert not_pdf.status_code == 404
+    assert outside.status_code in (400, 404)
+
+
 def test_workspace_query_param_resolves_workspace_on_connect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

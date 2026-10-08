@@ -133,6 +133,7 @@ from ..tools.memory import load_memory
 from ..tools.node_env import install_package as install_node_package
 from ..tools.node_env import list_packages as list_node_packages
 from ..tools.node_env import uninstall_package as uninstall_node_package
+from ..tools.pdf_pages import pdf_page_count, render_pdf_page
 from ..tools.scheduled_tasks import (
     SCHEDULED_THREAD_PREFIX,
     ScheduledRun,
@@ -2596,6 +2597,46 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         path = _unique_upload_path(scope, file.filename or "upload")
         path.write_bytes(content)
         return JSONResponse({"path": scope.relative(path), "bytes_written": len(content)})
+
+    def _attachment_pdf(path: str, thread_id: str) -> Path | JSONResponse:
+        scope = (
+            _get_session(thread_id).workspace_scope()
+            if thread_id
+            else WorkspaceScope(settings.workspace_root)
+        )
+        try:
+            file_path = scope.resolve(path)
+        except PermissionError:
+            return JSONResponse({"error": "Path is outside the workspace."}, status_code=400)
+        if file_path.suffix.lower() != ".pdf" or not file_path.is_file():
+            return JSONResponse({"error": "No such PDF."}, status_code=404)
+        return file_path
+
+    @app.get("/api/attachment/pdf")
+    async def get_attachment_pdf_info(path: str, thread_id: str = "") -> JSONResponse:
+        """How many pages an attached PDF has, for the preview dialog."""
+        found = _attachment_pdf(path, thread_id)
+        if isinstance(found, JSONResponse):
+            return found
+        try:
+            return JSONResponse({"pages": await asyncio.to_thread(pdf_page_count, found)})
+        except Exception:  # noqa: BLE001 -- a PDF PDFium can't open is shown as such
+            return JSONResponse({"error": "This PDF can't be opened."}, status_code=422)
+
+    @app.get("/api/attachment/pdf/page")
+    async def get_attachment_pdf_page(
+        path: str, page: int = 1, width: int = 600, thread_id: str = ""
+    ) -> Response:
+        found = _attachment_pdf(path, thread_id)
+        if isinstance(found, JSONResponse):
+            return found
+        try:
+            png = await asyncio.to_thread(render_pdf_page, found, page, width)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception:  # noqa: BLE001 -- see above
+            return JSONResponse({"error": "This PDF can't be opened."}, status_code=422)
+        return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
 
     @app.get("/api/previews/{name}")
     async def get_preview(name: str) -> Response:

@@ -4,7 +4,8 @@ import { uploadFile } from "../lib/rest";
 import { ThreadIdContext } from "./threadContext";
 import type { CommandInfo } from "../types/session";
 import type { BrowserCapture } from "./BrowserPanel";
-import { ImageLightbox } from "./ImageLightbox";
+import { attachmentKind, type AttachmentView } from "../lib/attachments";
+import { AttachmentCard, AttachmentDialog } from "./Attachments";
 import { PlusIcon, ReturnIcon, StopIcon } from "./icons";
 import type { PptxShapeCapture } from "./PptxShapeOverlay";
 import { RunStatus } from "./RunStatus";
@@ -135,7 +136,7 @@ export function Composer({
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
-  const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string } | null>(null);
+  const [openAttachment, setOpenAttachment] = useState<AttachmentView | null>(null);
   const [pastePreview, setPastePreview] = useState<string | null>(null);
   const [autocompleteMatches, setAutocompleteMatches] = useState<CommandInfo[]>([]);
   const [autocompleteIndex, setAutocompleteIndex] = useState(-1);
@@ -481,44 +482,26 @@ export function Composer({
         {(pendingImages.length > 0 || pendingFiles.length > 0 || pendingPastes.length > 0) && (
           <div className="mb-2 flex flex-wrap gap-2">
             {pendingImages.map((img, i) => (
-              <span
+              <AttachmentCard
                 key={`img-${i}`}
-                className="group relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--border)]"
-              >
-                <button
-                  type="button"
-                  title={`Preview ${img.name}`}
-                  className="h-full w-full cursor-zoom-in"
-                  onClick={() => setLightboxSrc({ src: img.dataUrl, alt: img.name })}
-                >
-                  <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Remove ${img.name}`}
-                  className="absolute right-0.5 top-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-black/60 text-xs text-white opacity-0 hover:bg-black/80 group-hover:opacity-100"
-                  onClick={() => setPendingImages((prev) => prev.filter((_, idx) => idx !== i))}
-                >
-                  ×
-                </button>
-              </span>
+                view={{ kind: "image", name: img.name, src: img.dataUrl }}
+                threadId={threadId}
+                onOpen={() => setOpenAttachment({ kind: "image", name: img.name, src: img.dataUrl })}
+                onRemove={() => setPendingImages((prev) => prev.filter((_, idx) => idx !== i))}
+              />
             ))}
-            {pendingFiles.map((f, i) => (
-              <span
-                key={`file-${i}`}
-                className="flex max-w-[220px] items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card-bg)] py-1.5 pl-3 pr-1.5 text-xs"
-              >
-                <span className="truncate">{f.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${f.name}`}
-                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--muted)] hover:bg-[var(--border)]"
-                  onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
+            {pendingFiles.map((f, i) => {
+              const view: AttachmentView = { kind: attachmentKind(f.name), name: f.name, path: f.path };
+              return (
+                <AttachmentCard
+                  key={`file-${i}`}
+                  view={view}
+                  threadId={threadId}
+                  onOpen={() => setOpenAttachment(view)}
+                  onRemove={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                />
+              );
+            })}
             {pendingPastes.map((p, i) => (
               <span
                 key={`paste-${i}`}
@@ -616,8 +599,8 @@ export function Composer({
         </div>
       </div>
     </div>
-    {lightboxSrc && (
-      <ImageLightbox src={lightboxSrc.src} alt={lightboxSrc.alt} onClose={() => setLightboxSrc(null)} />
+    {openAttachment && (
+      <AttachmentDialog view={openAttachment} threadId={threadId} onClose={() => setOpenAttachment(null)} />
     )}
     {pastePreview !== null && (
       <TextLightbox text={pastePreview} onClose={() => setPastePreview(null)} />

@@ -1,5 +1,5 @@
 /** Full-content click-to-preview overlay for a pasted-text attachment --
- * same overlay/click-outside-to-close convention as ImageLightbox, just for
+ * same overlay/click-outside-to-close convention as AttachmentDialog, just for
  * plain text too long to read inline (the composer's pending-paste chip).
  * Click the backdrop to close; click inside the text box does not, so the
  * text stays selectable/copyable without accidentally dismissing it. */
