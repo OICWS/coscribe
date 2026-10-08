@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import keyring.errors
 import pytest
 
 pytest.importorskip("langgraph", reason="needs the langgraph_spike extra installed")
@@ -8524,3 +8525,88 @@ def test_the_sub_agent_endpoints_refuse_an_id_that_is_a_path_lg(
 
     assert transcript.status_code == 404
     assert stop.status_code == 404
+
+
+def test_secrets_api_never_returns_a_value_and_refuses_without_a_keychain_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    kept: dict[str, str] = {}
+
+    class _Keychain:
+        errors = keyring.errors
+
+        def set_password(self, service: str, ref: str, value: str) -> None:
+            kept[ref] = value
+
+        def get_password(self, service: str, ref: str) -> str | None:
+            return kept.get(ref)
+
+        def delete_password(self, service: str, ref: str) -> None:
+            kept.pop(ref, None)
+
+    monkeypatch.setattr(secrets_module, "keyring", _Keychain())
+    usable = {"yes": True}
+    monkeypatch.setattr(secrets_module, "keychain_backend_usable", lambda: usable["yes"])
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        created = client.put(
+            "/api/secrets/STRIPE_KEY", json={"value": "sk-live-1", "hosts": ["api.stripe.com"]}
+        )
+        listed = client.get("/api/secrets")
+        no_hosts = client.put("/api/secrets/OTHER", json={"value": "v", "hosts": []})
+        usable["yes"] = False
+        no_keychain = client.put("/api/secrets/OTHER", json={"value": "v", "hosts": ["a.com"]})
+        listed_without = client.get("/api/secrets")
+        usable["yes"] = True
+
+        attached = client.put(
+            "/api/threads/t1/environment",
+            json={"variables": {"MODE": "fast"}, "secrets": ["STRIPE_KEY"]},
+        )
+        unknown = client.put(
+            "/api/threads/t1/environment", json={"variables": {}, "secrets": ["NOPE"]}
+        )
+        read_back = client.get("/api/threads/t1/environment")
+        deleted = client.delete("/api/secrets/STRIPE_KEY")
+        after_delete = client.get("/api/threads/t1/environment")
+        missing = client.delete("/api/secrets/STRIPE_KEY")
+
+    assert created.status_code == 200
+    assert created.json()["hosts"] == ["api.stripe.com"]
+    assert "sk-live-1" not in created.text
+    assert kept == {}  # removed again by the delete below
+    assert listed.json()["keychain"] is True
+    assert [s["name"] for s in listed.json()["secrets"]] == ["STRIPE_KEY"]
+    assert "sk-live-1" not in listed.text
+    assert no_hosts.status_code == 422 and "host" in no_hosts.json()["error"]
+    assert no_keychain.status_code == 503
+    assert no_keychain.json()["code"] == "keychain_unavailable"
+    assert listed_without.json()["keychain"] is False
+    assert attached.json() == {"variables": {"MODE": "fast"}, "secrets": ["STRIPE_KEY"]}
+    assert unknown.status_code == 422 and "NOPE" in unknown.json()["error"]
+    assert read_back.json() == attached.json()
+    assert deleted.json() == {"deleted": "STRIPE_KEY"}
+    assert after_delete.json() == {"variables": {"MODE": "fast"}, "secrets": []}
+    assert missing.status_code == 404
+
+
+def test_deleting_a_conversation_removes_its_environment_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/envthread") as ws:
+            _receive_until(ws, "history")
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "agent_message")
+        client.put(
+            "/api/threads/envthread/environment", json={"variables": {"A": "1"}, "secrets": []}
+        )
+        assert (tmp_path / "state" / "envthread.env.json").exists()
+        client.delete("/api/threads/envthread")
+
+    assert not (tmp_path / "state" / "envthread.env.json").exists()
