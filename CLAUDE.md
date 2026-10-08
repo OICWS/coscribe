@@ -43,6 +43,14 @@ read it, then only the document for the area you are touching.
 - **Hosted connectors sign in once, in the user's own browser** (OAuth 2.1 with
   PKCE). Services that need a registered app get the guided setup page; never
   ship a shared client secret.
+- **Package dependencies are checked** by `lint-imports` (part of `check.sh`).
+  Layers, top to bottom: `cli`, `web`, `coordinator | runtime_lg`,
+  `workflows | code_runtime`, `tools`, `runtime | config`, `providers`; a
+  package imports only from below. Only `web` imports FastAPI, only
+  `runtime.secrets` imports the keychain, `tools` and `runtime` never import
+  LangChain. Four known upward imports are listed in `pyproject.toml`
+  (`[tool.importlinter]`); fix them to shrink the list, never add one without a
+  decision record.
 - **UI text is English only.** Code comments explain WHY, never WHAT or history
   (history goes in the commit message).
 - **Verify vendor facts live** (model names, API limits, endpoints) before they

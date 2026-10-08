@@ -175,6 +175,7 @@ dev = [
     "types-PyYAML>=6.0",
     "types-reportlab>=4.0.0",
     "types-openpyxl>=3.1.0",
+    "import-linter>=2.15",
 ]
 web = [
     # 0.132.0 rejects a JSON body without a JSON Content-Type. Earlier
@@ -266,3 +267,66 @@ asyncio_mode = "auto"
 markers = [
     "real_libreoffice: exercises actual headless LibreOffice conversion (soffice) -- opts out of conftest.py's default fast-mode monkeypatch of the QA/recalc steps; still skips cleanly via the test file's own _libreoffice_actually_works()-style check when soffice isn't usable in this environment",
 ]
+
+# Which package may import which. Checked by `lint-imports` (scripts/check.sh,
+# so CI too). Layers run top to bottom: a package imports only from layers
+# below it. The ignore lists are the violations that existed when this was
+# added; each is to be fixed, and a line whose import is gone makes the check
+# fail, so the lists can only shrink. Add one only with a decision record.
+[tool.importlinter]
+root_package = "coscribe"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: a package imports only from the layers below it"
+type = "layers"
+layers = [
+    "coscribe.cli",
+    "coscribe.web",
+    "coscribe.coordinator | coscribe.runtime_lg",
+    "coscribe.workflows | coscribe.code_runtime",
+    "coscribe.tools",
+    "coscribe.runtime | coscribe.config | coscribe.needs_permission",
+    "coscribe.providers",
+]
+ignore_imports = [
+    "coscribe.tools.scheduled_tasks -> coscribe.workflows.spec",
+    "coscribe.workflows.solidify -> coscribe.runtime_lg.messages",
+    "coscribe.web.app -> coscribe.cli",
+    "coscribe.web.session -> coscribe.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only runtime.secrets talks to the OS keychain"
+type = "forbidden"
+source_modules = [
+    "coscribe.cli", "coscribe.web", "coscribe.coordinator", "coscribe.runtime_lg",
+    "coscribe.workflows", "coscribe.code_runtime", "coscribe.tools", "coscribe.config",
+]
+forbidden_modules = ["keyring"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Only coscribe.web knows about HTTP"
+type = "forbidden"
+source_modules = [
+    "coscribe.cli", "coscribe.coordinator", "coscribe.runtime_lg", "coscribe.workflows",
+    "coscribe.code_runtime", "coscribe.tools", "coscribe.runtime", "coscribe.config",
+]
+forbidden_modules = ["fastapi", "starlette", "uvicorn"]
+ignore_imports = ["coscribe.cli -> coscribe.web.session"]
+
+[[tool.importlinter.contracts]]
+name = "Built-in tools do not depend on LangChain or LangGraph"
+type = "forbidden"
+source_modules = ["coscribe.tools", "coscribe.runtime"]
+forbidden_modules = ["langchain", "langchain_core", "langgraph"]
+
+[[tool.importlinter.contracts]]
+name = "A fixed workflow run never reaches an autonomous agent"
+type = "forbidden"
+source_modules = [
+    "coscribe.workflows.engine", "coscribe.workflows.spec",
+    "coscribe.workflows.refs", "coscribe.workflows.permissions",
+]
+forbidden_modules = ["coscribe.code_runtime", "coscribe.runtime_lg", "coscribe.coordinator"]

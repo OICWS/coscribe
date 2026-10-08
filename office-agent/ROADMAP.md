@@ -8088,6 +8088,28 @@ could read the keychain itself. Redaction by exact value and common encodings
 is best effort, and a host the user allowed could echo a value back. The
 Secrets page says this.
 
+## Phase 8di -- Package dependencies are checked (shipped)
+
+From the governance review: nothing stopped new code from breaking the layering,
+and there were already three cycles (cli and web, tools and workflows, workflows
+and runtime_lg) from four import lines.
+
+- [x] `import-linter` in `[tool.importlinter]` (pyproject) and `check.sh` (so CI):
+      layers `cli > web > coordinator | runtime_lg > workflows | code_runtime >
+      tools > runtime | config > providers`; only `web` imports FastAPI; only
+      `runtime.secrets` imports `keyring`; `tools` and `runtime` don't import
+      LangChain; a fixed workflow run never reaches an agent. 5 contracts kept
+      on `main`. Checked that a new violation breaks the check and that an
+      ignore line whose import is gone fails it, so the baseline only shrinks.
+- [ ] The baseline, to be fixed (move `web/session.py` out of `web`; give the
+      two `cli` imports a home; `tools.scheduled_tasks -> workflows.spec` and
+      `workflows.solidify -> runtime_lg.messages` are listed): `web.app -> cli`,
+      `web.session -> cli`, `tools.scheduled_tasks -> workflows.spec`,
+      `workflows.solidify -> runtime_lg.messages`, and `cli -> web.session` (HTTP).
+- [x] The cache invariant (tool schemas and system prompt identical whatever a
+      conversation's secrets) was already pinned by the secrets work (9669895);
+      not repeated here.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
