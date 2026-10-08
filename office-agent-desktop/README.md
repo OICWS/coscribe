@@ -6,7 +6,7 @@ free port and opens a window pointed directly at it. See
 `src/main/index.ts`'s own module docs for the entry point.
 
 This is the **only desktop distribution** as of the Electron
-migration's Phase 4 cutover -- see `office-agent/ROADMAP.md`'s "Browser
+migration's Phase 4 cutover -- see `docs/history/roadmap-through-2026-10-08.md`'s "Browser
 panel: native second-window architecture" migration plan for the full
 history of **why this package exists**: the original Tauri shell it
 replaced (since removed -- see below) hit six real-hardware rounds of unresolved,
@@ -26,7 +26,7 @@ only platform this has been (or will be) verified on.
 
 **The Tauri shell is gone.** It was kept for a while after the cutover
 as a rollback net, was never needed, and was deleted on 2026-09-30;
-`office-agent/ROADMAP.md` keeps the history.
+`docs/history/roadmap-through-2026-10-08.md` keeps the history.
 
 ## Window chrome
 
@@ -158,7 +158,7 @@ round found it looked exactly like the app was broken (the splash
 page's own 180s failure UI firing, sidecar log completely empty the
 whole time). Only helps the NSIS build; `dist:portable`'s unpacked
 folder has no install step to hook this into. Not yet confirmed on
-real hardware -- see `office-agent/ROADMAP.md`.
+real hardware -- see `docs/history/roadmap-through-2026-10-08.md`.
 
 Both outputs are unsigned (no code-signing secrets configured) --
 Windows SmartScreen will show its usual "unrecognized app" warning on
@@ -178,4 +178,4 @@ before it ever reached a real-hardware test. It cannot substitute for
 the actual point of each phase in the migration plan: real window/tray/
 notification/embedding behavior on Windows, which is where every real
 bug found across Phases 1-3 was actually caught (see
-`office-agent/ROADMAP.md`'s Phase 8ae/8af/8ag entries).
+`docs/history/roadmap-through-2026-10-08.md`'s Phase 8ae/8af/8ag entries).
