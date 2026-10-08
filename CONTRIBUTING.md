@@ -25,9 +25,10 @@ See [`README.md`](README.md). Then check your setup works:
    pushing; CI runs the full `bash scripts/check.sh` (frontend `tsc -b` and
    build, oxlint, ruff, mypy, pytest). Touching
    the UI also means looking at it in the running app, not only compiling it.
-5. **Record real findings** in `office-agent/ROADMAP.md` (what shipped, what was
-   measured, what was *not* verified). Take the next free phase id from
-   `origin/main` when you write the entry, because ids collide otherwise.
+5. **Log what shipped** in `docs/log/<date>-<slug>.md` in the same PR (what changed,
+   what was measured, what was *not* verified; format in `docs/log/README.md`) and
+   update `docs/plan.md` if the open work changed. Don't append to
+   `office-agent/ROADMAP.md`: it is a short index now.
 6. **Commit messages explain why.** Comments in code explain a non-obvious
    reason, never what the line does.
 
