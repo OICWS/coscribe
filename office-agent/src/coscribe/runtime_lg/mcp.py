@@ -516,6 +516,7 @@ async def connect_mcp_tools_lg(
     config_path: Path,
     auth_factory: AuthFactory | None = None,
     on_stale: Callable[[str], None] | None = None,
+    state_dir: Path | None = None,
 ) -> tuple[list[BaseTool], dict[str, McpServerConnection]]:
     """Connect to every configured MCP server and return the combined,
     tagged tool list plus a {name: connection} map (for the caller to close
@@ -541,7 +542,7 @@ async def connect_mcp_tools_lg(
             "MCP config file not found at %s -- starting with no MCP tools", config_path
         )
         return [], {}
-    configs = load_mcp_server_configs(config_path)
+    configs = load_mcp_server_configs(config_path, state_dir)
     results = await asyncio.gather(
         *(
             connect_one_mcp_server_lg(name, config, auth_factory, on_stale=on_stale)

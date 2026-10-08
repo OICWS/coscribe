@@ -38,10 +38,21 @@ this change; only the fields actually used to establish a connection
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
+from urllib.parse import urlsplit
 
+from ..runtime.secret_store import (
+    SecretError,
+    SecretStore,
+    host_allowed,
+    placeholders_in,
+    substitute,
+)
 from ..runtime.secrets import resolve_secret
+
+logger = logging.getLogger(__name__)
 
 
 class MCPConfig(TypedDict, total=False):
@@ -127,9 +138,81 @@ def validate_mcp_config(config: dict[str, Any]) -> MCPConfig:
     return normalized
 
 
-def load_mcp_server_configs(config_path: Path) -> dict[str, MCPConfig]:
+def with_secrets(config: MCPConfig, state_dir: Path | None) -> MCPConfig:
+    """`config` with each `{{secret:NAME}}` in its env and header values
+    replaced by that secret's value from Settings > Secrets, so the value
+    lives only in the keychain and never in mcp.json. A header goes only to
+    this connector's own server, so the secret must be one allowed for that
+    host; an env value goes to the local command the user chose, which has
+    no host to check. Raises SecretError, naming the connector and secret."""
+    resolved: dict[str, Any] = dict(config)
+    host = urlsplit(config["server_url"]).hostname if "server_url" in config else None
+    for field in ("env", "headers"):
+        values: dict[str, str] | None = config.get(field)  # type: ignore[assignment]
+        if not values:
+            continue
+        resolved[field] = {
+            key: _substitute_secrets(
+                config["name"], field, value, host if field == "headers" else None, state_dir
+            )
+            for key, value in values.items()
+        }
+    return cast(MCPConfig, resolved)
+
+
+def prepare_for_connect(config: MCPConfig, state_dir: Path | None) -> MCPConfig:
+    """`config` as the connection needs it: keychain references read back and
+    secret placeholders filled in. Raises SecretError or RuntimeError."""
+    prepared: dict[str, Any] = dict(config)
+    for field in ("env", "headers"):
+        values: dict[str, Any] | None = config.get(field)  # type: ignore[assignment]
+        if values:
+            prepared[field] = {k: resolve_secret(v) or "" for k, v in values.items()}
+    return with_secrets(cast(MCPConfig, prepared), state_dir)
+
+
+def _substitute_secrets(
+    connector: str, field: str, value: str, host: str | None, state_dir: Path | None
+) -> str:
+    names = placeholders_in(value)
+    if not names:
+        return value
+    if state_dir is None:
+        raise SecretError(
+            f"{connector}: {field} uses a secret, but there is nowhere to look it up."
+        )
+    store = SecretStore(state_dir)
+    values: dict[str, str] = {}
+    for name in sorted(names):
+        hosts = store.hosts_of(name)
+        if hosts is None:
+            raise SecretError(f"{connector}: there is no secret named {name}.")
+        if host is not None and not any(host_allowed(pattern, host) for pattern in hosts):
+            raise SecretError(
+                f"{connector}: the secret {name} may only be sent to "
+                f"{', '.join(hosts)}, not {host}."
+            )
+        values[name] = store.resolve(name)
+    return substitute(value, values)
+
+
+def secret_names_used(entry: dict[str, Any]) -> set[str]:
+    """The secrets a stored connector entry refers to, for refusing to delete
+    one that is in use."""
+    names: set[str] = set()
+    for field in ("env", "headers"):
+        for value in (entry.get(field) or {}).values():
+            if isinstance(value, str):
+                names |= placeholders_in(value)
+    return names
+
+
+def load_mcp_server_configs(
+    config_path: Path, state_dir: Path | None = None, *, fill_secrets: bool = True
+) -> dict[str, MCPConfig]:
     """Parse a Claude-Desktop-style {"mcpServers": {name: {...}}} JSON file into
-    validated MCPConfig dicts, keyed by server name. Each `env`/`headers`
+    validated MCPConfig dicts, keyed by server name (`fill_secrets=False` keeps
+    `{{secret:NAME}}` placeholders as written, for showing a connector). Each `env`/`headers`
     value is resolved via runtime/secrets.py's resolve_secret before being
     returned (not inside validate_mcp_config itself, since that function is
     also called directly on live, already-plaintext request payloads in
@@ -148,5 +231,9 @@ def load_mcp_server_configs(config_path: Path) -> dict[str, MCPConfig]:
             config["env"] = {k: resolve_secret(v) or "" for k, v in config["env"].items()}
         if "headers" in config:
             config["headers"] = {k: resolve_secret(v) or "" for k, v in config["headers"].items()}
-        result[name] = config
+        try:
+            result[name] = with_secrets(config, state_dir) if fill_secrets else config
+        except SecretError as exc:
+            # One connector's missing secret must not take the others down.
+            logger.warning("Skipping connector %s: %s", name, exc)
     return result
