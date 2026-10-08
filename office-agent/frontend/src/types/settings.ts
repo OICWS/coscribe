@@ -442,3 +442,22 @@ export interface CodePermissions {
   run_code_command: CodePolicy;
   apply_code_change: CodePolicy;
 }
+
+/** A global secret: the value is never sent to the browser, only its name and where it may be sent. */
+export interface SecretInfo {
+  name: string;
+  hosts: string[];
+  created_at: string | null;
+}
+
+export interface SecretsResponse {
+  /** False on a computer with no keychain: nothing can be saved there. */
+  keychain: boolean;
+  secrets: SecretInfo[];
+}
+
+/** What one conversation is given: variables the model can read, and the names of the secrets it may use. */
+export interface SessionEnvironment {
+  variables: Record<string, string>;
+  secrets: string[];
+}

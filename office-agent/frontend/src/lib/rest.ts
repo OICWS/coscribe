@@ -1,4 +1,7 @@
 import type {
+  SecretInfo,
+  SecretsResponse,
+  SessionEnvironment,
   BrowseDirsResponse,
   ConfigResponse,
   ConfigUpdateResult,
@@ -450,3 +453,20 @@ export async function uploadFile(file: File, threadId: string): Promise<UploadRe
   const res = await fetch("/api/upload", { method: "POST", body: form });
   return res.json() as Promise<UploadResult>;
 }
+
+// -- Secrets and session environments -------------------------------------
+
+export const getSecrets = () => getJson<SecretsResponse>("/api/secrets");
+
+/** The server's own wording for a refusal (a short value, no keychain, a bad host) is shown as it is. */
+export const saveSecret = (name: string, body: { value?: string; hosts: string[] }) =>
+  sendForResult<SecretInfo>(`/api/secrets/${encodeURIComponent(name)}`, "PUT", body);
+
+export const deleteSecret = (name: string) =>
+  sendForResult<{ deleted: string }>(`/api/secrets/${encodeURIComponent(name)}`, "DELETE", undefined);
+
+export const getSessionEnvironment = (threadId: string) =>
+  getJson<SessionEnvironment>(`/api/threads/${encodeURIComponent(threadId)}/environment`);
+
+export const saveSessionEnvironment = (threadId: string, environment: SessionEnvironment) =>
+  sendForResult<SessionEnvironment>(`/api/threads/${encodeURIComponent(threadId)}/environment`, "PUT", environment);
