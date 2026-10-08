@@ -8064,6 +8064,14 @@ Settings > Secrets page and the dialog against this API.
       hosts a conversation has come from `list_secrets`, not the tool
       schemas or the system prompt, which would vary per session and bust
       the provider cache.
+- [x] From the review: a value stored before the 8-character minimum is not
+      sent (its forms could not be blanked); the blanking cache is dropped on
+      every save and delete, not only when `secrets.json`'s stamp changes;
+      tests that the two tools are deferred, not core, and that the bound
+      tool schemas and the system prompt are identical between a
+      conversation with secrets and one without (the provider-cache
+      invariant). `ToolMessage.artifact` is not blanked: nothing here
+      produces one.
 - Codex commands never get a value: they are not given `http_request`, so a
   code task can't use a secret; the chat can, itself.
 - [ ] Part 3: the Edit environment dialog applies the plain variables to

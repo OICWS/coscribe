@@ -20,6 +20,7 @@ import httpx
 
 from ..runtime.proxy import configured_proxy
 from ..runtime.secret_store import (
+    MIN_VALUE,
     SecretError,
     SecretStore,
     SessionEnvironments,
@@ -137,7 +138,15 @@ def build_http_tools(state_dir: str | Path, thread_id: str) -> list[Callable[...
                 )
             if scheme != "https":
                 raise SecretError(f"The secret {name} is only sent over https.")
-            values[name] = store.resolve(name)
+            value = store.resolve(name)
+            if len(value) < MIN_VALUE:
+                # Saved before the minimum existed: it couldn't be blanked
+                # from a response, so it isn't sent.
+                raise SecretError(
+                    f"The secret {name} is shorter than {MIN_VALUE} characters, too short to "
+                    "keep out of what comes back. Enter a longer one in Settings > Secrets."
+                )
+            values[name] = value
         return values
 
     return [

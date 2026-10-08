@@ -25,9 +25,9 @@ from coscribe.tools import http_request as http_module
 from coscribe.tools.http_request import build_http_tools
 
 from .test_code_agent import (
-    CODE_TASK_TOOL,  # noqa: F401 -- keeps the helper module's imports together
     _Model,
     _run,
+    _session,
     _Socket,
 )
 
@@ -248,8 +248,6 @@ def _call(args: dict[str, Any]) -> AIMessage:
 async def test_through_a_session_the_model_never_reads_the_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: _Server
 ) -> None:
-    from .test_code_agent import _session as make_session  # noqa: PLC0415
-
     store = SecretStore(tmp_path / "state")
     store.save("API_KEY", KEY, ["api.example.com"])
     SessionEnvironments(tmp_path / "state").set("t1", {}, ["API_KEY"], store.names())
@@ -266,7 +264,7 @@ async def test_through_a_session_the_model_never_reads_the_value(
             AIMessage(content="done"),
         ]
     )
-    session = make_session(tmp_path, monkeypatch, None, model)  # type: ignore[arg-type]
+    session = _session(tmp_path, monkeypatch, None, model)  # type: ignore[arg-type]
     session.preapproved_tools = frozenset({"http_request"})
     socket = _Socket(answer=lambda payload: True)
 
@@ -278,3 +276,58 @@ async def test_through_a_session_the_model_never_reads_the_value(
     assert server.sent[0].headers["x-key"] == KEY
     state = await session.lg_agent.aget_state(session.config)
     assert KEY not in repr(state.values["messages"])
+
+
+def test_a_value_replaced_at_once_is_blanked_not_the_one_before(tmp_path: Path) -> None:
+    store = SecretStore(tmp_path)
+    redact = redactor(tmp_path)
+    store.save("K", "aaaaaaaa-1111", ["a.com"])
+    assert redact("x aaaaaaaa-1111") == "x [REDACTED SECRET]"
+
+    store.save("K", "bbbbbbbb-2222", ["a.com"])
+
+    assert redact("x bbbbbbbb-2222") == "x [REDACTED SECRET]"
+    assert redact("x aaaaaaaa-1111") == "x aaaaaaaa-1111"
+    store.delete("K")
+    assert redact("x bbbbbbbb-2222") == "x bbbbbbbb-2222"
+
+
+def test_a_secret_saved_before_the_minimum_length_is_not_sent(
+    tmp_path: Path, server: _Server, keychain: _FakeKeyring
+) -> None:
+    tools = _tools(tmp_path)
+    keychain.store[("coscribe", "secret:API_KEY")] = "short"
+
+    with pytest.raises(SecretError, match="shorter than 8"):
+        tools["http_request"](
+            "GET", "https://api.example.com/x", headers={"A": "{{secret:API_KEY}}"}
+        )
+
+    assert server.sent == []
+
+
+def test_the_secret_tools_are_deferred_not_core() -> None:
+    from coscribe.coordinator import CORE_TOOL_NAMES  # noqa: PLC0415
+
+    assert not {"http_request", "list_secrets"} & CORE_TOOL_NAMES
+
+
+def _bound(session: Any) -> list[tuple[str, str]]:
+    return [
+        (getattr(t, "__name__", getattr(t, "name", "")), t.__doc__ or getattr(t, "description", ""))
+        for t in session._build_lg_tools(session.model)
+    ]
+
+
+def test_what_the_provider_caches_is_the_same_whatever_secrets_a_conversation_has(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with_secrets = _session(tmp_path / "a", monkeypatch, None, _Model(responses=[]))  # type: ignore[arg-type]
+    store = SecretStore(tmp_path / "a" / "state")
+    store.save("API_KEY", KEY, ["api.example.com"])
+    SessionEnvironments(tmp_path / "a" / "state").set("t1", {"X": "1"}, ["API_KEY"], store.names())
+    without = _session(tmp_path / "b", monkeypatch, None, _Model(responses=[]))  # type: ignore[arg-type]
+
+    assert _bound(with_secrets) == _bound(without)
+    assert with_secrets._instructions == without._instructions
+    assert "API_KEY" not in with_secrets._instructions

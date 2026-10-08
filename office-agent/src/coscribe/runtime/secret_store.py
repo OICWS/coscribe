@@ -165,6 +165,9 @@ class SecretStore:
                 }
             data[name] = entry
             self._write(data)
+            # A value replaced within one timestamp tick of the last write
+            # leaves the file's stamp as it was.
+            _FORMS_CACHE.pop(str(self.path), None)
         return {"name": name, "hosts": entry["hosts"], "created_at": entry.get("created_at")}
 
     def resolve(self, name: str) -> str:
@@ -194,6 +197,7 @@ class SecretStore:
                 return False
             _secrets.delete_secret(entry.get("ref"))
             self._write(data)
+            _FORMS_CACHE.pop(str(self.path), None)
         SessionEnvironments(self.state_dir).detach_everywhere(name)
         return True
 
@@ -342,4 +346,3 @@ def redactor(state_dir: str | Path) -> Callable[[str], str]:
         return text
 
     return redact
-
