@@ -120,6 +120,7 @@
   --agent-bubble-fg: #1f1f1f;
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
   --code-bg: color-mix(in srgb, var(--fg) 6%, transparent);
+  --code-fg: #b4382b;
 }
 
 :root[data-theme="dark"] {
@@ -167,6 +168,7 @@
   --agent-bubble-fg: #ece9e6;
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
   --code-bg: color-mix(in srgb, var(--fg) 12%, transparent);
+  --code-fg: #f0907f;
 }
 
 /* Reusable blue gradient text -- see the palette comment above for
@@ -326,12 +328,14 @@ body {
 }
 .md-prose code {
   background: var(--code-bg);
+  color: var(--code-fg);
   border-radius: 4px;
   padding: 0.15em 0.4em;
   font-weight: 400;
 }
 .md-prose pre code {
   background: none;
+  color: inherit;
   padding: 0;
 }
 .md-prose pre {
