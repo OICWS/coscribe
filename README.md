@@ -40,7 +40,8 @@ features in detail. The Windows desktop app is built from
 |---|---|
 | `office-agent/` | The Python backend, the React frontend and the tests |
 | `office-agent-desktop/` | The Electron desktop shell |
-| `docs/` | The project website |
+| `docs/` | Engineering docs: the plan, decisions, the log of what shipped |
+| `site/` | The project website (GitHub Pages) |
 
 ## Contributing
 
