@@ -8,7 +8,7 @@
 
 ## How it was checked
 
-- [ ] `cd office-agent && bash scripts/check.sh` passes (frontend `tsc -b` and build, ruff, mypy, pytest)
+- [ ] `cd office-agent && bash scripts/check.sh` passes, or CI is green (frontend `tsc -b` and build, oxlint, ruff, mypy, pytest)
 - [ ] A test fails without this change (or: why none is possible)
 - [ ] A UI change was looked at in the running app (screenshot below)
 - [ ] `office-agent/ROADMAP.md` records what shipped, using the next free phase id from `origin/main`

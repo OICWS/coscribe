@@ -2,15 +2,17 @@ name: coscribe CI
 
 "on":
   push:
-    branches: ["**"]
-    paths:
-      - "office-agent/**"
-      - ".github/workflows/office-agent-ci.yml"
-  pull_request:
+    # A pull request is checked by the pull_request run below; running both
+    # on every push to its branch doubled the work.
     branches: [main]
-    paths:
-      - "office-agent/**"
-      - ".github/workflows/office-agent-ci.yml"
+  pull_request:
+    # No `paths:` filter: a required check that never starts would keep a
+    # docs-only pull request from ever merging.
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -68,3 +70,25 @@ jobs:
       # is what keeps "passes locally" and "passes in CI" the same thing.
       - name: Checks
         run: bash scripts/check.sh
+
+  # Typechecks the Electron shell, which had no check at all. Not a required
+  # check until it has passed once.
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: office-agent-desktop
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: office-agent-desktop/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run typecheck
