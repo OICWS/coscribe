@@ -697,6 +697,16 @@ its task must name the files, the rules and what to produce. When its \
 report comes back, check it against what the user asked; don't redo its \
 work with your own tools."""
 
+SECRETS_INSTRUCTIONS = """\
+The user can give a conversation secrets (API keys and the like) that you \
+never see. list_secrets shows the names and the hosts each may be sent to. \
+To call an API with one, use http_request and write {{secret:NAME}} where \
+the key goes -- in a header such as Authorization, the body or the url's \
+query; coscribe puts the value in when it sends the request. Don't ask the \
+user to paste a key into the chat, and don't try to read, print or work out \
+a secret's value; if the call needs a secret that isn't listed, tell the \
+user to add it in the conversation's Edit environment."""
+
 BROWSER_INSTRUCTIONS = """\
 You have your own browser: the browser_* tools (browser_navigate, \
 browser_snapshot, browser_click, browser_type, ...) drive the tabs in \
@@ -915,6 +925,7 @@ def build_coordinator_agent(
         instructions = f"{instructions}\n\n{BROWSER_INSTRUCTIONS}"
     if settings.code_module_enabled:
         instructions = f"{instructions}\n\n{CODE_MODULE_INSTRUCTIONS}"
+    instructions = f"{instructions}\n\n{SECRETS_INSTRUCTIONS}"
     extra_dirs_note = _describe_extra_dirs(
         settings.extra_readable_dirs, settings.extra_writable_dirs
     )

@@ -79,6 +79,7 @@ from ..runtime import (
     tool_metadata,
 )
 from ..runtime.provider_config import load_custom_providers
+from ..runtime.secret_store import redactor
 from ..runtime_lg import (
     SkillSaveProposal,
     SubAgentHost,
@@ -137,6 +138,7 @@ from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
 from ..tools.browser import BROWSER_HOST, page_screenshot
 from ..tools.documents import DocumentToolkit
+from ..tools.http_request import build_http_tools
 from ..tools.interaction import (
     PLAN_CHOICE_AUTO,
     PLAN_CHOICE_MANUAL,
@@ -726,6 +728,7 @@ class ChatSessionLG:
             *combined_tools,
             *delegation_tools,
             *code_tools,
+            *build_http_tools(self.settings.state_dir, self.thread_id),
             review_work_tool,
             self._build_draft_workflow_tool(),
             self._build_revise_workflow_tool(),
@@ -1155,6 +1158,7 @@ class ChatSessionLG:
             defer_tools=defer,
             core_tool_names=core_names,
             take_steers=self._take_steers,
+            redact=redactor(self.settings.state_dir),
         )
 
     def _tool_binding(

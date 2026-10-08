@@ -15,13 +15,16 @@ user and could read the keychain itself.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from . import secrets as _secrets
 
@@ -29,6 +32,7 @@ NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 _HOST_LABEL = r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
 _HOST = re.compile(rf"(\*\.)?{_HOST_LABEL}(\.{_HOST_LABEL})+")
 MAX_HOSTS = 20
+MIN_VALUE = 8
 MAX_VALUE = 16384
 MAX_VARIABLES = 100
 MAX_VARIABLE_VALUE = 4096
@@ -136,6 +140,11 @@ class SecretStore:
             else:
                 if not isinstance(value, str) or not value:
                     raise SecretError("The value can't be empty.")
+                if len(value) < MIN_VALUE:
+                    raise SecretError(
+                        f"A value is at least {MIN_VALUE} characters: a shorter one can't be told "
+                        "from ordinary text, so it could not be kept out of what the model reads."
+                    )
                 if len(value) > MAX_VALUE:
                     raise SecretError(f"A value is at most {MAX_VALUE} characters.")
                 if not keychain_available():
@@ -156,6 +165,9 @@ class SecretStore:
                 }
             data[name] = entry
             self._write(data)
+            # A value replaced within one timestamp tick of the last write
+            # leaves the file's stamp as it was.
+            _FORMS_CACHE.pop(str(self.path), None)
         return {"name": name, "hosts": entry["hosts"], "created_at": entry.get("created_at")}
 
     def resolve(self, name: str) -> str:
@@ -185,6 +197,7 @@ class SecretStore:
                 return False
             _secrets.delete_secret(entry.get("ref"))
             self._write(data)
+            _FORMS_CACHE.pop(str(self.path), None)
         SessionEnvironments(self.state_dir).detach_everywhere(name)
         return True
 
@@ -264,3 +277,72 @@ class SessionEnvironments:
                     tmp = path.with_suffix(".tmp")
                     tmp.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
                     os.replace(tmp, path)
+
+
+PLACEHOLDER = re.compile(r"\{\{secret:([A-Za-z_][A-Za-z0-9_]{0,63})\}\}")
+
+
+def placeholders_in(text: str) -> set[str]:
+    return set(PLACEHOLDER.findall(text))
+
+
+def substitute(text: str, values: dict[str, str]) -> str:
+    """`text` with each `{{secret:NAME}}` replaced by `values[NAME]`."""
+    return PLACEHOLDER.sub(lambda m: values[m.group(1)], text)
+
+
+def _forms(value: str) -> set[str]:
+    """The value as it might come back in a response: as is, URL-encoded,
+    base64 (standard and URL-safe, padded or not), hex, and JSON-escaped."""
+    raw = value.encode("utf-8")
+    forms = {value, quote(value, safe=""), quote(value), raw.hex(), raw.hex().upper()}
+    forms.add(json.dumps(value)[1:-1])
+    for encoder in (base64.b64encode, base64.urlsafe_b64encode):
+        encoded = encoder(raw).decode("ascii")
+        forms.update({encoded, encoded.rstrip("=")})
+    return {f for f in forms if len(f) >= MIN_VALUE}
+
+
+_REDACTION_MARK = "[REDACTED SECRET]"
+_FORMS_CACHE: dict[str, tuple[tuple[int, int], list[str]]] = {}
+
+
+def _redaction_forms(state_dir: Path) -> list[str]:
+    """Every stored secret's forms, longest first. Re-read when `secrets.json`
+    changes, so a value added a moment ago is already covered."""
+    path = state_dir / "secrets.json"
+    try:
+        stat = path.stat()
+    except OSError:
+        return []
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    cached = _FORMS_CACHE.get(str(path))
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    store = SecretStore(state_dir)
+    forms: set[str] = set()
+    for name in store.names():
+        try:
+            forms |= _forms(store.resolve(name))
+        except SecretError:
+            continue  # unreadable now, so it can't be in anything either
+    ordered = sorted(forms, key=len, reverse=True)
+    _FORMS_CACHE[str(path)] = (stamp, ordered)
+    return ordered
+
+
+def redactor(state_dir: str | Path) -> Callable[[str], str]:
+    """A function that blanks every stored secret's value, and its common
+    encodings, out of a text. Best effort: it cannot see a value the code
+    that produced the text has transformed some other way."""
+    directory = Path(state_dir)
+
+    def redact(text: str) -> str:
+        if not text:
+            return text
+        for form in _redaction_forms(directory):
+            if form in text:
+                text = text.replace(form, _REDACTION_MARK)
+        return text
+
+    return redact

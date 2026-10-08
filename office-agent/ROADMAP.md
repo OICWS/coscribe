@@ -8039,13 +8039,41 @@ Settings > Secrets page and the dialog against this API.
 - [x] **Per session** (`<thread>.env.json`, removed with the conversation):
       plain variables, which the model can see, and the names of the secrets
       it may use, none by default.
-- [ ] Part 2: `http_request` with `{{secret:NAME}}` placeholders substituted
-      by coscribe at request time, only for an allowed host, with the
-      response redacted (exact value and common encodings) at the one place
-      every tool result passes before the model, transcript, UI and audit log;
-      `list_secrets` for the names and hosts of this session's secrets (kept
-      out of tool schemas and the system prompt: the tool list is fixed and
-      provider-cached). Scripts and Codex commands never receive a value.
+- [x] **Part 2: `http_request` and `list_secrets`** (`tools/http_request.py`).
+      The model writes `{{secret:NAME}}` in a header, the body or the url's
+      query; coscribe puts the value in when it sends the request, only if
+      the secret is one this conversation was given, the host is one of its
+      hosts (the host itself can't hold a placeholder), and the url is
+      https. Redirects aren't followed when a secret was used (the answer
+      reports the `Location`), so a value can't be carried on to another
+      host. `http_request` is an EXTERNAL tool, so each call is approved
+      under the permission mode, the card showing the placeholder.
+- [x] **Blanking at the one place** (`_RedactToolResultsMiddleware`,
+      outermost in every graph built by `build_langgraph_agent`, sub-agents
+      and the reviewer included): every tool result, and every error
+      `_catch_tool_errors` makes, passes it before it is written, so the
+      model, the transcript, the UI and the audit log read the same text.
+      It blanks every stored secret's value and its URL-encoded, base64
+      (standard and URL-safe, padded or not), hex and JSON-escaped forms.
+      `http_request` also does it itself, since a workflow step can call a
+      tool outside a graph. A code task's report and transcript pass it too.
+- [x] **A value is at least 8 characters**: a shorter one can't be told from
+      ordinary text, so blanking it would either miss or mangle.
+- [x] **Static prompt, fixed tool list**: `SECRETS_INSTRUCTIONS` says what
+      the tools are for and is the same in every conversation; the names and
+      hosts a conversation has come from `list_secrets`, not the tool
+      schemas or the system prompt, which would vary per session and bust
+      the provider cache.
+- [x] From the review: a value stored before the 8-character minimum is not
+      sent (its forms could not be blanked); the blanking cache is dropped on
+      every save and delete, not only when `secrets.json`'s stamp changes;
+      tests that the two tools are deferred, not core, and that the bound
+      tool schemas and the system prompt are identical between a
+      conversation with secrets and one without (the provider-cache
+      invariant). `ToolMessage.artifact` is not blanked: nothing here
+      produces one.
+- Codex commands never get a value: they are not given `http_request`, so a
+  code task can't use a secret; the chat can, itself.
 - [ ] Part 3: the Edit environment dialog applies the plain variables to
       scripts and Codex commands.
 - [ ] Later: connectors can take `{"secret": NAME}` for a header or env value

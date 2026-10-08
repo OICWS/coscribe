@@ -30,6 +30,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
+from ..runtime.secret_store import redactor
 from ..runtime.types import get_tool_metadata, tool_metadata
 from ..tools import QUESTION_TOOL_NAMES
 from ..tools.scheduled_tasks import TASK_DRAFT_TOOL_NAMES
@@ -393,6 +394,7 @@ def build_delegation_tools(
             and not requested
             and any(_tool_name(t) not in core_names for t in selected),
             core_tool_names=core_names,
+            redact=redactor(host.state_dir),
         )
         task = SubAgentTask(
             task_id=uuid.uuid4().hex[:12],
@@ -770,7 +772,11 @@ def build_review_work_tool(
         # five-minute one; its verdict is only as good as what it read in
         # the first few calls.
         reviewer = build_langgraph_agent(
-            model, reviewer_tools, REVIEWER_INSTRUCTIONS, max_turns=_REVIEWER_MAX_MODEL_CALLS
+            model,
+            reviewer_tools,
+            REVIEWER_INSTRUCTIONS,
+            max_turns=_REVIEWER_MAX_MODEL_CALLS,
+            redact=redactor(state_dir),
         )
         prompt_text = (
             f"Original request:\n{original_request}\n\nWork summary:\n{summary_of_work}\n\n"
