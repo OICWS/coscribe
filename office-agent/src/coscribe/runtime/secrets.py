@@ -53,6 +53,19 @@ def _keyring_available() -> bool:
     return keyring is not None
 
 
+def keychain_backend_usable() -> bool:
+    """Whether keyring has a real backend, not the do-nothing one it falls back
+    to when the machine has no keychain service."""
+    if not _keyring_available():
+        return False
+    try:
+        from keyring.backends import fail
+
+        return not isinstance(keyring.get_keyring(), fail.Keyring)
+    except Exception:  # noqa: BLE001 -- any trouble probing means it can't be relied on
+        return False
+
+
 def store_secret(ref: str, value: str) -> str | dict[str, str]:
     """Try to store `value` in the OS keychain under `ref`. Returns what
     the caller should persist in its place: {"keyring_ref": ref} on

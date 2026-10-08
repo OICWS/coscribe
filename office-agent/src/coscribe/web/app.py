@@ -98,6 +98,13 @@ from ..runtime import (
     run_hook,
     store_secret,
 )
+from ..runtime.secret_store import (
+    KeychainUnavailable,
+    SecretError,
+    SecretStore,
+    SessionEnvironments,
+    keychain_available,
+)
 from ..runtime.types import get_tool_metadata
 from ..runtime_lg import (
     continue_workflow_run,
@@ -1538,6 +1545,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         (settings.state_dir / f"{thread_id}.tasks.json").unlink(missing_ok=True)
         _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
         _title_sidecar_path(thread_id).unlink(missing_ok=True)
+        SessionEnvironments(settings.state_dir).delete(thread_id)
         ThreadMetaStore(settings.state_dir).delete(thread_id)
         sessions.pop(thread_id, None)
         return existed
@@ -2841,6 +2849,50 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         except CodexUnavailable as exc:
             model_problem = str(exc)
         return {**service.status(), "model": model, "model_problem": model_problem}
+
+    # -- Secrets: values are write-only; nothing here ever returns one.
+
+    @app.get("/api/secrets")
+    async def list_secrets() -> dict[str, Any]:
+        return {
+            "keychain": keychain_available(),
+            "secrets": SecretStore(settings.state_dir).entries(),
+        }
+
+    @app.put("/api/secrets/{name}")
+    async def put_secret(name: str, payload: dict[str, Any]) -> Any:
+        try:
+            return SecretStore(settings.state_dir).save(
+                name, payload.get("value"), payload.get("hosts")
+            )
+        except KeychainUnavailable as exc:
+            return JSONResponse(
+                {"error": str(exc), "code": "keychain_unavailable"}, status_code=503
+            )
+        except SecretError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+
+    @app.delete("/api/secrets/{name}")
+    async def delete_secret_endpoint(name: str) -> Any:
+        if not SecretStore(settings.state_dir).delete(name):
+            return JSONResponse({"error": f"There is no secret named {name}."}, status_code=404)
+        return {"deleted": name}
+
+    @app.get("/api/threads/{thread_id}/environment")
+    async def get_session_environment(thread_id: str) -> dict[str, Any]:
+        return SessionEnvironments(settings.state_dir).get(thread_id)
+
+    @app.put("/api/threads/{thread_id}/environment")
+    async def put_session_environment(thread_id: str, payload: dict[str, Any]) -> Any:
+        try:
+            return SessionEnvironments(settings.state_dir).set(
+                thread_id,
+                payload.get("variables", {}),
+                payload.get("secrets", []),
+                SecretStore(settings.state_dir).names(),
+            )
+        except SecretError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
 
     @app.get("/api/code/permissions")
     async def get_code_permissions() -> dict[str, Any]:

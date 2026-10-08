@@ -8015,6 +8015,50 @@ a call could wait.
 - [ ] Not found: why the built-in browser panel opened during the same use. The
       panel opens only when the AI uses a browser tool or a link is clicked in
       the app; neither shows in that conversation.
+## Phase 8dg -- Global secrets and per-session environments, part 1: the store and its API
+
+Asked for: secrets the user adds once in Settings and can give to a session,
+which the model never sees; and a per-session "Edit environment" for plain
+variables. Designed with the main-development session, which builds the
+Settings > Secrets page and the dialog against this API.
+
+- [x] **`runtime/secret_store.py`**: a secret is a name, a value and the hosts
+      it may be sent to. The value goes to the OS keychain (the existing
+      `store_secret`, ref `secret:<NAME>`); `secrets.json` holds names, hosts
+      and the keychain reference. **No API returns a value.**
+- [x] **No keychain, no save.** The provider and connector keys fall back to a
+      0600 file when there is no keychain; these refuse instead
+      (`503 keychain_unavailable`), as they do when the keychain refuses a
+      write. On Windows that is Credential Manager.
+- [x] **Hosts are mandatory**, `api.example.com` or `*.example.com` (not the
+      bare domain), no scheme, path or port. Part 2 sends a value only to
+      them.
+- [x] **Deleting a secret** removes its keychain entry and takes it out of
+      every session's list; a secret missing from the keychain (a copied
+      machine) is an error naming it, not a crash.
+- [x] **Per session** (`<thread>.env.json`, removed with the conversation):
+      plain variables, which the model can see, and the names of the secrets
+      it may use, none by default.
+- [ ] Part 2: `http_request` with `{{secret:NAME}}` placeholders substituted
+      by coscribe at request time, only for an allowed host, with the
+      response redacted (exact value and common encodings) at the one place
+      every tool result passes before the model, transcript, UI and audit log;
+      `list_secrets` for the names and hosts of this session's secrets (kept
+      out of tool schemas and the system prompt: the tool list is fixed and
+      provider-cached). Scripts and Codex commands never receive a value.
+- [ ] Part 3: the Edit environment dialog applies the plain variables to
+      scripts and Codex commands.
+- [ ] Later: connectors can take `{"secret": NAME}` for a header or env value
+      (`tools/mcp.py`, main session); a callback helper so a script can use a
+      secret (needs its own local authentication).
+
+**What is promised.** The model cannot SEE a secret's value: not in tool
+output, the transcript, an approval card or the logs, and neither by accident
+nor when a web page it read tells it to leak one. It is not defended against
+code that goes digging: with no sandbox a script runs as the same user and
+could read the keychain itself. Redaction by exact value and common encodings
+is best effort, and a host the user allowed could echo a value back. The
+Secrets page says this.
 
 ## Later -- real intentions, not actively scheduled
 
@@ -8022,6 +8066,11 @@ Deliberately un-numbered per your call: backend/foundation (Phases 2-6
 above) comes first; these get picked back up once that's done and there's
 a concrete reason to prioritize a new surface.
 
+- [ ] **Network access per session** (an "Edit environment" setting, asked for
+  and deferred). Without a sandbox it can only switch off coscribe's own web
+  tools (page fetch, search, the browser, connectors); a script or a Codex
+  command the user approves could still reach the network. If built, the
+  setting must say so on its face.
 - [x] **PPTX quality: a real reference-slide-template library, replacing
   generate-colors-from-scratch** -- shipped, stale "not started" note
   corrected. Found already done (commits predate this file's own catch-
