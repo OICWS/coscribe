@@ -201,8 +201,9 @@ _catch_tool_errors = _CatchToolErrorsMiddleware()
 
 def _redact_value(value: Any, redact: Callable[[str], str]) -> Any:
     """Every string anywhere in a JSON-shaped value (a message's content blocks,
-    an artifact), keys left as they are. Other objects pass through: nothing
-    here makes one, and it cannot be walked without knowing its type."""
+    an artifact). Keys are left as they are: two keys blanked to the same text
+    would collapse into one entry and lose a value. Other objects pass through:
+    nothing here makes one, and it cannot be walked without knowing its type."""
     if isinstance(value, str):
         return redact(value)
     if isinstance(value, list):
