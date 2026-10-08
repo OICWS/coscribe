@@ -27,8 +27,8 @@ See [`README.md`](README.md). Then check your setup works:
 5. **Record real findings** in `office-agent/ROADMAP.md` (what shipped, what was
    measured, what was *not* verified). Take the next free phase id from
    `origin/main` when you write the entry, because ids collide otherwise.
-6. **Commit messages explain why.** No model names in commits, PRs or comments.
-   Comments in code explain a non-obvious reason, never what the line does.
+6. **Commit messages explain why.** Comments in code explain a non-obvious
+   reason, never what the line does.
 
 ## Where the change goes
 

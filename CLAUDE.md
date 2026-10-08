@@ -9,10 +9,11 @@ read it, then only the document for the area you are touching.
 
 | Path | What lives there |
 |---|---|
-| `office-agent/src/coscribe/runtime_lg/` | The agent runtime (LangChain/LangGraph): coordinator, middleware (approvals, tool deferral, compaction), MCP connectors and their OAuth |
+| `office-agent/src/coscribe/runtime_lg/` | The agent runtime (LangChain/LangGraph): the graph, middleware (approvals, tool deferral, compaction), MCP connectors and their OAuth |
+| `office-agent/src/coscribe/coordinator.py` | The coordinator agent's definition: its tools and prompt |
 | `office-agent/src/coscribe/tools/` | Built-in tools: files, docx/xlsx/pptx/pdf, tasks, skills, scheduled tasks |
 | `office-agent/src/coscribe/web/` | FastAPI server (`app.py` holds nearly every route), per-conversation `session.py`, the connector catalog |
-| `office-agent/src/coscribe/code_runtime/` | The code module (running scripts and Codex) |
+| `office-agent/src/coscribe/code_runtime/` | The code module: Codex, driven as a second agent runtime |
 | `office-agent/src/coscribe/workflows/` | Scheduled workflows |
 | `office-agent/src/coscribe/runtime/` | Shared pieces: secrets, types, hooks, provider config |
 | `office-agent/frontend/` | React + TypeScript UI, built into `web/static/` |
@@ -57,8 +58,7 @@ bash scripts/check.sh --fast                    # everything except pytest
 ```
 
 A frontend change must pass `npm run build` (`tsc -b`), not only `tsc --noEmit`.
-Commit author is set per `office-agent/CLAUDE.md`. Never put a model name in a
-commit message, PR text or code comment.
+Commit author is set per `office-agent/CLAUDE.md`.
 
 ## Working with other sessions
 
