@@ -22,7 +22,7 @@ import logging
 import os
 import re
 import shlex
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
@@ -507,6 +507,7 @@ class CodexThread:
         context_window: int | None = None,
         stall_seconds: float = STALL_SECONDS,
         fallback_context: str = "",
+        env: Mapping[str, str] | None = None,
         on_open: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._host = host
@@ -520,6 +521,7 @@ class CodexThread:
         # place of the history it no longer has.
         self._fallback_context = fallback_context
         self._on_open = on_open
+        self._env = dict(env or {})
         self.resumed = False
 
     def _thread_params(self) -> dict[str, Any]:
@@ -530,8 +532,14 @@ class CodexThread:
             "approvalPolicy": "untrusted",
             "sandbox": "danger-full-access",
         }
+        config: dict[str, Any] = {}
         if self._context_window:
-            params["config"] = {"model_context_window": self._context_window}
+            config["model_context_window"] = self._context_window
+        if self._env:
+            # What the user set for this conversation, for Codex's commands.
+            config["shell_environment_policy"] = {"set": self._env}
+        if config:
+            params["config"] = config
         return params
 
     async def _open(self, server: AppServer) -> str:

@@ -79,7 +79,7 @@ from ..runtime import (
     tool_metadata,
 )
 from ..runtime.provider_config import load_custom_providers
-from ..runtime.secret_store import redactor
+from ..runtime.secret_store import SessionEnvironments, redactor
 from ..runtime_lg import (
     SkillSaveProposal,
     SubAgentHost,
@@ -721,6 +721,9 @@ class ChatSessionLG:
                         context_window=lambda: self._context_window_client.get_context_window(
                             self.settings.code_model or self._model_string
                         ),
+                        env=lambda: SessionEnvironments(self.settings.state_dir).get(
+                            self.thread_id
+                        )["variables"],
                     ),
                 )
             )

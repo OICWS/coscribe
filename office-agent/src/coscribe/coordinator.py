@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .config import Settings
+from .runtime.secret_store import SessionEnvironments
 from .runtime.types import Agent
 from .tools import (
     build_background_task_tools,
@@ -862,6 +863,13 @@ def build_coordinator_agent(
     # folded into that user-facing listing.
     file_tool_readable = [*extra_readable, settings.skills_dir]
     file_tool_writable = [*extra_writable, settings.skills_dir]
+    def session_env() -> dict[str, str]:
+        # Read at each run: the user can change them in Edit environment mid-conversation.
+        variables: dict[str, str] = SessionEnvironments(settings.state_dir).get(thread_id)[
+            "variables"
+        ]
+        return variables
+
     tools = (
         build_file_tools(root, extra_readable=file_tool_readable, extra_writable=file_tool_writable)
         + build_document_tools(
@@ -900,10 +908,18 @@ def build_coordinator_agent(
         + build_selfwake_tools(thread_id, settings.state_dir)
         + build_scheduled_task_tools(settings.state_dir, thread_id)
         + build_websearch_tools()
-        + build_script_tools(root, settings.state_dir, extra_writable=extra_writable)
-        + build_node_script_tools(root, settings.state_dir, extra_writable=extra_writable)
+        + build_script_tools(
+            root, settings.state_dir, extra_writable=extra_writable, session_env=session_env
+        )
+        + build_node_script_tools(
+            root, settings.state_dir, extra_writable=extra_writable, session_env=session_env
+        )
         + build_background_task_tools(
-            thread_id, root, settings.state_dir, extra_writable=extra_writable
+            thread_id,
+            root,
+            settings.state_dir,
+            extra_writable=extra_writable,
+            session_env=session_env,
         )
         + build_subagent_task_tools(thread_id, settings.state_dir)
     )

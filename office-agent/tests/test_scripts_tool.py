@@ -245,3 +245,24 @@ def test_run_python_script_writes_to_a_folder_the_conversation_added(
     assert result["exit_code"] == 0, result["stderr"]
     assert "blocked_write" not in result
     assert (added / "r.txt").read_text() == "x"
+
+
+def test_run_python_script_gets_the_conversations_variables_read_at_each_run(
+    tmp_path: Path, shared_state_dir: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    current = {"REPORT_REGION": "north", "PYTHONUTF8": "0"}
+    by_name = {
+        tool.__name__: tool
+        for tool in build_script_tools(workspace, shared_state_dir, session_env=lambda: current)
+    }
+    script = "import os; print(os.environ.get('REPORT_REGION'), os.environ['PYTHONUTF8'])"
+
+    first = by_name["run_python_script"](script=script, description="read the variables")
+    current["REPORT_REGION"] = "south"
+    second = by_name["run_python_script"](script=script, description="read them again")
+
+    # Changed in between, and not able to undo what the runner itself needs.
+    assert first["stdout"] == "north 1\n"
+    assert second["stdout"] == "south 1\n"

@@ -187,3 +187,25 @@ def test_run_node_script_refuses_a_write_outside_the_workspace_and_says_where(
     assert result["exit_code"] != 0
     assert Path(str(result["blocked_write"])).name == "r.txt"
     assert not (outside / "r.txt").exists()
+
+
+def test_run_node_script_gets_the_conversations_variables(
+    tmp_path: Path, shared_state_dir: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    by_name = {
+        tool.__name__: tool
+        for tool in build_node_script_tools(
+            workspace,
+            shared_state_dir,
+            session_env=lambda: {"REPORT_REGION": "north", "NODE_PATH": "/nowhere"},
+        )
+    }
+
+    result = by_name["run_node_script"](
+        script="console.log(process.env.REPORT_REGION, process.env.NODE_PATH !== '/nowhere')",
+        description="read the variables",
+    )
+
+    assert result["stdout"] == "north true\n"

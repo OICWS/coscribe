@@ -8074,8 +8074,15 @@ Settings > Secrets page and the dialog against this API.
       produces one.
 - Codex commands never get a value: they are not given `http_request`, so a
   code task can't use a secret; the chat can, itself.
-- [ ] Part 3: the Edit environment dialog applies the plain variables to
-      scripts and Codex commands.
+- [x] **Part 3: the session's plain variables reach what runs.** They are
+      put in the environment of `run_python_script`, `run_node_script` and
+      background scripts (read at each run, so a change in Edit environment
+      applies at once; set before what each runner needs itself -- encoding,
+      `NODE_PATH` -- so they can't undo it), and given to Codex per thread as
+      `shell_environment_policy.set` in the thread's config. Live, deepseek-
+      flash: a variable set for a conversation was printed by a Python
+      script and by a code task's `printenv`. They are plain text the model
+      can read; secrets are never put in an environment.
 - [ ] Later: connectors can take `{"secret": NAME}` for a header or env value
       (`tools/mcp.py`, main session); a callback helper so a script can use a
       secret (needs its own local authentication).

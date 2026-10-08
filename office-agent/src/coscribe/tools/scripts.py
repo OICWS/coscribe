@@ -34,7 +34,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +66,7 @@ def _run_python_script(
     script: str,
     timeout: float,
     extra_writable: Sequence[Path] = (),
+    session_env: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     timeout = min(max(timeout, 1.0), _MAX_TIMEOUT)
     venv_dir = ensure_script_env(state_dir)
@@ -86,6 +87,9 @@ def _run_python_script(
     # Bytecode and font caches would be writes outside the allowed folders.
     child_env = {
         **os.environ,
+        # The user's variables for this conversation come before what the
+        # script runner itself needs, which they must not be able to undo.
+        **(session_env or {}),
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
@@ -142,6 +146,7 @@ def build_script_tools(
     state_dir: str | Path,
     *,
     extra_writable: Sequence[str | Path] = (),
+    session_env: Callable[[], Mapping[str, str]] | None = None,
 ) -> list[Callable[..., Any]]:
     """Return the tool callables the Coordinator agent can call. `state_dir`
     is required (not optional like other tools' preview support) -- the
@@ -190,7 +195,9 @@ def build_script_tools(
             description: one sentence, plain language, what this script does
             timeout: seconds to allow before killing the script (capped at 600)
         """
-        return _run_python_script(root, state, script, timeout, folders)
+        return _run_python_script(
+            root, state, script, timeout, folders, session_env() if session_env else None
+        )
 
     return [
         tool_metadata(run_python_script, risk_category="EXEC", category="scripts"),

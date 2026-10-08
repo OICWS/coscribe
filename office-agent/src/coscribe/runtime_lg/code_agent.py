@@ -18,7 +18,7 @@ import logging
 import re
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -72,6 +72,8 @@ class CodeTaskContext:
     model: Callable[[], str]
     folder: Callable[[], Path]
     context_window: Callable[[], int | None]
+    # The plain variables the user set for this conversation.
+    env: Callable[[], dict[str, str]] = field(default=dict)
 
 
 def command_args(command: str, description: str = "") -> dict[str, Any]:
@@ -179,6 +181,7 @@ class _Run:
                 developer_instructions=INSTRUCTIONS,
                 context_window=await asyncio.to_thread(self.context.context_window),
                 fallback_context=_earlier_work(previous) if previous else "",
+                env=self.context.env(),
                 on_open=self.opened,
             )
             result = await thread.run_turn(record.prompt, self.decide, self.on_event)
