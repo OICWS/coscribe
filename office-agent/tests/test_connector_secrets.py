@@ -194,3 +194,78 @@ def test_through_the_api_the_value_is_never_stored_shown_or_deleted_while_in_use
     assert refused.status_code == 409 and refused.json()["connectors"] == ["svc"]
     assert removed.status_code == 200
     assert deleted.status_code == 200
+
+
+def test_a_secrets_value_that_looks_like_a_placeholder_is_not_expanded_again(
+    tmp_path: Path,
+) -> None:
+    store = SecretStore(tmp_path)
+    store.save("INNER_KEY", "inner-secret-value", ["mcp.example.com"])
+    store.save("OUTER_KEY", "x{{secret:INNER_KEY}}y-padding", ["mcp.example.com"])
+
+    config = with_secrets(_remote({"A": "{{secret:OUTER_KEY}}"}), tmp_path)
+
+    assert config["headers"] == {"A": "x{{secret:INNER_KEY}}y-padding"}
+
+
+def test_the_connector_list_says_why_a_connector_has_no_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    (tmp_path / "mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "svc": {
+                        "server_url": "https://mcp.example.com/mcp",
+                        "headers": {"A": "{{secret:NOPE}}"},
+                    },
+                    "ok": {"server_url": "https://mcp.example.com/mcp", "headers": {"A": "x"}},
+                }
+            }
+        )
+    )
+    with _client_lg(
+        tmp_path,
+        monkeypatch,
+        FakeToolCallingChatModel(responses=[]),
+        mcp_config_path=tmp_path / "mcp.json",
+    ) as client:
+        listed = client.get("/api/mcp/servers").json()
+
+    assert "NOPE" in listed["svc"]["secret_error"]
+    assert listed["ok"]["secret_error"] is None
+
+
+def test_an_unreadable_connector_setting_blocks_deleting_a_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, keychain: _FakeKeyring
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    stored = secrets.store_secret("mcp:svc:headers:A", "Bearer {{secret:SVC_KEY}}")
+    (tmp_path / "mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "svc": {
+                        "server_url": "https://mcp.example.com/mcp",
+                        "headers": {"A": stored},
+                    }
+                }
+            }
+        )
+    )
+    with _client_lg(
+        tmp_path,
+        monkeypatch,
+        FakeToolCallingChatModel(responses=[]),
+        mcp_config_path=tmp_path / "mcp.json",
+    ) as client:
+        client.put("/api/secrets/SVC_KEY", json={"value": KEY, "hosts": ["mcp.example.com"]})
+        for key in [k for k in keychain.store if k[1].startswith("mcp:")]:
+            del keychain.store[key]
+        blocked = client.delete("/api/secrets/SVC_KEY")
+
+    assert blocked.status_code == 503
+    assert SecretStore(tmp_path / "state").names() == {"SVC_KEY"}

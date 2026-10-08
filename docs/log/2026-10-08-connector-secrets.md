@@ -24,8 +24,11 @@ entered again, in a second place.
 - Deleting a secret a connector uses is refused (409, naming the connectors).
 - Reconnecting from the saved config now reads keychain references back too; the
   reconnect paths had passed them on unread.
-- 11 tests (`tests/test_connector_secrets.py`), mutation-checked on the host
-  check.
+- Tests in `tests/test_connector_secrets.py`, mutation-checked on the host check;
+  a secret's value that looks like a placeholder is not expanded again.
+- The Connectors list says why a connector has no secret (`secret_error`).
+- A connector setting that can't be read from the keychain blocks deleting a
+  secret (503) rather than counting as "uses nothing".
 
 ## Not verified
 - A real remote connector with a key from Settings > Secrets, and on Windows.

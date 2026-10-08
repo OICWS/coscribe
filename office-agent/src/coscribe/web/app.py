@@ -854,8 +854,8 @@ def _mask(value: str) -> str:
 
 def _mask_value(value: str) -> str:
     """A connector value for display. One that refers to a secret is shown
-    as written, placeholder and all, with any other text of it hidden: the
-    value itself is never in it."""
+    as written, placeholder and all, with any other text of it hidden (short
+    pieces such as "Bearer " stay readable): the value itself is never in it."""
     if not placeholders_in(value):
         return _mask(value)
     parts = re.split(r"(\{\{secret:[A-Za-z_][A-Za-z0-9_]{0,63}\}\})", value)
@@ -2895,10 +2895,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         return secret_names_used(resolved)
 
     def _stored_text(value: Any) -> str:
-        try:
-            return resolve_secret(value) or ""
-        except RuntimeError:
-            return ""
+        # An unreadable value could be the one that names the secret, so the
+        # caller treats it as in use rather than as nothing.
+        return resolve_secret(value) or ""
 
     @app.get("/api/secrets")
     async def list_secrets() -> dict[str, Any]:
@@ -2922,7 +2921,16 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/secrets/{name}")
     async def delete_secret_endpoint(name: str) -> Any:
-        using = _connectors_using_secret(name)
+        try:
+            using = _connectors_using_secret(name)
+        except RuntimeError as exc:
+            return JSONResponse(
+                {
+                    "error": "A connector's saved settings can't be read from the keychain, so "
+                    f"it can't be checked whether {name} is in use: {exc}"
+                },
+                status_code=503,
+            )
         if using:
             return JSONResponse(
                 {
@@ -3216,6 +3224,11 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # tab never has (add/bump already surface a real error message
             # at the point of failure; this is just current live state).
             connected = name in mcp_connections
+            try:
+                with_secrets(config, settings.state_dir)
+                secret_error = None
+            except (SecretError, RuntimeError) as exc:
+                secret_error = str(exc)
             if "server_url" in config:
                 # Remote (streamable_http) entry -- a hand-configured
                 # Custom-tab remote-server form. Bearer/auth header values
@@ -3227,6 +3240,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                         k: _mask_value(v) for k, v in (config.get("headers") or {}).items()
                     },
                     "connected": connected,
+                    "secret_error": secret_error,
                     "tools": _connector_tools(name),
                 }
                 if config.get("auth") == "oauth":
@@ -3242,6 +3256,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "args": config.get("args", []),
                     "masked_env": {k: _mask_value(v) for k, v in (config.get("env") or {}).items()},
                     "connected": connected,
+                    "secret_error": secret_error,
                     "tools": _connector_tools(name),
                 }
         return result
@@ -3267,7 +3282,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
         try:
             with_secrets(config, settings.state_dir)
-        except SecretError as exc:
+        except (SecretError, RuntimeError) as exc:
             return {"rejected": {payload.name: str(exc)}, "connected": False}
 
         # .resolve() -- see add_provider's identical fallback for why a
