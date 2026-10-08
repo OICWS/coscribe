@@ -43,11 +43,9 @@ jobs:
       # silently failing every run after -- caught only by finally
       # checking the Actions tab directly instead of trusting local runs
       # (which always had a hand-built static/ dir already sitting there).
-      - name: Build frontend
+      - name: Install frontend dependencies
         working-directory: office-agent/frontend
-        run: |
-          npm ci
-          npm run build
+        run: npm ci
 
       - name: Install coscribe
         run: pip install -e ".[dev,web]"
@@ -65,11 +63,8 @@ jobs:
       - name: Upgrade google-genai (needed for Part.thought_signature)
         run: pip install -U "google-genai>=2.13.0,<2.14.0"
 
-      - name: pytest
-        run: pytest -q
-
-      - name: ruff
-        run: ruff check src tests
-
-      - name: mypy
-        run: mypy src
+      # The one command contributors run locally too: builds the frontend
+      # (tsc -b, vite), then ruff, mypy and pytest. Keeping them in one script
+      # is what keeps "passes locally" and "passes in CI" the same thing.
+      - name: Checks
+        run: bash scripts/check.sh
