@@ -27,6 +27,9 @@ ruff check src tests
 echo "== mypy =="
 mypy src
 
+echo "== import boundaries =="
+lint-imports
+
 if [ "$fast" -eq 0 ]; then
   echo "== pytest =="
   pytest -q
