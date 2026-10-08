@@ -48,7 +48,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,7 +56,7 @@ from typing import Any
 
 from ..runtime.types import tool_metadata
 from .node_env import ensure_node_env
-from .script_env import ensure_script_env, venv_python
+from .script_env import ensure_script_env, overlay_env, venv_python
 from .script_guard import (
     blocked_write,
     node_guard_args,
@@ -278,6 +278,7 @@ def build_background_task_tools(
     state_dir: str | Path,
     *,
     extra_writable: Sequence[str | Path] = (),
+    session_env: Callable[[], Mapping[str, str]] | None = None,
 ) -> list[Callable[..., Any]]:
     """Return the tool callables the Coordinator agent can call. `state_dir`
     is required for the same reason run_python_script's is -- the script-env/
@@ -340,7 +341,7 @@ def build_background_task_tools(
             # 'charmap' codec can't encode characters bug documented in
             # PPTX_DESIGN.md §23.
             env = {
-                **os.environ,
+                **overlay_env(os.environ, session_env() if session_env else None),
                 "PYTHONIOENCODING": "utf-8",
                 "PYTHONUTF8": "1",
                 "PYTHONDONTWRITEBYTECODE": "1",
@@ -353,7 +354,10 @@ def build_background_task_tools(
             interpreter = shutil.which("node") or "node"
             scratch_dir = Path(tempfile.mkdtemp(prefix="coscribe_bg_node_script_"))
             script_path = scratch_dir / "script.js"
-            env = {**os.environ, "NODE_PATH": str(node_env_dir / "node_modules")}
+            env = {
+                **overlay_env(os.environ, session_env() if session_env else None),
+                "NODE_PATH": str(node_env_dir / "node_modules"),
+            }
             guard_args = node_guard_args(interpreter, write_roots) or []
         # encoding="utf-8" for the same reason as the write above's own
         # comment: Path.write_text has no UTF-8 default on Windows.

@@ -27,9 +27,11 @@ Code's own Bash tool on a sandboxless host).
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 _VENV_TIMEOUT = 120.0
@@ -336,3 +338,17 @@ def uninstall_package(
     if result.returncode != 0:
         return {"success": False, "error": result.stderr.strip() or result.stdout.strip()}
     return {"success": True, "error": None}
+
+
+def overlay_env(base: Mapping[str, str], extra: Mapping[str, str] | None) -> dict[str, str]:
+    """`base` with `extra` laid over it. Windows environment names are
+    case-insensitive and its `os.environ` upper-cases them, so a variable
+    named `Path` replaces `PATH` there instead of sitting beside it with the
+    child free to see either."""
+    merged = dict(base)
+    if not extra:
+        return merged
+    existing = {k.upper(): k for k in merged} if os.name == "nt" else {}
+    for name, value in extra.items():
+        merged[existing.get(name.upper(), name)] = value
+    return merged

@@ -26,7 +26,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,7 @@ from ..runtime.types import tool_metadata
 from ._files_written import snapshot_workspace, with_files_written
 from ._output_truncation import truncate_script_output
 from .node_env import ensure_node_env
+from .script_env import overlay_env
 from .script_guard import (
     blocked_write,
     node_guard_args,
@@ -57,6 +58,7 @@ def _run_node_script(
     script: str,
     timeout: float,
     extra_writable: Sequence[Path] = (),
+    session_env: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     timeout = min(max(timeout, 1.0), _MAX_TIMEOUT)
     node_env_dir = ensure_node_env(state_dir)
@@ -70,7 +72,10 @@ def _run_node_script(
     # the console codepage, so only the host-side write_text above (this
     # process writing script.js to disk) needs the explicit encoding here;
     # the subprocess.run encoding below still has to match on the read side.
-    env = {**os.environ, "NODE_PATH": str(node_env_dir / "node_modules")}
+    env = {
+        **overlay_env(os.environ, session_env),
+        "NODE_PATH": str(node_env_dir / "node_modules"),
+    }
     node = shutil.which("node") or "node"
     guard = node_guard_args(node, writable_roots(workspace_root, list(extra_writable)))
     before = snapshot_workspace(workspace_root)
@@ -126,6 +131,7 @@ def build_node_script_tools(
     state_dir: str | Path,
     *,
     extra_writable: Sequence[str | Path] = (),
+    session_env: Callable[[], Mapping[str, str]] | None = None,
 ) -> list[Callable[..., Any]]:
     """Return the tool callables the Coordinator agent can call. `state_dir`
     is required for the same reason run_python_script's is -- the node-env
@@ -172,7 +178,9 @@ def build_node_script_tools(
             description: one sentence, plain language, what this script does
             timeout: seconds to allow before killing the script (capped at 600)
         """
-        return _run_node_script(root, state, script, timeout, folders)
+        return _run_node_script(
+            root, state, script, timeout, folders, session_env() if session_env else None
+        )
 
     return [
         tool_metadata(run_node_script, risk_category="EXEC", category="scripts"),

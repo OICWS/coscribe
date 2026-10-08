@@ -338,3 +338,27 @@ def test_background_task_store_tail_bounds_output_from_the_end() -> None:
     assert store.tail("t1", 100) == "0123456789"
     assert store.tail("does-not-exist", 100) == ""
     shutil.rmtree(root, ignore_errors=True)
+
+
+async def test_a_background_script_gets_the_conversations_variables(
+    tmp_path: Path, shared_state_dir: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    by_name = {
+        tool.__name__: tool
+        for tool in build_background_task_tools(
+            "thread-1", workspace, shared_state_dir, session_env=lambda: {"REPORT_REGION": "north"}
+        )
+    }
+    tools = _make_tools("thread-1", workspace, shared_state_dir)
+    tools.run_background_script = by_name["run_background_script"]
+
+    started = await tools.run_background_script(
+        language="python",
+        script="import os; print(os.environ['REPORT_REGION'])",
+        description="read a variable",
+    )
+    finished = await _wait_until_finished(tools, started["task_id"])
+
+    assert finished["status"] == "succeeded" and "north" in finished["output"]

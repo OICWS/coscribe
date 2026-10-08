@@ -22,6 +22,7 @@ import coscribe.cli  # noqa: F401 -- web.session imports cli first
 from coscribe.code_runtime.launch import CodexHost, LaunchSpec
 from coscribe.config import Settings
 from coscribe.runtime import empty_hooks_config
+from coscribe.runtime.secret_store import SessionEnvironments
 from coscribe.runtime_lg.code_agent import CODE_APPROVAL_RISKS, CODE_TASK_TOOL
 from coscribe.tools import subagent_tasks
 from coscribe.tools.subagent_tasks import (
@@ -590,3 +591,34 @@ async def test_the_panel_hears_of_a_code_task_before_codex_is_ready(
     assert not release.is_set()
     release.set()
     await asyncio.wait_for(turn, 30)
+
+
+def _thread_configs(tmp_path: Path) -> list[dict[str, Any]]:
+    return [
+        json.loads(line)["params"].get("config", {})
+        for line in (tmp_path / "requests.jsonl").read_text().splitlines()
+        if '"thread/start"' in line
+    ]
+
+
+async def test_the_conversations_variables_are_set_for_codexs_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    SessionEnvironments(tmp_path / "state").set("t1", {"REPORT_REGION": "north"}, [], set())
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+
+    await _run(session, _Socket(answer=lambda payload: True))
+
+    [config] = _thread_configs(tmp_path)
+    assert config["shell_environment_policy"] == {"set": {"REPORT_REGION": "north"}}
+
+
+async def test_a_conversation_with_no_variables_sets_none_for_codex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codex: CodexHost
+) -> None:
+    session = _session(tmp_path, monkeypatch, codex, _Model(responses=_replies("approve")))
+
+    await _run(session, _Socket(answer=lambda payload: True))
+
+    [config] = _thread_configs(tmp_path)
+    assert "shell_environment_policy" not in config
