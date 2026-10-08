@@ -8555,9 +8555,11 @@ def test_secrets_api_never_returns_a_value_and_refuses_without_a_keychain_lg(
             "/api/secrets/STRIPE_KEY", json={"value": "sk-live-1", "hosts": ["api.stripe.com"]}
         )
         listed = client.get("/api/secrets")
-        no_hosts = client.put("/api/secrets/OTHER", json={"value": "v", "hosts": []})
+        no_hosts = client.put("/api/secrets/OTHER", json={"value": "value-ok-1", "hosts": []})
         usable["yes"] = False
-        no_keychain = client.put("/api/secrets/OTHER", json={"value": "v", "hosts": ["a.com"]})
+        no_keychain = client.put(
+            "/api/secrets/OTHER", json={"value": "value-ok-1", "hosts": ["a.com"]}
+        )
         listed_without = client.get("/api/secrets")
         usable["yes"] = True
 

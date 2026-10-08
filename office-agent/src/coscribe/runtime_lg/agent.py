@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import errno
 from collections.abc import Awaitable, Callable, Iterable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -198,6 +199,48 @@ class _CatchToolErrorsMiddleware(AgentMiddleware):
 _catch_tool_errors = _CatchToolErrorsMiddleware()
 
 
+def _redact_content(content: Any, redact: Callable[[str], str]) -> Any:
+    if isinstance(content, str):
+        return redact(content)
+    if isinstance(content, list):
+        return [
+            {**block, "text": redact(block["text"])}
+            if isinstance(block, dict) and isinstance(block.get("text"), str)
+            else redact(block)
+            if isinstance(block, str)
+            else block
+            for block in content
+        ]
+    return content
+
+
+def _redacted(result: Any, redact: Callable[[str], str]) -> Any:
+    if isinstance(result, ToolMessage):
+        return result.model_copy(update={"content": _redact_content(result.content, redact)})
+    update = getattr(result, "update", None)
+    if isinstance(update, dict) and isinstance(update.get("messages"), list):
+        messages = [_redacted(m, redact) for m in update["messages"]]
+        return replace(result, update={**update, "messages": messages})
+    return result
+
+
+class _RedactToolResultsMiddleware(AgentMiddleware):
+    """Every tool's result -- and every error it raised -- passes here before
+    it is written to the conversation, so the model, the transcript, the UI
+    and the audit log all read the same blanked text. The one place secret
+    values are kept out of what the model reads. Outermost, so it also sees
+    the error messages `_catch_tool_errors` makes."""
+
+    def __init__(self, redact: Callable[[str], str]) -> None:
+        self._redact = redact
+
+    def wrap_tool_call(self, request: Any, handler: Any) -> Any:
+        return _redacted(handler(request), self._redact)
+
+    async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
+        return _redacted(await handler(request), self._redact)
+
+
 class _AnswerEveryToolCallMiddleware(AgentMiddleware):
     """Whatever left a tool call without a result (a stop, a killed app, an
     approval that was never answered), the provider sees every call
@@ -279,6 +322,7 @@ def build_langgraph_agent(
     defer_tools: bool = False,
     core_tool_names: Iterable[str] = (),
     take_steers: Callable[[], Awaitable[list[str]]] | None = None,
+    redact: Callable[[str], str] | None = None,
 ) -> Any:
     """Build a LangGraph agent reusing coscribe's own ToolMetadata.
 
@@ -395,6 +439,8 @@ def build_langgraph_agent(
     # (it re-raises GraphBubbleUp untouched either way), but outermost is
     # the natural place for a catch-all.
     middleware: list[Any] = [_catch_tool_errors]
+    if redact is not None:
+        middleware.insert(0, _RedactToolResultsMiddleware(redact))
     # Only for an Anthropic model: importing langchain_anthropic pulls in the
     # whole anthropic SDK, ~0.6s of every server start for people who never
     # use it. A model switch rebuilds this graph (ChatSessionLG.switch_model),

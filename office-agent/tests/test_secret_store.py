@@ -63,7 +63,7 @@ def test_a_machine_with_no_keychain_refuses_rather_than_write_a_plain_file(
     monkeypatch.setattr(secrets, "keychain_backend_usable", lambda: False)
 
     with pytest.raises(KeychainUnavailable, match="never written to a plain file"):
-        SecretStore(tmp_path).save("A", "value", ["example.com"])
+        SecretStore(tmp_path).save("A", "value-cccc", ["example.com"])
 
     assert not (tmp_path / "secrets.json").exists()
 
@@ -79,7 +79,7 @@ def test_a_keychain_that_refuses_the_write_leaves_no_trace(
     monkeypatch.setattr(secrets, "keychain_backend_usable", lambda: True)
 
     with pytest.raises(KeychainUnavailable):
-        SecretStore(tmp_path).save("A", "value", ["example.com"])
+        SecretStore(tmp_path).save("A", "value-cccc", ["example.com"])
 
     assert not (tmp_path / "secrets.json").exists()
 
@@ -88,28 +88,28 @@ def test_hosts_can_be_changed_without_the_value_and_the_value_replaced(
     tmp_path: Path, keychain: _FakeKeyring
 ) -> None:
     store = SecretStore(tmp_path)
-    store.save("K", "one", ["a.example.com"])
+    store.save("K", "value-one-1", ["a.example.com"])
 
     store.save("K", None, ["b.example.com", "*.c.example.com"])
     assert store.hosts_of("K") == ["b.example.com", "*.c.example.com"]
-    assert store.resolve("K") == "one"
+    assert store.resolve("K") == "value-one-1"
 
-    store.save("K", "two", ["b.example.com"])
-    assert store.resolve("K") == "two"
+    store.save("K", "value-two-2", ["b.example.com"])
+    assert store.resolve("K") == "value-two-2"
 
 
 @pytest.mark.parametrize(
     ("name", "value", "hosts", "message"),
     [
-        ("1bad", "v", ["a.com"], "name"),
-        ("has space", "v", ["a.com"], "name"),
+        ("1bad", "value-ok-1", ["a.com"], "name"),
+        ("has space", "value-ok-1", ["a.com"], "name"),
         ("OK", "", ["a.com"], "empty"),
-        ("OK", "v", [], "at least one host"),
-        ("OK", "v", ["https://a.com"], "isn't a host name"),
-        ("OK", "v", ["a.com/path"], "isn't a host name"),
-        ("OK", "v", ["a.com:443"], "isn't a host name"),
-        ("OK", "v", ["localhost"], "isn't a host name"),
-        ("OK", "v", "a.com", "list of host names"),
+        ("OK", "value-ok-1", [], "at least one host"),
+        ("OK", "value-ok-1", ["https://a.com"], "isn't a host name"),
+        ("OK", "value-ok-1", ["a.com/path"], "isn't a host name"),
+        ("OK", "value-ok-1", ["a.com:443"], "isn't a host name"),
+        ("OK", "value-ok-1", ["localhost"], "isn't a host name"),
+        ("OK", "value-ok-1", "a.com", "list of host names"),
     ],
 )
 def test_what_the_store_refuses(
@@ -117,6 +117,15 @@ def test_what_the_store_refuses(
 ) -> None:
     with pytest.raises(SecretError, match=message):
         SecretStore(tmp_path).save(name, value, hosts)
+
+    assert keychain.store == {}
+
+
+def test_a_value_too_short_to_tell_from_ordinary_text_is_refused(
+    tmp_path: Path, keychain: _FakeKeyring
+) -> None:
+    with pytest.raises(SecretError, match="at least 8"):
+        SecretStore(tmp_path).save("PIN", "1234567", ["a.com"])
 
     assert keychain.store == {}
 
@@ -147,7 +156,7 @@ def test_a_secret_missing_from_the_keychain_is_a_clear_error_naming_it(
     tmp_path: Path, keychain: _FakeKeyring
 ) -> None:
     store = SecretStore(tmp_path)
-    store.save("GONE", "v", ["a.com"])
+    store.save("GONE", "value-gone-1", ["a.com"])
     keychain.store.clear()
 
     with pytest.raises(SecretError, match="GONE"):
@@ -160,8 +169,8 @@ def test_deleting_a_secret_removes_its_keychain_entry_and_every_sessions_use_of_
     tmp_path: Path, keychain: _FakeKeyring
 ) -> None:
     store = SecretStore(tmp_path)
-    store.save("A", "va", ["a.com"])
-    store.save("B", "vb", ["b.com"])
+    store.save("A", "value-aaaa", ["a.com"])
+    store.save("B", "value-bbbb", ["b.com"])
     environments = SessionEnvironments(tmp_path)
     environments.set("s1", {}, ["A", "B"], store.names())
     environments.set("s2", {"X": "1"}, ["A"], store.names())
@@ -177,7 +186,7 @@ def test_deleting_a_secret_removes_its_keychain_entry_and_every_sessions_use_of_
 
 def test_a_session_environment_is_checked(tmp_path: Path, keychain: _FakeKeyring) -> None:
     store = SecretStore(tmp_path)
-    store.save("A", "va", ["a.com"])
+    store.save("A", "value-aaaa", ["a.com"])
     environments = SessionEnvironments(tmp_path)
 
     saved = environments.set("s", {"MODE": "fast"}, ["A", "A"], store.names())

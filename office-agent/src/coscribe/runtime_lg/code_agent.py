@@ -27,6 +27,7 @@ from ..code_runtime.install import CodexUnavailable
 from ..code_runtime.launch import codex_model
 from ..code_runtime.service import CodeService
 from ..code_runtime.thread import ApprovalRequest, CodexEvent, CodexThread, shell_script
+from ..runtime.secret_store import redactor
 from ..runtime.types import tool_metadata
 from ..tools.subagent_tasks import (
     SubAgentTask,
@@ -102,6 +103,9 @@ class _Run:
         self.record = record
         self.context = context
         self.previous = previous
+        # Codex is never given a secret, but what it prints is the model's
+        # to read, so it goes through the same blanking as any tool result.
+        self.redact = redactor(host.state_dir)
         self.entries: list[dict[str, Any]] = [{"kind": "user", "text": record.prompt}]
 
     async def save(self) -> None:
@@ -119,7 +123,7 @@ class _Run:
     async def on_event(self, event: CodexEvent) -> None:
         data = event.data
         if event.kind == "message" and data.get("text"):
-            self.entries.append({"kind": "agent", "text": data["text"]})
+            self.entries.append({"kind": "agent", "text": self.redact(data["text"])})
         elif event.kind == "command_started":
             self.record.tool_uses += 1
             self.record.last_tool = {
@@ -136,7 +140,7 @@ class _Run:
                     "arguments": command_args(str(data.get("command", ""))),
                     "result": {
                         "exit_code": exit_code,
-                        "output": str(data.get("output") or "")[-_OUTPUT_CHARS:],
+                        "output": self.redact(str(data.get("output") or "")[-_OUTPUT_CHARS:]),
                     },
                     "is_error": data.get("status") != "completed" or exit_code not in (0, None),
                 }
@@ -198,7 +202,7 @@ class _Run:
                 report += f"\n\nFiles created or changed in {folder}: " + ", ".join(
                     result.files_changed
                 )
-            record.result = report
+            record.result = self.redact(report)
             record.status = "succeeded"
         else:
             record.status = "failed"
