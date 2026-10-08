@@ -23,6 +23,7 @@ import {
   FilterIcon,
   FolderIcon,
   FolderPlusIcon,
+  LockIcon,
   HandIcon,
   ListChecksIcon,
   MoreIcon,
@@ -31,6 +32,7 @@ import {
   SearchIcon,
   TrashIcon,
 } from "./icons";
+import { EnvironmentDialog } from "./EnvironmentDialog";
 import { ThreadStatusIcon } from "./ThreadStatusIcon";
 
 const COLLAPSED_KEY = "coscribe.collapsedGroups";
@@ -67,6 +69,7 @@ function ThreadMenu({
   isCurrent,
   onClose,
   onRename,
+  onEnvironment,
   onMove,
   onArchive,
   onDelete,
@@ -76,6 +79,7 @@ function ThreadMenu({
   isCurrent: boolean;
   onClose: () => void;
   onRename: () => void;
+  onEnvironment: () => void;
   onMove: (group: string) => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -111,6 +115,9 @@ function ThreadMenu({
     >
       <button type="button" role="menuitem" className={itemClass} onClick={onRename}>
         <PencilIcon className="h-3.5 w-3.5" /> Rename
+      </button>
+      <button type="button" role="menuitem" className={itemClass} onClick={onEnvironment}>
+        <LockIcon className="h-3.5 w-3.5" /> Edit environment
       </button>
       <div className="relative" onMouseEnter={() => setSubmenu(true)}>
         <button
@@ -437,6 +444,7 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
   const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [environmentOf, setEnvironmentOf] = useState<ThreadSummary | null>(null);
   const [dragging, setDragging] = useState<ThreadSummary | null>(null);
   const [dropKey, setDropKey] = useState<string | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -651,6 +659,13 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
           );
         })}
       </div>
+      {environmentOf && (
+        <EnvironmentDialog
+          threadId={environmentOf.thread_id}
+          title={environmentOf.preview || environmentOf.thread_id}
+          onClose={() => setEnvironmentOf(null)}
+        />
+      )}
       {menu && (
         <ThreadMenu
           menu={menu}
@@ -659,6 +674,10 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
           onClose={() => setMenu(null)}
           onRename={() => {
             setRenamingId(menu.thread.thread_id);
+            setMenu(null);
+          }}
+          onEnvironment={() => {
+            setEnvironmentOf(menu.thread);
             setMenu(null);
           }}
           onMove={(group) => void move(menu.thread, group)}
