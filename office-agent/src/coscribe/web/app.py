@@ -1336,6 +1336,37 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         if connection is not None:
             await connection.close()
 
+    reconnecting: set[str] = set()
+
+    def _reconnect_stale_connector(name: str) -> None:
+        """A connector call hung or hit a dead session: connect it afresh in
+        the background, once at a time per connector."""
+        if name in reconnecting:
+            return
+        reconnecting.add(name)
+
+        async def reconnect() -> None:
+            try:
+                if settings.mcp_config_path is None or not settings.mcp_config_path.is_file():
+                    return
+                entry = _read_mcp_servers_raw(settings.mcp_config_path)["mcpServers"].get(name)
+                if entry is None:
+                    return
+                config = validate_mcp_config({"type": "mcp", "name": name, **entry})
+                await _disconnect_mcp_server_lg(name)
+                await _connect_and_register_mcp_server_lg(name, config)
+                await _refresh_all_sessions_extra_tools()
+            except Exception:  # noqa: BLE001 -- the Connectors page shows it as not connected
+                logging.getLogger(__name__).warning(
+                    "Reconnecting connector %r failed", name, exc_info=True
+                )
+            finally:
+                reconnecting.discard(name)
+
+        task = asyncio.create_task(reconnect())
+        sign_in_tasks.add(task)
+        task.add_done_callback(sign_in_tasks.discard)
+
     async def _connect_and_register_mcp_server_lg(
         name: str, config: Any, connect_timeout: float | None = None
     ) -> tuple[bool, str | None]:
@@ -1352,7 +1383,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
         extra = {} if connect_timeout is None else {"connect_timeout": connect_timeout}
         new_tools, connection, error = await connect_one_mcp_server_lg(
-            name, config, mcp_oauth.auth_for, **extra
+            name, config, mcp_oauth.auth_for, on_stale=_reconnect_stale_connector, **extra
         )
         if connection is None:
             return False, error
@@ -1571,7 +1602,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 from ..runtime_lg.mcp import connect_mcp_tools_lg
 
                 connect_task: asyncio.Task[Any] = asyncio.create_task(
-                    connect_mcp_tools_lg(settings.mcp_config_path, mcp_oauth.auth_for)
+                    connect_mcp_tools_lg(
+                        settings.mcp_config_path, mcp_oauth.auth_for, _reconnect_stale_connector
+                    )
                 )
                 mcp_connect_task = connect_task
                 try:

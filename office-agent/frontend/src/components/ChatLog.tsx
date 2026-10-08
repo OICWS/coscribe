@@ -494,7 +494,7 @@ function SummaryLabel({ parts }: { parts: SummaryParts }) {
       {parts.object && (
         <>
           {parts.glue ?? " "}
-          <code className="rounded bg-[var(--code-bg)] px-1 py-0.5 font-mono text-[0.85em]">{parts.object}</code>
+          <span className="font-medium text-[var(--fg)]">{parts.object}</span>
         </>
       )}
       {showDiffStats && parts.diffStat && <DiffStat added={parts.diffStat.added} removed={parts.diffStat.removed} />}
@@ -704,7 +704,7 @@ function ToolDetail({
     return <p className="px-3 py-2 text-[var(--muted)]">No result yet.</p>;
   }
   return (
-    <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all bg-[var(--code-bg)] px-3 py-2 font-mono text-xs leading-relaxed">
+    <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all bg-[var(--bg)] px-3 py-2 font-mono text-xs leading-relaxed">
       {typeof item.result === "string" ? item.result : JSON.stringify(item.result, null, 2)}
     </pre>
   );
@@ -723,7 +723,7 @@ function CodeCommandDetail({ item }: { item: Extract<ToolOrApprovalItem, { kind:
       {result === undefined ? (
         <p className="border-t border-[var(--border)] px-3 py-2 font-sans text-[var(--muted)]">No result yet.</p>
       ) : (
-        <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all border-t border-[var(--border)] bg-[var(--code-bg)] px-3 py-2">
+        <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all border-t border-[var(--border)] bg-[var(--bg)] px-3 py-2">
           {output || "(no output)"}
           {exitCode ? `\n(exit code ${exitCode})` : ""}
         </pre>
@@ -888,7 +888,7 @@ function ApprovalDetail({
           {typeof scriptArgs.description === "string" && scriptArgs.description && (
             <div className="text-xs text-[var(--muted)]">{scriptArgs.description}</div>
           )}
-          <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-all rounded-md bg-black/20 px-2 py-1.5 font-mono text-xs leading-normal">
+          <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 font-mono text-xs leading-normal">
             {typeof scriptArgs.script === "string" ? scriptArgs.script : JSON.stringify(scriptArgs.script)}
           </pre>
           <div className="text-xs text-[var(--muted)]">
@@ -898,7 +898,9 @@ function ApprovalDetail({
           </div>
         </div>
       ) : (
-        <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-xs text-[var(--muted)]">{JSON.stringify(item.arguments, null, 2)}</pre>
+        Object.keys(item.arguments).length > 0 && (
+          <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-all text-xs text-[var(--muted)]">{JSON.stringify(item.arguments, null, 2)}</pre>
+        )
       )}
       {item.status === "pending" ? (
         <div className="mt-2 flex gap-2">

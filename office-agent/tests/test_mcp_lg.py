@@ -535,3 +535,49 @@ def test_collapse_non_nullable_anyof_falls_back_to_object_then_first_branch() ->
 def test_collapse_non_nullable_anyof_tolerates_none_and_non_dict_input() -> None:
     _collapse_non_nullable_anyof(None)
     _collapse_non_nullable_anyof("not a schema")
+
+
+async def test_a_connector_call_that_hangs_or_fails_comes_back_as_an_error_and_asks_for_a_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_mcp(monkeypatch)
+
+    async def hang(x: str = "") -> tuple[str, None]:
+        await asyncio.sleep(3600)
+        return x, None
+
+    async def broken(x: str = "") -> tuple[str, None]:
+        raise RuntimeError("Session terminated")
+
+    async def fine(x: str = "") -> tuple[str, None]:
+        return f"got {x}", None
+
+    async def blank(x: str = "") -> tuple[str, None]:
+        return "", None
+
+    async def load(session: Any, **_: Any) -> list[StructuredTool]:
+        return [
+            StructuredTool.from_function(
+                coroutine=fn, name=name, description="d", response_format="content_and_artifact"
+            )
+            for name, fn in (("hang", hang), ("broken", broken), ("fine", fine), ("blank", blank))
+        ]
+
+    monkeypatch.setattr("coscribe.runtime_lg.mcp.load_mcp_tools", load)
+    stale: list[str] = []
+    connection = McpServerConnection(
+        "fs", {"command": "npx", "args": []}, None, 5, stale.append, call_timeout=0.05
+    )
+    tools = {t.name: t for t in await connection.connect()}
+
+    hung = await tools["hang"].ainvoke({"x": "a"})
+    failed = await tools["broken"].ainvoke({"x": "a"})
+    worked = await tools["fine"].ainvoke({"x": "a"})
+    empty = await tools["blank"].ainvoke({"x": "a"})
+    await connection.close()
+
+    assert "didn't answer within" in hung and "try the same call again" in hung
+    assert "Session terminated" in failed
+    assert worked == "got a"
+    assert "returned no content" in empty
+    assert stale == ["fs", "fs"]

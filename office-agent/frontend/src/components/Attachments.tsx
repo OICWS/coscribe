@@ -95,7 +95,9 @@ function ImageMenu({ at, src, onClose }: { at: MenuAt; src: string; onClose: () 
         Copy <span className="text-[var(--muted)]">Ctrl+C</span>
       </button>
       <div className="my-2 border-t border-[var(--border)]" />
-      <button type="button" role="menuitem" className={MENU_ITEM} onClick={run(() => document.execCommand("selectAll"))}>
+      <button type="button" role="menuitem" className={MENU_ITEM} onClick={run(() => {
+          document.execCommand("selectAll");
+        })}>
         Select All <span className="text-[var(--muted)]">Ctrl+A</span>
       </button>
     </div>,
