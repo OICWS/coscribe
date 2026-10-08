@@ -4942,6 +4942,49 @@ def test_adding_a_discover_skill_downloads_and_checks_it_lg(
     assert again.status_code == 400
 
 
+def test_skill_plugins_can_be_previewed_then_added_with_connectors_matched_to_ours(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools import skill_catalog
+
+    from .test_skill_catalog import _plugin_catalog
+
+    catalog, served = _plugin_catalog()
+    catalog["plugins"][0].update(
+        title="Pl",
+        author="A",
+        version="1.0",
+        description="d",
+        license="Apache-2.0",
+        updated="2026-01-01",
+        connectors=[
+            {"name": "notion", "url": "https://mcp.notion.com/mcp/"},
+            {"name": "odd", "url": "https://example.invalid/mcp"},
+        ],
+    )
+    monkeypatch.setattr(skill_catalog, "load_catalog", lambda: catalog)
+    monkeypatch.setattr("coscribe.web.app.load_catalog", lambda: catalog)
+    monkeypatch.setattr(skill_catalog, "_download", served.__getitem__)
+    skill_catalog._preview_cache.clear()
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        listed = client.get("/api/skills/plugins").json()
+        detail = client.get("/api/skills/plugins/pl").json()
+        preview = client.get("/api/skills/plugins/pl/files/skills/one/SKILL.md")
+        outside = client.get("/api/skills/plugins/pl/files/../x")
+        unknown = client.get("/api/skills/plugins/nope")
+        added = client.post("/api/skills/plugins/pl")
+        after = client.get("/api/skills/plugins").json()
+
+    assert [(p["id"], p["added"]) for p in listed] == [("pl", 0)]
+    assert [c["connector"] for c in detail["connectors"]] == ["notion", None]
+    assert detail["files"] == ["skills/one/SKILL.md", "skills/two/SKILL.md"]
+    assert preview.json()["content"].endswith("one")
+    assert outside.status_code == 404 and unknown.status_code == 404
+    assert added.json() == {"added": ["one", "two"]}
+    assert after[0]["added"] == 2
+
+
 def test_workspace_query_param_resolves_workspace_on_connect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

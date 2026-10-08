@@ -160,3 +160,65 @@ def install_catalog_skill(
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
     return target
+
+
+def get_plugin(plugin_id: str) -> dict[str, Any]:
+    plugin = next((p for p in load_catalog()["plugins"] if p["id"] == plugin_id), None)
+    if plugin is None:
+        raise SkillCatalogError(f"{plugin_id!r} isn't in Discover")
+    plugin_dict: dict[str, Any] = plugin
+    return plugin_dict
+
+
+def install_plugin(
+    skills_dir: Path, plugin_id: str, *, fetch: Callable[[str], bytes] | None = None
+) -> list[str]:
+    """Adds every skill of a plugin that isn't there yet. All or nothing: if
+    one download fails, the skills this call already added are removed again,
+    so Add can simply be pressed once more."""
+    plugin = get_plugin(plugin_id)
+    added: list[str] = []
+    try:
+        for name in plugin["skills"]:
+            if (Path(skills_dir) / name).exists():
+                continue
+            try:
+                install_catalog_skill(skills_dir, name, fetch=fetch)
+            except SkillCatalogError as exc:
+                if "already added" in str(exc):
+                    continue
+                raise
+            added.append(name)
+    except SkillCatalogError:
+        for name in added:
+            shutil.rmtree(Path(skills_dir) / name, ignore_errors=True)
+        raise
+    return added
+
+
+_preview_cache: dict[tuple[str, str], bytes] = {}
+
+
+def plugin_file(
+    plugin_id: str, path: str, *, fetch: Callable[[str], bytes] | None = None
+) -> bytes:
+    """One file of a plugin as pinned in the catalog, for previewing before
+    anything is added. Only paths the catalog lists can be asked for, and the
+    download is checked against the catalog's SHA-256 like an install is."""
+    plugin = get_plugin(plugin_id)
+    file = next((f for f in plugin["files"] if f["path"] == path), None)
+    if file is None:
+        raise SkillCatalogError(f"No such file: {path!r}")
+    key = (plugin["commit"], f"{plugin['path']}/{path}")
+    cached = _preview_cache.get(key)
+    if cached is not None:
+        return cached
+    url = _RAW_URL.format(repo=plugin["repo"], commit=plugin["commit"], src=key[1])
+    try:
+        data = (fetch or _download)(url)
+    except Exception as exc:  # noqa: BLE001 -- any network failure is the user's to see
+        raise SkillCatalogError(f"Couldn't download {path}: {exc}") from exc
+    if hashlib.sha256(data).hexdigest() != file["sha256"]:
+        raise SkillCatalogError(f"{path} didn't match the expected contents")
+    _preview_cache[key] = data
+    return data

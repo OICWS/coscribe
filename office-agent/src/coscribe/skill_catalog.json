@@ -1,6 +1,2413 @@
 {
  "repo": "anthropics/skills",
  "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+ "plugins": [
+  {
+   "id": "legal",
+   "title": "Legal",
+   "author": "Anthropic",
+   "version": "1.3.0",
+   "description": "Speed up contract review, NDA triage, and compliance workflows for in-house legal teams. Draft legal briefs, organize precedent research, and manage institutional knowledge.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "legal",
+   "updated": "2026-10-01",
+   "skills": [
+    "review-contract",
+    "triage-nda",
+    "compliance-check",
+    "legal-risk-assessment",
+    "legal-response",
+    "meeting-briefing"
+   ],
+   "connectors": [
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "box",
+     "url": "https://mcp.box.com"
+    },
+    {
+     "name": "egnyte",
+     "url": "https://mcp-server.egnyte.com/mcp"
+    },
+    {
+     "name": "atlassian",
+     "url": "https://mcp.atlassian.com/v1/mcp"
+    },
+    {
+     "name": "docusign",
+     "url": "https://mcp.docusign.com/mcp"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 281,
+     "sha256": "ed576b34443525c817a5fe10c9808b2c992cc1c051f673d91b40e7667e6f2155"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 704,
+     "sha256": "5b6a2d42d9e24bd9017de725b5c551bae452169ea7cc3fb1c4db21dbfa27003e"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1204,
+     "sha256": "1f420b2dada7768a536bf9668939ed67b193a0466af1d4617db0e80370e70dc4"
+    },
+    {
+     "path": "LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+     "path": "README.md",
+     "size": 9773,
+     "sha256": "8fb3696cc0a641d18213318dc503fed6086b3ea4aab5a2484b9cee3508ed5429"
+    },
+    {
+     "path": "skills/compliance-check/SKILL.md",
+     "size": 14694,
+     "sha256": "8dff8ebe7eda9ad5e38f3faf1016a7fc1eeba65bcdb7f5ae45ea507824bbc1c2"
+    },
+    {
+     "path": "skills/legal-response/SKILL.md",
+     "size": 16174,
+     "sha256": "b3a0585ee00a53ccb159fbf5b7dd4d4b45c39e5e65cc8f4f39cbb134fef493db"
+    },
+    {
+     "path": "skills/legal-risk-assessment/SKILL.md",
+     "size": 12581,
+     "sha256": "9f7985e3a98ac8419b52067cdaa1b72f754fa38c20489e7f0bf9de36347d4d89"
+    },
+    {
+     "path": "skills/meeting-briefing/SKILL.md",
+     "size": 8990,
+     "sha256": "4d19bc2ddb2138d1b306b150c5d0900ce0a398d5ab690b8eba8101ef33d98baa"
+    },
+    {
+     "path": "skills/review-contract/SKILL.md",
+     "size": 16708,
+     "sha256": "3a6413475f51adedbff130f4d5aabbeeacfb2abd323e0338bc91c21937fbfb76"
+    },
+    {
+     "path": "skills/triage-nda/SKILL.md",
+     "size": 14583,
+     "sha256": "767a8f6759268e003ee882af8dfb56579aca2121b9dc49a2c65c4e77de93f768"
+    }
+   ]
+  },
+  {
+   "id": "finance",
+   "title": "Finance",
+   "author": "Anthropic",
+   "version": "1.3.0",
+   "description": "Streamline finance and accounting workflows, from journal entries and reconciliation to financial statements and variance analysis. Speed up audit prep, month-end close, and keeping your books clean.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "finance",
+   "updated": "2026-10-01",
+   "skills": [
+    "audit-support",
+    "close-management",
+    "financial-statements",
+    "journal-entry",
+    "reconciliation",
+    "sox-testing",
+    "variance-analysis"
+   ],
+   "connectors": [
+    {
+     "name": "snowflake",
+     "url": ""
+    },
+    {
+     "name": "databricks",
+     "url": ""
+    },
+    {
+     "name": "bigquery",
+     "url": "https://bigquery.googleapis.com/mcp"
+    },
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 309,
+     "sha256": "e573982c1366ad1bc8580575734bc583e16673de417dd28e0464ba130fd852b6"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 573,
+     "sha256": "53fa121f50a637beca5976d49cf2083716bba8bedbd0126b6ed073126a20ab77"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1159,
+     "sha256": "af6f4e93e4af385fef0946f685216ba57104f785f35b8b596ea624808213624b"
+    },
+    {
+     "path": "LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+     "path": "README.md",
+     "size": 5248,
+     "sha256": "055ceb266a9f8f45607ca1ee28e1ace10b8d761d83d8fc7bf142f46ef84def2b"
+    },
+    {
+     "path": "skills/audit-support/SKILL.md",
+     "size": 16801,
+     "sha256": "6e53c9529c42bb92c11d00a58af5119f7383903d9cb3b911625089fec2ff4784"
+    },
+    {
+     "path": "skills/close-management/SKILL.md",
+     "size": 10278,
+     "sha256": "6c2df93bcd15eddf65017445fa44f3eb0b16a755711a5e0602d73ca595e73732"
+    },
+    {
+     "path": "skills/financial-statements/SKILL.md",
+     "size": 14699,
+     "sha256": "1a9ba1cc85495eef32fa250b8a4c05e4854430af574a290b855f919dbb557dfc"
+    },
+    {
+     "path": "skills/journal-entry/SKILL.md",
+     "size": 5144,
+     "sha256": "c085de41feb0b8c74771cdd631fff1f668ec253938c69fee47b6a953fc03a266"
+    },
+    {
+     "path": "skills/reconciliation/SKILL.md",
+     "size": 8144,
+     "sha256": "aa17e90539f4d4d84130c910c7f527236bfaa71977c4c03493c8e8e515ddeea6"
+    },
+    {
+     "path": "skills/sox-testing/SKILL.md",
+     "size": 9306,
+     "sha256": "5e5939a070a25d9696b27aaec6c20e64084e6f58637994b2f7ec92744074ea23"
+    },
+    {
+     "path": "skills/variance-analysis/SKILL.md",
+     "size": 11232,
+     "sha256": "467db7de3fb118550d013409254e2d4a9f87385a661e154655bf3431919b0ba1"
+    }
+   ]
+  },
+  {
+   "id": "marketing",
+   "title": "Marketing",
+   "author": "Anthropic",
+   "version": "1.2.0",
+   "description": "Create content, plan campaigns, and analyze performance across marketing channels. Maintain brand voice consistency, track competitors, and report on what's working.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "marketing",
+   "updated": "2026-10-01",
+   "skills": [
+    "brand-review",
+    "campaign-plan",
+    "competitive-brief",
+    "content-creation",
+    "draft-content",
+    "email-sequence",
+    "performance-report",
+    "seo-audit"
+   ],
+   "connectors": [
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "canva",
+     "url": "https://mcp.canva.com/mcp"
+    },
+    {
+     "name": "figma",
+     "url": "https://mcp.figma.com/mcp"
+    },
+    {
+     "name": "hubspot",
+     "url": "https://mcp.hubspot.com/anthropic"
+    },
+    {
+     "name": "amplitude",
+     "url": "https://mcp.amplitude.com/mcp"
+    },
+    {
+     "name": "amplitude-eu",
+     "url": "https://mcp.eu.amplitude.com/mcp"
+    },
+    {
+     "name": "notion",
+     "url": "https://mcp.notion.com/mcp"
+    },
+    {
+     "name": "ahrefs",
+     "url": "https://api.ahrefs.com/mcp/mcp"
+    },
+    {
+     "name": "similarweb",
+     "url": "https://mcp.similarweb.com"
+    },
+    {
+     "name": "klaviyo",
+     "url": "https://mcp.klaviyo.com/mcp"
+    },
+    {
+     "name": "supermetrics",
+     "url": "https://mcp.supermetrics.com/mcp"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 277,
+     "sha256": "efa94746df716ae20e30d7140caea560adb644962757efe9fb1f3dea0e139833"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 1260,
+     "sha256": "2099579862ab8d7e62dd502f146cc398dcf6566d001706779c83e2e70a4021cd"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1260,
+     "sha256": "e85d04dde99b220ba438cf1345212e7414da536fb7d781d83a4ad57270586630"
+    },
+    {
+     "path": "LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+     "path": "README.md",
+     "size": 4531,
+     "sha256": "fbb0f36f1c1c1d58c69a40ab90702e683702e7767b65857d7f57cbe3d43cfdeb"
+    },
+    {
+     "path": "skills/brand-review/SKILL.md",
+     "size": 12936,
+     "sha256": "759f29397a908c32521080247292a4e1c52ac01643bea70ccd6e807e86c1fa4b"
+    },
+    {
+     "path": "skills/campaign-plan/SKILL.md",
+     "size": 14153,
+     "sha256": "f0b146074b64ee0fd52f7864e30191eab83878c8c1e3e7cf24754e13c7dbfad3"
+    },
+    {
+     "path": "skills/competitive-brief/SKILL.md",
+     "size": 13150,
+     "sha256": "c1e5442facbc3206ac6a77392bef009fe9aff4ba7c2678e2f4118be2f6be82b3"
+    },
+    {
+     "path": "skills/content-creation/SKILL.md",
+     "size": 8830,
+     "sha256": "17f0bfd536502a91c760accaa1ae6c0c76c3812973571729664133e282c5dded"
+    },
+    {
+     "path": "skills/draft-content/SKILL.md",
+     "size": 4612,
+     "sha256": "0bfe029dcc039ff71a76b0fec3c5d900fba0e447eb9dcd505ab25b14be3577fd"
+    },
+    {
+     "path": "skills/email-sequence/SKILL.md",
+     "size": 10627,
+     "sha256": "4303252cbe340b19945b3e58d46430fdf42ea47b3e26d985e3ef1d6da5e36021"
+    },
+    {
+     "path": "skills/performance-report/SKILL.md",
+     "size": 19213,
+     "sha256": "997397e23ba5124cdcbbf17e4be9f5cb36f2a2145b5648e02b2852c91c3cc140"
+    },
+    {
+     "path": "skills/seo-audit/SKILL.md",
+     "size": 9526,
+     "sha256": "25008ccdda6f4d9b7ba05f11120d0b9cc976c2d0b04f3d86605e63b1a54a8c40"
+    }
+   ]
+  },
+  {
+   "id": "operations",
+   "title": "Operations",
+   "author": "Anthropic",
+   "version": "1.3.0",
+   "description": "Optimize business operations \u2014 vendor management, process documentation, change management, capacity planning, and compliance tracking. Keep your organization running efficiently.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "operations",
+   "updated": "2026-10-01",
+   "skills": [
+    "capacity-plan",
+    "change-request",
+    "compliance-tracking",
+    "process-doc",
+    "process-optimization",
+    "risk-assessment",
+    "runbook",
+    "status-report",
+    "vendor-review"
+   ],
+   "connectors": [
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    },
+    {
+     "name": "notion",
+     "url": "https://mcp.notion.com/mcp"
+    },
+    {
+     "name": "atlassian",
+     "url": "https://mcp.atlassian.com/v1/mcp"
+    },
+    {
+     "name": "asana",
+     "url": "https://mcp.asana.com/v2/mcp"
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 294,
+     "sha256": "537581962ab21a90bdb853fd21864af226378e70347c49e843fe5feaf2c69e0f"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 617,
+     "sha256": "677f4b6de79ae668339fb11682c16ab7bfdb491fffc66c96f14f6a0552445ecb"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1225,
+     "sha256": "20d50b6d90afca267201b55f131398efb6a995ed45b1cc45ab5a07642267dc83"
+    },
+    {
+     "path": "README.md",
+     "size": 5377,
+     "sha256": "1f3ac674cfa7d89057dad669c7fc2a23fd633d094e9a6e949f627cedebf622d9"
+    },
+    {
+     "path": "skills/capacity-plan/SKILL.md",
+     "size": 3487,
+     "sha256": "3b8f1379471eae19e5be26c750681ad0c6054f4c8cdbf79c94309fcf46957ea8"
+    },
+    {
+     "path": "skills/change-request/SKILL.md",
+     "size": 3764,
+     "sha256": "b1ee71cc1fecb22c7d27e2e00171f5d62fb54c405095b51098dacfea0447d8d7"
+    },
+    {
+     "path": "skills/compliance-tracking/SKILL.md",
+     "size": 1592,
+     "sha256": "644d393abdfddc8c37f7a7804f601e7bbd476e95571e6dcb4d916e478ba8ebd5"
+    },
+    {
+     "path": "skills/process-doc/SKILL.md",
+     "size": 2503,
+     "sha256": "fceeeddb363e813ba831f9f2de1adb4c7e45ad179366bbb9ea9e40377abe96a9"
+    },
+    {
+     "path": "skills/process-optimization/SKILL.md",
+     "size": 1288,
+     "sha256": "14099838fdbfca24057e934fc22ed17f94629c5e9c9cec470f32e3063d0575f9"
+    },
+    {
+     "path": "skills/risk-assessment/SKILL.md",
+     "size": 1630,
+     "sha256": "82e29810a762c396a56f92bbd5c5afd252f7a07c6be69a246c28f7b82c4086d9"
+    },
+    {
+     "path": "skills/runbook/SKILL.md",
+     "size": 2519,
+     "sha256": "c5c3eaa4c22fff96ec7239ce67eb3e100661b20a2818749e2f7ee21787233185"
+    },
+    {
+     "path": "skills/status-report/SKILL.md",
+     "size": 2571,
+     "sha256": "8c3a21075294a5c5b7a1a7930613e53f0afbdbc12cf9e05d4bd08e6950c0a0d9"
+    },
+    {
+     "path": "skills/vendor-review/SKILL.md",
+     "size": 3170,
+     "sha256": "c2a959a7ed068e34a83984cf223754062e6819deb0ba1ca33eb747b4cc808d5e"
+    }
+   ]
+  },
+  {
+   "id": "human-resources",
+   "title": "People & HR",
+   "author": "Anthropic",
+   "version": "1.3.0",
+   "description": "Streamline people operations \u2014 recruiting, onboarding, performance reviews, compensation analysis, and policy guidance. Maintain compliance and keep your team running smoothly.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "human-resources",
+   "updated": "2026-10-01",
+   "skills": [
+    "comp-analysis",
+    "draft-offer",
+    "interview-prep",
+    "onboarding",
+    "org-planning",
+    "people-report",
+    "performance-review",
+    "policy-lookup",
+    "recruiting-pipeline"
+   ],
+   "connectors": [
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    },
+    {
+     "name": "notion",
+     "url": "https://mcp.notion.com/mcp"
+    },
+    {
+     "name": "atlassian",
+     "url": "https://mcp.atlassian.com/v1/mcp"
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 296,
+     "sha256": "deeaab9d979dbc3fb20a43a4cd1a7fdfb5b7678efeab36814997a167f160e648"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 529,
+     "sha256": "baaa982cd45979685b11820f6840176594f5a482557dad9564466f3fbf402ff9"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1072,
+     "sha256": "88d45a2a71ad0d8a76a93c5ce531fe7fcec1e23114fb23a91472c831f6904d41"
+    },
+    {
+     "path": "README.md",
+     "size": 5257,
+     "sha256": "a42f6a452fa46a52d2b7b8545a5630521ae816fb517bdf451086ec4bd2608fd0"
+    },
+    {
+     "path": "skills/comp-analysis/SKILL.md",
+     "size": 3263,
+     "sha256": "1af196cd1c38cdb96565eadebcf13fa25e979469b3e06f4791e18baa7f2534a6"
+    },
+    {
+     "path": "skills/draft-offer/SKILL.md",
+     "size": 2359,
+     "sha256": "b50f677f4c8fb769b9cd0be51cd250e0e21a4530d579d5f400b7d7b1b1a63ea9"
+    },
+    {
+     "path": "skills/interview-prep/SKILL.md",
+     "size": 1436,
+     "sha256": "c687311babdeccf086aa5f6d86dcbfc3a9d1b8bb7124f072450ffa4315d98c4c"
+    },
+    {
+     "path": "skills/onboarding/SKILL.md",
+     "size": 3195,
+     "sha256": "c9210cdd00f8c2998a01c6d1310a8742aafa82a5861fb7c1c18686b72a56da97"
+    },
+    {
+     "path": "skills/org-planning/SKILL.md",
+     "size": 1227,
+     "sha256": "b3c6e33d251487225485c7fe455586f0cd490b282d7e41054273fa60820891ea"
+    },
+    {
+     "path": "skills/people-report/SKILL.md",
+     "size": 2782,
+     "sha256": "e68d00be15a681da288e6023df095a952add099db2c14873c47a69e3ab3634b8"
+    },
+    {
+     "path": "skills/performance-review/SKILL.md",
+     "size": 4910,
+     "sha256": "a34e3f49e7c8619f07fd218cb2b6a6d57572dd7a0a78c72977dcd1739578e588"
+    },
+    {
+     "path": "skills/policy-lookup/SKILL.md",
+     "size": 4199,
+     "sha256": "5fc79b5e81922431b5665d33552dcce7de499e2680b4a81720cb4e2a68015edf"
+    },
+    {
+     "path": "skills/recruiting-pipeline/SKILL.md",
+     "size": 1213,
+     "sha256": "a00b442f701faa6eb65b8ecc8fcf375d5a33ec827b987ba8b04edaef0e90b92f"
+    }
+   ]
+  },
+  {
+   "id": "product-management",
+   "title": "Product",
+   "author": "Anthropic",
+   "version": "1.2.0",
+   "description": "Write feature specs, plan roadmaps, and synthesize user research faster. Keep stakeholders updated and stay ahead of the competitive landscape.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "product-management",
+   "updated": "2026-10-01",
+   "skills": [
+    "metrics-review",
+    "product-brainstorming",
+    "roadmap-update",
+    "sprint-planning",
+    "stakeholder-update",
+    "synthesize-research",
+    "write-spec"
+   ],
+   "connectors": [
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "linear",
+     "url": "https://mcp.linear.app/mcp"
+    },
+    {
+     "name": "asana",
+     "url": "https://mcp.asana.com/v2/mcp"
+    },
+    {
+     "name": "monday",
+     "url": "https://mcp.monday.com/mcp"
+    },
+    {
+     "name": "clickup",
+     "url": "https://mcp.clickup.com/mcp"
+    },
+    {
+     "name": "atlassian",
+     "url": "https://mcp.atlassian.com/v1/mcp"
+    },
+    {
+     "name": "notion",
+     "url": "https://mcp.notion.com/mcp"
+    },
+    {
+     "name": "figma",
+     "url": "https://mcp.figma.com/mcp"
+    },
+    {
+     "name": "amplitude",
+     "url": "https://mcp.amplitude.com/mcp"
+    },
+    {
+     "name": "amplitude-eu",
+     "url": "https://mcp.eu.amplitude.com/mcp"
+    },
+    {
+     "name": "pendo",
+     "url": "https://app.pendo.io/mcp/v0/shttp"
+    },
+    {
+     "name": "intercom",
+     "url": "https://mcp.intercom.com/mcp"
+    },
+    {
+     "name": "fireflies",
+     "url": "https://api.fireflies.ai/mcp"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    },
+    {
+     "name": "similarweb",
+     "url": "https://mcp.similarweb.com/mcp"
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 264,
+     "sha256": "69742e798d5052d41188b877c1ab39c7184bdf03ae946bbaeb794fd20c8e5f85"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 1528,
+     "sha256": "cf1e1d5e2b5a51eecdb2cf15463527b976c41db20997e6a864dd746834a0ce1b"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1429,
+     "sha256": "f52733eb0cd1b46f96cbf15bd9d8dd5215c9341d9323f42da076bcddccda2f5e"
+    },
+    {
+     "path": "LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+     "path": "README.md",
+     "size": 6546,
+     "sha256": "44c21947033cdff521f01adc77f1cf38ea71abe0027cf1d625090ac949a13b9f"
+    },
+    {
+     "path": "commands/brainstorm.md",
+     "size": 7157,
+     "sha256": "fb0ce47a71ac9b7d952cfaafaf40ad361b53d5e9627e93f409bd1ccc80cc0522"
+    },
+    {
+     "path": "skills/metrics-review/SKILL.md",
+     "size": 18038,
+     "sha256": "e92f364b668074c72b36fd0f69a6adef2ead66640b2c17dc824c043fb613d278"
+    },
+    {
+     "path": "skills/product-brainstorming/SKILL.md",
+     "size": 15944,
+     "sha256": "53ee71b6863b277aba87002d8a5bb58bd2a4172d7cfeb2e282a0161958edc8e7"
+    },
+    {
+     "path": "skills/roadmap-update/SKILL.md",
+     "size": 12372,
+     "sha256": "bdb121e290b590d60b94bca84d1700a8803c78db9f68f2a28fd04ccfe8aceb9e"
+    },
+    {
+     "path": "skills/sprint-planning/SKILL.md",
+     "size": 4144,
+     "sha256": "c078d3f838c783e9ab53ca1a4b4c04dcd7930a55a995731b8c020cd656cb1edd"
+    },
+    {
+     "path": "skills/stakeholder-update/SKILL.md",
+     "size": 14677,
+     "sha256": "bcdb8ee95dc34d025dcc3d98e7435c4dca45930581b3b7a8707f8770dd364e79"
+    },
+    {
+     "path": "skills/synthesize-research/SKILL.md",
+     "size": 16135,
+     "sha256": "ae98c11102545c911a1ea5d8527be0e08a3db8e53327f2865f0db19bbb2d7e9c"
+    },
+    {
+     "path": "skills/write-spec/SKILL.md",
+     "size": 12326,
+     "sha256": "ca6670913878b4ac4582727562bfced5271492a5a800d934f68c9e7bc1cd4dcc"
+    }
+   ]
+  },
+  {
+   "id": "data",
+   "title": "Data & analytics",
+   "author": "Anthropic",
+   "version": "1.1.0",
+   "description": "Write SQL, explore datasets, and generate insights faster. Build visualizations and dashboards, and turn raw data into clear stories for stakeholders.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "data",
+   "updated": "2026-10-01",
+   "skills": [
+    "build-dashboard",
+    "create-viz",
+    "data-visualization",
+    "explore-data",
+    "sql-queries",
+    "statistical-analysis",
+    "validate-data"
+   ],
+   "connectors": [
+    {
+     "name": "snowflake",
+     "url": ""
+    },
+    {
+     "name": "databricks",
+     "url": ""
+    },
+    {
+     "name": "bigquery",
+     "url": "https://bigquery.googleapis.com/mcp"
+    },
+    {
+     "name": "hex",
+     "url": "https://app.hex.tech/mcp"
+    },
+    {
+     "name": "amplitude",
+     "url": "https://mcp.amplitude.com/mcp"
+    },
+    {
+     "name": "amplitude-eu",
+     "url": "https://mcp.eu.amplitude.com/mcp"
+    },
+    {
+     "name": "atlassian",
+     "url": "https://mcp.atlassian.com/v1/mcp"
+    },
+    {
+     "name": "definite",
+     "url": "https://api.definite.app/v3/mcp/http"
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 257,
+     "sha256": "9a6e5a0dfb8aa482914f36a0466e2514cc757d418fa741187b5ff84bf32d405f"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 721,
+     "sha256": "359c6cc16ca1aea8e709b1940d296ae4d3f9bfb1acef9d75c523a3d6b05f4939"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1061,
+     "sha256": "79de0e9613ef7870e773b6dcdcb7d50f4bff2c0574c14ab5e0aeb29014dcec7b"
+    },
+    {
+     "path": "LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+     "path": "README.md",
+     "size": 5067,
+     "sha256": "4c7eb5edd9298a3cec8bb6a3cd703f28c81d3bf405ff790d6a70588d7131db70"
+    },
+    {
+     "path": "skills/build-dashboard/SKILL.md",
+     "size": 26002,
+     "sha256": "6f23faa0b266820a23096f76df9d83e6b67597af4fc8c3306b4eba7e9f409f99"
+    },
+    {
+     "path": "skills/create-viz/SKILL.md",
+     "size": 5151,
+     "sha256": "3b13a9c2c9d2b1d36f9c323d952d93f578216f2094bc80d4be6fd4ccbfe9b77d"
+    },
+    {
+     "path": "skills/data-visualization/SKILL.md",
+     "size": 11051,
+     "sha256": "5811e8b3547cda6bc8af118aaf0d7589e8861cdc9facce6372dc78aea99ab87d"
+    },
+    {
+     "path": "skills/explore-data/SKILL.md",
+     "size": 11520,
+     "sha256": "af7590fa616360259da712b5ede5f79b817beb854c47a465f95774354988e8a2"
+    },
+    {
+     "path": "skills/sql-queries/SKILL.md",
+     "size": 11126,
+     "sha256": "dbd5a5e2d563d83ca6d4d033206f285f503296eabff4a35545cdb4cb5302bd9a"
+    },
+    {
+     "path": "skills/statistical-analysis/SKILL.md",
+     "size": 10434,
+     "sha256": "91a15cfc144efffcd622b09827362a73993a3ff30e3a78114801832477c9f8a0"
+    },
+    {
+     "path": "skills/validate-data/SKILL.md",
+     "size": 14916,
+     "sha256": "1e424822043480375b80aef9416227b1c8083af749ca536568716265f79ca54b"
+    }
+   ]
+  },
+  {
+   "id": "design",
+   "title": "Design",
+   "author": "Anthropic",
+   "version": "1.2.0",
+   "description": "Accelerate design workflows \u2014 critique, design system management, UX writing, accessibility audits, research synthesis, and dev handoff. From exploration to pixel-perfect specs.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "design",
+   "updated": "2026-10-01",
+   "skills": [
+    "accessibility-review",
+    "design-critique",
+    "design-handoff",
+    "design-system",
+    "research-synthesis",
+    "user-research",
+    "ux-copy"
+   ],
+   "connectors": [
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "figma",
+     "url": "https://mcp.figma.com/mcp"
+    },
+    {
+     "name": "linear",
+     "url": "https://mcp.linear.app/mcp"
+    },
+    {
+     "name": "asana",
+     "url": "https://mcp.asana.com/v2/mcp"
+    },
+    {
+     "name": "atlassian",
+     "url": "https://mcp.atlassian.com/v1/mcp"
+    },
+    {
+     "name": "notion",
+     "url": "https://mcp.notion.com/mcp"
+    },
+    {
+     "name": "intercom",
+     "url": "https://mcp.intercom.com/mcp"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 288,
+     "sha256": "334481226cbe4232a95418484be7e503bfbf01431756f4bb2743a2345a28f89b"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 880,
+     "sha256": "7311b6be5c42019a7cbfa05b4bde48b642409f35bfde87d552ce7a314b0085c7"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1139,
+     "sha256": "242e232bb37b2bd5778d2e88db7edb53a6100819a8f037d786a3e1a55b4d141f"
+    },
+    {
+     "path": "README.md",
+     "size": 4743,
+     "sha256": "77d23b951d0b82609b1f0cb7d6ae18860ea5b07e5f5d3d25b0f6e92dee87a1c8"
+    },
+    {
+     "path": "skills/accessibility-review/SKILL.md",
+     "size": 4278,
+     "sha256": "ef42982af0d51238dda2ab16d08626712891bdd41864876c32d1e7b13fb3124f"
+    },
+    {
+     "path": "skills/design-critique/SKILL.md",
+     "size": 3923,
+     "sha256": "3a4f260eb9f60b431782bf6d90f22afb480c0c67860267a032df58a3e1bd19cd"
+    },
+    {
+     "path": "skills/design-handoff/SKILL.md",
+     "size": 3953,
+     "sha256": "38f1efc807928030654218443ad07f6a37ac82de6b4d627a03113a3568d787b7"
+    },
+    {
+     "path": "skills/design-system/SKILL.md",
+     "size": 5600,
+     "sha256": "fb31bd0144c43955106f01927126ae9fd2d4148be44c8d5887b3391f40c31445"
+    },
+    {
+     "path": "skills/research-synthesis/SKILL.md",
+     "size": 3014,
+     "sha256": "40048615dc81fc8b9b06104769498214d61a35ae4518a0995a12bbbd0ab945a1"
+    },
+    {
+     "path": "skills/user-research/SKILL.md",
+     "size": 1751,
+     "sha256": "fa18fc13d0f44aa869102962ef9466417ade726d659465195a40fbcf08cee156"
+    },
+    {
+     "path": "skills/ux-copy/SKILL.md",
+     "size": 3436,
+     "sha256": "d46a00a62ec637e9ca9d5f7823ea3e0a4ec26dffc53bb5035f59b48ebfcdcde7"
+    }
+   ]
+  },
+  {
+   "id": "customer-support",
+   "title": "Customer support",
+   "author": "Anthropic",
+   "version": "1.3.0",
+   "description": "Triage tickets, draft responses, escalate issues, and build your knowledge base. Research customer context and turn resolved issues into self-service content.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "customer-support",
+   "updated": "2026-10-01",
+   "skills": [
+    "customer-escalation",
+    "customer-research",
+    "draft-response",
+    "kb-article",
+    "ticket-triage"
+   ],
+   "connectors": [
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "intercom",
+     "url": "https://mcp.intercom.com/mcp"
+    },
+    {
+     "name": "hubspot",
+     "url": "https://mcp.hubspot.com/anthropic"
+    },
+    {
+     "name": "guru",
+     "url": "https://mcp.api.getguru.com/mcp"
+    },
+    {
+     "name": "atlassian",
+     "url": "https://mcp.atlassian.com/v1/mcp"
+    },
+    {
+     "name": "notion",
+     "url": "https://mcp.notion.com/mcp"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 277,
+     "sha256": "4abc451ebdc9d6ecb04f4b5a59dde8ea25727c20886fa422fa38881fbfb267e6"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 805,
+     "sha256": "0c179e7e90c016de549805b3d9f458e841458f03497794033fe49f98eed4b166"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 1121,
+     "sha256": "7a3eefc8558e46460eb83638d522ceb284382bf56bb70cd85f75f3024e64b706"
+    },
+    {
+     "path": "LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+     "path": "README.md",
+     "size": 5592,
+     "sha256": "90d0ad3d1a3820847625eef0bb0c4ec2cb7261397555757bd3b94045e17116a9"
+    },
+    {
+     "path": "skills/customer-escalation/SKILL.md",
+     "size": 11205,
+     "sha256": "90c33574a41371e8e116aaf40237141adcd6075ef8bcb9de993de2b543867b3e"
+    },
+    {
+     "path": "skills/customer-research/SKILL.md",
+     "size": 10232,
+     "sha256": "9c504672d26dbb01ad4bb527a5352399760503aea0edf83bd3695e6bc346a128"
+    },
+    {
+     "path": "skills/draft-response/SKILL.md",
+     "size": 14581,
+     "sha256": "1a201228b75a98fc3b5d45090cb7443d50df204b2ee748bfc8970790a64f0026"
+    },
+    {
+     "path": "skills/kb-article/SKILL.md",
+     "size": 12274,
+     "sha256": "cfc300f5ecc5128910a8ff04514d565a45ca9178bf1dc2a40cc40e2ce4db9292"
+    },
+    {
+     "path": "skills/ticket-triage/SKILL.md",
+     "size": 11276,
+     "sha256": "d0e5e95443e358ad2a74811b196071d10807ca95aa20351ab5760feeecee1294"
+    }
+   ]
+  },
+  {
+   "id": "sales",
+   "title": "Sales",
+   "author": "Anthropic",
+   "version": "2.0.1",
+   "description": "Sales skills that work with the tools your team already uses - your CRM, email, calendar, chat and call recorder - or with uploaded files. Prep calls, summarize and follow up, research accounts, review deals and pipeline, and write the forecast. When you ask, it can update CRM records, create email drafts or send email, post to chat and book meetings through your connected tools.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/knowledge-work-plugins",
+   "commit": "8444efcd48f7012f09797778a36a33e73d0861f4",
+   "path": "sales",
+   "updated": "2026-10-01",
+   "skills": [
+    "account-research",
+    "call-summary",
+    "competitive-intelligence",
+    "create-an-asset",
+    "draft-outreach",
+    "handle-objection"
+   ],
+   "connectors": [
+    {
+     "name": "slack",
+     "url": "https://mcp.slack.com/mcp"
+    },
+    {
+     "name": "hubspot",
+     "url": "https://mcp.hubspot.com/anthropic"
+    },
+    {
+     "name": "salesforce",
+     "url": "https://api.salesforce.com/platform/mcp/v1/platform/headless-360"
+    },
+    {
+     "name": "close",
+     "url": "https://mcp.close.com/mcp"
+    },
+    {
+     "name": "monday",
+     "url": "https://mcp.monday.com/mcp"
+    },
+    {
+     "name": "clay",
+     "url": "https://api.clay.com/v3/mcp"
+    },
+    {
+     "name": "zoominfo",
+     "url": "https://mcp.zoominfo.com/mcp"
+    },
+    {
+     "name": "notion",
+     "url": "https://mcp.notion.com/mcp"
+    },
+    {
+     "name": "atlassian",
+     "url": "https://mcp.atlassian.com/v1/mcp"
+    },
+    {
+     "name": "fireflies",
+     "url": "https://api.fireflies.ai/mcp"
+    },
+    {
+     "name": "apollo",
+     "url": "https://mcp.apollo.io/mcp"
+    },
+    {
+     "name": "outreach",
+     "url": "https://api.outreach.io/mcp/"
+    },
+    {
+     "name": "google calendar",
+     "url": ""
+    },
+    {
+     "name": "gmail",
+     "url": ""
+    },
+    {
+     "name": "microsoft-365",
+     "url": "https://microsoft365.mcp.claude.com/mcp"
+    },
+    {
+     "name": "similarweb",
+     "url": "https://mcp.similarweb.com/mcp"
+    },
+    {
+     "name": "google drive",
+     "url": ""
+    },
+    {
+     "name": "gong",
+     "url": "https://mcp.gong.io/mcp"
+    },
+    {
+     "name": "zoom",
+     "url": "https://mcp.zoom.us/mcp/zoom/streamable"
+    },
+    {
+     "name": "otter-ai",
+     "url": "https://mcp.otter.ai/mcp"
+    },
+    {
+     "name": "calendly",
+     "url": "https://mcp.calendly.com/"
+    },
+    {
+     "name": "lusha",
+     "url": "https://mcp.lusha.com/mcp/claude"
+    },
+    {
+     "name": "crunchbase",
+     "url": "https://mcp.crunchbase.com/"
+    }
+   ],
+   "files": [
+    {
+     "path": ".claude-plugin/plugin.json",
+     "size": 490,
+     "sha256": "cfb8d710a3a2e60cd8e41647cce2addff990d4cc5ef10d2cbcd0569f07a89f15"
+    },
+    {
+     "path": ".mcp.json",
+     "size": 2179,
+     "sha256": "2de43adcedd0cde2da04fb58dcb8f7a8af51bf7d98fa94d3831c440bb4f384ef"
+    },
+    {
+     "path": "CONNECTORS.md",
+     "size": 2519,
+     "sha256": "f8cb5b6690f26165454be2a365d5c8949266d3a265ee3f8a9ba9734292d8f0bd"
+    },
+    {
+     "path": "LICENSE",
+     "size": 11358,
+     "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+     "path": "README.md",
+     "size": 9646,
+     "sha256": "f4d40d38a3f88140e4620a42cc078e859f30e05eb00e2a63a9cbe0840f1130db"
+    },
+    {
+     "path": "skills/account-research/SKILL.md",
+     "size": 7788,
+     "sha256": "97e1e9884149f7801cfc60c3e9119f37a66c53b30f730ab7b4a2862eedabdb05"
+    },
+    {
+     "path": "skills/call-summary/SKILL.md",
+     "size": 9821,
+     "sha256": "23d174b441604a2f333aa671ec1b6130018c56018c6375620c8a41ed13e92819"
+    },
+    {
+     "path": "skills/competitive-intelligence/SKILL.md",
+     "size": 8481,
+     "sha256": "4bac0057b05869c1d627b64f6950464e7ea2332e7544dcfd223f9a3d0830e0ca"
+    },
+    {
+     "path": "skills/create-an-asset/SKILL.md",
+     "size": 8400,
+     "sha256": "8e9acec41654e245a229c2ed79915a952b628b1491df0c325197aa518175762b"
+    },
+    {
+     "path": "skills/draft-outreach/SKILL.md",
+     "size": 9692,
+     "sha256": "159a79d94036f3b3082975d3b01ae739691829fa939d16689a33dde16f6b6c47"
+    },
+    {
+     "path": "skills/handle-objection/SKILL.md",
+     "size": 7702,
+     "sha256": "f8e922441acbff67b2c641079dda03cb9378fce04f8997893a980fad5a6d8b79"
+    }
+   ]
+  },
+  {
+   "id": "design-creative",
+   "title": "Design & creative",
+   "author": "Anthropic",
+   "version": "",
+   "description": "Creative and design skills: generative art, posters and canvas designs, themes and brand styling, and animated GIFs for Slack.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills",
+   "updated": "2026-10-05",
+   "skills": [
+    "algorithmic-art",
+    "brand-guidelines",
+    "canvas-design",
+    "slack-gif-creator",
+    "theme-factory"
+   ],
+   "connectors": [],
+   "files": [
+    {
+     "path": "algorithmic-art/LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "algorithmic-art/SKILL.md",
+     "size": 19769,
+     "sha256": "3bc4092c09804853186524c826bc0621b940bb6122c05b84496dff95388e6eef"
+    },
+    {
+     "path": "algorithmic-art/templates/generator_template.js",
+     "size": 7826,
+     "sha256": "9ee0f1da52ef8f7bbfde1917123654880890d43f2d388642d71eab6dd78f94c4"
+    },
+    {
+     "path": "algorithmic-art/templates/viewer.html",
+     "size": 20844,
+     "sha256": "86c79d7ce97d2599ebe4bd9b97fdeb7295c9d3ed61ceeb513cbe1b2bb5d1ce29"
+    },
+    {
+     "path": "brand-guidelines/LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "brand-guidelines/SKILL.md",
+     "size": 2235,
+     "sha256": "1120b3769e2985cefb3d25be981b1f914abeba57ae079b83c20c666c164fa9fe"
+    },
+    {
+     "path": "canvas-design/LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "canvas-design/SKILL.md",
+     "size": 11939,
+     "sha256": "a1f288079624402f30682753c1d43920b6664785698d21d3e7aa197450a6448b"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/ArsenalSC-OFL.txt",
+     "size": 4373,
+     "sha256": "8ddd61b18ba2c0d0dbe4a691cf5f1a0673f473d02fa0546e67ee88c006aeff6e"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/ArsenalSC-Regular.ttf",
+     "size": 165848,
+     "sha256": "65e6f89df58f68fd905b3add34a79dd6106aa3b3044df0dad9676fff53d504b9"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/BigShoulders-Bold.ttf",
+     "size": 94528,
+     "sha256": "b43bcd198b9fdf717dd42aa61a34dba32e01aceaeae659d689afd0ca52c37ea2"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/BigShoulders-OFL.txt",
+     "size": 4397,
+     "sha256": "fbc746aabf0eb1847dfd92e2efc4596d79fa897d60b8e64062a22f585508fb3f"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/BigShoulders-Regular.ttf",
+     "size": 94396,
+     "sha256": "18a879fc71978a4447150705caf880a9da3860083c259fd29e6dc03057b6842a"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Boldonse-OFL.txt",
+     "size": 4390,
+     "sha256": "45cc82ab4032273c0924025ffcf8f0665a68e1a5955e3f7247e5daf1deeb1326"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Boldonse-Regular.ttf",
+     "size": 77168,
+     "sha256": "cc2e540604565c0f90a7d8d46194a2f42fc9c45512cd2e39bf03b50eb68c35a4"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/BricolageGrotesque-Bold.ttf",
+     "size": 90952,
+     "sha256": "a737b146fe0d77ffe8a86e3cd16700dd431d3b1e420d4fd80e142cd68a1cb50d"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/BricolageGrotesque-OFL.txt",
+     "size": 4403,
+     "sha256": "0e4f4eb8534bc66a76aca13dd19c1f9731b2008866b29ccff182b764649df9b4"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/BricolageGrotesque-Regular.ttf",
+     "size": 90920,
+     "sha256": "972a6d098c9867ae131d0ea99e221e63976b11a19d4b931c2c7ace525674e4f6"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/CrimsonPro-Bold.ttf",
+     "size": 107352,
+     "sha256": "48f191e38355c8db100eb3ce157c20f9302a3b9a37b44a660f77ecfce3986609"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/CrimsonPro-Italic.ttf",
+     "size": 108828,
+     "sha256": "52318db3526b644e6efa60be0b3ca5a50e40fbe8bd026c261e0aa206f0772267"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/CrimsonPro-OFL.txt",
+     "size": 4394,
+     "sha256": "35680d14547b6748b6f362a052a46d22764ce5eccf96e18b74f567bb2ee58114"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/CrimsonPro-Regular.ttf",
+     "size": 106696,
+     "sha256": "48fad08cb1917a7b2f2c6fe5135d6c07743a6663cf7631ec4481108aaf081422"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/DMMono-OFL.txt",
+     "size": 4392,
+     "sha256": "bfe7842fcb88323e2981e24710c25202677385a8c75fb6a87217b275a0247ae3"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/DMMono-Regular.ttf",
+     "size": 48852,
+     "sha256": "f98ada968dc3b6b2c08d3f5caaf266977df0bfe0929372b93df5a06cf2ace450"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/EricaOne-OFL.txt",
+     "size": 4410,
+     "sha256": "e0de629968b52255548d5fafcf30b24ff9edae0eda362380755a75816404d0fa"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/EricaOne-Regular.ttf",
+     "size": 24872,
+     "sha256": "db1d89e80e33a8a01beaaac7a85df582857d24a43f1e181461aa7ff5d701476a"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/GeistMono-Bold.ttf",
+     "size": 78304,
+     "sha256": "75c0828d5c1ee44b9ef9f4df577bf41595ec362e2ea3f1e558590c9e92c7949d"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/GeistMono-OFL.txt",
+     "size": 4388,
+     "sha256": "6a873c900f584109b13ae0aaf81d6e3cf0a68751a216b03f7b6c68d547057bb4"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/GeistMono-Regular.ttf",
+     "size": 78232,
+     "sha256": "a55c1b51cda4afeab9e471e7947b85a20f7c8831d7e6b1470c1b7fbdc0f0f15e"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Gloock-OFL.txt",
+     "size": 4381,
+     "sha256": "c0a3f3125ac491ef3d1f09f401be4834c646562f647e44f2bcbc49f0466c656d"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Gloock-Regular.ttf",
+     "size": 95156,
+     "sha256": "e86b4ce66dbd3f1f83eee8db99ec96e0da1128c3f53df0e9b3b7472025dfe960"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/IBMPlexMono-Bold.ttf",
+     "size": 136008,
+     "sha256": "dbd2a2fb024579438d6400a84e57579bfd2dbe67c306c8fd9fde92a61e4f2eea"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/IBMPlexMono-OFL.txt",
+     "size": 4363,
+     "sha256": "5294ce778857e1eb02e830b6ab06435537d38f43055327e73d03a2d4d57d5123"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/IBMPlexMono-Regular.ttf",
+     "size": 133796,
+     "sha256": "ab08018ccd276b79fb2c636bb95b9c543598f9d50505fe92506fcb4dae7810cd"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/IBMPlexSerif-Bold.ttf",
+     "size": 161000,
+     "sha256": "b8d294e9b5c5a0940f167c3ced0f7ef2e3f57082ca3ff096ef30e86e26c1c159"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/IBMPlexSerif-BoldItalic.ttf",
+     "size": 169840,
+     "sha256": "da64b75f4284f53e7b5c71fa190a35b8bf3494fe19f1804c81c3a53340bca570"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/IBMPlexSerif-Italic.ttf",
+     "size": 170004,
+     "sha256": "b11f1048745e715a55c9d837b3f10226ca3d78867b7db7251ddad8f98dcf0f38"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/IBMPlexSerif-Regular.ttf",
+     "size": 160380,
+     "sha256": "77cd233a2af8dc6b1022faea3bb3b01f3c75af68bcf530cb6aeb15982ff3dbb7"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/InstrumentSans-Bold.ttf",
+     "size": 68084,
+     "sha256": "444f85bf1c4b0e1ce1ca624f6be54bcd832207714ccaf4ea99ee531341683bdf"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/InstrumentSans-BoldItalic.ttf",
+     "size": 70004,
+     "sha256": "3762f6cef95d6039489ad5ba5787d4c30f17a1ad01e9ac3c816ed69692722a68"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/InstrumentSans-Italic.ttf",
+     "size": 69900,
+     "sha256": "78e85858e371b2cb4e18f617c10f0f937c0e12a0887ffee98555b24ed305b3a7"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/InstrumentSans-OFL.txt",
+     "size": 4403,
+     "sha256": "bf4dc6d13a8cccd4807133c77a1ee9619a16b92cb23322258725ab6731c2f6e5"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/InstrumentSans-Regular.ttf",
+     "size": 68028,
+     "sha256": "a22cb26e48fd79bcb01bf2fc92d36785474dce36d9c544ab0a8868c2657c4a87"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/InstrumentSerif-Italic.ttf",
+     "size": 70868,
+     "sha256": "9c86e4d5a47b50224a2463a9eca8535835257c8e85c470c2c6b454b1af6f046e"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/InstrumentSerif-Regular.ttf",
+     "size": 69312,
+     "sha256": "56ac3be03ac3ba283196b3e77850ab2ffcf56cfb6fd3212c5620109a972f8c99"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Italiana-OFL.txt",
+     "size": 4394,
+     "sha256": "8373b11312ace78c4cec2e8f9f6aa9f2330601107dac7bcf899c6f2dbd40c5a5"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Italiana-Regular.ttf",
+     "size": 27184,
+     "sha256": "15c4dd6ab8cf4a29ba8826f65edcbe2f6c266c557d34d081f25072dfd5605fd2"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/JetBrainsMono-Bold.ttf",
+     "size": 114828,
+     "sha256": "a2349098b9e45419e7bf0e2958d6c4937a049dded37387b08be725be4c7615f3"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/JetBrainsMono-OFL.txt",
+     "size": 4399,
+     "sha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/JetBrainsMono-Regular.ttf",
+     "size": 114904,
+     "sha256": "b6b1ff4ddefe36d7f2a6174e1d001cab374e594519ee9049af028d577b64c5f5"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Jura-Light.ttf",
+     "size": 154308,
+     "sha256": "c891a381df056b2c4dfe85841e911bf45da0890fa21a7b2692cbe5ea1f505e1e"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Jura-Medium.ttf",
+     "size": 154488,
+     "sha256": "c72965cb732a92872643819fd1734128238583cc36b116313859137a51d3368a"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Jura-OFL.txt",
+     "size": 4380,
+     "sha256": "eaf9bdb675f6d87e5feb88199ab3ea581d3bd2082f426e384fa9c394576d7260"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/LibreBaskerville-OFL.txt",
+     "size": 4449,
+     "sha256": "55959eef5b0c3b2e3c1c7631b8ff0f9447d75de20f29cfa7db5bcfb026763343"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/LibreBaskerville-Regular.ttf",
+     "size": 147584,
+     "sha256": "2101302538d9e88adb679031c04623e4578b5745e89566284fd2c508d79acae0"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Lora-Bold.ttf",
+     "size": 133828,
+     "sha256": "7d74015e950c2fb66519c7295b8155621d22200ae2ca2a4c6b43ce3c490cac87"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Lora-BoldItalic.ttf",
+     "size": 140332,
+     "sha256": "152f87e71f5ddb60d5c57ecd9132807c947e65c42977193c9164e7c5a6690081"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Lora-Italic.ttf",
+     "size": 139328,
+     "sha256": "be627e595184e8afe521f08da0607eee613f1997d423bc8dadc5798995581377"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Lora-OFL.txt",
+     "size": 4423,
+     "sha256": "62e37a82d3f1ef2a70712885fa8b3144b65fd144d8e748d6196b690a354d792c"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Lora-Regular.ttf",
+     "size": 133888,
+     "sha256": "7ed00e7c9cdf16ab7e2fd2361fe45d4f0b61263cd60aae398b27b7ee08108827"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/NationalPark-Bold.ttf",
+     "size": 79208,
+     "sha256": "69ac4c301c4a7233c6e602d12a92c54d7967b575f4449951c45ce773f7acff53"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/NationalPark-OFL.txt",
+     "size": 4399,
+     "sha256": "81c6c71d83b5b45d7344f96df12bb4a2477a5b092a9144757ee1d0f50f855175"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/NationalPark-Regular.ttf",
+     "size": 76424,
+     "sha256": "a477338b7e18308d476650dfe31235ef86a883572665e56ffb5fb80f82009b58"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/NothingYouCouldDo-OFL.txt",
+     "size": 4363,
+     "sha256": "7c2a6970584ddad04919816163746f83b378078015899b18468b40f05e9ce128"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/NothingYouCouldDo-Regular.ttf",
+     "size": 32020,
+     "sha256": "d866f985896d3280f4fce72db7e17302c24a0c1fdb0699b6b5ed3af14f944d57"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Outfit-Bold.ttf",
+     "size": 55392,
+     "sha256": "6654b93d21301ec61887d3cedd6c11d9df1b1dfb63f9cf45ac7995f6e2235ab1"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Outfit-OFL.txt",
+     "size": 4389,
+     "sha256": "1945b62cd76da9a3051a1660dde72afaa64ffc2666d30e7a78356d651653ba2f"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Outfit-Regular.ttf",
+     "size": 54912,
+     "sha256": "f24945365147c9e783e91d8649959b59be6b00c9ee4ecd2f6b33afbb2dd871fe"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/PixelifySans-Medium.ttf",
+     "size": 51072,
+     "sha256": "38397504f71c122b03d234ea6f55118e3d5bdbddffd82bedddbd7755d3b3be82"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/PixelifySans-OFL.txt",
+     "size": 4395,
+     "sha256": "7f54d1d9f1ae1ba9f2722f978145f90324fea34ca3c2304b3a29cfa96ac6037e"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/PoiretOne-OFL.txt",
+     "size": 4366,
+     "sha256": "2eaf541f7eb8b512e4c757a5212060abf5b6edfef230e9d7640bf736b315c33a"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/PoiretOne-Regular.ttf",
+     "size": 45244,
+     "sha256": "9cf265b139648b36b6c0afdfeb0bf27f7e66db9a16094bc40f644d8da05bc318"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/RedHatMono-Bold.ttf",
+     "size": 34420,
+     "sha256": "7ef48353f4be5ddb90f000f6fad48f2b62b3e8c27d9818d8d45ff46c201065e0"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/RedHatMono-OFL.txt",
+     "size": 4394,
+     "sha256": "435fbfb7e66988b2a06686a4cb966faec733f35d8fe100a1601573c27f3e0bb8"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/RedHatMono-Regular.ttf",
+     "size": 34488,
+     "sha256": "452fe826871b37539f5212b20c87cf30f82f58dd2741f1c96edd1dcbdc0db6b4"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Silkscreen-OFL.txt",
+     "size": 4394,
+     "sha256": "6b849745119bbe85ec01fd080c9cd50234da9f52ac6e48b55d1a424a0c4d7ca9"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Silkscreen-Regular.ttf",
+     "size": 31960,
+     "sha256": "49567408600809e25147e9225ac4f37f410e2df45a750696c45027531fb65f1b"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/SmoochSans-Medium.ttf",
+     "size": 59704,
+     "sha256": "dd76e6e77cce82f827a8654cd906e9ce58f3aaf78adda63c4a7f655b8ecb41f0"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/SmoochSans-OFL.txt",
+     "size": 4396,
+     "sha256": "74c9c4eb88e891483e1b7bc54780b452cbf4f4df66d4e71881d7569aa2130749"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Tektur-Medium.ttf",
+     "size": 76248,
+     "sha256": "52bbe8c9b057b3d2da4eeace31a524b1ea26a1375ae34319cf6900ccc57a4c82"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Tektur-OFL.txt",
+     "size": 4385,
+     "sha256": "3f1466cb5438f31782eeb6e895f3a655bc4d090e24263e331f555357d1cb734e"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/Tektur-Regular.ttf",
+     "size": 75604,
+     "sha256": "162e1b36c4718c5b051b36c971ad7e50d341944f35618f480422ebbe72988f98"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/WorkSans-Bold.ttf",
+     "size": 191304,
+     "sha256": "240d125fc9f8561363dc1ea3f513501253bd70942f41468f48f0b0cafb0c82e2"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/WorkSans-BoldItalic.ttf",
+     "size": 175772,
+     "sha256": "a5b2cad813df0aaa7d16621f2e93b5117c25e9bc788bc9a3ad218e9d6348ce34"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/WorkSans-Italic.ttf",
+     "size": 174280,
+     "sha256": "6b7f7002e0b0c8b261fe878658ef5551e3e59d9f6b609b04efb90dde1e2c1ada"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/WorkSans-OFL.txt",
+     "size": 4397,
+     "sha256": "ace8c22a3326318b54e67c3691857929634205533f454a70ef5a3473ddb2e2ba"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/WorkSans-Regular.ttf",
+     "size": 188916,
+     "sha256": "e67985a843df0d3cdee51a3d0f329eb1774a344ad9ff0c9ab923751f1577e2a4"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/YoungSerif-OFL.txt",
+     "size": 4398,
+     "sha256": "cdcb8039606b40a027a6d24586ec62d5fe29c701343d82a048c829cb28a3dd28"
+    },
+    {
+     "path": "canvas-design/canvas-fonts/YoungSerif-Regular.ttf",
+     "size": 105136,
+     "sha256": "f8dc08f77abad753a00670af70756a8ace938e5c3f0b770f4f4c2071c4bd8fc6"
+    },
+    {
+     "path": "slack-gif-creator/LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "slack-gif-creator/SKILL.md",
+     "size": 7841,
+     "sha256": "2efca615ce55a3edd8fc05c779068a8085816617991987e446606403cd3abb22"
+    },
+    {
+     "path": "slack-gif-creator/core/easing.py",
+     "size": 6265,
+     "sha256": "60bc943449802541f0f0881a874faa7ef408aaaf0b758fde756664ada7740452"
+    },
+    {
+     "path": "slack-gif-creator/core/frame_composer.py",
+     "size": 4548,
+     "sha256": "a127ea8f2a58893ea10a5c7b5cab4e2010af6515adc538676eb0cc14f5a03985"
+    },
+    {
+     "path": "slack-gif-creator/core/gif_builder.py",
+     "size": 9847,
+     "sha256": "b6f50d738c491ee0438a2e86e897f71cdab9792494ba4605f140befb0bddbf89"
+    },
+    {
+     "path": "slack-gif-creator/core/validators.py",
+     "size": 3785,
+     "sha256": "56bd19e3aae05f8387d78ec8185d6098b3dc909d1fa041211753da37212528a3"
+    },
+    {
+     "path": "slack-gif-creator/requirements.txt",
+     "size": 66,
+     "sha256": "edc7108a0c6b56183566c71ee96830f6dc791e3b41952112d9cb56b33a6bd757"
+    },
+    {
+     "path": "theme-factory/LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "theme-factory/SKILL.md",
+     "size": 3124,
+     "sha256": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552"
+    },
+    {
+     "path": "theme-factory/theme-showcase.pdf",
+     "size": 124310,
+     "sha256": "3e126eca9fe99088051f7cb984c97cedb31c7d9e09ce0ba5d61bd01e70a0d253"
+    },
+    {
+     "path": "theme-factory/themes/arctic-frost.md",
+     "size": 544,
+     "sha256": "868a75a8fb5b2a61d0f0ab87c437fe632d3cbab6371c418f06aa2816ac109ae0"
+    },
+    {
+     "path": "theme-factory/themes/botanical-garden.md",
+     "size": 519,
+     "sha256": "222cb8e7496abc9b75b29453c809fb9839e7e4b01fa45deecdd896b38d087765"
+    },
+    {
+     "path": "theme-factory/themes/desert-rose.md",
+     "size": 496,
+     "sha256": "bd065b8629be3b64655183927e248e3d892a27b8d184b009cfba89c96102744f"
+    },
+    {
+     "path": "theme-factory/themes/forest-canopy.md",
+     "size": 506,
+     "sha256": "ecb722efa24688e808b5bf323c334ca2349e989cfddd72ce8400ce5d4c4bd3e7"
+    },
+    {
+     "path": "theme-factory/themes/golden-hour.md",
+     "size": 528,
+     "sha256": "3444a00df971d3c2f06b665e21a2e9eb5d7d7d6f6281f2758773b8345776a139"
+    },
+    {
+     "path": "theme-factory/themes/midnight-galaxy.md",
+     "size": 513,
+     "sha256": "0e134c4c0324df41e34ac314269aa6829cd378cf3c304b31858d0cd158d2f944"
+    },
+    {
+     "path": "theme-factory/themes/modern-minimalist.md",
+     "size": 549,
+     "sha256": "b8bc572b75948d4df69c401af703b9262ed6820a3ceb270da30a529e92763614"
+    },
+    {
+     "path": "theme-factory/themes/ocean-depths.md",
+     "size": 555,
+     "sha256": "a7ad8eec85341dbfcb2665da827a4b6a4baee08ab3335ac02421f18e6b46b2e2"
+    },
+    {
+     "path": "theme-factory/themes/sunset-boulevard.md",
+     "size": 558,
+     "sha256": "658af11ab04be4923692571081ffb42a428141ae537703117b9236d9f8ee22a3"
+    },
+    {
+     "path": "theme-factory/themes/tech-innovation.md",
+     "size": 547,
+     "sha256": "183648163026dd5eeba3df5effa335b55ba333c3ee1fe215278605e55f40a52a"
+    }
+   ]
+  },
+  {
+   "id": "writing",
+   "title": "Writing",
+   "author": "Anthropic",
+   "version": "",
+   "description": "Writing skills: internal communications in the formats companies use.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills",
+   "updated": "2026-10-05",
+   "skills": [
+    "internal-comms"
+   ],
+   "connectors": [],
+   "files": [
+    {
+     "path": "internal-comms/LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "internal-comms/SKILL.md",
+     "size": 1511,
+     "sha256": "067b7587a344a928fc6534ef66b1bcd591fc7c26d207ea7ca3334aeb678d6475"
+    },
+    {
+     "path": "internal-comms/examples/3p-updates.md",
+     "size": 3274,
+     "sha256": "087e4363c0f3513728a7e695eeb9ead5c3ecd12a4681b59340691180e65b68fc"
+    },
+    {
+     "path": "internal-comms/examples/company-newsletter.md",
+     "size": 3295,
+     "sha256": "30f81cfbdb03858a006169c72169024089c7c5d3d32611d337782da4f38c86b5"
+    },
+    {
+     "path": "internal-comms/examples/faq-answers.md",
+     "size": 2366,
+     "sha256": "5ecd3356cd6666937f2ebefa753253edfdbdca15e368d07baf398bfcced72484"
+    },
+    {
+     "path": "internal-comms/examples/general-comms.md",
+     "size": 602,
+     "sha256": "4d3a4bb198a77626bcf018e96b2b45a2dbabed172d4ade0fcd70d23ae8a47a47"
+    }
+   ]
+  },
+  {
+   "id": "developer",
+   "title": "Developer",
+   "author": "Anthropic",
+   "version": "",
+   "description": "Skills for developers: the Claude API, front-end design, MCP servers.",
+   "license": "Apache-2.0",
+   "repo": "anthropics/skills",
+   "commit": "683bc88e56f3e09ba94f7055977f3d3aa499f202",
+   "path": "skills",
+   "updated": "2026-10-05",
+   "skills": [
+    "claude-api",
+    "frontend-design",
+    "mcp-builder"
+   ],
+   "connectors": [],
+   "files": [
+    {
+     "path": "claude-api/LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "claude-api/SKILL.md",
+     "size": 103457,
+     "sha256": "d2d78eb159724410f2996489f054b15e803ec030198d36ca35cb764ab80520c0"
+    },
+    {
+     "path": "claude-api/csharp/claude-api/README.md",
+     "size": 18915,
+     "sha256": "5504328ce794dffe46ec2572113098271363c80e911022be0eb889f453f6e902"
+    },
+    {
+     "path": "claude-api/csharp/claude-api/batches.md",
+     "size": 413,
+     "sha256": "ec276fccf21757ed00803dfa4bc35f14f334138629fa53c77a025d718eda96a1"
+    },
+    {
+     "path": "claude-api/csharp/claude-api/files-api.md",
+     "size": 900,
+     "sha256": "766ccf5dca9ef3caba8cefeddde10f6d171a7bd2ff4c97689462fad2d0d18e4b"
+    },
+    {
+     "path": "claude-api/csharp/claude-api/streaming.md",
+     "size": 787,
+     "sha256": "bc0100e50b3495e869901bcfb231870cb3483b936534af5fd3dddb5d07e4531e"
+    },
+    {
+     "path": "claude-api/csharp/claude-api/tool-use.md",
+     "size": 5998,
+     "sha256": "d3d5e7f309316414d698146d0ea1e234642c957940e1c4e9bcf9176994c2176d"
+    },
+    {
+     "path": "claude-api/curl/examples.md",
+     "size": 9714,
+     "sha256": "4520e447d37924e62fe982923f3eceea5338dbf3b3a0d25d0f914272c16b90a0"
+    },
+    {
+     "path": "claude-api/curl/managed-agents.md",
+     "size": 8618,
+     "sha256": "0039b221a33b7b62462c18f3b68808ea15fec5501b64bc46009021dbbdf1fa2c"
+    },
+    {
+     "path": "claude-api/go/claude-api/README.md",
+     "size": 8477,
+     "sha256": "a8e78588e8f11ef4d8f2dd1729739952ca79aefd7b1ebf07c411ee58c05d8231"
+    },
+    {
+     "path": "claude-api/go/claude-api/files-api.md",
+     "size": 936,
+     "sha256": "7bf67ece5e4d18b1fb07085a55b680420cc7bd4de94a1fb2bb73cb23f39c20f0"
+    },
+    {
+     "path": "claude-api/go/claude-api/streaming.md",
+     "size": 1026,
+     "sha256": "a523e992e438309ca1bbc075ded2b652eb257242fd0ce521afd3b8ea024ed94d"
+    },
+    {
+     "path": "claude-api/go/claude-api/tool-use.md",
+     "size": 8393,
+     "sha256": "2053c347e13691b3785189b13e6bc7c41d577e893004e9c0f67817effdc91ef5"
+    },
+    {
+     "path": "claude-api/go/managed-agents/README.md",
+     "size": 18939,
+     "sha256": "811570bde7e34d7326f9b83673aa4eac79f3b401518d41fd657e969b3ea0cb18"
+    },
+    {
+     "path": "claude-api/java/claude-api/README.md",
+     "size": 11946,
+     "sha256": "cb6d395dc1d930371f828290132681541eff7f1a7e2739bb4c6655ebbb3b8c7f"
+    },
+    {
+     "path": "claude-api/java/claude-api/files-api.md",
+     "size": 1198,
+     "sha256": "1c792f3421de32f42a56235327f87807a5579340726bba677ec13e05f9b493c7"
+    },
+    {
+     "path": "claude-api/java/claude-api/streaming.md",
+     "size": 655,
+     "sha256": "de13bc9573b37edb5af69606853c4fde3d494ee10ff47d1a030ecef9cc17463b"
+    },
+    {
+     "path": "claude-api/java/claude-api/tool-use.md",
+     "size": 9509,
+     "sha256": "58240638a66d67fee542978301841929fbefe7317487e12b86734281f6b649d6"
+    },
+    {
+     "path": "claude-api/java/managed-agents/README.md",
+     "size": 16944,
+     "sha256": "5757f9b485ca073650b24bc8fd7e3efa9c9709d23ccd8444c38a380081720435"
+    },
+    {
+     "path": "claude-api/php/claude-api/README.md",
+     "size": 6554,
+     "sha256": "00e2e88f3ea9a6cce812d3e6ae9e035bc36f88828a09e518bb73af91097a9d66"
+    },
+    {
+     "path": "claude-api/php/claude-api/batches.md",
+     "size": 447,
+     "sha256": "6f82a29f718ff6e6b02aaaee3cfd6cda2feb82aca57d945f11a2c021214a699d"
+    },
+    {
+     "path": "claude-api/php/claude-api/files-api.md",
+     "size": 476,
+     "sha256": "0715a0d4cce88fd885f57bd33b4654071a9068d5f8a892143b062c78fe51afc9"
+    },
+    {
+     "path": "claude-api/php/claude-api/streaming.md",
+     "size": 682,
+     "sha256": "3b8ac667b21f17750eb3c1fc7dc166fd7b1f57a1d8b11e74489de4432e21d31d"
+    },
+    {
+     "path": "claude-api/php/claude-api/tool-use.md",
+     "size": 8097,
+     "sha256": "319e8ecfe18c54770b697936c095dbfdfbb0c0987360151f10eaf48fed18c9c5"
+    },
+    {
+     "path": "claude-api/php/managed-agents/README.md",
+     "size": 13513,
+     "sha256": "9bb9d9ca5d7c328c7203e9de63189a6118d4ed5f9046f4d0f9ec79673ee48060"
+    },
+    {
+     "path": "claude-api/python/claude-api/README.md",
+     "size": 20491,
+     "sha256": "9ff90530827950140ff6c707374fc0d95a94de437ffbc2340b78a54140508c95"
+    },
+    {
+     "path": "claude-api/python/claude-api/batches.md",
+     "size": 5588,
+     "sha256": "15d480b44e07b237a33eac50a5ae4d7c46b5c94c4462c992346f2b0818964f57"
+    },
+    {
+     "path": "claude-api/python/claude-api/files-api.md",
+     "size": 4499,
+     "sha256": "2aa142978660d9ae3200d21a4d333531ca101898706f620834304e8a7d534580"
+    },
+    {
+     "path": "claude-api/python/claude-api/sdk-upgrade.md",
+     "size": 28741,
+     "sha256": "408bdcabdd05aceca3765320b03684a00e1bd22f6da2d057db5c24b48804bef8"
+    },
+    {
+     "path": "claude-api/python/claude-api/streaming.md",
+     "size": 11940,
+     "sha256": "8f73a54dbbb5e82c2c7690d7d866f17ad8c72f662a2be6dd788b5c0956714026"
+    },
+    {
+     "path": "claude-api/python/claude-api/tool-use.md",
+     "size": 19786,
+     "sha256": "133934c24555f2e20297ff331c1e3303b14b1dc4824d2ec336e418caf162927f"
+    },
+    {
+     "path": "claude-api/python/managed-agents/README.md",
+     "size": 11518,
+     "sha256": "c33922db0214431c858e50a8e60ab7b7b617411acfd2c338f23cf90ef4ad4696"
+    },
+    {
+     "path": "claude-api/ruby/claude-api/README.md",
+     "size": 4843,
+     "sha256": "c7de89d236f22bc0b44a091a45ee186ec057caa021a71acd4d3849599cbf3b36"
+    },
+    {
+     "path": "claude-api/ruby/claude-api/streaming.md",
+     "size": 235,
+     "sha256": "09b784f2ab0a5fd17e0589225408c618d26c6dd3cd601364ff92f409d5b104a0"
+    },
+    {
+     "path": "claude-api/ruby/claude-api/tool-use.md",
+     "size": 1063,
+     "sha256": "9d4290be5e263eaee485f5d36e0ce8b87cafed19ed30fc045c484757efe29a22"
+    },
+    {
+     "path": "claude-api/ruby/managed-agents/README.md",
+     "size": 10452,
+     "sha256": "022a5ea193d4864947bd4e3c6f41f160a6bebd1f7b29a9419df200b227dc2fd5"
+    },
+    {
+     "path": "claude-api/shared/admin-api.md",
+     "size": 11606,
+     "sha256": "a69c53817391fca50c0a1848f46de9debf71fa3681298fccb0a6435b760bac2d"
+    },
+    {
+     "path": "claude-api/shared/agent-design.md",
+     "size": 8736,
+     "sha256": "9960728faf6976a2ddfceed02ed72af122d3b2558af573a9a0ea207b3adec2bc"
+    },
+    {
+     "path": "claude-api/shared/anthropic-cli.md",
+     "size": 23218,
+     "sha256": "d4d4c0a6ddd74224c366a9fa8d12a01763d1e1cd90a96de669211d381ee208ad"
+    },
+    {
+     "path": "claude-api/shared/claude-platform-on-aws.md",
+     "size": 4420,
+     "sha256": "dec03193c61909167846c0526a4feacf011578b5e7ee29f76378141315cf97f5"
+    },
+    {
+     "path": "claude-api/shared/cost-optimization.md",
+     "size": 57453,
+     "sha256": "1d996afeae295a698eab5df16ff9385054d8beedb3a6d74ff331ef1abb6f8702"
+    },
+    {
+     "path": "claude-api/shared/error-codes.md",
+     "size": 19845,
+     "sha256": "9345972e355af8e50717e3e5b757d051972687192142223321a05e3588a13205"
+    },
+    {
+     "path": "claude-api/shared/evals/build-eval.md",
+     "size": 54819,
+     "sha256": "50e3381b55b7bb913f84c2645a409802084c5caf01bab2d271d6bef0090dbd6c"
+    },
+    {
+     "path": "claude-api/shared/evals/cost-hillclimb.md",
+     "size": 31574,
+     "sha256": "fe15b3bcce81613a98c80b309ddfba7881d5778e339dbb19e95aded5ca84283a"
+    },
+    {
+     "path": "claude-api/shared/evals/eval-audit.md",
+     "size": 27892,
+     "sha256": "a013f8eb0452c51c5a31860df0fb47219dcdb4da507092fc98867225095026ba"
+    },
+    {
+     "path": "claude-api/shared/evals/eval-hillclimb.md",
+     "size": 68773,
+     "sha256": "6e2c829294c6bfcc0b544352bca66d5e4c10e8de5a63b66d5e0ac9a861de8710"
+    },
+    {
+     "path": "claude-api/shared/evals/report/SCHEMA.md",
+     "size": 16121,
+     "sha256": "9a83404a9b3c413113df39d9bdf08e003ff4d6a75386f4010887da3298766687"
+    },
+    {
+     "path": "claude-api/shared/evals/report/build-report-lite.mjs",
+     "size": 27329,
+     "sha256": "af79ca5fa5f06747dbcaa1d40017c8c8e81e0aa11cb8e32b848043893cdb03c7"
+    },
+    {
+     "path": "claude-api/shared/evals/report/runner-scaffold.mjs",
+     "size": 33142,
+     "sha256": "c3a87ba4b94b3018b83c075d5148ba7760580aa447699d513d45ab55b82a531a"
+    },
+    {
+     "path": "claude-api/shared/live-sources.md",
+     "size": 22997,
+     "sha256": "9c37bff187cc74d2db49c3f697db7bd3db853b9c53e2d999d60ca61236379407"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-api-reference.md",
+     "size": 34401,
+     "sha256": "1e7762835f6fc83e5cb704daa08eda6201d4afd141ed789fde9d24dbec6ae098"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-client-patterns.md",
+     "size": 12043,
+     "sha256": "f3d752675e225892f97da4d7bffbefd430841d6655b2c53a926f212121759d55"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-core.md",
+     "size": 32852,
+     "sha256": "1d2e548fcdbf5291d20dde57a5463cbfbf7db22ce9ac1bb307af98c5d302451b"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-environments.md",
+     "size": 12870,
+     "sha256": "feb0018013b1a3de67fd322d1f31667495622edeba5c6c356395bba492ab2df8"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-events.md",
+     "size": 25029,
+     "sha256": "c3c4bde5dbc8ae5d283ed9df86a87871ec098f6cd60a27ff384df0d685eeb767"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-memory.md",
+     "size": 11362,
+     "sha256": "0dec5641630f97629ea75bbbe5c2bced861f9c16b0572a68c901849ea4d00bcb"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-multiagent.md",
+     "size": 26250,
+     "sha256": "11da64cd20c3e2fd53cd6e437c3b1ee5472bd19d7e388814cf7f0dc78b6bc778"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-onboarding-from-quickstart.md",
+     "size": 18411,
+     "sha256": "13da02dca5a7052565af839476dd224eb4ebc00393dd7801c4a905ce380be0d9"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-onboarding-from-url.md",
+     "size": 25783,
+     "sha256": "de9666779aab6ab1a51cbd79d7ee3b718c29105eb36e0c9b82ff291ac28a58df"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-onboarding.md",
+     "size": 15736,
+     "sha256": "faea6d7178bbdc0ec280f2beba43fcde28685e708ad6b5a1bfff28a59572cf83"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-outcomes.md",
+     "size": 8115,
+     "sha256": "82e18fe53fb41c38aab4d63b36d1e37767088f0650374f79c19fc176d5cb599f"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-overview.md",
+     "size": 13707,
+     "sha256": "05035bd75de5a25276c4cfb010088bfadb5ee6c798afe4e8ba080d5260d0346c"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/contract-tracker.md",
+     "size": 1806,
+     "sha256": "312ee5f886de59b6db4603d2df9766d66285db36973656c5b9ff0bcc1ed02279"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/data-analyst.md",
+     "size": 1561,
+     "sha256": "c2116bac43972f2b40311104bd7cd4e084cca806dd40a1ddf8462845d785bd57"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/deep-researcher.md",
+     "size": 2430,
+     "sha256": "a680856d874dff23cd3f016e36d0a58bc4db36c56d790d216743f236ee37a48c"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/field-monitor.md",
+     "size": 2105,
+     "sha256": "f17f26eee0109f4172134c5bea5761c52b8459e44ae03608c701cd3492f4a3af"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/incident-commander.md",
+     "size": 1723,
+     "sha256": "badd3622ffab0798ab44a55189f47e95c107107ce57eda9fa5357b1aded8fb2a"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/sprint-retro-facilitator.md",
+     "size": 2091,
+     "sha256": "8b5ed9895feb1ade54578a270493c63d0f57b3bb0fbc2eafcfa2e87d3130fa75"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/structured-extractor.md",
+     "size": 1541,
+     "sha256": "c278074c8c48d35fc6c68ed32eaa8704cae73a8e74035fd1d4a6abdcb9bd0fbd"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/support-agent.md",
+     "size": 1481,
+     "sha256": "da75c50edf207f5ef468fbbbfc2e77d56e7d906a6c2cda28756f896195e171c5"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-quickstarts/support-to-eng-escalator.md",
+     "size": 1842,
+     "sha256": "46720e5341808a9938825be44f936c91f83739ebdef9e1d17d9f0ec22738346b"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-scheduled-deployments.md",
+     "size": 9068,
+     "sha256": "eb1c8a1a6f428b3db634e6d37162fd8952c3d853920b7414be32a4943b70f227"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-self-hosted-sandboxes.md",
+     "size": 27847,
+     "sha256": "3228ab72afbe3ab1a0ac0f5a41995e1764c947cf17ce22a858b41b67262b71ee"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-tools.md",
+     "size": 35673,
+     "sha256": "17672bb414c3cccd0f5b040e1ab1c08f8b3d1de648615d9840b34c856be6c00b"
+    },
+    {
+     "path": "claude-api/shared/managed-agents-webhooks.md",
+     "size": 11321,
+     "sha256": "38746f77a3ee971f9b1f7d47cec9e753131bf271fd795aed5c3da1764c9a6ac1"
+    },
+    {
+     "path": "claude-api/shared/model-migration.md",
+     "size": 316954,
+     "sha256": "2accac3b1c1cd5c47a81d16e456cd3ebaac3139d3d86e92200f6e810c7a4cda8"
+    },
+    {
+     "path": "claude-api/shared/models.md",
+     "size": 15969,
+     "sha256": "cffa80f693b484518d507bc7ac7f061aa41f5a73d7ae761e238ac7f829f79a52"
+    },
+    {
+     "path": "claude-api/shared/platform-availability.md",
+     "size": 7415,
+     "sha256": "607997bc16de403970cb32c1dc1fa63e68f7f02328728be59397e7cefb2efed4"
+    },
+    {
+     "path": "claude-api/shared/preserved-thinking-migration/causes.md",
+     "size": 37879,
+     "sha256": "f463aed849879c02f7105e11855fc65deb2a9b1bfbdca303b045825c1c68a0c9"
+    },
+    {
+     "path": "claude-api/shared/preserved-thinking-migration/drop_block_probe.py",
+     "size": 64338,
+     "sha256": "de9f874ad4d57cdf12b4143cc5626d48d18b904f4c79c56c440cf0982e4823e9"
+    },
+    {
+     "path": "claude-api/shared/preserved-thinking-migration/prefix_diff.py",
+     "size": 94008,
+     "sha256": "734934b81b5f26e9ed2f8f51f44fed6554233de4f37b22a8845ae4ffcb622ac0"
+    },
+    {
+     "path": "claude-api/shared/preserved-thinking-migration.md",
+     "size": 63994,
+     "sha256": "479996bf10ba0a12c1a134a81f530afd85b8e35b6e7ee65d04b86ce3d7fd0d8e"
+    },
+    {
+     "path": "claude-api/shared/prompt-audit.md",
+     "size": 48983,
+     "sha256": "c33200da181e10f1f31bd4625059cd30bc6922940aac49017d8ab0c2721878f2"
+    },
+    {
+     "path": "claude-api/shared/prompt-caching.md",
+     "size": 33021,
+     "sha256": "92c0904c031831594187840231628d5986c4fd9e0e3415e41ac06bf9220e5c60"
+    },
+    {
+     "path": "claude-api/shared/token-counting.md",
+     "size": 1603,
+     "sha256": "8674e246c165decdc13106a4861a254ededb0421caf7fa4015ed0fb36e6c60dc"
+    },
+    {
+     "path": "claude-api/shared/tool-use-concepts.md",
+     "size": 44242,
+     "sha256": "bc5364fed0fe2a196a9f81cddf943d210adde53e3ad5be9b84057093fc8b28f5"
+    },
+    {
+     "path": "claude-api/typescript/claude-api/README.md",
+     "size": 15739,
+     "sha256": "e1477b7d759734ba7189d094e002c171a68749f3e56f0aa5a4326ecac6825bd4"
+    },
+    {
+     "path": "claude-api/typescript/claude-api/batches.md",
+     "size": 2594,
+     "sha256": "acc33bb981acd48b6ee9a6b2c2afeef9487c42ef2b117225da3949dc61efb464"
+    },
+    {
+     "path": "claude-api/typescript/claude-api/files-api.md",
+     "size": 2384,
+     "sha256": "df8e4e433a4ded6d4c3eb40de9bc0782cf77aaa8e3e331a539aec1cff55d1316"
+    },
+    {
+     "path": "claude-api/typescript/claude-api/streaming.md",
+     "size": 9514,
+     "sha256": "09db982effb0b7d14e29eddd5425b00040debfedccf3dd0db9af73f7d2da3e79"
+    },
+    {
+     "path": "claude-api/typescript/claude-api/tool-use.md",
+     "size": 22670,
+     "sha256": "fdc6b6aa9cc076206d284cbe0844db4650b23d10dbb6a2b0b036fc802054ce9d"
+    },
+    {
+     "path": "claude-api/typescript/managed-agents/README.md",
+     "size": 10989,
+     "sha256": "32a7123bb7f8462864c47b01f2bc8489ffd0841a05685747cd14858a4ae4049a"
+    },
+    {
+     "path": "frontend-design/LICENSE.txt",
+     "size": 10174,
+     "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+    },
+    {
+     "path": "frontend-design/SKILL.md",
+     "size": 9390,
+     "sha256": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3"
+    },
+    {
+     "path": "mcp-builder/LICENSE.txt",
+     "size": 11345,
+     "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    },
+    {
+     "path": "mcp-builder/SKILL.md",
+     "size": 9092,
+     "sha256": "0f4592dcb53cf2b5d6b7febee6b4152018b565551a1c29e3c612f57b218ab295"
+    },
+    {
+     "path": "mcp-builder/reference/evaluation.md",
+     "size": 21663,
+     "sha256": "8c99479f8a2d22a636c38e274537aac3610879e26f34e0709825077c4576f427"
+    },
+    {
+     "path": "mcp-builder/reference/mcp_best_practices.md",
+     "size": 7330,
+     "sha256": "80fb4369a349447cf18ecdd7494fe7938b6065377e9f08c077cec411093a3007"
+    },
+    {
+     "path": "mcp-builder/reference/node_mcp_server.md",
+     "size": 28550,
+     "sha256": "c3ba35a4f599dd53be9c6555ae72c19a7bf412cd5426576c2c08d42755482c66"
+    },
+    {
+     "path": "mcp-builder/reference/python_mcp_server.md",
+     "size": 25099,
+     "sha256": "2da52f77e675191014ca2e146a4b95aa04d0ca7dd7e2b100322df15ade685e80"
+    },
+    {
+     "path": "mcp-builder/scripts/connections.py",
+     "size": 4875,
+     "sha256": "9403668a2041568772082a8b334122c1f88daf0541fb393af4522d0094a47a6e"
+    },
+    {
+     "path": "mcp-builder/scripts/evaluation.py",
+     "size": 12579,
+     "sha256": "49ed1d17cdce5da101b210197740713f49b935c29d4f339542a14b132658e6f7"
+    },
+    {
+     "path": "mcp-builder/scripts/example_evaluation.xml",
+     "size": 1194,
+     "sha256": "9272b348ddcc4b06ba562367ccd0770e018158c0068ac5116d5e34aaeff8777a"
+    },
+    {
+     "path": "mcp-builder/scripts/requirements.txt",
+     "size": 29,
+     "sha256": "d5d7558b2368ecea9dfeed7d1fbc71ee9e0750bebd1282faa527d528a344c3c7"
+    }
+   ]
+  }
+ ],
  "skills": [
   {
    "name": "review-contract",

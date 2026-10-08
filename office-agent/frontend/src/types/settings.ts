@@ -107,15 +107,26 @@ export interface SkillInfo {
   updated: string;
 }
 
-export interface CatalogSkill {
-  name: string;
+export interface SkillPlugin {
+  id: string;
+  title: string;
+  author: string;
+  repo: string;
+  version: string;
   description: string;
   license: string;
-  /** What kind of work it is for: Legal, Finance, Marketing... */
-  category: string;
-  /** Total bytes the download would fetch. */
-  size: number;
-  added: boolean;
+  /** ISO date of the pinned commit. */
+  updated: string;
+  skills: string[];
+  /** How many of `skills` are already added. */
+  added: number;
+}
+
+export interface SkillPluginDetail extends SkillPlugin {
+  files: string[];
+  skill_details: { name: string; description: string }[];
+  /** `connector` is coscribe's connector for the same server, if it has one. */
+  connectors: { name: string; url: string; connector: string | null }[];
 }
 
 export type SkillsResponse = SkillInfo[];

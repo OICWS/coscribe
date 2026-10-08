@@ -7898,6 +7898,36 @@ on Windows a backslash is enough.
       store (not read, not rewritten, not deleted; fails without the fix);
       the two endpoints answer 404 to a backslash id.
 
+## Phase 8dc -- Skills Discover as plugins you can read before adding (shipped)
+
+The skills Discover list was a flat list of 80 names and gave no way to look
+inside a skill before downloading it. A skill is a folder (instructions,
+reference files, scripts) that may expect certain tools and connectors, and
+Anthropic's `knowledge-work-plugins` already ship that way, so Discover now
+lists plugins and the page mirrors the plugin.
+
+- [x] **Discover = 13 plugin cards** (10 role plugins from
+      `knowledge-work-plugins` with their real version, description and
+      commit date; 3 packs made from `anthropics/skills` -- Design &
+      creative, Writing, Developer). A plugin page has Overview, Contents (file
+      tree and viewer), Skills and Connectors tabs; Add installs every skill
+      of the plugin, skips ones already there and removes what it added if a
+      download fails, so it can just be pressed again.
+- [x] **Preview without installing.** The catalog now carries every file of a
+      plugin with its SHA-256; the preview endpoint fetches one file at the
+      pinned commit, checks the hash, caps size (500 KB) and only serves paths
+      the catalog lists.
+- [x] **Connectors tab** reads the plugin's `.mcp.json` and marks each service
+      "In coscribe" when its server address (or name) is one of our hosted
+      connectors, else "Not in coscribe yet" (Slack, Salesforce, HubSpot and
+      others need a pre-registered app or have no dynamic registration). Icons
+      for Slack, Gmail, Google Drive/Calendar, HubSpot, Figma, Asana and
+      Microsoft apps were added as SVG (from the landing page set).
+- [x] **Not done:** coscribe's own built-in skills (pptx, excel, word,
+      skill-creator) keep the existing detail page rather than a store-style
+      one; skills that expect a connector still just run without it, as the
+      role skills do when no playbook exists.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

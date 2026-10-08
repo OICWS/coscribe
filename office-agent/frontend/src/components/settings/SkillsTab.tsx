@@ -1,9 +1,12 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
-  addCatalogSkill,
-  getSkillCatalog,
+  addSkillPlugin,
+  getMcpCatalog,
   getSkillFileContent,
   getSkillFiles,
+  getSkillPlugin,
+  getSkillPluginFile,
+  getSkillPlugins,
   getSkills,
   getTools,
   removeSkill,
@@ -12,7 +15,13 @@ import {
 } from "../../lib/rest";
 import { useClickOutside } from "../../lib/useClickOutside";
 import { useFetchOnActive } from "../../lib/useFetchOnActive";
-import type { CatalogSkill, SkillFileContentResult, SkillInfo } from "../../types/settings";
+import type {
+  McpCatalogEntry,
+  SkillFileContentResult,
+  SkillInfo,
+  SkillPlugin,
+  SkillPluginDetail,
+} from "../../types/settings";
 import { ConfirmDialog } from "../ConfirmDialog";
 import {
   ArrowLeftIcon,
@@ -29,6 +38,7 @@ import {
   UploadIcon,
 } from "../icons";
 import { ToggleSwitch } from "../ToggleSwitch";
+import { ConnectorIcon } from "./ConnectorIcon";
 import { FetchRetry } from "./FetchRetry";
 
 const Markdown = lazy(() => import("../Markdown").then((m) => ({ default: m.Markdown })));
@@ -40,7 +50,7 @@ interface SkillsTabProps {
   onCreateSkill: () => void;
 }
 
-type View = { kind: "list" } | { kind: "upload" } | { kind: "detail"; name: string };
+type View = { kind: "list" } | { kind: "upload" } | { kind: "detail"; name: string } | { kind: "plugin"; id: string };
 type Tab = "yours" | "discover";
 
 const SOURCE_BYLINE: Record<SkillInfo["source"], string> = {
@@ -334,7 +344,18 @@ function CodeView({ text }: { text: string }) {
   );
 }
 
-function FileViewer({ skillName, path }: { skillName: string; path: string }) {
+function FileViewer({
+  source,
+  path,
+  load,
+}: {
+  /** Identifies what `load` reads from, so switching sources reloads. */
+  source: string;
+  path: string;
+  load: (path: string) => Promise<SkillFileContentResult>;
+}) {
+  const loadRef = useRef(load);
+  loadRef.current = load;
   const [content, setContent] = useState<SkillFileContentResult | null>(null);
   const [mode, setMode] = useState<"preview" | "code">("preview");
   const previewable = PREVIEWABLE.has(extension(path));
@@ -344,14 +365,14 @@ function FileViewer({ skillName, path }: { skillName: string; path: string }) {
     let cancelled = false;
     setContent(null);
     if (previewable) {
-      getSkillFileContent(skillName, path)
+      loadRef.current(path)
         .catch(() => ({ error: "Couldn't load this file." }))
         .then((result) => !cancelled && setContent(result));
     }
     return () => {
       cancelled = true;
     };
-  }, [skillName, path, previewable]);
+  }, [source, path, previewable]);
 
   const segment = (active: boolean) =>
     `flex h-7 w-8 items-center justify-center rounded-md ${
@@ -512,7 +533,7 @@ function SkillDetailView({
             />
           </div>
           {selected ? (
-            <FileViewer skillName={skill.name} path={selected} />
+            <FileViewer source={skill.name} path={selected} load={(path) => getSkillFileContent(skill.name, path)} />
           ) : (
             <p className="p-5 text-sm text-[var(--muted)]">No files.</p>
           )}
@@ -522,29 +543,240 @@ function SkillDetailView({
   );
 }
 
-function DiscoverRow({ entry, adding, onAdd }: { entry: CatalogSkill; adding: boolean; onAdd: () => void }) {
+function PluginCard({ plugin, onOpen }: { plugin: SkillPlugin; onOpen: () => void }) {
+  const complete = plugin.added === plugin.skills.length;
   return (
-    <div className="flex items-center gap-4 border-b border-[var(--border)] py-3.5 last:border-b-0">
-      <SkillBadge />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[15px]">{entry.name}</div>
-        <div className="truncate text-sm text-[var(--muted)]" title={entry.description}>
-          by Anthropic &middot; {entry.description}
+    <button
+      type="button"
+      className="flex min-w-0 flex-col gap-3 rounded-xl border border-[var(--border)] p-4 text-left hover:bg-[var(--card-bg)]"
+      onClick={onOpen}
+    >
+      <div className="flex items-center gap-3">
+        <SkillBadge />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[15px] font-medium">{plugin.title}</div>
+          <div className="truncate text-xs text-[var(--muted)]">
+            by {plugin.author} &middot; {plugin.skills.length} skills
+          </div>
         </div>
+        {complete && <CheckIcon className="h-4 w-4 shrink-0 text-[var(--muted)]" aria-label="Added" />}
       </div>
-      {entry.added ? (
-        <span className="flex shrink-0 items-center gap-1 px-3 text-sm text-[var(--muted)]">
-          <CheckIcon className="h-4 w-4" /> Added
-        </span>
-      ) : (
-        <button
-          type="button"
-          disabled={adding}
-          className="shrink-0 rounded-lg border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--card-bg)] disabled:opacity-60"
-          onClick={onAdd}
-        >
-          {adding ? "Adding..." : "Add"}
-        </button>
+      <p className="line-clamp-3 text-sm leading-relaxed text-[var(--muted)]">{plugin.description}</p>
+    </button>
+  );
+}
+
+const CONNECTOR_TITLES: Record<string, string> = {
+  hubspot: "HubSpot",
+  bigquery: "BigQuery",
+  docusign: "DocuSign",
+  zoominfo: "ZoomInfo",
+  "otter-ai": "Otter.ai",
+  "microsoft-365": "Microsoft 365",
+  "amplitude-eu": "Amplitude (EU)",
+  gmail: "Gmail",
+  similarweb: "Similarweb",
+};
+
+function connectorTitle(name: string): string {
+  return CONNECTOR_TITLES[name] ?? name.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+type PluginTab = "overview" | "contents" | "skills" | "connectors";
+
+function PluginDetailView({
+  id,
+  onBack,
+  onAdded,
+}: {
+  id: string;
+  onBack: () => void;
+  onAdded: () => void;
+}) {
+  const [plugin, setPlugin] = useState<SkillPluginDetail | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<PluginTab>("overview");
+  const [selected, setSelected] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<McpCatalogEntry[]>([]);
+
+  const load = () => {
+    getSkillPlugin(id)
+      .then((detail) => {
+        setPlugin(detail);
+        setSelected((prev) => prev ?? (detail.files.find((f) => f.endsWith("/SKILL.md")) ?? detail.files[0] ?? null));
+      })
+      .catch((err: unknown) => setLoadError(err instanceof Error ? err.message : "Couldn't load this plugin."));
+  };
+  useEffect(load, [id]);
+  useEffect(() => {
+    getMcpCatalog()
+      .then(setCatalog)
+      .catch(() => {});
+  }, []);
+
+  const tree = useMemo(() => buildFileTree(plugin?.files ?? []), [plugin]);
+  const tabClass = (active: boolean) =>
+    `-mb-px border-b-2 px-4 py-2.5 text-[15px] ${
+      active ? "border-[var(--fg)] text-[var(--fg)]" : "border-transparent text-[var(--muted)] hover:text-[var(--fg)]"
+    }`;
+  const tabButton = (value: PluginTab, label: string, count?: number) => (
+    <button type="button" className={tabClass(tab === value)} onClick={() => setTab(value)}>
+      {label}
+      {count !== undefined && <span className="text-[var(--muted)]"> &middot; {count}</span>}
+    </button>
+  );
+
+  const add = async () => {
+    setAdding(true);
+    setAddError(null);
+    const result = await addSkillPlugin(id);
+    setAdding(false);
+    if ("error" in result) setAddError(result.error);
+    load();
+    onAdded();
+  };
+
+  const back = (
+    <button type="button" className="flex w-fit items-center gap-2 text-[15px] text-[var(--fg)] hover:opacity-70" onClick={onBack}>
+      <ArrowLeftIcon className="h-4 w-4" /> Discover
+    </button>
+  );
+  if (!plugin) {
+    return (
+      <div className="flex flex-col gap-5">
+        {back}
+        <p className="text-sm text-[var(--muted)]">{loadError ?? "Loading..."}</p>
+      </div>
+    );
+  }
+  const complete = plugin.added === plugin.skills.length;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-5">
+      {back}
+      <div className="flex items-center gap-4">
+        <SkillBadge large />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-lg font-semibold">{plugin.title}</div>
+          <div className="text-sm text-[var(--muted)]">
+            by {plugin.author}
+            {plugin.version && <> &middot; v{plugin.version}</>} &middot; {plugin.skills.length} skills &middot; updated{" "}
+            {shortDate(plugin.updated)}
+          </div>
+        </div>
+        {complete ? (
+          <span className="flex shrink-0 items-center gap-1 px-3 text-sm text-[var(--muted)]">
+            <CheckIcon className="h-4 w-4" /> Added
+          </span>
+        ) : (
+          <button
+            type="button"
+            disabled={adding}
+            className="shrink-0 rounded-lg bg-[var(--primary)] px-4 py-1.5 text-sm font-medium text-[var(--primary-fg)] hover:bg-[var(--primary-hover)] disabled:opacity-60"
+            onClick={add}
+          >
+            {adding ? "Adding..." : plugin.added > 0 ? "Add the rest" : "Add"}
+          </button>
+        )}
+      </div>
+      {addError && (
+        <p role="alert" className="text-sm text-[var(--danger)]">
+          {addError}
+        </p>
+      )}
+      <div className="flex border-b border-[var(--border)]">
+        {tabButton("overview", "Overview")}
+        {tabButton("contents", "Contents", plugin.files.length)}
+        {tabButton("skills", "Skills", plugin.skills.length)}
+        {tabButton("connectors", "Connectors", plugin.connectors.length)}
+      </div>
+
+      {tab === "overview" && (
+        <div className="flex flex-col gap-4">
+          <p className="text-[15px] leading-relaxed">{plugin.description}</p>
+          <p className="text-sm text-[var(--muted)]">
+            From github.com/{plugin.repo}, under the {plugin.license === "Apache-2.0" ? "Apache License 2.0" : plugin.license}.
+            Adding it downloads {plugin.skills.length} skills into your skills folder; you can look through every file first
+            under Contents.
+          </p>
+        </div>
+      )}
+
+      {tab === "contents" && (
+        <div className="flex min-h-[420px] flex-1 overflow-hidden rounded-xl border border-[var(--border)]">
+          <div className="w-60 shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--card-bg)]/40 p-2">
+            <FileTreeView
+              node={tree}
+              prefix=""
+              depth={0}
+              selectedPath={selected}
+              collapsed={collapsed}
+              onToggleDir={(path) =>
+                setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(path)) next.delete(path);
+                  else next.add(path);
+                  return next;
+                })
+              }
+              onSelectFile={setSelected}
+            />
+          </div>
+          {selected ? (
+            <FileViewer source={plugin.id} path={selected} load={(path) => getSkillPluginFile(plugin.id, path)} />
+          ) : (
+            <p className="p-5 text-sm text-[var(--muted)]">No files.</p>
+          )}
+        </div>
+      )}
+
+      {tab === "skills" && (
+        <div>
+          {plugin.skill_details.map((skill) => (
+            <button
+              key={skill.name}
+              type="button"
+              className="flex w-full flex-col gap-0.5 border-b border-[var(--border)] py-3.5 text-left last:border-b-0 hover:opacity-80"
+              onClick={() => {
+                setSelected(plugin.files.find((f) => f.endsWith(`${skill.name}/SKILL.md`)) ?? null);
+                setTab("contents");
+              }}
+            >
+              <span className="text-[15px]">{skill.name}</span>
+              <span className="line-clamp-2 text-sm text-[var(--muted)]">{skill.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "connectors" && (
+        <div>
+          {plugin.connectors.length === 0 ? (
+            <p className="py-6 text-center text-sm text-[var(--muted)]">This plugin doesn't use any connectors.</p>
+          ) : (
+            <>
+              <p className="pb-2 text-sm text-[var(--muted)]">
+                Services these skills work with. The ones coscribe has a connector for can be added under Connectors.
+              </p>
+              {plugin.connectors.map((c) => {
+                const entry = catalog.find((e) => e.name === c.connector);
+                return (
+                  <div key={c.name} className="flex items-center gap-4 border-b border-[var(--border)] py-3.5 last:border-b-0">
+                    <ConnectorIcon name={c.connector ?? c.name} title={entry?.title ?? connectorTitle(c.name)} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px]">{entry?.title ?? connectorTitle(c.name)}</div>
+                      {entry && <div className="truncate text-sm text-[var(--muted)]">{entry.description}</div>}
+                    </div>
+                    <span className="shrink-0 text-sm text-[var(--muted)]">{c.connector ? "In coscribe" : "Not in coscribe yet"}</span>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
       )}
     </div>
   );
@@ -653,9 +885,8 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
   const [view, setView] = useState<View>({ kind: "list" });
   const [tab, setTab] = useState<Tab>("yours");
   const [search, setSearch] = useState("");
-  const [catalog, setCatalog] = useState<CatalogSkill[] | null>(null);
+  const [catalog, setCatalog] = useState<SkillPlugin[] | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [adding, setAdding] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<SkillInfo | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -664,7 +895,7 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
 
   const loadCatalog = () => {
     setCatalogError(null);
-    getSkillCatalog()
+    getSkillPlugins()
       .then(setCatalog)
       .catch((err: unknown) => setCatalogError(err instanceof Error ? err.message : "Couldn't load Discover."));
   };
@@ -689,16 +920,6 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
     if ("error" in result) setActionError(result.error);
     setView({ kind: "list" });
     setCatalog(null);
-    retry();
-  };
-
-  const add = async (name: string) => {
-    setAdding(name);
-    setActionError(null);
-    const result = await addCatalogSkill(name);
-    setAdding(null);
-    if ("error" in result) setActionError(result.error);
-    loadCatalog();
     retry();
   };
 
@@ -729,6 +950,19 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
     );
   }
 
+  if (view.kind === "plugin") {
+    return (
+      <PluginDetailView
+        id={view.id}
+        onBack={() => setView({ kind: "list" })}
+        onAdded={() => {
+          setCatalog(null);
+          retry();
+        }}
+      />
+    );
+  }
+
   const detailSkill = view.kind === "detail" ? skills.find((s) => s.name === view.name) : undefined;
   if (detailSkill) {
     return (
@@ -749,7 +983,7 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
       active ? "bg-[var(--bg)] text-[var(--fg)] shadow-sm ring-1 ring-[var(--border)]" : "text-[var(--muted)] hover:text-[var(--fg)]"
     }`;
   const visible = skills.filter((s) => matches(search, s.name, s.description));
-  const discover = (catalog ?? []).filter((e) => matches(search, e.name, e.description));
+  const discover = (catalog ?? []).filter((e) => matches(search, e.title, e.description, ...e.skills));
 
   return (
     <div className="flex flex-col gap-5">
@@ -865,24 +1099,17 @@ export function SkillsTab({ active, onCreateSkill }: SkillsTabProps) {
             </p>
           )}
           {catalog === null && !catalogError && <p className="text-sm text-[var(--muted)]">Loading...</p>}
-          {[...new Set(discover.map((e) => e.category))].map((category) => (
-            <section key={category} className="mb-5">
-              <h3 className="flex items-center gap-2 text-[17px] font-medium">
-                {category} <CountBadge count={discover.filter((e) => e.category === category).length} />
-              </h3>
-              {discover
-                .filter((e) => e.category === category)
-                .map((entry) => (
-                  <DiscoverRow key={entry.name} entry={entry} adding={adding === entry.name} onAdd={() => add(entry.name)} />
-                ))}
-            </section>
-          ))}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {discover.map((plugin) => (
+              <PluginCard key={plugin.id} plugin={plugin} onOpen={() => setView({ kind: "plugin", id: plugin.id })} />
+            ))}
+          </div>
           {catalog !== null && discover.length === 0 && (
-            <p className="py-6 text-center text-sm text-[var(--muted)]">No skills match "{search.trim()}".</p>
+            <p className="py-6 text-center text-sm text-[var(--muted)]">No plugins match "{search.trim()}".</p>
           )}
           {catalog !== null && (
             <p className="mt-4 text-xs text-[var(--muted)]">
-              Open-source skills from github.com/anthropics/skills and github.com/anthropics/knowledge-work-plugins (Apache License 2.0). Adding one downloads its folder.
+              Open-source skills from github.com/anthropics/skills and github.com/anthropics/knowledge-work-plugins (Apache License 2.0). A plugin is a bundle of skills; Add downloads all of them.
             </p>
           )}
         </div>

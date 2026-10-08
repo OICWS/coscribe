@@ -246,8 +246,90 @@ def _entry(
     }
 
 
+PACK_DESCRIPTIONS = {
+    "Design & creative": "Creative and design skills: generative art, posters and canvas designs, "
+    "themes and brand styling, and animated GIFs for Slack.",
+    "Writing": "Writing skills: internal communications in the formats companies use.",
+    "Developer": "Skills for developers: the Claude API, front-end design, MCP servers.",
+}
+
+
+def _file_entries(root: Path, only: list[str] | None = None) -> list[dict[str, object]]:
+    out = []
+    for file in sorted(p for p in root.rglob("*") if p.is_file()):
+        rel = file.relative_to(root).as_posix()
+        parts = rel.split("/")
+        if only is not None and parts[0] == "skills" and parts[1] not in only:
+            continue
+        data = file.read_bytes()
+        out.append({"path": rel, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+    return out
+
+
+def _commit_date(clone: Path, commit: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(clone), "show", "-s", "--format=%cs", commit], text=True
+    ).strip()
+
+
+def _plugin(
+    clone: Path, plugin: str, category: str, names: list[str], commit: str
+) -> dict[str, object]:
+    root = clone / plugin
+    meta = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    mcp = (
+        json.loads((root / ".mcp.json").read_text(encoding="utf-8"))
+        if (root / ".mcp.json").is_file()
+        else {}
+    )
+    connectors = [
+        {"name": name, "url": str(config.get("url") or "")}
+        for name, config in mcp.get("mcpServers", {}).items()
+    ]
+    return {
+        "id": plugin,
+        "title": category,
+        "author": meta.get("author", {}).get("name", "Anthropic"),
+        "version": meta.get("version", ""),
+        "description": meta["description"],
+        "license": "Apache-2.0",
+        "repo": "anthropics/knowledge-work-plugins",
+        "commit": commit,
+        "path": plugin,
+        "updated": _commit_date(clone, commit),
+        "skills": names,
+        "connectors": connectors,
+        # Only the skills listed, plus the plugin's own README, license and manifests.
+        "files": _file_entries(root, names),
+    }
+
+
+def _pack(clone: Path, category: str, names: list[str], commit: str) -> dict[str, object]:
+    root = clone / "skills"
+    files = []
+    for name in names:
+        for entry in _file_entries(root / name):
+            files.append({**entry, "path": f"{name}/{entry['path']}"})
+    return {
+        "id": category.lower().replace(" & ", "-").replace(" ", "-"),
+        "title": category,
+        "author": "Anthropic",
+        "version": "",
+        "description": PACK_DESCRIPTIONS[category],
+        "license": "Apache-2.0",
+        "repo": "anthropics/skills",
+        "commit": commit,
+        "path": "skills",
+        "updated": _commit_date(clone, commit),
+        "skills": names,
+        "connectors": [],
+        "files": files,
+    }
+
+
 def main(skills_clone: Path, plugins_clone: Path) -> None:
     entries = []
+    plugins = []
     seen: set[str] = set()
     # Work categories first: that is the order Discover lists them in.
     plugins_commit = _commit(plugins_clone)
@@ -255,6 +337,7 @@ def main(skills_clone: Path, plugins_clone: Path) -> None:
         plugin_license = (
             f"{plugin}/LICENSE" if (plugins_clone / plugin / "LICENSE").is_file() else "LICENSE"
         )
+        plugins.append(_plugin(plugins_clone, plugin, category, names, plugins_commit))
         for name in names:
             if name in seen:
                 raise SystemExit(f"{name}: listed twice")
@@ -273,6 +356,7 @@ def main(skills_clone: Path, plugins_clone: Path) -> None:
             )
     skills_commit = _commit(skills_clone)
     for category, names in ANTHROPIC_SKILLS:
+        plugins.append(_pack(skills_clone, category, names, skills_commit))
         for name in names:
             if name in seen:
                 raise SystemExit(f"{name}: listed twice")
@@ -291,12 +375,18 @@ def main(skills_clone: Path, plugins_clone: Path) -> None:
             )
     OUT.write_text(
         json.dumps(
-            {"repo": "anthropics/skills", "commit": skills_commit, "skills": entries}, indent=1
+            {
+                "repo": "anthropics/skills",
+                "commit": skills_commit,
+                "plugins": plugins,
+                "skills": entries,
+            },
+            indent=1,
         )
         + "\n",
         encoding="utf-8",
     )
-    print(f"wrote {len(entries)} skills to {OUT}")
+    print(f"wrote {len(entries)} skills in {len(plugins)} plugins to {OUT}")
 
 
 if __name__ == "__main__":

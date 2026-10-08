@@ -24,7 +24,8 @@ import type {
   ScriptEnvInstallResult,
   ScriptEnvInterpreterInfo,
   ScriptEnvPackage,
-  CatalogSkill,
+  SkillPlugin,
+  SkillPluginDetail,
   CodePermissions,
   CodePolicy,
   CodeStatus,
@@ -162,10 +163,19 @@ export const setSkillEnabled = (name: string, enabled: boolean) =>
 export const removeSkill = (name: string) =>
   sendForResult<{ removed: string }>(`/api/skills/${encodeURIComponent(name)}`, "DELETE", undefined);
 
-export const getSkillCatalog = () => getJson<CatalogSkill[]>("/api/skills/catalog");
+export const getSkillPlugins = () => getJson<SkillPlugin[]>("/api/skills/plugins");
 
-export const addCatalogSkill = (name: string) =>
-  sendForResult<{ added: string }>(`/api/skills/catalog/${encodeURIComponent(name)}`, "POST", undefined);
+export const getSkillPlugin = (id: string) =>
+  getJson<SkillPluginDetail>(`/api/skills/plugins/${encodeURIComponent(id)}`);
+
+export const addSkillPlugin = (id: string) =>
+  sendForResult<{ added: string[] }>(`/api/skills/plugins/${encodeURIComponent(id)}`, "POST", undefined);
+
+export async function getSkillPluginFile(id: string, path: string): Promise<SkillFileContentResult> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const res = await fetch(`/api/skills/plugins/${encodeURIComponent(id)}/files/${encodedPath}`);
+  return res.json() as Promise<SkillFileContentResult>;
+}
 
 export const getSkillFiles = (name: string) =>
   getJson<SkillFilesResponse>(`/api/skills/${encodeURIComponent(name)}/files`);

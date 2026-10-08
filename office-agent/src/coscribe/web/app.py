@@ -159,8 +159,11 @@ from ..tools.skill_catalog import (
     all_skills,
     disabled_skill_names,
     enabled_skill_names,
+    get_plugin,
     install_catalog_skill,
+    install_plugin,
     load_catalog,
+    plugin_file,
     remove_skill,
     set_skill_enabled,
     skill_source,
@@ -979,6 +982,10 @@ class ScriptEnvPackageInstall(BaseModel):
 
 class ScriptEnvInterpreterUpdate(BaseModel):
     path: str  # blank clears the override, reverting to auto-detection
+
+
+def _connector_url_key(url: str) -> str:
+    return url.split("#")[0].rstrip("/").lower()
 
 
 def _read_mcp_servers_raw(path: Path) -> dict[str, Any]:
@@ -2374,6 +2381,91 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         set_skill_enabled(settings.state_dir, name, True)
         return JSONResponse({"added": name})
 
+    _SKILL_FILE_PREVIEW_MAX_BYTES = 500_000
+
+    def _plugin_summary(plugin: dict[str, Any]) -> dict[str, Any]:
+        installed = set(_skills_by_name())
+        return {
+            "id": plugin["id"],
+            "title": plugin["title"],
+            "author": plugin["author"],
+            "repo": plugin["repo"],
+            "version": plugin["version"],
+            "description": plugin["description"],
+            "license": plugin["license"],
+            "updated": plugin["updated"],
+            "skills": plugin["skills"],
+            "added": sum(1 for n in plugin["skills"] if n in installed),
+        }
+
+    @app.get("/api/skills/plugins")
+    async def get_skill_plugins() -> list[dict[str, Any]]:
+        return [_plugin_summary(p) for p in load_catalog()["plugins"]]
+
+    @app.get("/api/skills/plugins/{plugin_id}")
+    async def get_skill_plugin(plugin_id: str) -> JSONResponse:
+        try:
+            plugin = get_plugin(plugin_id)
+        except SkillCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        hosted = [e for e in MCP_CATALOG if e.get("server_url")]
+        by_url = {_connector_url_key(e["server_url"]): e["name"] for e in hosted}
+        names = {e["name"] for e in hosted}
+
+        def ours(c: dict[str, Any]) -> str | None:
+            found = by_url.get(_connector_url_key(c["url"])) if c["url"] else None
+            return found or (c["name"] if c["name"] in names else None)
+
+        descriptions = {s["name"]: s["description"] for s in load_catalog()["skills"]}
+        return JSONResponse(
+            {
+                **_plugin_summary(plugin),
+                "files": [f["path"] for f in plugin["files"]],
+                "skill_details": [
+                    {"name": n, "description": descriptions.get(n, "")} for n in plugin["skills"]
+                ],
+                # `connector` is the coscribe connector that talks to the same
+                # server, or null when coscribe has none for it.
+                "connectors": [
+                    {**c, "connector": ours(c)} for c in plugin["connectors"]
+                ],
+            }
+        )
+
+    @app.get("/api/skills/plugins/{plugin_id}/files/{path:path}")
+    async def get_skill_plugin_file(plugin_id: str, path: str) -> JSONResponse:
+        try:
+            plugin = get_plugin(plugin_id)
+        except SkillCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        entry = next((f for f in plugin["files"] if f["path"] == path), None)
+        if entry is None:
+            return JSONResponse({"error": f"No such file: {path!r}."}, status_code=404)
+        if entry["size"] > _SKILL_FILE_PREVIEW_MAX_BYTES:
+            return JSONResponse(
+                {"error": f"File is {entry['size']:,} bytes -- too large to preview here."},
+                status_code=413,
+            )
+        try:
+            data = await asyncio.to_thread(plugin_file, plugin_id, path)
+            return JSONResponse({"path": path, "content": data.decode("utf-8")})
+        except UnicodeDecodeError:
+            return JSONResponse(
+                {"error": "This file isn't UTF-8 text -- can't preview it here."}, status_code=415
+            )
+        except SkillCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+
+    @app.post("/api/skills/plugins/{plugin_id}")
+    async def add_skill_plugin(plugin_id: str) -> JSONResponse:
+        try:
+            added = await asyncio.to_thread(install_plugin, settings.skills_dir, plugin_id)
+        except SkillCatalogError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        for name in added:
+            set_skill_enabled(settings.state_dir, name, True)
+        return JSONResponse({"added": added})
+
     @app.get("/api/skills/{name}/files")
     async def get_skill_files(name: str) -> JSONResponse:
         # Backs the Skills settings tab's own file-tree browser (a skill
@@ -2398,7 +2490,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     # huge file (an accidentally-included data dump) from being sent whole
     # to the browser, matching search_files/list_files' own "bounded, not
     # unlimited" caps elsewhere in this codebase.
-    _SKILL_FILE_PREVIEW_MAX_BYTES = 500_000
 
     @app.get("/api/skills/{name}/files/{path:path}")
     async def get_skill_file_content(name: str, path: str) -> JSONResponse:
