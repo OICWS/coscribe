@@ -2,7 +2,7 @@
 
 One file per piece of work, named `<date>-<slug>.md` (for example
 `2026-10-08-secrets-ui.md`). Newest last in the directory listing. This
-replaces appending to `office-agent/ROADMAP.md`, which was one long file every
+replaces appending to the old `ROADMAP.md`, which was one long file every
 session edited at the end, so entries collided on phase ids and on merge.
 
 Write the entry in the PR that ships the work. Keep it to what a later reader
@@ -25,7 +25,8 @@ Why: <the problem or the request, a few lines>
 
 Rules: say plainly what was not verified; no history of the conversation that
 led to it (that is the commit message); link the decision record if one was
-needed. Work before 2026-10-08 is in `office-agent/ROADMAP.md`.
+needed. Work before 2026-10-08 is in `docs/history/roadmap-through-2026-10-08.md`
+(`office-agent/ROADMAP.md` is a short index of it).
 
 When a decision record is required (see [`../decisions/`](../decisions/)): a
 change to one of the invariants in the root `CLAUDE.md`, a new dependency
