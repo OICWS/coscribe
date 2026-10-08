@@ -7940,6 +7940,44 @@ lists plugins and the page mirrors the plugin.
       one; skills that expect a connector still just run without it, as the
       role skills do when no playbook exists.
 
+## Phase 8dd -- Connectors that need an app registered with the service (shipped)
+
+HubSpot and Google Workspace don't accept dynamic client registration (HubSpot
+needs an "MCP auth app", Google a Web-application OAuth client with a secret),
+so they can't be one click. Rather than hide them, the connector page walks
+the person through a one-time setup and keeps the credentials safe.
+
+- [x] **Setup page** on the connector (HubSpot, Gmail, Google Calendar, Google
+      Drive): numbered steps taken from each service's own guide (read
+      2026-10-08), a button that opens the right page, the redirect address and
+      scopes/commands as copy boxes, then Client ID / Client secret fields
+      checked on save. Once saved the page shows one line (change, export,
+      remove) and the normal Connect button; the Discover card says "Needs
+      setup" and its + opens the page instead of failing.
+- [x] **Fixed sign-in port.** These services compare the redirect address
+      exactly and the desktop app's port changes every start, so such a
+      sign-in is received by a small loopback listener on port 47821, open only
+      while the sign-in waits. A busy port is reported in plain words. Scopes
+      and Google's `access_type=offline&prompt=consent` (so a refresh token is
+      issued) are added to the sign-in address; the SDK's flow, token storage
+      and refresh are otherwise unchanged and no registration is attempted
+      (tested against the OAuth test server: zero registrations).
+- [x] **Credentials** are stored through the keychain-backed secret store, per
+      service group (Google's three connectors share one app), never echoed
+      back.
+- [x] **Teams:** Export setup writes a JSON file (it contains the secret, the
+      UI says so); Import setup on another machine skips straight to Connect.
+      "Copy a message for your admin" prepares the request for services whose
+      workspace needs an administrator to approve the app. Errors about the
+      redirect address or approval are turned into what to do next.
+- [ ] **Not verified live:** no HubSpot or Google account was available, so
+      the steps follow the vendors' documents and the whole flow was tested
+      only against a local OAuth server that requires a pre-registered client.
+      Google's Workspace MCP servers are a Developer Preview; whether HubSpot
+      accepts a `localhost` redirect was not stated in its documentation.
+      Slack (its MCP is limited to Marketplace/internal apps, per a third-party
+      guide) is still not offered.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6

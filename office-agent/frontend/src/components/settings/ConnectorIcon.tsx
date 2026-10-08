@@ -8,8 +8,8 @@ const ICONS = import.meta.glob("../../assets/connectors/*.{png,jpg,svg}", {
 
 // Names a plugin's connector list uses that differ from the icon's file.
 const ALIASES: Record<string, string> = {
-  "google calendar": "googlecalendar",
-  "google drive": "googledrive",
+  "google calendar": "google-calendar",
+  "google drive": "google-drive",
   "microsoft-365": "m365",
   "amplitude-eu": "amplitude",
   "otter-ai": "otter",

@@ -4,6 +4,7 @@ import {
   addMcpServer,
   bumpMcpVersion,
   getMcpCatalog,
+  getMcpOAuthApps,
   getMcpServers,
   getNpmLatestVersion,
   reconnectMcpServer,
@@ -15,6 +16,7 @@ import type {
   ConnectorTool,
   ConnectorToolPolicy,
   McpCatalogEntry,
+  McpOAuthApps,
   McpServerInfo,
   McpServersResponse,
 } from "../../types/settings";
@@ -33,6 +35,8 @@ import {
 } from "../icons";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { FetchRetry } from "./FetchRetry";
+import { friendlySignInError } from "../../lib/connectorSetup";
+import { ConnectorSetup } from "./ConnectorSetup";
 import { fieldClass, primaryButtonClass, secondaryButtonClass } from "./SettingRow";
 import { useClickOutside } from "../../lib/useClickOutside";
 import { useFetchOnActive } from "../../lib/useFetchOnActive";
@@ -66,7 +70,7 @@ function parseEnvLines(text: string): Record<string, string> {
 }
 
 type LocalServerArgs = { command: string; args: string[]; env?: Record<string, string> };
-type RemoteServerArgs = { server_url: string; headers?: Record<string, string>; auth?: "oauth" };
+type RemoteServerArgs = { server_url: string; headers?: Record<string, string>; auth?: "oauth"; oauth_app?: string };
 
 /** A catalog entry, a connector someone added, or both. */
 interface ConnectorRow {
@@ -456,6 +460,9 @@ function CatalogConnectorPage({
   info,
   pending,
   notice,
+  appSaved,
+  redirectUri,
+  onSetupChanged,
   onBack,
   onConnect,
   onSignIn,
@@ -467,6 +474,10 @@ function CatalogConnectorPage({
   info: McpServerInfo | null;
   pending: boolean;
   notice: Notice | null;
+  /** Whether the app this service needs (if any) has been registered and saved. */
+  appSaved: boolean;
+  redirectUri: string;
+  onSetupChanged: () => void;
   onBack: () => void;
   onConnect: () => void;
   onSignIn: () => void;
@@ -478,6 +489,8 @@ function CatalogConnectorPage({
   const tools = entry.tools ?? [];
   const [allTools, setAllTools] = useState(false);
   const shown = allTools ? tools : tools.slice(0, TOOLS_SHOWN);
+  const needsSetup = entry.setup !== undefined && !appSaved;
+  const showError = (text: string) => (entry.setup ? friendlySignInError(text, entry.setup, redirectUri) : text);
   const address = entry.server_url ?? (pkg ? `${pkg.name} ${pkg.version}` : `${entry.command ?? ""} ${(entry.args ?? []).join(" ")}`);
   return (
     <div className="flex flex-col gap-6">
@@ -520,6 +533,14 @@ function CatalogConnectorPage({
               Remove
             </button>
           </div>
+        ) : needsSetup ? (
+          <button
+            type="button"
+            className={primaryButtonClass}
+            onClick={() => document.getElementById(`setup-${entry.name}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+          >
+            Set up
+          </button>
         ) : (
           <button
             type="button"
@@ -540,10 +561,13 @@ function CatalogConnectorPage({
         </p>
       ) : info && !info.connected && !pending ? (
         <p role="status" className="text-sm text-[var(--danger)]">
-          {info.signin_error ?? "Not connected."}
+          {showError(info.signin_error ?? "Not connected.")}
         </p>
       ) : (
-        notice && <NoticeText notice={notice} />
+        notice && <NoticeText notice={{ ...notice, text: notice.error ? showError(notice.text) : notice.text }} />
+      )}
+      {entry.setup && (
+        <ConnectorSetup entry={entry} setup={entry.setup} saved={appSaved} redirectUri={redirectUri} onChanged={onSetupChanged} />
       )}
       {entry.about && <p className="max-w-[46rem] text-[15px] leading-relaxed">{entry.about}</p>}
 
@@ -626,12 +650,14 @@ function CatalogConnectorPage({
 function DiscoverCard({
   entry,
   added,
+  needsSetup,
   pending,
   onOpen,
   onAdd,
 }: {
   entry: McpCatalogEntry;
   added: boolean;
+  needsSetup: boolean;
   pending: boolean;
   onOpen: () => void;
   onAdd: () => void;
@@ -656,7 +682,12 @@ function DiscoverCard({
       <div className="min-w-0 flex-1 pr-8">
         <div className="text-[15px] font-medium">{title}</div>
         <div className="mt-0.5 line-clamp-2 text-sm text-[var(--fg)]">{entry.description}</div>
-        {entry.made_by && <div className="mt-1.5 text-sm text-[var(--muted)]">by {entry.made_by}</div>}
+        {entry.made_by && (
+          <div className="mt-1.5 text-sm text-[var(--muted)]">
+            by {entry.made_by}
+            {needsSetup && <span className="ml-2 rounded-full bg-[var(--bg)] px-2 py-0.5 text-xs">Needs setup</span>}
+          </div>
+        )}
       </div>
       {added ? (
         <CheckIcon aria-label="Added" className="absolute right-4 top-4 h-4 w-4 text-[var(--muted)]" />
@@ -839,7 +870,11 @@ function StatusCell({ row, pending }: { row: ConnectorRow; pending: boolean }) {
 // Header and rows share it, so each column lines up with its heading.
 const ROW_GRID = "grid grid-cols-[minmax(0,1fr)_10rem_8rem] items-center gap-4 px-3";
 
-const EMPTY: { catalog: McpCatalogEntry[]; servers: McpServersResponse } = { catalog: [], servers: {} };
+const EMPTY: { catalog: McpCatalogEntry[]; servers: McpServersResponse; apps: McpOAuthApps } = {
+  catalog: [],
+  servers: {},
+  apps: { saved: [], redirect_uri: "" },
+};
 
 /** Settings > Connectors: the list, a connector's own page (its tools and
  * their permissions), and adding a custom one. */
@@ -863,12 +898,17 @@ export function ConnectorsTab({ active }: { active: boolean }) {
   }, []);
 
   const {
-    data: { catalog, servers },
+    data: { catalog, servers, apps },
     status,
     retry: refresh,
   } = useFetchOnActive(
     active,
-    () => Promise.all([getMcpCatalog(), getMcpServers()]).then(([cat, srv]) => ({ catalog: cat, servers: srv })),
+    () =>
+      Promise.all([getMcpCatalog(), getMcpServers(), getMcpOAuthApps()]).then(([cat, srv, saved]) => ({
+        catalog: cat,
+        servers: srv,
+        apps: saved,
+      })),
     EMPTY,
   );
 
@@ -913,13 +953,18 @@ export function ConnectorsTab({ active }: { active: boolean }) {
       else setNotice({ text: `Saved, but couldn't connect${result.error ? ` -- ${result.error}` : "."}`, error: true });
     });
 
+  const needsSetup = (entry: McpCatalogEntry) => entry.setup !== undefined && !apps.saved.includes(entry.setup.group);
+
   const connectCatalog = (entry: McpCatalogEntry) => {
     setOpenName(entry.name);
     if (entry.needs_config) {
       setNotice({ text: `${entry.title ?? entry.name} needs its own token -- add it as a custom connector.`, error: false });
       return;
     }
-    if (entry.server_url) void performAdd(entry.name, { server_url: entry.server_url, auth: entry.auth });
+    if (entry.setup && !apps.saved.includes(entry.setup.group)) return;
+    if (entry.server_url) {
+      void performAdd(entry.name, { server_url: entry.server_url, auth: entry.auth, oauth_app: entry.setup?.group });
+    }
     else void performAdd(entry.name, { command: entry.command ?? "", args: entry.args ?? [] });
   };
 
@@ -998,6 +1043,9 @@ export function ConnectorsTab({ active }: { active: boolean }) {
         info={opened.serverInfo}
         pending={pendingConnectorAdds.has(opened.name)}
         notice={notice}
+        appSaved={opened.catalogEntry.setup ? apps.saved.includes(opened.catalogEntry.setup.group) : true}
+        redirectUri={apps.redirect_uri}
+        onSetupChanged={refresh}
         onBack={backToList}
         onConnect={() => connectCatalog(opened.catalogEntry!)}
         onSignIn={() => void signIn(opened.name)}
@@ -1171,9 +1219,10 @@ export function ConnectorsTab({ active }: { active: boolean }) {
                   key={row.name}
                   entry={row.catalogEntry!}
                   added={row.serverInfo !== null}
+                  needsSetup={needsSetup(row.catalogEntry!)}
                   pending={pendingConnectorAdds.has(row.name)}
                   onOpen={() => openRow(row.name)}
-                  onAdd={() => connectCatalog(row.catalogEntry!)}
+                  onAdd={() => (needsSetup(row.catalogEntry!) ? openRow(row.name) : connectCatalog(row.catalogEntry!))}
                 />
               ))}
             </div>

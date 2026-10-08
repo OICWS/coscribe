@@ -875,6 +875,18 @@ class MCPServerUpdate(BaseModel):
     headers: dict[str, str] = {}
     # "oauth": sign in through the server's own browser page; no headers.
     auth: str | None = None
+    # With "oauth": the app registered with the service (see
+    # runtime_lg/mcp_oauth.py) to sign in with, instead of a registration.
+    oauth_app: str | None = None
+
+
+class OAuthAppCredentials(BaseModel):
+    client_id: str
+    client_secret: str | None = None
+
+
+class OAuthAppImport(BaseModel):
+    apps: dict[str, OAuthAppCredentials]
 
 
 class MCPVersionBump(BaseModel):
@@ -1100,9 +1112,30 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     mcp_connections: dict[str, McpServerConnection] = {}
     # Deferred import for the same reason as runtime_lg.mcp (see the comment
     # above MCP_STARTUP_TIMEOUT_SECONDS).
-    from ..runtime_lg.mcp_oauth import SIGN_IN_TIMEOUT_SECONDS, McpOAuth
+    from ..runtime_lg.mcp_oauth import (
+        APP_REDIRECT_URI,
+        SIGN_IN_TIMEOUT_SECONDS,
+        CallbackPortBusy,
+        LoopbackCallback,
+        McpOAuth,
+        NeedsSignIn,
+    )
 
     mcp_oauth = McpOAuth(settings.state_dir)
+
+    def _oauth_callback_response(
+        state: str, code: str | None, error: str | None
+    ) -> tuple[int, str]:
+        name = mcp_oauth.complete(state, code, error)
+        if name is None:
+            return 400, _oauth_page("This sign-in link has expired. Start again from coscribe.")
+        if error:
+            return 200, _oauth_page(f"Signing in to {name} didn't work: {error}.")
+        return 200, _oauth_page(
+            f"You're signed in to {name}. You can close this tab and go back to coscribe."
+        )
+
+    app_callback = LoopbackCallback(_oauth_callback_response)
     sign_in_tasks: set[asyncio.Task[None]] = set()
 
     def _title_sidecar_path(thread_id: str) -> Path:
@@ -1597,6 +1630,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # shutdown (a lingering Playwright browser, most visibly).
             for connection in mcp_connections.values():
                 await connection.close()
+            for task in list(sign_in_tasks):
+                task.cancel()
+            await app_callback.stop()
             await shutdown_code_services()
 
     app = FastAPI(lifespan=lifespan)
@@ -2414,7 +2450,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
         def ours(c: dict[str, Any]) -> str | None:
             found = by_url.get(_connector_url_key(c["url"])) if c["url"] else None
-            return found or (c["name"] if c["name"] in names else None)
+            plain = c["name"].replace(" ", "-")
+            return found or (plain if plain in names else None)
 
         descriptions = {s["name"]: s["description"] for s in load_catalog()["skills"]}
         return JSONResponse(
@@ -2848,8 +2885,36 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         (already opened in the user's browser). The connection keeps
         waiting for the redirect in the background; the Connectors page
         sees the result through GET /api/mcp/servers."""
-        redirect_uri = f"{str(request.base_url).rstrip('/')}/api/mcp/oauth/callback"
-        flow = await mcp_oauth.begin(name, redirect_uri)
+        app_group = config.get("oauth_app")
+        setup: dict[str, Any] = next(
+            (
+                e["setup"]
+                for e in MCP_CATALOG
+                if app_group and e.get("setup", {}).get("group") == app_group
+            ),
+            {},
+        )
+        if app_group:
+            if mcp_oauth.app(app_group) is None:
+                return {"connected": False, "error": "Set up the app for this connector first."}
+            try:
+                await app_callback.start()
+            except CallbackPortBusy as exc:
+                return {"connected": False, "error": str(exc)}
+            redirect_uri = APP_REDIRECT_URI
+        else:
+            redirect_uri = f"{str(request.base_url).rstrip('/')}/api/mcp/oauth/callback"
+        try:
+            flow = await mcp_oauth.begin(
+                name,
+                redirect_uri,
+                app=app_group,
+                scope=" ".join(setup["scopes"]) if setup.get("scopes") else None,
+                auth_params=setup.get("auth_params"),
+            )
+        except NeedsSignIn as exc:
+            await app_callback.stop()
+            return {"connected": False, "error": str(exc)}
         await _disconnect_mcp_server_lg(name)
 
         async def connect() -> None:
@@ -2862,6 +2927,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             except Exception as exc:  # noqa: BLE001 -- shown to the user, not swallowed
                 error = str(exc) or type(exc).__name__
             mcp_oauth.finish(flow, None if connected else error or "Couldn't sign in.")
+            if app_callback.running and not any(
+                mcp_oauth.pending(n) for n in list(mcp_oauth._active)
+            ):
+                await app_callback.stop()
 
         task = asyncio.create_task(connect())
         sign_in_tasks.add(task)
@@ -2874,23 +2943,64 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             return {"connected": flow.error is None, "error": flow.error}
         return {"connected": False, "signin": {"url": flow.url}}
 
+    @app.get("/api/mcp/oauth-apps")
+    async def get_mcp_oauth_apps() -> dict[str, Any]:
+        return {"saved": mcp_oauth.app_groups(), "redirect_uri": APP_REDIRECT_URI}
+
+    @app.put("/api/mcp/oauth-apps/{group}")
+    async def put_mcp_oauth_app(group: str, payload: OAuthAppCredentials) -> JSONResponse:
+        client_id = payload.client_id.strip()
+        secret = (payload.client_secret or "").strip() or None
+        if not client_id or any(ch.isspace() for ch in client_id):
+            return JSONResponse(
+                {"error": "The Client ID is empty or has spaces in it."}, status_code=400
+            )
+        needs_secret = any(
+            e.get("setup", {}).get("group") == group and e["setup"].get("needs_secret")
+            for e in MCP_CATALOG
+        )
+        if needs_secret and secret is None:
+            return JSONResponse(
+                {"error": "This service needs the Client secret too."}, status_code=400
+            )
+        if secret is not None and any(ch.isspace() for ch in secret):
+            return JSONResponse({"error": "The Client secret has spaces in it."}, status_code=400)
+        mcp_oauth.set_app(group, client_id, secret)
+        return JSONResponse({"saved": group})
+
+    @app.delete("/api/mcp/oauth-apps/{group}")
+    async def delete_mcp_oauth_app(group: str) -> dict[str, Any]:
+        mcp_oauth.forget_app(group)
+        return {"removed": group}
+
+    @app.get("/api/mcp/oauth-apps/{group}/export")
+    async def export_mcp_oauth_app(group: str) -> JSONResponse:
+        credentials = mcp_oauth.app(group)
+        if credentials is None:
+            return JSONResponse({"error": "Nothing saved for this service."}, status_code=404)
+        return JSONResponse(
+            {
+                "apps": {
+                    group: {"client_id": credentials[0], "client_secret": credentials[1]},
+                }
+            }
+        )
+
+    @app.post("/api/mcp/oauth-apps/import")
+    async def import_mcp_oauth_apps(payload: OAuthAppImport) -> JSONResponse:
+        for group, credentials in payload.apps.items():
+            if not credentials.client_id.strip():
+                return JSONResponse({"error": f"{group}: the Client ID is empty."}, status_code=400)
+        for group, credentials in payload.apps.items():
+            mcp_oauth.set_app(group, credentials.client_id.strip(), credentials.client_secret)
+        return JSONResponse({"imported": sorted(payload.apps)})
+
     @app.get("/api/mcp/oauth/callback", response_class=HTMLResponse)
     async def mcp_oauth_callback(
         state: str = "", code: str | None = None, error: str | None = None
     ) -> HTMLResponse:
-        name = mcp_oauth.complete(state, code, error)
-        if name is None:
-            return HTMLResponse(
-                _oauth_page("This sign-in link has expired. Start again from coscribe."),
-                status_code=400,
-            )
-        if error:
-            return HTMLResponse(_oauth_page(f"Signing in to {name} didn't work: {error}."))
-        return HTMLResponse(
-            _oauth_page(
-                f"You're signed in to {name}. You can close this tab and go back to coscribe."
-            )
-        )
+        status, body = _oauth_callback_response(state, code, error)
+        return HTMLResponse(body, status_code=status)
 
     @app.post("/api/mcp/servers/{name}/signin")
     async def sign_in_mcp_server(name: str, request: Request) -> dict[str, Any]:
@@ -2958,6 +3068,8 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 entry["headers"] = payload.headers
             if payload.auth:
                 entry["auth"] = payload.auth
+                if payload.oauth_app:
+                    entry["oauth_app"] = payload.oauth_app
         else:
             entry = {"command": payload.command, "args": payload.args}
             if payload.env:

@@ -169,3 +169,19 @@ def test_every_plugin_lists_skills_that_exist_and_files_with_hashes() -> None:
         assert all(len(f["sha256"]) == 64 for f in plugin["files"])
         for name in plugin["skills"]:
             assert any(f["path"].endswith(f"{name}/SKILL.md") for f in plugin["files"])
+
+
+def test_connectors_that_need_an_app_describe_their_setup_and_plugin_names_find_them() -> None:
+    from coscribe.web.connector_catalog import MCP_CATALOG
+
+    needing = [e for e in MCP_CATALOG if "setup" in e]
+    assert {e["name"] for e in needing} >= {"hubspot", "gmail", "google-calendar", "google-drive"}
+    for entry in needing:
+        setup = entry["setup"]
+        assert entry["auth"] == "oauth" and entry["server_url"].startswith("https://")
+        assert setup["group"] and setup["provider"] and setup["steps"]
+        assert sum(1 for step in setup["steps"] if step.get("redirect")) == 1
+        assert all(step["title"] and step["body"] for step in setup["steps"])
+    assert len({e["name"] for e in MCP_CATALOG}) == len(MCP_CATALOG)
+    # Google's three share one app.
+    assert {e["setup"]["group"] for e in needing if e["made_by"] == "Google"} == {"google"}

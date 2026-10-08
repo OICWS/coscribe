@@ -152,6 +152,32 @@ export type SkillFileContentResult = { path: string; content: string } | { error
 // Connectors tab (MCP)
 // ---------------------------------------------------------------------
 
+export interface McpSetupStep {
+  title: string;
+  body: string;
+  link?: { label: string; url: string };
+  /** Text to copy as it is: a command, a list of scopes. */
+  copy?: { label: string; value: string }[];
+  /** Show the redirect address to copy at this step. */
+  redirect?: boolean;
+}
+
+/** What a service needs before it can be signed in to: an app its user (or organization) registers with it once. */
+export interface McpSetup {
+  /** Several connectors of one maker share one app. */
+  group: string;
+  provider: string;
+  needs_secret: boolean;
+  scopes?: string[];
+  steps: McpSetupStep[];
+  notes?: string;
+}
+
+export interface McpOAuthApps {
+  saved: string[];
+  redirect_uri: string;
+}
+
 export interface McpCatalogEntry {
   name: string;
   /** What people call it, e.g. "Microsoft 365"; `name` is its config key. */
@@ -165,6 +191,7 @@ export interface McpCatalogEntry {
   /** A hosted server, signed in to in the browser (`auth` is "oauth"). */
   server_url?: string;
   auth?: "oauth";
+  setup?: McpSetup;
   made_by?: string;
   homepage?: string;
   category?: string;

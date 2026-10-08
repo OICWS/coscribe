@@ -5,6 +5,7 @@ import type {
   CreateScheduledTaskPayload,
   ConnectorToolPolicy,
   McpCatalogEntry,
+  McpOAuthApps,
   McpServerUpdateResult,
   McpServersResponse,
   McpReconnectResult,
@@ -203,8 +204,42 @@ export const addMcpServer = (
   name: string,
   server:
     | { command: string; args: string[]; env?: Record<string, string> }
-    | { server_url: string; headers?: Record<string, string>; auth?: "oauth" },
+    | { server_url: string; headers?: Record<string, string>; auth?: "oauth"; oauth_app?: string },
 ) => postJson<McpServerUpdateResult>("/api/mcp/servers", { name, ...server });
+export const getMcpOAuthApps = () => getJson<McpOAuthApps>("/api/mcp/oauth-apps");
+/** The service's own refusal ("has spaces in it") is shown as it is, so the body is read whatever the status. */
+export async function saveMcpOAuthApp(
+  group: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<{ saved: string } | { error: string }> {
+  const res = await fetch(`/api/mcp/oauth-apps/${encodeURIComponent(group)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret || null }),
+  });
+  return res.json() as Promise<{ saved: string } | { error: string }>;
+}
+export const removeMcpOAuthApp = (group: string) => del<{ removed: string }>(`/api/mcp/oauth-apps/${encodeURIComponent(group)}`);
+export const exportMcpOAuthApp = (group: string) =>
+  getJson<{ apps: Record<string, { client_id: string; client_secret: string | null }> }>(
+    `/api/mcp/oauth-apps/${encodeURIComponent(group)}/export`,
+  );
+export async function importMcpOAuthApps(text: string): Promise<{ imported: string[] } | { error: string }> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: "That file isn't a coscribe setup file." };
+  }
+  const res = await fetch("/api/mcp/oauth-apps/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(parsed),
+  });
+  if (res.status === 422) return { error: "That file isn't a coscribe setup file." };
+  return res.json() as Promise<{ imported: string[] } | { error: string }>;
+}
 export const removeMcpServer = (name: string) => del<Record<string, never>>(`/api/mcp/servers/${encodeURIComponent(name)}`);
 export const setConnectorToolPolicies = (name: string, tools: Record<string, ConnectorToolPolicy>) =>
   putJson<{ tools: Record<string, ConnectorToolPolicy> }>(`/api/mcp/servers/${encodeURIComponent(name)}/permissions`, {

@@ -8188,7 +8188,10 @@ def _sign_in_like_a_browser(client: Any, opened: list[str], approve: bool = True
             if not approve:
                 state = parse_qs(urlparse(location).query)["state"][0]
                 location = f"{location.split('?')[0]}?error=access_denied&state={state}"
-            client.get(location.replace("http://testserver", ""))
+            if location.startswith("http://localhost:"):
+                httpx.get(location)
+            else:
+                client.get(location.replace("http://testserver", ""))
 
         threading.Thread(target=visit, daemon=True).start()
 
@@ -8260,6 +8263,101 @@ def test_an_oauth_connector_signs_in_through_the_browser_and_keeps_the_sign_in(
         reconnected = client.post("/api/mcp/servers/docs/reconnect").json()
         assert reconnected["connected"] is True and len(opened) == 1
         assert server.provider.registrations == 1
+
+
+def _register_app(server: Any, client_id: str, secret: str) -> None:
+    from mcp.shared.auth import OAuthClientInformationFull
+    from pydantic import AnyUrl
+
+    from coscribe.runtime_lg.mcp_oauth import APP_REDIRECT_URI
+
+    server.provider.clients[client_id] = OAuthClientInformationFull(
+        client_id=client_id,
+        client_secret=secret,
+        redirect_uris=[AnyUrl(APP_REDIRECT_URI)],
+        token_endpoint_auth_method="client_secret_post",
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+    )
+
+
+def test_a_connector_with_its_own_registered_app_signs_in_on_the_fixed_port_without_registering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.runtime_lg.mcp_oauth import APP_REDIRECT_URI
+
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, server, opened):
+        _register_app(server, "my-app-id", "my-app-secret")
+        refused = client.put("/api/mcp/oauth-apps/acme", json={"client_id": "has space"})
+        saved = client.put(
+            "/api/mcp/oauth-apps/acme",
+            json={"client_id": "my-app-id", "client_secret": "my-app-secret"},
+        )
+        response = client.post(
+            "/api/mcp/servers",
+            json={
+                "name": "docs",
+                "server_url": server.mcp_url,
+                "auth": "oauth",
+                "oauth_app": "acme",
+            },
+        )
+        _wait_until(lambda: client.get("/api/mcp/servers").json()["docs"]["connected"])
+        listed = client.get("/api/mcp/oauth-apps").json()
+        exported = client.get("/api/mcp/oauth-apps/acme/export").json()
+        client.delete("/api/mcp/oauth-apps/acme")
+        after = client.get("/api/mcp/oauth-apps").json()
+
+    assert refused.status_code == 400 and saved.json() == {"saved": "acme"}
+    assert response.json()["signin"]["url"].startswith(f"{server.url}/authorize?")
+    assert "client_id=my-app-id" in opened[0]
+    assert f"redirect_uri={APP_REDIRECT_URI.replace(':', '%3A').replace('/', '%2F')}" in opened[0]
+    assert server.provider.registrations == 0
+    assert listed == {"saved": ["acme"], "redirect_uri": APP_REDIRECT_URI}
+    assert exported == {
+        "apps": {"acme": {"client_id": "my-app-id", "client_secret": "my-app-secret"}}
+    }
+    assert after["saved"] == []
+
+
+def test_a_connector_that_needs_its_app_says_so_and_a_busy_port_is_explained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket
+
+    from coscribe.runtime_lg.mcp_oauth import CALLBACK_PORT
+
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, server, opened):
+        body = {"name": "docs", "server_url": server.mcp_url, "auth": "oauth", "oauth_app": "acme"}
+        missing = client.post("/api/mcp/servers", json=body).json()
+        client.put(
+            "/api/mcp/oauth-apps/acme", json={"client_id": "x", "client_secret": "y"}
+        )
+        with socket.socket() as squatter:
+            squatter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            squatter.bind(("127.0.0.1", CALLBACK_PORT))
+            squatter.listen()
+            busy = client.post("/api/mcp/servers", json=body).json()
+
+    assert missing["connected"] is False and "Set up the app" in missing["error"]
+    assert busy["connected"] is False and str(CALLBACK_PORT) in busy["error"]
+    assert opened == []
+
+
+def test_imported_app_setups_are_saved_for_the_services_they_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _oauth_connector_client(tmp_path, monkeypatch) as (client, _server, _opened):
+        bad = client.post("/api/mcp/oauth-apps/import", json={"apps": {"g": {"client_id": " "}}})
+        good = client.post(
+            "/api/mcp/oauth-apps/import",
+            json={"apps": {"google": {"client_id": "a", "client_secret": "b"}}},
+        )
+        listed = client.get("/api/mcp/oauth-apps").json()
+
+    assert bad.status_code == 400
+    assert good.json() == {"imported": ["google"]}
+    assert listed["saved"] == ["google"]
 
 
 def test_an_expired_oauth_sign_in_is_refreshed_without_the_browser(

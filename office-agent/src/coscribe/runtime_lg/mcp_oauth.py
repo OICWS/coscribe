@@ -9,6 +9,14 @@ registration -- a user never has to create an app anywhere, and nothing is
 installed locally. Servers that need a pre-registered app (Slack, Google
 Workspace, Box) are out by design.
 
+Servers that don't accept dynamic registration (HubSpot, Google Workspace)
+work with an app the user or their organization registered with the
+service: its client id (and secret, if it has one) is saved once, keyed by
+the service's name for it, and used in place of a registration. Those
+services check the redirect address exactly, and the desktop app listens on
+a different port each start, so such a sign-in is received on a fixed
+loopback port that is open only while it lasts.
+
 Tokens and the registered client are stored through `runtime/secrets.py`
 (OS keychain, plaintext fallback with 0600), so a restart reconnects
 without asking again; a refresh token that no longer works surfaces as
@@ -26,7 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from ..runtime.secrets import delete_secret, harden_file_permissions, resolve_secret, store_secret
 
@@ -44,6 +52,17 @@ _CLIENT_NAME = "coscribe"
 _PLACEHOLDER_REDIRECT = "http://127.0.0.1/api/mcp/oauth/callback"
 
 
+# Rarely used by anything else, so an app registered with a service can name
+# one redirect address that is always the same.
+CALLBACK_PORT = 47821
+CALLBACK_PATH = "/api/mcp/oauth/callback"
+APP_REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}{CALLBACK_PATH}"
+
+
+class CallbackPortBusy(Exception):
+    """Something else is listening on the fixed sign-in port."""
+
+
 class NeedsSignIn(Exception):
     """The connector has no usable credentials and nobody is signing in."""
 
@@ -55,6 +74,10 @@ class SignIn:
     name: str
     redirect_uri: str
     url: str | None = None
+    # Added to the authorization address: the scopes a service needs named
+    # (its discovery documents don't) and its own extra parameters.
+    scope: str | None = None
+    auth_params: dict[str, str] = field(default_factory=dict)
     # Set once the server has answered, whether or not it worked.
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     url_ready: asyncio.Event = field(default_factory=asyncio.Event)
@@ -148,6 +171,34 @@ class McpOAuth:
     def last_error(self, name: str) -> str | None:
         return self._last_error.get(name)
 
+    def _app_storage(self, group: str) -> _Storage:
+        return _Storage(self._dir / "apps" / _file_name(group), f"app:{group}")
+
+    def set_app(self, group: str, client_id: str, client_secret: str | None) -> None:
+        storage = self._app_storage(group)
+        storage._save("client_id", client_id)
+        if client_secret:
+            storage._save("client_secret", client_secret)
+        else:
+            storage.drop("client_secret")
+
+    def app(self, group: str) -> tuple[str, str | None] | None:
+        storage = self._app_storage(group)
+        client_id = storage.load("client_id")
+        return (client_id, storage.load("client_secret")) if client_id else None
+
+    def forget_app(self, group: str) -> None:
+        storage = self._app_storage(group)
+        storage.drop("client_id")
+        storage.drop("client_secret")
+        storage._path.unlink(missing_ok=True)
+
+    def app_groups(self) -> list[str]:
+        apps = self._dir / "apps"
+        if not apps.is_dir():
+            return []
+        return sorted(p.stem for p in apps.glob("*.json") if self.app(p.stem) is not None)
+
     def has_credentials(self, name: str) -> bool:
         return self._storage(name).load("tokens") is not None
 
@@ -170,7 +221,15 @@ class McpOAuth:
             old._code.set_exception(OAuthFlowError("A newer sign-in replaced this one."))
         old.url_ready.set()
 
-    async def begin(self, name: str, redirect_uri: str) -> SignIn:
+    async def begin(
+        self,
+        name: str,
+        redirect_uri: str,
+        *,
+        app: str | None = None,
+        scope: str | None = None,
+        auth_params: dict[str, str] | None = None,
+    ) -> SignIn:
         """Start signing in to `name`. Tokens from before are dropped: the
         user asked to sign in, so the ones on file didn't work. The
         registered client is kept unless it was registered for another
@@ -180,12 +239,38 @@ class McpOAuth:
         self._last_error.pop(name, None)
         storage = self._storage(name)
         storage.drop("tokens")
+        if app is not None:
+            await self._seed_app(storage, app, redirect_uri)
         client = await storage.get_client_info()
         if client is not None and redirect_uri not in {str(u) for u in client.redirect_uris or []}:
             storage.drop("client")
-        flow = SignIn(name=name, redirect_uri=redirect_uri)
+        flow = SignIn(
+            name=name, redirect_uri=redirect_uri, scope=scope, auth_params=auth_params or {}
+        )
         self._active[name] = flow
         return flow
+
+    async def _seed_app(self, storage: _Storage, group: str, redirect_uri: str) -> None:
+        """Stores the registered app as the connector's client, so the SDK
+        goes straight to the sign-in page instead of registering one."""
+        from mcp.shared.auth import OAuthClientInformationFull
+        from pydantic import AnyUrl
+
+        credentials = self.app(group)
+        if credentials is None:
+            raise NeedsSignIn("Set up the app for this connector first.")
+        client_id, client_secret = credentials
+        await storage.set_client_info(
+            OAuthClientInformationFull(
+                client_id=client_id,
+                client_secret=client_secret,
+                redirect_uris=[AnyUrl(redirect_uri)],
+                token_endpoint_auth_method="client_secret_post" if client_secret else "none",
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                client_name=_CLIENT_NAME,
+            )
+        )
 
     def finish(self, flow: SignIn, error: str | None) -> None:
         flow.error = error
@@ -234,7 +319,14 @@ class McpOAuth:
         async def redirect_handler(url: str) -> None:
             if flow is None or self._active.get(name) is not flow:
                 raise NeedsSignIn(f"{name} needs you to sign in again.")
-            state = parse_qs(urlparse(url).query).get("state", [""])[0]
+            parsed = urlparse(url)
+            state = parse_qs(parsed.query).get("state", [""])[0]
+            if flow.scope or flow.auth_params:
+                query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+                if flow.scope:
+                    query["scope"] = flow.scope
+                query.update(flow.auth_params)
+                url = urlunparse(parsed._replace(query=urlencode(query)))
             self._by_state[state] = flow
             flow.url = url
             flow.url_ready.set()
@@ -257,3 +349,61 @@ class McpOAuth:
             callback_handler=callback_handler,
             timeout=SIGN_IN_TIMEOUT_SECONDS,
         )
+
+
+class LoopbackCallback:
+    """Receives the redirect for an app registered with a service, on the
+    fixed port that app names. Open only while a sign-in is waiting; any
+    other request than the callback is refused."""
+
+    def __init__(self, respond: Callable[[str, str | None, str | None], tuple[int, str]]) -> None:
+        self._respond = respond
+        self._server: asyncio.AbstractServer | None = None
+
+    @property
+    def running(self) -> bool:
+        return self._server is not None
+
+    async def start(self) -> None:
+        if self._server is not None:
+            return
+        try:
+            # "localhost" binds every address it names (::1 and 127.0.0.1), so
+            # whichever one the browser picks reaches it.
+            self._server = await asyncio.start_server(self._handle, "localhost", CALLBACK_PORT)
+        except OSError as exc:
+            raise CallbackPortBusy(
+                f"Port {CALLBACK_PORT} is used by another program. Close it and try again."
+            ) from exc
+
+    async def stop(self) -> None:
+        server, self._server = self._server, None
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            request_line = (await asyncio.wait_for(reader.readline(), 10)).decode("latin-1")
+            parts = request_line.split()
+            target = urlparse(parts[1]) if len(parts) >= 2 and parts[0] == "GET" else None
+            if target is None or target.path != CALLBACK_PATH:
+                status, body = 404, "Not found"
+            else:
+                query = parse_qs(target.query)
+                status, body = self._respond(
+                    query.get("state", [""])[0],
+                    query.get("code", [None])[0],
+                    query.get("error", [None])[0],
+                )
+            payload = body.encode("utf-8")
+            writer.write(
+                f"HTTP/1.1 {status} OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n".encode()
+                + payload
+            )
+            await writer.drain()
+        except (TimeoutError, ConnectionError):
+            pass
+        finally:
+            writer.close()

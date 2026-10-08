@@ -189,6 +189,97 @@ _MSLEARN_TOOLS = ["microsoft_docs_search", "microsoft_code_sample_search", "micr
 _HUGGINGFACE_TOOLS = ["hf_whoami", "hub_repo_search", "hub_repo_details", "hf_fs"]
 _CLOUDFLARE_TOOLS = ["search_cloudflare_documentation", "migrate_pages_to_workers_guide"]
 
+# Services that don't register clients on their own. The person (or their
+# organization) registers an app with the service once and gives coscribe its
+# client id; coscribe then signs in the usual way. `steps` are what the
+# Connectors page walks through, taken from each service's own setup guide
+# (HubSpot's remote MCP server page, Google's "Configure the Google Workspace
+# MCP servers", both read 2026-10-08).
+_GOOGLE_SCOPES = "https://www.googleapis.com/auth/"
+
+
+def _google_setup(scopes: list[str], apis: str, mcp: str) -> dict[str, Any]:
+    return {
+        "group": "google",
+        "provider": "Google",
+        "needs_secret": True,
+        "scopes": [_GOOGLE_SCOPES + s for s in scopes],
+        "auth_params": {"access_type": "offline", "prompt": "consent"},
+        "steps": [
+            {
+                "title": "Join the Google Workspace Developer Preview",
+                "body": "Google offers its Workspace MCP servers to members of this program. "
+                "You also need a Google Cloud project.",
+                "link": {
+                    "label": "Open the program page",
+                    "url": "https://developers.google.com/workspace/preview",
+                },
+            },
+            {
+                "title": "Turn on the APIs and MCP services",
+                "body": "Run this once in a terminal with the gcloud tool, with your project's id "
+                "in place of PROJECT_ID (or use the links on Google's page).",
+                "copy": [
+                    {
+                        "label": "Command",
+                        "value": f"gcloud services enable {apis} {mcp} --project=PROJECT_ID",
+                    }
+                ],
+                "link": {
+                    "label": "Google's guide",
+                    "url": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+                },
+            },
+            {
+                "title": "Set up the consent screen",
+                "body": "In Google Cloud, open Google Auth Platform > Branding and create the app "
+                "(choose Internal if you can, otherwise External and add yourself as a test "
+                "user). Then under Data Access, add these scopes.",
+                "copy": [{"label": "Scopes", "value": "\n".join(_GOOGLE_SCOPES + s for s in scopes)}],
+                "link": {
+                    "label": "Open Google Auth Platform",
+                    "url": "https://console.cloud.google.com/auth/overview",
+                },
+            },
+            {
+                "title": "Create the app's credentials",
+                "body": "Under Clients, create a client of type Web application and add the "
+                "redirect address below. Then copy its Client ID and Client secret.",
+                "redirect": True,
+                "link": {
+                    "label": "Open Clients",
+                    "url": "https://console.cloud.google.com/auth/clients",
+                },
+            },
+        ],
+        "notes": "An External app left in testing may ask you to sign in again every few days.",
+    }
+
+
+_HUBSPOT_SETUP: dict[str, Any] = {
+    "group": "hubspot",
+    "provider": "HubSpot",
+    "needs_secret": True,
+    "steps": [
+        {
+            "title": "Create an MCP connector in HubSpot",
+            "body": "Go to Development > MCP Connectors and choose Create MCP connector. Name it "
+            "coscribe and add the redirect address below.",
+            "redirect": True,
+            "link": {
+                "label": "Open MCP Connectors",
+                "url": "https://app.hubspot.com/l/mcp-auth-apps/",
+            },
+        },
+        {
+            "title": "Copy its credentials",
+            "body": "On the connector's page, copy the Client ID and Client secret.",
+        },
+    ],
+    "notes": "What coscribe can see follows the HubSpot account you sign in with.",
+}
+
+
 MCP_CATALOG: list[dict[str, Any]] = [
     {
         "name": "canva",
@@ -582,6 +673,96 @@ MCP_CATALOG: list[dict[str, Any]] = [
             {"label": "Privacy policy", "url": "https://www.cloudflare.com/privacypolicy/"},
         ],
         "server_url": "https://docs.mcp.cloudflare.com/mcp",
+    },
+    {
+        "name": "hubspot",
+        "title": "HubSpot",
+        "made_by": "HubSpot",
+        "homepage": "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
+        "category": "Sales",
+        "description": "Work with your HubSpot CRM contacts, companies and deals.",
+        "about": "Search and read CRM records and activity in your HubSpot account. coscribe "
+        "sees only what the HubSpot user you sign in with can see. Needs a one-time setup: "
+        "you register a small app in HubSpot.",
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server",
+            }
+        ],
+        "server_url": "https://mcp.hubspot.com",
+        "auth": "oauth",
+        "setup": _HUBSPOT_SETUP,
+    },
+    {
+        "name": "gmail",
+        "title": "Gmail",
+        "made_by": "Google",
+        "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+        "category": "Email & calendar",
+        "description": "Read and draft email in your Gmail.",
+        "about": "Search and read your mail and write drafts. coscribe sees only the Google "
+        "account you sign in with. Needs a one-time setup: you register an app in Google Cloud.",
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+            }
+        ],
+        "server_url": "https://gmailmcp.googleapis.com/mcp/v1",
+        "auth": "oauth",
+        "setup": _google_setup(
+            ["gmail.readonly", "gmail.compose"], "gmail.googleapis.com", "gmailmcp.googleapis.com"
+        ),
+    },
+    {
+        "name": "google-calendar",
+        "title": "Google Calendar",
+        "made_by": "Google",
+        "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+        "category": "Email & calendar",
+        "description": "Look at your Google Calendar events and availability.",
+        "about": "Read your calendars and events and check free and busy times. coscribe sees "
+        "only the Google account you sign in with. Needs a one-time setup: you register an "
+        "app in Google Cloud.",
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+            }
+        ],
+        "server_url": "https://calendarmcp.googleapis.com/mcp/v1",
+        "auth": "oauth",
+        "setup": _google_setup(
+            [
+                "calendar.calendarlist.readonly",
+                "calendar.events.freebusy",
+                "calendar.events.readonly",
+            ],
+            "calendar-json.googleapis.com",
+            "calendarmcp.googleapis.com",
+        ),
+    },
+    {
+        "name": "google-drive",
+        "title": "Google Drive",
+        "made_by": "Google",
+        "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+        "category": "Files",
+        "description": "Search and read files in your Google Drive.",
+        "about": "Find and read files in your Drive. coscribe sees only the Google account you "
+        "sign in with. Needs a one-time setup: you register an app in Google Cloud.",
+        "links": [
+            {
+                "label": "Documentation",
+                "url": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+            }
+        ],
+        "server_url": "https://drivemcp.googleapis.com/mcp/v1",
+        "auth": "oauth",
+        "setup": _google_setup(
+            ["drive.readonly", "drive.file"], "drive.googleapis.com", "drivemcp.googleapis.com"
+        ),
     },
     {
         "name": "ahrefs",
