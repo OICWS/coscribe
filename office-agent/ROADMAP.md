@@ -7880,6 +7880,23 @@ READMEs.
       `vercel-labs/agent-skills` (frontend and deployment) and
       `ComposioHQ/awesome-claude-skills` (864 files but no license at its
       root). Any of these can still be added from Skills > Add > Upload.
+## Phase 8dc -- A sub-agent task id never names a file outside the store (shipped)
+
+Found reviewing 8da: a task id is the model's (`check_subagent_task`,
+`stop_subagent`) or a URL's (`/api/subagents/{id}/...`), and
+`SubAgentTaskStore` put it straight into a file name. A value with a path in
+it read any `.json` relative to the store, and reading a record that looks
+like a running task settles it by rewriting the file. Small in effect (a
+record must parse as a task), but it is a path built from outside input, and
+on Windows a backslash is enough.
+
+- [x] **The store only takes ids made of letters, digits, `_` and `-`**
+      (the tool's own are 12 hex; tests and older records use short names).
+      `load` of anything else is "no such task", `delete` does nothing, and
+      saving one raises. One place, so every caller is covered.
+- [x] Tests: six path-shaped ids against a real running record outside the
+      store (not read, not rewritten, not deleted; fails without the fix);
+      the two endpoints answer 404 to a backslash id.
 
 ## Later -- real intentions, not actively scheduled
 
