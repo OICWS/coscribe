@@ -18,6 +18,9 @@ echo "== frontend: tsc -b and vite build =="
 # `tsc -b` is stricter than `tsc --noEmit -p .`; CI runs this one.
 (cd frontend && npm run build)
 
+echo "== oxlint =="
+(cd frontend && npx --no-install oxlint)
+
 echo "== ruff =="
 ruff check src tests
 

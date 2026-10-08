@@ -24,10 +24,10 @@ Every one of these is written the same way: real findings, real
 numbers, real bugs -- not guessed. Match that bar in anything you add
 to them, and check them before assuming something is undocumented.
 
-## Code review before every commit: Open Code Review, delegation mode
+## Code review: Open Code Review, delegation mode
 
 Decided explicitly (2026-09-16, to cut token spend on review passes):
-before committing any code change, run a review pass through
+before marking a pull request ready, run a self-check pass through
 `ocr` (`alibaba/open-code-review`, installed globally via
 `npm install -g @alibaba-group/open-code-review` -- reinstall if a
 fresh container doesn't have it) in **delegation mode** -- no Claude
@@ -49,6 +49,14 @@ on an already-verified real commit (no false positives), and correctly
 flagged a deliberately-planted mutable-default-argument bug in a
 synthetic test. Favor precision over recall per the rule set's own
 instruction -- only raise something you're actually confident about.
+
+This is the author's self-check, and it is the same model reviewing its own
+work. A pull request that touches an invariant path also needs an independent
+review by a separate session the maintainer starts (`/code-review <PR number>`).
+Invariant paths: `runtime/secrets*.py`, `runtime/secret_store.py`,
+`runtime_lg/tool_deferral.py`, `runtime_lg/mcp_oauth.py`,
+`code_runtime/permissions.py`, `coordinator.py` (the instructions and the core
+tool names), and anything that opens a network listener.
 
 ## Code comments: WHY only, never WHAT or history
 
@@ -93,14 +101,33 @@ thinking and design, complex or high-risk backend code, all frontend
 code, prompt/instruction wording, and live verification -- and reviews
 the subagent's diff before committing.
 
-## Repository -- develop on public `main` only
+## Repository -- how a change reaches `main`
 
-All development happens in `OICWS/coscribe`, branch `main` (there is no
-`dev`). The private `OICWS/project` repo was the development repo until
-2026-09-30, when the two held identical trees; it is frozen now and is
-neither pushed to nor read. Commit on `main` with the full test suite
-green, ruff/mypy clean and the OCR review pass done, then
-`git push origin main`.
+All development happens in `OICWS/coscribe`. The private `OICWS/project` repo
+was the development repo until 2026-09-30, when the two held identical trees;
+it is frozen now and is neither pushed to nor read.
+
+`main` is protected: **every change, the maintainer's and doc-only ones too,
+goes through a pull request** whose `test` check is green, squash-merged.
+Nothing is pushed to `main` directly.
+
+- Branch name `<area>/<slug>` (areas: runtime, tools, server, workflows, code,
+  secrets, frontend, desktop, docs).
+- Open a *draft* PR with your first push, titled `[area] goal`, with a
+  "Touches:" line naming the hot files you expect to edit. The list of open PRs
+  is the board of who is doing what.
+- Before editing a hot file (`web/app.py`, `web/session.py`,
+  `tests/test_web.py`, `coordinator.py`, `frontend/src/App.tsx`,
+  `frontend/src/types/*.ts`), look at the open PRs; if someone is changing the
+  same part, tell the maintainer instead of racing.
+- One area per PR, about 600 changed lines at most (generated catalogs and
+  icons excepted). Land partial work behind an unused code path ("part 1:
+  nothing applies it yet") instead of stacking PRs.
+- Update an open PR with `git merge origin/main`, not rebase and force-push.
+- **Never merge a PR, enable auto-merge or push to `main`.** The maintainer
+  merges, when the PR's checks and `main`'s latest run are green.
+- **`main` is red:** nothing merges except the fix. If the cause is the last
+  merged PR and no fix PR is open within 15 minutes, open a `git revert` PR.
 
 `git fetch` through this environment's proxy can return a stale
 cached read -- if the branch state looks wrong, cross-check with
@@ -108,9 +135,10 @@ cached read -- if the branch state looks wrong, cross-check with
 
 ## Test discipline
 
-Full suite (`pytest tests/`, ~4-5 min, runs in the background) green
-and `ruff check`/`mypy` clean before every commit -- no exceptions,
-including doc-only changes (confirms nothing else broke). A test that
+CI is the gate. Before pushing run `bash scripts/check.sh --fast` (frontend
+build, oxlint, ruff, mypy) and the test files for what you touched; before
+marking a PR ready, wait for a green CI run (or run the full
+`bash scripts/check.sh`, about 12 minutes). A test that
 writes real files must `monkeypatch.chdir(tmp_path)` first if it (or
 code it calls) can fall back to a relative path -- a real, live-hit
 mistake this session made once already (see `test_web.py`'s own

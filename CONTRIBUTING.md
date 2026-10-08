@@ -21,8 +21,9 @@ See [`README.md`](README.md). Then check your setup works:
    (`office-agent/frontend/`), *desktop* (`office-agent-desktop/`), *docs*.
    Stay inside one area per change; file an issue for what you notice elsewhere.
 3. **Write the test with the change.** A bug fix gets a test that failed before.
-4. **Run the checks:** `cd office-agent && bash scripts/check.sh`. It is the
-   command CI runs (frontend `tsc -b` and build, ruff, mypy, pytest). Touching
+4. **Run the checks:** `cd office-agent && bash scripts/check.sh --fast` before
+   pushing; CI runs the full `bash scripts/check.sh` (frontend `tsc -b` and
+   build, oxlint, ruff, mypy, pytest). Touching
    the UI also means looking at it in the running app, not only compiling it.
 5. **Record real findings** in `office-agent/ROADMAP.md` (what shipped, what was
    measured, what was *not* verified). Take the next free phase id from
@@ -32,10 +33,12 @@ See [`README.md`](README.md). Then check your setup works:
 
 ## Where the change goes
 
-Today the maintainer's own sessions commit directly to `main` after the checks
-pass, and other sessions and contributors open a pull request from a branch.
-Use a pull request unless the maintainer has told you to commit to `main`. The
-maintainer merges. This is under review; the outcome will be written here.
+`main` is protected: every change, including the maintainer's and doc-only
+ones, is a pull request whose `test` check passes, squash-merged by the
+maintainer. Branch `<area>/<slug>`, open a draft PR on your first push that
+says what you are changing and which hot files it touches, and update it with
+`git merge origin/main`. The full rules are in
+[`office-agent/CLAUDE.md`](office-agent/CLAUDE.md).
 
 ## Reporting problems
 
