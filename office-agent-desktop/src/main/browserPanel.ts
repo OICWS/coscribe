@@ -274,6 +274,24 @@ export function tabLimitReached(): boolean {
   return tabs.length >= MAX_TABS;
 }
 
+// Chromium's default scrollbar is a wide, opaque bar with a track. This is the
+// thin one the rest of the app uses: no track, a soft thumb that darkens
+// under the pointer. Inserted as user-origin CSS so a page that styles its own
+// scrollbar still wins; translucent grey reads on light and dark pages alike.
+const SCROLLBAR_CSS = `
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgba(128, 128, 128, 0.4);
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background-color: rgba(128, 128, 128, 0.75); }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+`;
+
 export function createTab(url?: string): Tab {
   const view = new WebContentsView({
     webPreferences: {
@@ -301,6 +319,10 @@ export function createTab(url?: string): Tab {
     tab.loadError = null;
     if (pickModeActive && tab.id === activeId) wc.send(CONTENT_SET_PICK_MODE_CHANNEL, true);
     sendTabs();
+  });
+  // insertCSS lasts for one document, so every page gets it again.
+  wc.on("dom-ready", () => {
+    void wc.insertCSS(SCROLLBAR_CSS, { cssOrigin: "user" }).catch(() => undefined);
   });
   wc.on("did-navigate-in-page", () => sendTabs());
   wc.on("page-title-updated", () => sendTabs());
