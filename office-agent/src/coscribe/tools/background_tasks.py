@@ -56,7 +56,7 @@ from typing import Any
 
 from ..runtime.types import tool_metadata
 from .node_env import ensure_node_env
-from .script_env import ensure_script_env, venv_python
+from .script_env import ensure_script_env, overlay_env, venv_python
 from .script_guard import (
     blocked_write,
     node_guard_args,
@@ -341,8 +341,7 @@ def build_background_task_tools(
             # 'charmap' codec can't encode characters bug documented in
             # PPTX_DESIGN.md §23.
             env = {
-                **os.environ,
-                **(session_env() if session_env else {}),
+                **overlay_env(os.environ, session_env() if session_env else None),
                 "PYTHONIOENCODING": "utf-8",
                 "PYTHONUTF8": "1",
                 "PYTHONDONTWRITEBYTECODE": "1",
@@ -356,8 +355,7 @@ def build_background_task_tools(
             scratch_dir = Path(tempfile.mkdtemp(prefix="coscribe_bg_node_script_"))
             script_path = scratch_dir / "script.js"
             env = {
-                **os.environ,
-                **(session_env() if session_env else {}),
+                **overlay_env(os.environ, session_env() if session_env else None),
                 "NODE_PATH": str(node_env_dir / "node_modules"),
             }
             guard_args = node_guard_args(interpreter, write_roots) or []

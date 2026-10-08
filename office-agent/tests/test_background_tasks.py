@@ -137,7 +137,11 @@ async def test_check_background_task_can_read_partial_output_while_still_running
     started = await tools.run_background_script(
         language="python",
         script=(
-            "import sys, time\nprint('first')\nsys.stdout.flush()\ntime.sleep(2)\nprint('second')\n"
+            "import sys, time\n"
+            "print('first')\n"
+            "sys.stdout.flush()\n"
+            "time.sleep(2)\n"
+            "print('second')\n"
         ),
         description="print, pause, print again",
     )

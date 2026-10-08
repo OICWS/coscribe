@@ -41,7 +41,7 @@ from typing import Any
 from ..runtime.types import tool_metadata
 from ._files_written import snapshot_workspace, with_files_written
 from ._output_truncation import truncate_script_output
-from .script_env import ensure_script_env, venv_python
+from .script_env import ensure_script_env, overlay_env, venv_python
 from .script_guard import (
     blocked_write,
     locked_file_note,
@@ -86,10 +86,9 @@ def _run_python_script(
     # real, live-reported failure on the user's Windows test machine.
     # Bytecode and font caches would be writes outside the allowed folders.
     child_env = {
-        **os.environ,
         # The user's variables for this conversation come before what the
         # script runner itself needs, which they must not be able to undo.
-        **(session_env or {}),
+        **overlay_env(os.environ, session_env),
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1",
         "PYTHONDONTWRITEBYTECODE": "1",

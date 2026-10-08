@@ -34,6 +34,7 @@ from ..runtime.types import tool_metadata
 from ._files_written import snapshot_workspace, with_files_written
 from ._output_truncation import truncate_script_output
 from .node_env import ensure_node_env
+from .script_env import overlay_env
 from .script_guard import (
     blocked_write,
     node_guard_args,
@@ -72,8 +73,7 @@ def _run_node_script(
     # process writing script.js to disk) needs the explicit encoding here;
     # the subprocess.run encoding below still has to match on the read side.
     env = {
-        **os.environ,
-        **(session_env or {}),
+        **overlay_env(os.environ, session_env),
         "NODE_PATH": str(node_env_dir / "node_modules"),
     }
     node = shutil.which("node") or "node"

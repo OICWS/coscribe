@@ -863,6 +863,7 @@ def build_coordinator_agent(
     # folded into that user-facing listing.
     file_tool_readable = [*extra_readable, settings.skills_dir]
     file_tool_writable = [*extra_writable, settings.skills_dir]
+
     def session_env() -> dict[str, str]:
         # Read at each run: the user can change them in Edit environment mid-conversation.
         variables: dict[str, str] = SessionEnvironments(settings.state_dir).get(thread_id)[

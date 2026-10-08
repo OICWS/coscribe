@@ -237,3 +237,22 @@ def test_ensure_script_env_prefers_a_configured_override_over_sys_executable(
     venv_dir = ensure_script_env(tmp_path)
 
     assert venv_python(venv_dir).is_file()
+
+
+def test_overlay_env_replaces_a_name_that_differs_only_in_case_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    from coscribe.tools import script_env  # noqa: PLC0415
+
+    base = {"PATH": "/bin", "HOME": "/h"}
+
+    monkeypatch.setattr(script_env, "os", SimpleNamespace(name="nt"))
+    on_windows = script_env.overlay_env(base, {"Path": "/mine", "NEW": "1"})
+    monkeypatch.setattr(script_env, "os", SimpleNamespace(name="posix"))
+    elsewhere = script_env.overlay_env(base, {"Path": "/mine"})
+
+    assert on_windows == {"PATH": "/mine", "HOME": "/h", "NEW": "1"}
+    assert elsewhere == {"PATH": "/bin", "HOME": "/h", "Path": "/mine"}
+    assert script_env.overlay_env(base, None) == base and base["PATH"] == "/bin"
