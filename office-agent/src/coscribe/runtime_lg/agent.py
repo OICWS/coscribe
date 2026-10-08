@@ -199,24 +199,29 @@ class _CatchToolErrorsMiddleware(AgentMiddleware):
 _catch_tool_errors = _CatchToolErrorsMiddleware()
 
 
-def _redact_content(content: Any, redact: Callable[[str], str]) -> Any:
-    if isinstance(content, str):
-        return redact(content)
-    if isinstance(content, list):
-        return [
-            {**block, "text": redact(block["text"])}
-            if isinstance(block, dict) and isinstance(block.get("text"), str)
-            else redact(block)
-            if isinstance(block, str)
-            else block
-            for block in content
-        ]
-    return content
+def _redact_value(value: Any, redact: Callable[[str], str]) -> Any:
+    """Every string anywhere in a JSON-shaped value (a message's content blocks,
+    an artifact), keys left as they are. Other objects pass through: nothing
+    here makes one, and it cannot be walked without knowing its type."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, list):
+        return [_redact_value(item, redact) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_value(item, redact) for item in value)
+    if isinstance(value, dict):
+        return {key: _redact_value(item, redact) for key, item in value.items()}
+    return value
 
 
 def _redacted(result: Any, redact: Callable[[str], str]) -> Any:
     if isinstance(result, ToolMessage):
-        return result.model_copy(update={"content": _redact_content(result.content, redact)})
+        return result.model_copy(
+            update={
+                "content": _redact_value(result.content, redact),
+                "artifact": _redact_value(result.artifact, redact),
+            }
+        )
     update = getattr(result, "update", None)
     if isinstance(update, dict) and isinstance(update.get("messages"), list):
         messages = [_redacted(m, redact) for m in update["messages"]]
