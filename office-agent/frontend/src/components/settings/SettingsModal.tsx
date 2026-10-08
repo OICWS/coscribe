@@ -8,6 +8,7 @@ import {
   CodeIcon,
   FolderIcon,
   KeyIcon,
+  LockIcon,
   LinkIcon,
   SearchIcon,
   SettingsIcon,
@@ -35,6 +36,7 @@ import { EnvironmentTab } from "./EnvironmentTab";
 import { GeneralTab } from "./GeneralTab";
 import { DRAWS_TITLE_BAR, openBackdrops } from "../../lib/titleBar";
 import { ProvidersTab } from "./ProvidersTab";
+import { SecretsTab } from "./SecretsTab";
 import { SkillsTab } from "./SkillsTab";
 import { ToolsTab } from "./ToolsTab";
 import { WorkspaceTab } from "./WorkspaceTab";
@@ -46,6 +48,7 @@ export type SettingsCategory =
   | "tools"
   | "skills"
   | "connectors"
+  | "secrets"
   | "environment"
   | "code";
 
@@ -77,6 +80,7 @@ const GROUPS: { label: string; categories: CategoryDef[] }[] = [
       { id: "providers", label: "Providers", icon: KeyIcon },
       { id: "tools", label: "Tools", icon: ToolIcon },
       { id: "environment", label: "Environment", icon: TerminalIcon },
+      { id: "secrets", label: "Secrets", icon: LockIcon },
       { id: "code", label: "Code", icon: CodeIcon },
     ],
   },
@@ -294,6 +298,7 @@ export function SettingsModal({
               />
             )}
             {category === "connectors" && <ConnectorsTab active={category === "connectors"} />}
+            {category === "secrets" && <SecretsTab active={category === "secrets"} />}
             {category === "environment" && <EnvironmentTab active={category === "environment"} />}
             {category === "code" && <CodeTab values={values} onChange={(k, v) => setValues({ ...values, [k]: v })} />}
             </div>

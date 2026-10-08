@@ -8060,6 +8060,27 @@ could read the keychain itself. Redaction by exact value and common encodings
 is best effort, and a host the user allowed could echo a value back. The
 Secrets page says this.
 
+## Phase 8dh -- Secrets page and Edit environment dialog (shipped, frontend of 8dg)
+
+- [x] **Settings > Secrets** (`SecretsTab.tsx`): list with each secret's name,
+      hosts and date; add, replace the value, edit the hosts, delete (with a
+      confirmation that it leaves every conversation). Nothing on the page can
+      read a value back. The page says what is promised and what is not (the
+      model cannot see a value; code that goes digging could read the
+      keychain) and, when `keychain` is false, shows why saving is off and
+      disables it. The server's own wording for a refusal (bad host, value too
+      short) is shown as it is.
+- [x] **Right-click a conversation > Edit environment** (`EnvironmentDialog.tsx`):
+      plain variables the assistant can read, and a tick list of the global
+      secrets this conversation may use, each with its hosts; none by default.
+      It says that scripts and the code module don't receive the variables
+      yet (8dg part 3); remove that sentence when part 3 lands.
+- [x] Verified live against a backend with a file-backed keychain stand-in:
+      add with a bad then a good host, the value never reaches the page,
+      host edit, attach to a conversation with a variable, persisted state
+      read back from the API, delete takes the secret out of the conversation.
+      Not verified: a real Windows Credential Manager.
+
 ## Later -- real intentions, not actively scheduled
 
 Deliberately un-numbered per your call: backend/foundation (Phases 2-6
