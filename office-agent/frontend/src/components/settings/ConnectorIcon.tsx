@@ -12,6 +12,7 @@ const ALIASES: Record<string, string> = {
   "google drive": "googledrive",
   "microsoft-365": "m365",
   "amplitude-eu": "amplitude",
+  "otter-ai": "otter",
 };
 
 function iconUrl(rawName: string): string | undefined {

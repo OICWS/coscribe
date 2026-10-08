@@ -7923,6 +7923,18 @@ lists plugins and the page mirrors the plugin.
       others need a pre-registered app or have no dynamic registration). Icons
       for Slack, Gmail, Google Drive/Calendar, HubSpot, Figma, Asana and
       Microsoft apps were added as SVG (from the landing page set).
+- [x] **Connectors the plugins use are now in the connector market.** Probed
+      the 27 other servers the plugins name with a real registration attempt:
+      13 accepted and were added (Ahrefs, Apollo.io, Clay, Close, Egnyte, Guru,
+      Hex, Klaviyo, Lusha, Otter.ai, Outreach, Pendo, Supermetrics), each with
+      its icon; tools are listed once connected (no documentation list was
+      checked for them). Left out: Slack, Box, HubSpot, Zoom, Crunchbase,
+      Similarweb (no registration endpoint), Salesforce (refuses unknown
+      clients), ZoomInfo (approved vendors only), Gong (wants a scope we don't
+      send), Calendly (https redirect only), DocuSign (403), Definite (404),
+      BigQuery (open endpoint, needs Google auth outside MCP), Microsoft 365
+      (Anthropic's own gateway, not the vendor's). Icons were added for the
+      left-out ones too except Salesforce, Zoom, Definite (only 32 px sources).
 - [x] **Not done:** coscribe's own built-in skills (pptx, excel, word,
       skill-creator) keep the existing detail page rather than a store-style
       one; skills that expect a connector still just run without it, as the
