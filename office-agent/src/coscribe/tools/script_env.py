@@ -352,3 +352,24 @@ def overlay_env(base: Mapping[str, str], extra: Mapping[str, str] | None) -> dic
     for name, value in extra.items():
         merged[existing.get(name.upper(), name)] = value
     return merged
+
+
+_PYTHON_COMMANDS = frozenset({"python", "python3", "py"})
+
+
+def resolve_python_command(command: str, state_dir: Path | None) -> str:
+    """The command to launch for a connector configured as a bare `python`,
+    `python3` or `py`. A packaged app's PATH often lacks the user's Python,
+    or finds the Windows Store stub that exits at once, which showed up as
+    "Connection closed" with nothing to act on. A name that already runs is
+    left alone; only a broken one is replaced, by the interpreter chosen in
+    Settings > Environment if it works, else the first one detected."""
+    if command.lower().removesuffix(".exe") not in _PYTHON_COMMANDS:
+        return command
+    found = shutil.which(command)
+    if found and working_interpreters([found]):
+        return command
+    override = get_interpreter_override(state_dir) if state_dir is not None else None
+    candidates = [*([override] if override else []), *fallbacks_for_platform()]
+    working = working_interpreters(candidates)
+    return working[0] if working else command

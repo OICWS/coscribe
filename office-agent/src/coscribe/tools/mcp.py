@@ -51,6 +51,7 @@ from ..runtime.secret_store import (
     substitute,
 )
 from ..runtime.secrets import resolve_secret
+from .script_env import resolve_python_command
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,20 @@ def prepare_for_connect(config: MCPConfig, state_dir: Path | None) -> MCPConfig:
         values: dict[str, Any] | None = config.get(field)  # type: ignore[assignment]
         if values:
             prepared[field] = {k: resolve_secret(v) or "" for k, v in values.items()}
-    return with_secrets(cast(MCPConfig, prepared), state_dir)
+    return with_interpreter(with_secrets(cast(MCPConfig, prepared), state_dir), state_dir)
+
+
+def with_interpreter(config: MCPConfig, state_dir: Path | None) -> MCPConfig:
+    """`config` with a bare `python` command pointed at a Python that runs;
+    the saved connector keeps the name it was added with."""
+    command = config.get("command")
+    if not command:
+        return config
+    resolved = resolve_python_command(command, state_dir)
+    if resolved == command:
+        return config
+    logger.info("Connector command %s resolved to %s", command, resolved)
+    return cast(MCPConfig, {**config, "command": resolved})
 
 
 def _substitute_secrets(
@@ -232,7 +246,11 @@ def load_mcp_server_configs(
         if "headers" in config:
             config["headers"] = {k: resolve_secret(v) or "" for k, v in config["headers"].items()}
         try:
-            result[name] = with_secrets(config, state_dir) if fill_secrets else config
+            result[name] = (
+                with_interpreter(with_secrets(config, state_dir), state_dir)
+                if fill_secrets
+                else config
+            )
         except SecretError as exc:
             # One connector's missing secret must not take the others down.
             logger.warning("Skipping connector %s: %s", name, exc)
