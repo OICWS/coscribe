@@ -1,4 +1,4 @@
-/** Settings > General > Appearance: theme, chat font and motion. Applied
+/** Settings > General > Appearance: theme, interface font and motion. Applied
  * as attributes on <html> (index.css keys its tokens off them) and saved
  * to the server's .env, since the desktop app serves this page from a new
  * port each launch and browser storage doesn't survive that. A copy in
@@ -9,28 +9,28 @@ import { setThemeSource } from "./electron";
 import { getConfig, updateConfig } from "./rest";
 
 export type ThemeChoice = "system" | "light" | "dark";
-export type ChatFontChoice = "sans" | "serif" | "system";
+export type InterfaceFontChoice = "default" | "system" | "dyslexic";
 export type MotionChoice = "system" | "reduced";
 
 export interface Appearance {
   theme: ThemeChoice;
-  chatFont: ChatFontChoice;
+  interfaceFont: InterfaceFontChoice;
   motion: MotionChoice;
 }
 
 const OPTIONS: { [K in keyof Appearance]: readonly Appearance[K][] } = {
   theme: ["system", "light", "dark"],
-  chatFont: ["sans", "serif", "system"],
+  interfaceFont: ["default", "system", "dyslexic"],
   motion: ["system", "reduced"],
 };
 
 const CONFIG_KEYS: { [K in keyof Appearance]: string } = {
   theme: "COSCRIBE_THEME",
-  chatFont: "COSCRIBE_CHAT_FONT",
+  interfaceFont: "COSCRIBE_INTERFACE_FONT",
   motion: "COSCRIBE_MOTION",
 };
 
-const DEFAULTS: Appearance = { theme: "system", chatFont: "sans", motion: "system" };
+const DEFAULTS: Appearance = { theme: "system", interfaceFont: "default", motion: "system" };
 const HINT_KEY = "coscribe-appearance";
 
 function valid(raw: Partial<Record<keyof Appearance, unknown>>): Partial<Appearance> {
@@ -67,7 +67,7 @@ function apply(): void {
   const root = document.documentElement;
   root.dataset.theme = current.theme === "system" ? (darkQuery.matches ? "dark" : "light") : current.theme;
   root.dataset.motion = current.motion === "reduced" || reduceQuery.matches ? "reduced" : "full";
-  root.dataset.chatFont = current.chatFont;
+  root.dataset.interfaceFont = current.interfaceFont;
   // Native menus and dialogs follow along.
   setThemeSource(current.theme);
   for (const listener of listeners) listener();
@@ -86,7 +86,7 @@ export function startAppearance(): void {
         ...DEFAULTS,
         ...valid({
           theme: saved[CONFIG_KEYS.theme],
-          chatFont: saved[CONFIG_KEYS.chatFont],
+          interfaceFont: saved[CONFIG_KEYS.interfaceFont],
           motion: saved[CONFIG_KEYS.motion],
         }),
       };

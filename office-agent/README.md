@@ -1993,10 +1993,11 @@ The **+** button next to the message box opens three things:
   points at (see [Custom LLM providers](#custom-llm-providers) above). API
   keys are masked in the configured list, same as the API Keys tab.
 - **Appearance** (top of Settings → General) -- Theme (match the system,
-  light or dark), Chat font (IBM Plex Sans, the default; Source Serif 4,
-  bundled under the OFL; or the system's own UI font) and Motion (follow
+  light or dark), Interface font for the whole interface (Figtree, the
+  default; the system's own UI font; or OpenDyslexic -- Figtree and
+  OpenDyslexic bundled under the OFL) and Motion (follow
   the system, or reduced). Applied the moment you pick it, and saved as
-  `COSCRIBE_THEME`, `COSCRIBE_CHAT_FONT`, `COSCRIBE_MOTION` in `.env` --
+  `COSCRIBE_THEME`, `COSCRIBE_INTERFACE_FONT`, `COSCRIBE_MOTION` in `.env` --
   the desktop app serves the page from a new port each launch, so browser
   storage wouldn't keep it. Claude's own Anthropic Serif isn't offered: it
   is Anthropic's proprietary typeface and can't be redistributed.

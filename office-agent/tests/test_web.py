@@ -8041,7 +8041,7 @@ def test_appearance_settings_save_to_env_and_come_back_without_a_restart(
     fake_model = FakeToolCallingChatModel(responses=[])
     updates = {
         "COSCRIBE_THEME": "dark",
-        "COSCRIBE_CHAT_FONT": "serif",
+        "COSCRIBE_INTERFACE_FONT": "dyslexic",
         "COSCRIBE_MOTION": "reduced",
     }
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:

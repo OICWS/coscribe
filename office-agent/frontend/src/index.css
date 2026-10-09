@@ -4,30 +4,21 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 @plugin "@tailwindcss/typography";
 
-/* Self-hosted via @fontsource (OFL-licensed, actual woff2 files bundled
-   into this build's own output -- Vite resolves these @imports and
-   copies the referenced font files the same way it already does for
-   katex/dist/katex.min.css's own fonts, see Markdown.tsx), not a Google
-   Fonts CDN link -- this app is local-first/offline-capable by design
-   (see ARCHITECTURE.md), and a CDN font would silently fall back to
-   system fonts the moment there's no network, which is the one thing a
-   self-hosted font never does. IBM Plex Sans/Mono over the previous bare
-   system-ui stack -- has real character (distinctive, slightly
-   technical) without being the "Inter everywhere" default every AI
-   tool's UI already uses, and Plex Mono gives the existing font-mono
-   chips/code blocks a face that's actually paired with the body text
-   instead of whatever monospace the OS happens to ship.
-   400-italic/500/600/700 cover markdown's own italic, bold, and heading
-   weights; Mono only needs 400, nothing here ever bolds/italicizes it. */
-@import "@fontsource/ibm-plex-sans/400.css";
-@import "@fontsource/ibm-plex-sans/400-italic.css";
-@import "@fontsource/ibm-plex-sans/500.css";
-@import "@fontsource/ibm-plex-sans/600.css";
-@import "@fontsource/ibm-plex-sans/700.css";
+/* Self-hosted via @fontsource (OFL-licensed, the woff2 files are bundled into
+   this build's output): this app is local-first and works offline, and a CDN
+   font would fall back to the system's the moment there is no network.
+   Figtree is the interface font, OpenDyslexic an accessibility choice for it
+   (Settings > General > Interface font), IBM Plex Mono the code face. 400-italic,
+   500, 600 and 700 cover markdown's italic, bold and headings; the mono face
+   only needs 400. */
+@import "@fontsource/figtree/400.css";
+@import "@fontsource/figtree/400-italic.css";
+@import "@fontsource/figtree/500.css";
+@import "@fontsource/figtree/600.css";
+@import "@fontsource/figtree/700.css";
+@import "@fontsource/opendyslexic/400.css";
+@import "@fontsource/opendyslexic/700.css";
 @import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/source-serif-4/400.css";
-@import "@fontsource/source-serif-4/400-italic.css";
-@import "@fontsource/source-serif-4/600.css";
 
 @theme {
   /* Retargets Tailwind's own font-sans/font-mono utility classes (and
@@ -37,9 +28,7 @@
      place these tokens can be overridden. body's own `font:` shorthand
      below is separate, plain CSS (not a Tailwind utility), so it needs
      the same font-family repeated by hand. */
-  --font-sans: "IBM Plex Sans", system-ui, "Segoe UI", Roboto, sans-serif;
-  /* Chinese has no web font bundled here; the system's own Song faces fill in. */
-  --font-serif: "Source Serif 4", "Noto Serif SC", "Songti SC", SimSun, Georgia, serif;
+  --font-sans: "Figtree", system-ui, "Segoe UI", Roboto, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -288,12 +277,7 @@ body,
 body {
   background: var(--bg);
   color: var(--fg);
-  font:
-    15px/1.5 "IBM Plex Sans",
-    system-ui,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  font: 15px/1.5 var(--font-sans);
 }
 
 /* Maps @tailwindcss/typography's own CSS variables onto this app's
@@ -388,18 +372,12 @@ body {
   scroll-behavior: auto !important;
 }
 
-/* Settings > General > Chat font, for conversation text only. */
-:root {
-  --font-chat: var(--font-sans);
+/* Settings > General > Interface font: the whole interface follows --font-sans. */
+:root[data-interface-font="system"] {
+  --font-sans: system-ui, "Segoe UI", Roboto, sans-serif;
 }
-:root[data-chat-font="serif"] {
-  --font-chat: var(--font-serif);
-}
-:root[data-chat-font="system"] {
-  --font-chat: system-ui, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
-}
-.chat-font {
-  font-family: var(--font-chat);
+:root[data-interface-font="dyslexic"] {
+  --font-sans: "OpenDyslexic", system-ui, "Segoe UI", sans-serif;
 }
 
 /* A fenced code block: a language bar above the code, one frame around both. */

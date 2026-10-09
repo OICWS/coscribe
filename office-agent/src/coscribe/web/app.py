@@ -389,7 +389,7 @@ DESKTOP_ENV_VARS = ["COSCRIBE_BACKGROUND_ON_CLOSE", "COSCRIBE_NOTIFICATIONS"]
 # doesn't survive an origin change.
 APPEARANCE_ENV_VARS: dict[str, tuple[str, ...]] = {
     "COSCRIBE_THEME": ("system", "light", "dark"),
-    "COSCRIBE_CHAT_FONT": ("sans", "serif", "system"),
+    "COSCRIBE_INTERFACE_FONT": ("default", "system", "dyslexic"),
     "COSCRIBE_MOTION": ("system", "reduced"),
 }
 

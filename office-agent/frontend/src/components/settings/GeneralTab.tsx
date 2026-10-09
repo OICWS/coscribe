@@ -1,4 +1,4 @@
-import { setAppearance, useAppearance, type ChatFontChoice } from "../../lib/appearance";
+import { setAppearance, useAppearance } from "../../lib/appearance";
 import { useConfiguredModels } from "../../lib/useConfiguredModels";
 import { MonitorIcon, MoonIcon, SunIcon } from "../icons";
 import { ToggleSwitch } from "../ToggleSwitch";
@@ -67,11 +67,11 @@ const THEMES = [
   { value: "dark", label: <MoonIcon className="h-4 w-4" />, title: "Dark" },
 ] as const;
 
-const CHAT_FONTS: { value: ChatFontChoice; label: string }[] = [
-  { value: "sans", label: "IBM Plex Sans" },
-  { value: "serif", label: "Source Serif" },
-  { value: "system", label: "System font" },
-];
+const INTERFACE_FONTS = [
+  { value: "default", label: "Figtree", title: "Figtree" },
+  { value: "system", label: "System", title: "The system's own font" },
+  { value: "dyslexic", label: "OpenDyslexic", title: "OpenDyslexic" },
+] as const;
 
 const MOTION = [
   { value: "system", label: "System" },
@@ -89,20 +89,14 @@ function AppearanceSection() {
           control={<SegmentedControl value={appearance.theme} options={THEMES} onChange={(v) => void setAppearance("theme", v)} />}
         />
         <SettingRow
-          label="Chat font"
+          label="Interface font"
+          description="Font for the whole interface: menus, sidebars, panels and conversations. Figtree and OpenDyslexic are open-source (SIL Open Font License)."
           control={
-            <select
-              aria-label="Chat font"
-              className={`${fieldClass} w-48`}
-              value={appearance.chatFont}
-              onChange={(e) => void setAppearance("chatFont", e.target.value as ChatFontChoice)}
-            >
-              {CHAT_FONTS.map((font) => (
-                <option key={font.value} value={font.value}>
-                  {font.label}
-                </option>
-              ))}
-            </select>
+            <SegmentedControl
+              value={appearance.interfaceFont}
+              options={INTERFACE_FONTS}
+              onChange={(v) => void setAppearance("interfaceFont", v)}
+            />
           }
         />
         <SettingRow
