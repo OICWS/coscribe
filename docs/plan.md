@@ -20,12 +20,12 @@ Last reviewed: 2026-10-09.
      it; it no longer imports `cli` or FastAPI).
    - Done: the setup page, request models and provider catalog are out of `web/app.py`;
      every HTTP route is in `web/routes/` (one `router(state)` each).
-   - Next: the two WebSocket routes, then `tests/test_web.py`.
-     `app.py` and `tests/test_web.py` are hot files.
-2. **Working with more than one person** (proposed record 0007, replaces the
-   draft in #53): the maintainer accepts or changes it; then an admin adds the
-   second collaborator, their handle goes into `.github/CODEOWNERS`, and the
-   ruleset requires code-owner review for those paths.
+   - Done: the two WebSocket routes are in `web/routes/ws.py`.
+   - Next: split `tests/test_web.py` into `tests/web/` by domain (hot file).
+2. **Working with more than one person** (record 0007, proposed): the maintainer
+   accepts or changes it; then an admin adds the second collaborator, their handle
+   goes into `.github/CODEOWNERS`, and the ruleset requires code-owner review for
+   those paths.
 3. **Background commands**: the Background tasks panel lists sub-agents and
    scripts; add `run_background_command` so a shell command can run there too
    (touches `coordinator.py` and the approval rules).
@@ -57,6 +57,8 @@ Last reviewed: 2026-10-09.
   one file at a time.
 
 ## Later (wanted, not scheduled)
+
+- Conversations messaging each other (record 0008, proposed; design only).
 
 - Network access per session (an Edit environment setting). Without a sandbox it
   could only switch off coscribe's own web tools; it must say so on its face.

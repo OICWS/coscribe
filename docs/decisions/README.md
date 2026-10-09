@@ -16,3 +16,4 @@ old one; the old one stays, marked "Superseded by".
 | [0005](0005-code-is-a-second-runtime.md) | Code is a second runtime, never inside a fixed workflow |
 | [0006](0006-changes-reach-main-through-pull-requests.md) | Changes reach `main` only through pull requests |
 | [0007](0007-working-with-more-than-one-human.md) | Working with more than one human and their AI sessions (proposed) |
+| [0008](0008-conversations-can-message-each-other.md) | Conversations can message each other (proposed) |

@@ -48,13 +48,18 @@ def _routes(tmp_path: Path) -> list[Any]:
     return _flatten(list(create_app_lg(settings).routes))
 
 
+def _path(route: Any) -> str:
+    """An included WebSocket route reports an empty `path`; the real one is on the wrapped route."""
+    return route.path or getattr(route, "original_route", route).path
+
+
 def _describe(route: Any) -> str:
     if isinstance(getattr(route, "original_route", route), WebSocketRoute):
-        return f"WS {route.path}"
+        return f"WS {_path(route)}"
     if isinstance(route, Mount):
-        return f"MOUNT {route.path}"
+        return f"MOUNT {_path(route)}"
     methods = sorted(getattr(route, "methods", None) or [])
-    return f"{','.join(methods)} {route.path}"
+    return f"{','.join(methods)} {_path(route)}"
 
 
 def _methods(route: Any) -> set[str]:
@@ -74,13 +79,13 @@ def test_the_routes_are_the_checked_in_ones(tmp_path: Path) -> None:
 def test_a_fixed_path_is_registered_before_a_pattern_that_would_match_it(tmp_path: Path) -> None:
     routes = [route for route in _routes(tmp_path) if not isinstance(route, Mount)]
     shadowed = [
-        (earlier.path, later.path)
+        (_path(earlier), _path(later))
         for index, later in enumerate(routes)
-        if "{" not in later.path
+        if "{" not in _path(later)
         for earlier in routes[:index]
-        if "{" in earlier.path
+        if "{" in _path(earlier)
         and _methods(earlier) & _methods(later)
-        and earlier.path_regex.match(later.path)
+        and earlier.path_regex.match(_path(later))
     ]
 
     assert shadowed == []
