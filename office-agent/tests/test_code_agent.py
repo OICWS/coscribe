@@ -18,9 +18,9 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
-import coscribe.cli  # noqa: F401 -- web.session imports cli first
 from coscribe.code_runtime.launch import CodexHost, LaunchSpec
 from coscribe.config import Settings
+from coscribe.conversation.session import ChatSessionLG
 from coscribe.runtime import empty_hooks_config
 from coscribe.runtime.secret_store import SessionEnvironments
 from coscribe.runtime_lg.code_agent import CODE_APPROVAL_RISKS, CODE_TASK_TOOL
@@ -31,7 +31,6 @@ from coscribe.tools.subagent_tasks import (
     get_subagent_transcript,
     stop_subagent_task,
 )
-from coscribe.web.session import ChatSessionLG
 
 FAKE = Path(__file__).with_name("fake_codex_app_server.py")
 
@@ -132,9 +131,13 @@ def _session(
     code_model: str | None = None,
 ) -> ChatSessionLG:
     monkeypatch.setattr(
-        "coscribe.web.session.resolve_chat_model", lambda name, custom_providers=None: model
+        "coscribe.conversation.session.resolve_chat_model",
+        lambda name, custom_providers=None: model,
     )
-    monkeypatch.setattr("coscribe.web.session.code_service", lambda settings: _Service(codex))
+    monkeypatch.setattr(
+        "coscribe.conversation.session.code_service",
+        lambda settings: _Service(codex),
+    )
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None,
         default_model=default_model,
@@ -577,7 +580,7 @@ async def test_the_panel_hears_of_a_code_task_before_codex_is_ready(
             await release.wait()
             return await super().prepare()
 
-    monkeypatch.setattr("coscribe.web.session.code_service", lambda settings: Slow(codex))
+    monkeypatch.setattr("coscribe.conversation.session.code_service", lambda settings: Slow(codex))
     socket = _Socket(answer=lambda payload: True)
     socket.session = session
     session._live_websocket = socket  # type: ignore[assignment]

@@ -14,15 +14,14 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, Huma
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
-import coscribe.cli  # noqa: F401 -- web.session imports cli first
 from coscribe.config import Settings
+from coscribe.conversation.session import ChatSessionLG
 from coscribe.runtime import empty_hooks_config
 from coscribe.runtime_lg.messages import (
     context_note,
     last_conversation_context,
     strip_mode_note,
 )
-from coscribe.web.session import ChatSessionLG
 
 
 class _RecordingModel(BaseChatModel):
@@ -72,7 +71,8 @@ def _session(
     folder: Path,
 ) -> ChatSessionLG:
     monkeypatch.setattr(
-        "coscribe.web.session.resolve_chat_model", lambda name, custom_providers=None: model
+        "coscribe.conversation.session.resolve_chat_model",
+        lambda name, custom_providers=None: model,
     )
     (tmp_path / "MEMORY.md").write_text("- The user prefers metric units.\n", encoding="utf-8")
     settings = Settings(  # type: ignore[call-arg]

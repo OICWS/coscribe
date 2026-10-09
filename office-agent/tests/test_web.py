@@ -54,13 +54,13 @@ from pptx import Presentation
 from pptx.util import Inches
 
 from coscribe.config import Settings
+from coscribe.conversation.thread_meta import ThreadMetaStore
 from coscribe.runtime import secrets as secrets_module
 from coscribe.runtime_lg.audit import AuditLog
 from coscribe.runtime_lg.messages import is_steer
 from coscribe.tools.presentations import PresentationToolkit
 from coscribe.tools.subagent_tasks import SubAgentTaskStore
 from coscribe.web.app import ScriptEnvPackageInstall, create_app_lg
-from coscribe.web.thread_meta import ThreadMetaStore
 
 
 class FakeToolCallingChatModel(BaseChatModel):
@@ -380,7 +380,7 @@ def _client_lg(
     **settings_overrides: object,
 ) -> Any:
     monkeypatch.setattr(
-        "coscribe.web.session.resolve_chat_model",
+        "coscribe.conversation.session.resolve_chat_model",
         lambda model, custom_providers=None: fake_model,
     )
 
@@ -1947,7 +1947,7 @@ def test_close_orphaned_tool_calls_heals_a_thread_already_corrupted_mid_history(
     from langchain_core.messages import ToolCall
     from langgraph.checkpoint.memory import InMemorySaver
 
-    from coscribe.web.session import _close_orphaned_tool_calls
+    from coscribe.conversation.session import _close_orphaned_tool_calls
 
     def lookup(q: str) -> str:
         """Look something up."""
@@ -2001,7 +2001,7 @@ def test_close_orphaned_tool_calls_commits_a_finished_parallel_calls_uncommitted
     from langchain_core.messages import ToolCall
     from langgraph.checkpoint.memory import InMemorySaver
 
-    from coscribe.web.session import _ORPHANED_TOOL_CALL_NOTE, _close_orphaned_tool_calls
+    from coscribe.conversation.session import _ORPHANED_TOOL_CALL_NOTE, _close_orphaned_tool_calls
 
     started = threading.Event()
     release = threading.Event()
@@ -2065,7 +2065,7 @@ def test_close_orphaned_tool_calls_commits_a_finished_tools_uncommitted_write() 
     from langchain_core.messages import ToolCall
     from langgraph.checkpoint.memory import InMemorySaver
 
-    from coscribe.web.session import _close_orphaned_tool_calls
+    from coscribe.conversation.session import _close_orphaned_tool_calls
 
     def lookup(q: str) -> str:
         """Look something up."""
@@ -2116,7 +2116,7 @@ def test_switch_model_rebuilds_the_graph_and_reports_the_new_model(
         # otherwise overwrite this one (same gotcha as
         # connect_one_mcp_server_lg elsewhere in this file).
         monkeypatch.setattr(
-            "coscribe.web.session.resolve_chat_model",
+            "coscribe.conversation.session.resolve_chat_model",
             lambda model, custom_providers=None: models[model],
         )
         with client.websocket_connect("/ws/t_switch") as ws:
@@ -2179,7 +2179,7 @@ def test_switch_model_picks_up_a_provider_added_after_the_session_was_created(
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         # Must be set *after* entering _client_lg -- see the identical
         # gotcha noted on test_switch_model_rebuilds_the_graph above.
-        monkeypatch.setattr("coscribe.web.session.resolve_chat_model", _fake_resolve)
+        monkeypatch.setattr("coscribe.conversation.session.resolve_chat_model", _fake_resolve)
         with client.websocket_connect("/ws/t_switch_new_provider") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history -- session object created here, no custom providers yet
@@ -7524,9 +7524,9 @@ async def test_a_sub_agents_approval_survives_a_closed_turn_socket(
 ) -> None:
     from types import SimpleNamespace
 
+    from coscribe.conversation.session import _SubAgentApprovalChannel
     from coscribe.tools import subagent_tasks
     from coscribe.tools.subagent_tasks import SubAgentTask
-    from coscribe.web.session import _SubAgentApprovalChannel
 
     monkeypatch.setitem(subagent_tasks._RUNNING, "t1", asyncio.get_running_loop().create_future())
 
@@ -7637,7 +7637,7 @@ def test_the_chat_model_tests_its_draft_and_fixes_what_failed_lg(
     from coscribe.tools.scheduled_tasks import ScheduledTriggerStore
 
     ids = iter(["d1", "d2"])
-    monkeypatch.setattr("coscribe.web.session._new_draft_id", lambda: next(ids))
+    monkeypatch.setattr("coscribe.conversation.session._new_draft_id", lambda: next(ids))
     (tmp_path / "workspace").mkdir()
     (tmp_path / "workspace" / "input.txt").write_text("data", encoding="utf-8")
 

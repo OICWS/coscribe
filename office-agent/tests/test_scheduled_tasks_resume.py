@@ -25,6 +25,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from coscribe.config import Settings
+from coscribe.conversation.session import ChatSessionLG
 from coscribe.runtime_lg.scheduled_tasks import (
     _run_in_session,
     fire_trigger_now,
@@ -38,11 +39,6 @@ from coscribe.tools.scheduled_tasks import (
     ScheduleRule,
     run_thread_id,
 )
-
-# Import order matters here -- see test_selfwake_resume.py's identical
-# comment for why coscribe.web.app must be imported before ChatSessionLG
-# is used, to resolve a circular import safely.
-from coscribe.web.app import ChatSessionLG
 
 
 class FakeToolCallingChatModel(BaseChatModel):
@@ -105,7 +101,10 @@ def _settings(tmp_path: Path, **overrides: Any) -> Settings:
 async def _make_get_session(
     settings: Settings, checkpointer: Any, fake_model: FakeToolCallingChatModel, monkeypatch: Any
 ) -> Any:
-    monkeypatch.setattr("coscribe.web.session.resolve_chat_model", lambda *a, **k: fake_model)
+    monkeypatch.setattr(
+        "coscribe.conversation.session.resolve_chat_model",
+        lambda *a, **k: fake_model,
+    )
 
     async def get_session(thread_id: str) -> ChatSessionLG:
         return ChatSessionLG(
@@ -521,7 +520,10 @@ async def test_approval_mode_auto_is_restored_after_the_run(
     )
     checkpoint_path = tmp_path / "checkpoints.sqlite"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
-        monkeypatch.setattr("coscribe.web.session.resolve_chat_model", lambda *a, **k: fake_model)
+        monkeypatch.setattr(
+            "coscribe.conversation.session.resolve_chat_model",
+            lambda *a, **k: fake_model,
+        )
         session = ChatSessionLG(
             thread_id="reused-thread",
             settings=settings,

@@ -16,11 +16,11 @@ Last reviewed: 2026-10-09.
      `AGENTS.md`, templates.
    - Done: `ROADMAP.md` compacted (old one archived in `docs/history/`), plan,
      decisions and log in place, package dependencies checked in CI.
-   - Next: move `web/session.py` out of `web/` (it is the conversation engine and
-     the CLI uses it), then split `web/app.py` into routers by domain, then
-     `tests/test_web.py`.
-     `app.py` and `session.py` are hot files: announce a freeze in the PR before
-     moving them.
+   - Done: `web/session.py` and its helpers moved to `conversation/` (the CLI uses
+     it; it no longer imports `cli` or FastAPI).
+   - Next: split `web/app.py` into routers by domain (a route-table test first,
+     then `AppState`, then the routes in one announced freeze), then
+     `tests/test_web.py`. `app.py` and `tests/test_web.py` are hot files.
 2. **Background commands**: the Background tasks panel lists sub-agents and
    scripts; add `run_background_command` so a shell command can run there too
    (touches `coordinator.py` and the approval rules).

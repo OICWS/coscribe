@@ -86,6 +86,9 @@ from ..code_runtime.service import (
     shutdown_code_services,
 )
 from ..config import PermissionMode, Settings
+from ..conversation.activity import OPENABLE_EXTENSIONS, open_in_os
+from ..conversation.session import ChatSessionLG
+from ..conversation.thread_meta import ThreadMetaStore
 from ..coordinator import build_coordinator_agent
 from ..runtime import (
     LLMClient,
@@ -204,12 +207,9 @@ from ..workflows.catalog import describe_params, tool_description
 from ..workflows.permissions import granted_by, summarize
 from ..workflows.solidify import DraftFailed
 from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflow_error
-from .activity import OPENABLE_EXTENSIONS, open_in_os
 from .background_events import BackgroundEvent, BackgroundEventBus, run_event
 from .browser_panel import BrowserPanelError, BrowserPanelSession
 from .connector_catalog import MCP_CATALOG, SeenTools
-from .session import ChatSessionLG
-from .thread_meta import ThreadMetaStore
 
 if TYPE_CHECKING:
     # Real type only needed for a local variable annotation below (never

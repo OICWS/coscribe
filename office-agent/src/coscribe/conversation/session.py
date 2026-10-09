@@ -48,7 +48,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
 
-from fastapi import WebSocket
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -65,7 +64,6 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from ..cli import INIT_PROMPT
 from ..code_runtime.permissions import CodePermissions
 from ..code_runtime.service import code_service
 from ..config import Settings
@@ -165,6 +163,8 @@ from ..workflows.spec import parse_workflow, walk
 from ..workflows.testing import run_test, uses_browser
 from .activity import summarize_activity, summarize_workflow_run
 from .context_usage import build_context_breakdown
+from .events import EventSink
+from .prompts import INIT_PROMPT
 from .thread_meta import ThreadMetaStore
 from .turn_lock import TurnLock
 
@@ -673,7 +673,7 @@ class ChatSessionLG:
         # every other websocket use in this class already is (see
         # notify_resync's own docstring for why this one specifically
         # needs a place to live outside any single call's stack).
-        self._live_websocket: WebSocket | None = None
+        self._live_websocket: EventSink | None = None
         set_change_listener(self.thread_id, self._background_task_changed)
         # A reply is being worked on -- unlike the turn lock, not held for the
         # moments a reconnect or a folder change takes it.
@@ -814,7 +814,7 @@ class ChatSessionLG:
         notice.add_done_callback(self._report_tasks.discard)
 
     @staticmethod
-    async def _send_quietly(websocket: WebSocket, message: dict[str, Any]) -> None:
+    async def _send_quietly(websocket: EventSink, message: dict[str, Any]) -> None:
         try:
             await websocket.send_json(message)
         except Exception:  # noqa: BLE001 -- a closing tab mustn't fail the script's run
@@ -895,7 +895,7 @@ class ChatSessionLG:
             and (self._title_task is None or self._title_task.done())
         )
 
-    async def _name_thread(self, websocket: WebSocket, first_message: str | None = None) -> None:
+    async def _name_thread(self, websocket: EventSink, first_message: str | None = None) -> None:
         """A short title from the conversation's first message, asked for as
         soon as it is sent so that a long first turn (or one waiting on the
         user) doesn't leave the raw message as the label; the end of the first
@@ -1363,7 +1363,7 @@ class ChatSessionLG:
         if self._current_turn_task is not None and not self._current_turn_task.done():
             self._current_turn_task.cancel()
 
-    async def switch_model(self, model: str, websocket: WebSocket) -> None:
+    async def switch_model(self, model: str, websocket: EventSink) -> None:
         """Change this thread's active model immediately, mid-session, no
         restart, no reconnect -- mirrors ChatSession.switch_model's public
         contract exactly, but the mechanism is necessarily different:
@@ -1487,7 +1487,7 @@ class ChatSessionLG:
         empty while it uses the app's default workspace."""
         return [self.workspace_root, *self.extra_folders] if self._workspace_explicit else []
 
-    async def set_folders(self, paths: list[str], websocket: WebSocket) -> bool:
+    async def set_folders(self, paths: list[str], websocket: EventSink) -> bool:
         """Replace this conversation's folders -- any time between turns.
         The first is the main one (relative paths resolve there); none
         means the app's default workspace. Rebuilds the tools against them,
@@ -1510,7 +1510,7 @@ class ChatSessionLG:
         async with self._turn_lock:
             return await self._apply_folders(paths, websocket)
 
-    async def add_folder(self, path: str, websocket: WebSocket) -> bool:
+    async def add_folder(self, path: str, websocket: EventSink) -> bool:
         """One more folder for this conversation, keeping the ones it has --
         the default workspace stays the main one when none were chosen."""
         folder = Path(path).expanduser()
@@ -1519,7 +1519,7 @@ class ChatSessionLG:
             return True
         return await self.set_folders([str(p) for p in current] + [str(folder)], websocket)
 
-    async def _apply_folders(self, paths: list[str], websocket: WebSocket) -> bool:
+    async def _apply_folders(self, paths: list[str], websocket: EventSink) -> bool:
         chosen: list[Path] = []
         for raw in paths:
             folder = Path(raw).expanduser()
@@ -1570,7 +1570,7 @@ class ChatSessionLG:
         return True
 
     async def set_enabled_skills(
-        self, skill_names: set[str], websocket: WebSocket, *, announce: bool = True
+        self, skill_names: set[str], websocket: EventSink, *, announce: bool = True
     ) -> None:
         """Toggle this thread's active built-in/local skills, live,
         mid-session -- deliberately with NO "once only" guard: the user
@@ -1626,7 +1626,7 @@ class ChatSessionLG:
         if announce:
             await self.send_state(websocket)
 
-    async def send_state(self, websocket: WebSocket, *, on_connect: bool = False) -> None:
+    async def send_state(self, websocket: EventSink, *, on_connect: bool = False) -> None:
         if self._context_window is None:
             self._context_window = await asyncio.to_thread(
                 self._context_window_client.get_context_window, self._model_string
@@ -1821,7 +1821,7 @@ class ChatSessionLG:
         except Exception:
             logger.debug("notify_resync: failed to notify the live tab for %s", self.thread_id)
 
-    async def send_history(self, websocket: WebSocket) -> None:
+    async def send_history(self, websocket: EventSink) -> None:
         """One-shot replay of this thread's checkpointed messages, sent
         once right after send_state on every fresh WS connection (see
         app.py's ws_endpoint) -- fixes a real, live-reported bug: the
@@ -1854,7 +1854,7 @@ class ChatSessionLG:
             entries.append({"kind": "user", "text": prompt})
         await websocket.send_json({"type": "history", "entries": entries, "has_older": has_older})
 
-    async def load_older_messages(self, websocket: WebSocket) -> None:
+    async def load_older_messages(self, websocket: EventSink) -> None:
         """Scroll-up pagination for a thread that's been /compact'd: send_
         history above only ever returns the *current* checkpoint's message
         list, which right after a compaction is just the synthetic summary
@@ -1946,7 +1946,7 @@ class ChatSessionLG:
             }
         )
 
-    async def _stream_turn(self, turn_input: Any, websocket: WebSocket) -> str:
+    async def _stream_turn(self, turn_input: Any, websocket: EventSink) -> str:
         """Runs one astream() call, forwarding the model's own narration as
         "agent_delta" events and each tool's return value as "tool_result",
         same wire shape as ChatSession's _on_delta/_post_tool_use. Returns
@@ -2168,7 +2168,7 @@ class ChatSessionLG:
         await _capture_segment_usage()
         return "".join(text_parts)
 
-    async def _announce_started_tools(self, update: Any, websocket: WebSocket) -> None:
+    async def _announce_started_tools(self, update: Any, websocket: EventSink) -> None:
         """Tells the page which ungated calls are about to run, so it can
         show them running. Gated ones are announced by the approval path
         instead, and only when nobody is asked: a call waiting for approval
@@ -2186,7 +2186,7 @@ class ChatSessionLG:
                         await self._send_tool_started(call["name"], call["args"], websocket)
 
     async def _send_tool_started(
-        self, name: str, args: dict[str, Any], websocket: WebSocket
+        self, name: str, args: dict[str, Any], websocket: EventSink
     ) -> None:
         if name in QUESTION_TOOL_NAMES or name in TASK_DRAFT_TOOL_NAMES:
             return
@@ -2770,7 +2770,7 @@ class ChatSessionLG:
         return False
 
     async def _decide_question_request(
-        self, args: dict[str, Any], websocket: WebSocket
+        self, args: dict[str, Any], websocket: EventSink
     ) -> dict[str, Any]:
         """The ask_user_question flow: send question_required, wait for a
         real person's answer, and return it as a "respond" decision --
@@ -2796,7 +2796,7 @@ class ChatSessionLG:
         return {"type": "respond", "message": format_question_answers(questions, reply)}
 
     async def _decide_plan_request(
-        self, args: dict[str, Any], websocket: WebSocket
+        self, args: dict[str, Any], websocket: EventSink
     ) -> dict[str, Any]:
         """exit_plan_mode: the user approves the plan -- leaving plan mode for
         auto or manual approvals -- or keeps planning with feedback."""
@@ -2838,7 +2838,7 @@ class ChatSessionLG:
         return {"type": "respond", "message": answer}
 
     async def _decide_task_draft_request(
-        self, name: str, args: dict[str, Any], websocket: WebSocket
+        self, name: str, args: dict[str, Any], websocket: EventSink
     ) -> dict[str, Any]:
         """create_scheduled_task's review flow: the frontend shows the
         draft, the user edits and saves it (through the ordinary REST
@@ -2865,7 +2865,7 @@ class ChatSessionLG:
             self._pending_questions.pop(request_id, None)
         return {"type": "respond", "message": answer}
 
-    async def _resolve_pending_approvals(self, websocket: WebSocket) -> str | None:
+    async def _resolve_pending_approvals(self, websocket: EventSink) -> str | None:
         """While the graph is paused, decide every pending action request
         and resume -- looping in case a resumed turn immediately hits
         another approval-gated call.
@@ -2937,7 +2937,7 @@ class ChatSessionLG:
             state = await agent.aget_state(config)
         return latest_text
 
-    async def resume_after_reconnect(self, websocket: WebSocket) -> None:
+    async def resume_after_reconnect(self, websocket: EventSink) -> None:
         """If this session's graph is still paused on an approval from
         before a dropped connection or a process restart, redeliver it now
         instead of leaving the browser with nothing to resolve -- the
@@ -3008,7 +3008,7 @@ class ChatSessionLG:
             return
         store.finish_run(trigger_id, run_id, "stopped" if self._stop_requested else "completed")
 
-    async def _handle_compact(self, websocket: WebSocket) -> None:
+    async def _handle_compact(self, websocket: EventSink) -> None:
         """Summarize this thread's checkpointed message history down to one
         note, freeing up context -- the runtime_lg counterpart to
         ChatSession's /compact. Reuses runtime/compaction.py's own
@@ -3084,7 +3084,7 @@ class ChatSessionLG:
             }
         )
 
-    async def _handle_clear(self, websocket: WebSocket) -> None:
+    async def _handle_clear(self, websocket: EventSink) -> None:
         """Wipe this thread's conversation history and start fresh -- unlike
         /compact (collapses down to a summary note), this discards it
         outright. Doesn't touch plan_mode/accept_edits (session-level UI
@@ -3127,7 +3127,7 @@ class ChatSessionLG:
         self,
         index: int,
         text: str,
-        websocket: WebSocket,
+        websocket: EventSink,
         images: list[str] | None = None,
     ) -> None:
         # Same _turn_lock serialization as handle_user_message -- an edit
@@ -3141,7 +3141,7 @@ class ChatSessionLG:
         self,
         index: int,
         text: str,
-        websocket: WebSocket,
+        websocket: EventSink,
         images: list[str] | None = None,
     ) -> None:
         """Edit an earlier user turn and regenerate the conversation from
@@ -3195,14 +3195,14 @@ class ChatSessionLG:
 
         await self._handle_user_message_locked(text, websocket, images=images)
 
-    async def handle_rewind_message(self, index: int, websocket: WebSocket) -> None:
+    async def handle_rewind_message(self, index: int, websocket: EventSink) -> None:
         # Same _turn_lock serialization as handle_edit_message -- see that
         # method's own comment.
         async with self._turn_lock:
             self._current_turn_task = asyncio.current_task()
             await self._handle_rewind_message_locked(index, websocket)
 
-    async def _handle_rewind_message_locked(self, index: int, websocket: WebSocket) -> None:
+    async def _handle_rewind_message_locked(self, index: int, websocket: EventSink) -> None:
         """Undo the last question and its reply -- real, live-reported
         bug this fixes: the UI's "Rewind" button used to call
         handle_edit_message with the turn's own *unedited* text, which
@@ -3239,7 +3239,7 @@ class ChatSessionLG:
             )
         await websocket.send_json({"type": "rewound", "index": index})
 
-    async def _handle_save_skill(self, name: str, websocket: WebSocket) -> None:
+    async def _handle_save_skill(self, name: str, websocket: EventSink) -> None:
         """/saveskill's own entry point: validate the name, require a
         non-empty conversation, run one curator round
         (propose_skill_save_lg), present it."""
@@ -3264,7 +3264,7 @@ class ChatSessionLG:
         proposal: SkillSaveProposal,
         clarification_history: list[tuple[str, str]],
         rounds: int,
-        websocket: WebSocket,
+        websocket: EventSink,
     ) -> dict[str, Any]:
         """Same "plain chat bubble, not a new WS event type" reasoning as
         _present_save_proposal -- the description/body preview is shown
@@ -3299,7 +3299,7 @@ class ChatSessionLG:
             "clarification_history": clarification_history,
         }
 
-    async def _handle_pending_skill_save_proposal(self, text: str, websocket: WebSocket) -> None:
+    async def _handle_pending_skill_save_proposal(self, text: str, websocket: EventSink) -> None:
         """While pending_save_skill_proposal is set, every incoming message
         answers the curator's clarifying question or confirms/discards its
         proposed save instead of running a normal turn."""
@@ -3396,7 +3396,7 @@ class ChatSessionLG:
     async def handle_user_message(
         self,
         text: str,
-        websocket: WebSocket,
+        websocket: EventSink,
         images: list[str] | None = None,
     ) -> None:
         # See _turn_lock's docstring in __init__: this serializes turns so a
@@ -3428,7 +3428,7 @@ class ChatSessionLG:
     async def _handle_user_message_locked(
         self,
         text: str,
-        websocket: WebSocket,
+        websocket: EventSink,
         images: list[str] | None = None,
         *,
         notice: bool = False,

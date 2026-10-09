@@ -482,14 +482,14 @@ def _connector_tool() -> str:
 async def _first_request_tools(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch, model_string: str, extra_tools: list[Any]
 ) -> list[str]:
-    import coscribe.cli  # noqa: F401 -- web.session imports cli first
     from coscribe.config import Settings
+    from coscribe.conversation.session import ChatSessionLG
     from coscribe.runtime import empty_hooks_config
-    from coscribe.web.session import ChatSessionLG
 
     model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
     monkeypatch.setattr(
-        "coscribe.web.session.resolve_chat_model", lambda name, custom_providers=None: model
+        "coscribe.conversation.session.resolve_chat_model",
+        lambda name, custom_providers=None: model,
     )
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None,

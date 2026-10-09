@@ -26,19 +26,12 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from coscribe.config import Settings
+from coscribe.conversation.session import ChatSessionLG
 from coscribe.runtime_lg.selfwake import poll_due_wakes
 from coscribe.tools import background_tasks
 from coscribe.tools.background_tasks import BackgroundTask, BackgroundTaskStore
 from coscribe.tools.selfwake import WakeRequest, WakeStore
 from coscribe.tools.subagent_tasks import SubAgentTask, SubAgentTaskStore
-
-# Import order matters here: web/session.py does `from ..cli import
-# INIT_PROMPT`, and cli.py does `from .web.session import ChatSessionLG` --
-# importing coscribe.cli first (as web/app.py itself does) resolves that
-# circular import safely; importing coscribe.web.session directly first
-# does not (see test_web.py's identical `from coscribe.web.app import ...`
-# for the same reason).
-from coscribe.web.app import ChatSessionLG
 
 
 class FakeToolCallingChatModel(BaseChatModel):
@@ -100,7 +93,10 @@ def _settings(tmp_path: Path) -> Settings:
 async def _make_get_session(
     settings: Settings, checkpointer: Any, fake_model: FakeToolCallingChatModel, monkeypatch: Any
 ) -> Any:
-    monkeypatch.setattr("coscribe.web.session.resolve_chat_model", lambda *a, **k: fake_model)
+    monkeypatch.setattr(
+        "coscribe.conversation.session.resolve_chat_model",
+        lambda *a, **k: fake_model,
+    )
 
     async def get_session(thread_id: str) -> ChatSessionLG:
         return ChatSessionLG(

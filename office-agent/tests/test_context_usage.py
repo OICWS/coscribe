@@ -5,8 +5,8 @@ backend (see that module's own docstring for the measurement approach).
 import pytest
 from langchain_core.tools import tool
 
-from coscribe.web import context_usage
-from coscribe.web.context_usage import (
+from coscribe.conversation import context_usage
+from coscribe.conversation.context_usage import (
     build_context_breakdown,
     count_text_tokens,
     count_tool_schema_tokens,
