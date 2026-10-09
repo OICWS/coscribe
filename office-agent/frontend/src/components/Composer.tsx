@@ -570,7 +570,8 @@ export function Composer({
       </div>
 
       <div className="flex items-center justify-between gap-2 pt-2">
-        <div className="flex items-center gap-0.5">
+        {/* ml-1.5 puts the + under the first letter typed in the box above. */}
+        <div className="ml-1.5 flex items-center gap-0.5">
           <input
             ref={fileInputRef}
             type="file"
