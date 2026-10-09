@@ -7,6 +7,7 @@ import { scheduleKindLabel } from "../lib/scheduleLabels";
 import type { RunStatus, ScheduledTask } from "../types/settings";
 import type { ThreadSummary } from "../types/session";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { EnvironmentDialog } from "./EnvironmentDialog";
 import { RunStatusIcon } from "./RunStatusIcon";
 import { ThreadList } from "./ThreadList";
 import { COLLAPSED_CLUSTER_WIDTH, DRAWS_TITLE_BAR } from "../lib/titleBar";
@@ -236,6 +237,9 @@ export function NavRail({
     };
   }, [hovering, pinned]);
   const [deleteTarget, setDeleteTarget] = useState<ThreadSummary | null>(null);
+  // Held here, not in the list: the list goes when the sidebar collapses, and a
+  // dialog opened from it must outlive that (a window losing focus collapses it).
+  const [environmentOf, setEnvironmentOf] = useState<ThreadSummary | null>(null);
 
   useEffect(() => {
     if (expanded) onThreadsChanged();
@@ -335,6 +339,7 @@ export function NavRail({
                   onChanged={onThreadsChanged}
                   onRenamed={onThreadRenamed}
                   onDeleteRequest={setDeleteTarget}
+                  onEditEnvironment={setEnvironmentOf}
                 />
               </div>
             )}
@@ -371,6 +376,13 @@ export function NavRail({
           </div>
         )}
       </div>
+      {environmentOf && (
+        <EnvironmentDialog
+          threadId={environmentOf.thread_id}
+          title={environmentOf.preview || environmentOf.thread_id}
+          onClose={() => setEnvironmentOf(null)}
+        />
+      )}
       {deleteTarget && (
         <ConfirmDialog
           title="Delete chat?"
