@@ -6,7 +6,7 @@ are the way they are lives in [`docs/decisions/`](decisions/) and
 [`ARCHITECTURE.md`](../ARCHITECTURE.md). Update this file in the PR that
 changes the picture; keep it under about 150 lines.
 
-Last reviewed: 2026-10-08.
+Last reviewed: 2026-10-09.
 
 ## Next, in order
 
@@ -21,14 +21,16 @@ Last reviewed: 2026-10-08.
      `tests/test_web.py`.
      `app.py` and `session.py` are hot files: announce a freeze in the PR before
      moving them.
-2. **Secrets, part 3** (backend): apply a conversation's plain variables to
-   scripts and the code module; then remove the sentence "Scripts and the code
-   module don't receive these yet" from `EnvironmentDialog.tsx`.
-3. **Connector add form: pick a secret** (frontend). The backend already takes
-   `{{secret:NAME}}` in a connector's header or env value (see
-   `docs/log/2026-10-08-connector-secrets.md`); the form should offer the
-   secrets from Settings > Secrets and say a header's secret must be allowed for
-   that connector's host.
+2. **One Background tasks panel** (frontend, after the backend part lands): the
+   Sub Agents panel is renamed and also lists background scripts (stop, log,
+   clear, the same groups). The model-facing tools are unchanged. Later: a
+   `run_background_command` for shell commands (touches `coordinator.py`).
+3. **Connector add form: pick a secret** (frontend). The backend takes
+   `{{secret:NAME}}` in a connector's header or env value; the form should offer
+   the secrets from Settings > Secrets and say a header's secret must be allowed
+   for that connector's host. Also show the `connectors` list of the 409 when a
+   secret in use is deleted, and drop "Scripts and the code module don't receive
+   these yet" from `EnvironmentDialog.tsx`.
 
 ## Needs the maintainer's testing (could not be verified here)
 

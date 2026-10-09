@@ -136,6 +136,7 @@ from ..tools import (
 )
 from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
+from ..tools.background_tasks import BackgroundTask, set_change_listener
 from ..tools.browser import BROWSER_HOST, page_screenshot
 from ..tools.documents import DocumentToolkit
 from ..tools.http_request import build_http_tools
@@ -673,6 +674,7 @@ class ChatSessionLG:
         # notify_resync's own docstring for why this one specifically
         # needs a place to live outside any single call's stack).
         self._live_websocket: WebSocket | None = None
+        set_change_listener(self.thread_id, self._background_task_changed)
         # A reply is being worked on -- unlike the turn lock, not held for the
         # moments a reconnect or a folder change takes it.
         self.turn_running = False
@@ -797,6 +799,26 @@ class ChatSessionLG:
             )
         except Exception:  # noqa: BLE001 -- a closing tab mustn't fail the sub-agent's run
             logger.debug("subagents_changed not delivered", exc_info=True)
+
+    def _background_task_changed(self, task: BackgroundTask) -> None:
+        websocket = self._live_websocket
+        if websocket is None:
+            return
+        message = {
+            "type": "background_tasks_changed",
+            "task_id": task.task_id,
+            "status": task.status,
+        }
+        notice = asyncio.get_running_loop().create_task(self._send_quietly(websocket, message))
+        self._report_tasks.add(notice)
+        notice.add_done_callback(self._report_tasks.discard)
+
+    @staticmethod
+    async def _send_quietly(websocket: WebSocket, message: dict[str, Any]) -> None:
+        try:
+            await websocket.send_json(message)
+        except Exception:  # noqa: BLE001 -- a closing tab mustn't fail the script's run
+            logger.debug("%s not delivered", message["type"], exc_info=True)
 
     def _take_subagent_wakes(self, task_id: str) -> list[str]:
         wake_store = WakeStore(self.settings.state_dir)

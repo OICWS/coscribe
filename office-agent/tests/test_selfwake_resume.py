@@ -27,6 +27,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from coscribe.config import Settings
 from coscribe.runtime_lg.selfwake import poll_due_wakes
+from coscribe.tools import background_tasks
 from coscribe.tools.background_tasks import BackgroundTask, BackgroundTaskStore
 from coscribe.tools.selfwake import WakeRequest, WakeStore
 from coscribe.tools.subagent_tasks import SubAgentTask, SubAgentTaskStore
@@ -310,16 +311,17 @@ async def test_task_wake_stays_pending_while_the_task_is_still_running(
     settings = _settings(tmp_path)
     fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="still going")])
     task_store = BackgroundTaskStore(settings.state_dir)
-    task_store.save(
-        BackgroundTask(
-            task_id="task-2",
-            thread_id="thread-1",
-            language="python",
-            description="a long job",
-            status="running",
-            started_at=datetime.now(UTC).isoformat(),
-        )
+    running = BackgroundTask(
+        task_id="task-2",
+        thread_id="thread-1",
+        language="python",
+        description="a long job",
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
     )
+    task_store.save(running)
+    # A task this process holds no handle for counts as interrupted, not running.
+    monkeypatch.setitem(background_tasks._LIVE, "task-2", (running, object()))
     checkpoint_path = tmp_path / "checkpoints.sqlite"
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         get_session = await _make_get_session(settings, checkpointer, fake_model, monkeypatch)

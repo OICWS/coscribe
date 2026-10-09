@@ -131,6 +131,12 @@ from ..tools import (
     save_uploaded_skill,
 )
 from ..tools._workspace import WorkspaceScope
+from ..tools.background_tasks import (
+    BackgroundTaskStore,
+    forget_finished_background_tasks,
+    read_background_log,
+    stop_background_task,
+)
 from ..tools.browser import BROWSER_HOST, SCREENSHOT_FOLDER
 from ..tools.connector_permissions import (
     POLICIES,
@@ -2098,6 +2104,34 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
     @app.delete("/api/threads/{thread_id}/subagents")
     async def forget_finished_subagents_endpoint(thread_id: str) -> dict[str, int]:
         return {"removed": forget_finished_subagents(settings.state_dir, thread_id)}
+
+    # Background scripts share the panel with sub-agents; the same four
+    # actions, over their own store.
+
+    @app.get("/api/threads/{thread_id}/background-tasks")
+    async def list_background_tasks_endpoint(thread_id: str) -> list[dict[str, Any]]:
+        tasks = BackgroundTaskStore(settings.state_dir).list_for_thread(thread_id)
+        return [t.to_dict() for t in tasks]
+
+    @app.get("/api/background-tasks/{task_id}/log")
+    async def get_background_task_log_endpoint(task_id: str) -> JSONResponse:
+        log = read_background_log(settings.state_dir, task_id)
+        if log is None:
+            return JSONResponse({"error": f"No background task {task_id!r}"}, status_code=404)
+        return JSONResponse(log)
+
+    @app.post("/api/background-tasks/{task_id}/stop")
+    async def stop_background_task_endpoint(task_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(stop_background_task(settings.state_dir, task_id))
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+
+    @app.delete("/api/threads/{thread_id}/background-tasks")
+    async def forget_finished_background_tasks_endpoint(thread_id: str) -> dict[str, int]:
+        return {"removed": forget_finished_background_tasks(settings.state_dir, thread_id)}
 
     # -- /api/scheduled-tasks -- the Settings > Scheduled Tasks panel's
     # create-without-a-conversation entry point; direct ScheduledTriggerStore
