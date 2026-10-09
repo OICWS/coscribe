@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -67,8 +68,13 @@ from .script_guard import (
     write_python_wrapper,
 )
 
+# An id comes from a URL in the panel, so it must never name a path outside
+# the store.
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
 VALID_LANGUAGES = ("python", "node")
-VALID_STATUSES = ("running", "succeeded", "failed", "timed_out", "killed")
+VALID_STATUSES = ("running", "succeeded", "failed", "timed_out", "killed", "interrupted")
+FINISHED_STATUSES = tuple(status for status in VALID_STATUSES if status != "running")
 
 # Deliberately much larger than run_python_script/run_node_script's own
 # 120s default / 600s cap -- the whole reason to reach for the background
@@ -112,6 +118,22 @@ _RUNNING_SUPERVISORS: set[asyncio.Task[None]] = set()
 _LIVE: dict[str, tuple[BackgroundTask, asyncio.subprocess.Process]] = {}
 
 
+# One listener per conversation: the open tab's session, so the Background
+# tasks panel refreshes when a script starts or ends instead of waiting for
+# its poll. A replaced listener is a reopened session, never a second reader.
+_LISTENERS: dict[str, Callable[[BackgroundTask], None]] = {}
+
+
+def set_change_listener(thread_id: str, listener: Callable[[BackgroundTask], None]) -> None:
+    _LISTENERS[thread_id] = listener
+
+
+def _announce(task: BackgroundTask) -> None:
+    listener = _LISTENERS.get(task.thread_id)
+    if listener is not None:
+        listener(task)
+
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -127,6 +149,7 @@ class BackgroundTask:
     finished_at: str | None = None
     exit_code: int | None = None
     pid: int | None = None
+    note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -139,6 +162,7 @@ class BackgroundTask:
             "finished_at": self.finished_at,
             "exit_code": self.exit_code,
             "pid": self.pid,
+            "note": self.note,
         }
 
     @classmethod
@@ -153,6 +177,7 @@ class BackgroundTask:
             finished_at=data.get("finished_at"),
             exit_code=data.get("exit_code"),
             pid=data.get("pid"),
+            note=data.get("note"),
         )
 
 
@@ -176,10 +201,14 @@ class BackgroundTaskStore:
         os.replace(tmp_path, path)
 
     def load(self, task_id: str) -> BackgroundTask | None:
+        if not _SAFE_ID.fullmatch(task_id):
+            return None
         path = self._json_path(task_id)
         if not path.exists():
             return None
-        return BackgroundTask.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        return self._settle_if_orphaned(
+            BackgroundTask.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        )
 
     def list_for_thread(self, thread_id: str) -> list[BackgroundTask]:
         if not self.root.is_dir():
@@ -188,7 +217,27 @@ class BackgroundTaskStore:
             BackgroundTask.from_dict(json.loads(p.read_text(encoding="utf-8")))
             for p in sorted(self.root.glob("*.json"))
         ]
-        return [t for t in tasks if t.thread_id == thread_id]
+        mine = sorted((t for t in tasks if t.thread_id == thread_id), key=lambda t: t.started_at)
+        return [self._settle_if_orphaned(task) for task in mine]
+
+    def _settle_if_orphaned(self, task: BackgroundTask) -> BackgroundTask:
+        """A task this process holds no handle for lost its supervisor in a
+        restart; left as "running" it would show as working forever, and a
+        wake waiting on it would never fire. The process itself may still be
+        running: only coscribe's record of it is gone."""
+        if task.status != "running" or task.task_id in _LIVE:
+            return task
+        task.status = "interrupted"
+        task.finished_at = task.finished_at or _now_iso()
+        task.note = "coscribe restarted while it was running; the script may still be running."
+        self.save(task)
+        return task
+
+    def delete(self, task_id: str) -> None:
+        if not _SAFE_ID.fullmatch(task_id):
+            return
+        for path in (self._json_path(task_id), self.log_path(task_id)):
+            path.unlink(missing_ok=True)
 
     def log_path(self, task_id: str) -> Path:
         return self.root / f"{task_id}.log"
@@ -197,6 +246,8 @@ class BackgroundTaskStore:
         return self.root / f"{task_id}.json"
 
     def tail(self, task_id: str, tail_bytes: int) -> str:
+        if not _SAFE_ID.fullmatch(task_id):
+            return ""
         path = self.log_path(task_id)
         if not path.is_file():
             return ""
@@ -270,6 +321,58 @@ async def _supervise(
     else:
         task.status = "succeeded" if exit_code == 0 else "failed"
     store.save(task)
+    _announce(task)
+
+
+def stop_background_task(
+    state_dir: str | Path, task_id: str, thread_id: str | None = None
+) -> dict[str, Any]:
+    """Kill a running background script. Raises KeyError for an unknown task
+    (or one of another conversation, when `thread_id` is given) and
+    ValueError when it isn't running or this process holds no handle to it."""
+    on_disk = BackgroundTaskStore(state_dir).load(task_id)
+    if on_disk is None or (thread_id is not None and on_disk.thread_id != thread_id):
+        raise KeyError(f"No background task with id {task_id!r} in this conversation")
+    if on_disk.status != "running":
+        raise ValueError(f"Task {task_id!r} is already {on_disk.status!r}, not running")
+    live = _LIVE.get(task_id)
+    if live is None:
+        raise ValueError(
+            f"No live process handle for task {task_id!r} in this coscribe-web process "
+            "(it may have started before the server last restarted)"
+        )
+    # Mutate the same object _supervise holds, not `on_disk`: it reads this
+    # object's status once the process exits to tell a kill from a failure.
+    live_task, proc = live
+    live_task.status = "killed"
+    BackgroundTaskStore(state_dir).save(live_task)
+    proc.kill()
+    return live_task.to_dict()
+
+
+def forget_finished_background_tasks(state_dir: str | Path, thread_id: str) -> int:
+    store = BackgroundTaskStore(state_dir)
+    removed = 0
+    for task in store.list_for_thread(thread_id):
+        if task.status in FINISHED_STATUSES:
+            store.delete(task.task_id)
+            removed += 1
+    return removed
+
+
+def read_background_log(
+    state_dir: str | Path, task_id: str, tail_bytes: int = _DEFAULT_TAIL_BYTES
+) -> dict[str, Any] | None:
+    """The task's record and the end of its log, for the panel. None when
+    there is no such task. Output is filtered the way check_background_task's
+    is, so the script guard's own notices never read as the script's."""
+    store = BackgroundTaskStore(state_dir)
+    task = store.load(task_id)
+    if task is None:
+        return None
+    tail_bytes = min(max(tail_bytes, 1), _MAX_TAIL_BYTES)
+    _blocked, output = blocked_write(without_guard_warnings(store.tail(task_id, tail_bytes)))
+    return {"task": task.to_dict(), "output": output}
 
 
 def build_background_task_tools(
@@ -389,6 +492,7 @@ def build_background_task_tools(
         )
         store.save(task)
         _LIVE[task.task_id] = (task, proc)
+        _announce(task)
 
         supervisor = asyncio.create_task(_supervise(store, task, proc, scratch_dir, timeout))
         _RUNNING_SUPERVISORS.add(supervisor)
@@ -446,27 +550,7 @@ def build_background_task_tools(
         Args:
             task_id: id returned by run_background_script.
         """
-        on_disk = store.load(task_id)
-        if on_disk is None or on_disk.thread_id != thread_id:
-            raise KeyError(f"No background task with id {task_id!r} in this conversation")
-        if on_disk.status != "running":
-            raise ValueError(f"Task {task_id!r} is already {on_disk.status!r}, not running")
-        live = _LIVE.get(task_id)
-        if live is None:
-            raise RuntimeError(
-                f"No live process handle for task {task_id!r} in this coscribe-web process "
-                "(it may have started before the server last restarted)"
-            )
-        # Mutate the *same* BackgroundTask object _supervise itself holds
-        # (not on_disk, a separate copy freshly deserialized above) -- see
-        # _LIVE's own docstring for why this matters: _supervise checks
-        # this exact object's .status once the process actually exits, to
-        # tell a deliberate kill apart from a plain failure.
-        live_task, proc = live
-        live_task.status = "killed"
-        store.save(live_task)
-        proc.kill()
-        return live_task.to_dict()
+        return stop_background_task(state, task_id, thread_id)
 
     return [
         tool_metadata(run_background_script, risk_category="EXEC", category="background_tasks"),
