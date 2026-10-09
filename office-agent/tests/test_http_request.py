@@ -233,6 +233,17 @@ def test_the_middleware_blanks_a_result_an_error_and_a_command_update(tmp_path: 
     blocks = ToolMessage(content=[{"type": "text", "text": KEY}], tool_call_id="3", name="t")
 
     out = [middleware.wrap_tool_call(None, lambda _r, m=m: m) for m in (message, error, blocks)]
+    nested = ToolMessage(
+        content=[{"type": "text", "text": "ok", "extra": {"deep": [KEY]}}],
+        artifact={"structured_content": {f"k-{KEY}": [f"a {KEY} b", 3, None]}},
+        tool_call_id="4",
+        name="t",
+    )
+    nested_out = middleware.wrap_tool_call(None, lambda _r: nested)
+    assert nested_out.content[0]["extra"] == {"deep": ["[REDACTED SECRET]"]}
+    assert nested_out.artifact == {
+        "structured_content": {f"k-{KEY}": ["a [REDACTED SECRET] b", 3, None]}
+    }
 
     assert out[0].content == "key=[REDACTED SECRET]"
     assert out[1].content == "failed with [REDACTED SECRET]" and out[1].status == "error"
