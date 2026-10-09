@@ -40,6 +40,7 @@ import logging
 import shutil
 import tempfile
 import time
+import unicodedata
 import uuid
 from asyncio import Future, get_running_loop
 from collections import defaultdict
@@ -421,9 +422,30 @@ _TITLE_INSTRUCTIONS = (
 )
 
 
+# Characters of room in a sidebar row, counting a wide (Chinese, Japanese, Korean) one as two.
+_TITLE_WIDTH = 40
+
+
 def _clean_title(text: str) -> str:
     title = " ".join(text.strip().splitlines()[0].split()) if text.strip() else ""
-    return title.strip("\"'“”「」《》*#。.").strip()[:80]
+    return _fit_title(title.strip("\"'“”「」《》*#。.").strip())
+
+
+def _fit_title(title: str) -> str:
+    """The title cut to the sidebar's width, for a model that answers with a sentence
+    although it was asked for a few words."""
+    width = 0
+    end = 0
+    for char in title:
+        width += 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+        if width > _TITLE_WIDTH:
+            break
+        end += 1
+    if end == len(title):
+        return title
+    cut = title[:end]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > len(cut) * 0.6 else cut).rstrip() + "…"
 
 
 _WIND_DOWN_REPORT_TURN = 3

@@ -39,7 +39,6 @@ import {
   SearchIcon,
   TrashIcon,
 } from "./icons";
-import { EnvironmentDialog } from "./EnvironmentDialog";
 import { ThreadStatusIcon } from "./ThreadStatusIcon";
 
 const COLLAPSED_KEY = "coscribe.collapsedGroups";
@@ -437,11 +436,19 @@ export interface ThreadListProps {
   onChanged: () => void;
   onRenamed: (threadId: string, title: string) => void;
   onDeleteRequest: (thread: ThreadSummary) => void;
+  onEditEnvironment: (thread: ThreadSummary) => void;
 }
 
 /** The conversations in the sidebar: grouped, each with its status, with a
  * filter by status (Archived among them) and a text search. */
-export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteRequest }: ThreadListProps) {
+export function ThreadList({
+  threads,
+  currentId,
+  onChanged,
+  onRenamed,
+  onDeleteRequest,
+  onEditEnvironment,
+}: ThreadListProps) {
   const [groups, setGroups] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<Record<string, ThreadStatus>>({});
   const [filter, setFilter] = useState<ThreadFilter>("all");
@@ -451,7 +458,6 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
   const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [environmentOf, setEnvironmentOf] = useState<ThreadSummary | null>(null);
   const [dragging, setDragging] = useState<ThreadSummary | null>(null);
   const [dropKey, setDropKey] = useState<string | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -666,13 +672,6 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
           );
         })}
       </div>
-      {environmentOf && (
-        <EnvironmentDialog
-          threadId={environmentOf.thread_id}
-          title={threadLabel(environmentOf)}
-          onClose={() => setEnvironmentOf(null)}
-        />
-      )}
       {menu && (
         <ThreadMenu
           menu={menu}
@@ -684,7 +683,7 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
             setMenu(null);
           }}
           onEnvironment={() => {
-            setEnvironmentOf(menu.thread);
+            onEditEnvironment(menu.thread);
             setMenu(null);
           }}
           onMove={(group) => void move(menu.thread, group)}
