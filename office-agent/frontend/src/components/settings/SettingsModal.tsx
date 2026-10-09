@@ -221,11 +221,11 @@ export function SettingsModal({
   // that isn't a descendant of it in the first place.
   return createPortal(
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60`}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 ${DRAWS_TITLE_BAR ? "pt-10" : ""}`}
       onClick={(e) => e.target === e.currentTarget && close()}
     >
       {/* In the desktop app the OS draws its window buttons over the top
-       * 40px of the page; the backdrop starts below them (index.css). */}
+       * 40px of the page, so the dialog stays below them. */}
       <div className={`relative flex ${DRAWS_TITLE_BAR ? "h-[min(840px,100vh-4.5rem)]" : "h-[min(840px,100vh-2rem)]"} w-[min(1100px,100vw-2rem)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel-bg)] shadow-[var(--shadow)]`}>
         <button
           type="button"

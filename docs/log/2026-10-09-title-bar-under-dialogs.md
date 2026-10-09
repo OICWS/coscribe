@@ -19,3 +19,8 @@ the drag area did not: a dialog's backdrop covered the whole window.
 - The real desktop app: window dragging with a dialog open (the drag area is
   still declared by the same element; only its covering changed), and Windows
   Window Controls Overlay placement.
+
+## Superseded
+Reverted the same day (`2026-10-09-title-bar-covered.md`): the maintainer wanted the page's own
+title-bar buttons covered by a dialog too, leaving only the OS window buttons (minimise, maximise,
+close) usable.
