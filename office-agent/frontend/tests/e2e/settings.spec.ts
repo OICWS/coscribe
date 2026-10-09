@@ -89,3 +89,23 @@ test("Skills tab: a skill switched off from its menu shows Off, and back on", as
   await page.getByRole("menuitem", { name: "Turn on" }).click();
   await expect(row.getByText("Off", { exact: true })).toHaveCount(0);
 });
+
+test("General tab: the interface font changes the whole interface, not only the chat", async ({ page }) => {
+  await page.goto(freshThreadPath("interface-font"));
+  await waitForConnected(page);
+  const fontOf = (selector: string) =>
+    page.evaluate((s) => getComputedStyle(document.querySelector(s) as Element).fontFamily, selector);
+  const original = await page.evaluate(() => document.documentElement.dataset.interfaceFont ?? "default");
+  const restore = { default: "Figtree", system: "The system's own font", dyslexic: "OpenDyslexic" }[original] ?? "Figtree";
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByTitle("OpenDyslexic", { exact: true }).click();
+  await page.getByRole("button", { name: "Close settings" }).click();
+  try {
+    expect(await fontOf("textarea")).toContain("OpenDyslexic");
+    expect(await fontOf("body")).toContain("OpenDyslexic");
+  } finally {
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByTitle(restore, { exact: true }).click();
+  }
+});
