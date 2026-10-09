@@ -3733,6 +3733,7 @@ def test_post_mcp_server_persists_config_and_sets_env_var_when_unset(
                 "args": ["mcp-server-fetch"],
                 "masked_env": {},
                 "connected": False,
+                "secret_error": None,
                 "tools": [],
             }
         }
@@ -3970,7 +3971,7 @@ def test_lifespan_backgrounds_a_slow_mcp_connect_instead_of_blocking_startup(
     finished = threading.Event()
 
     async def _slow_connect_mcp_tools_lg(
-        config_path: Path, *args: Any
+        config_path: Path, *args: Any, **kwargs: Any
     ) -> tuple[list[Any], dict[str, Any]]:
         await asyncio.to_thread(release.wait, 10)
         finished.set()

@@ -24,8 +24,11 @@ Last reviewed: 2026-10-08.
 2. **Secrets, part 3** (backend): apply a conversation's plain variables to
    scripts and the code module; then remove the sentence "Scripts and the code
    module don't receive these yet" from `EnvironmentDialog.tsx`.
-3. **Connectors take `{"secret": NAME}`** for a header or env value
-   (`tools/mcp.py` and the connector add form).
+3. **Connector add form: pick a secret** (frontend). The backend already takes
+   `{{secret:NAME}}` in a connector's header or env value (see
+   `docs/log/2026-10-08-connector-secrets.md`); the form should offer the
+   secrets from Settings > Secrets and say a header's secret must be allowed for
+   that connector's host.
 
 ## Needs the maintainer's testing (could not be verified here)
 

@@ -104,6 +104,7 @@ from ..runtime.secret_store import (
     SecretStore,
     SessionEnvironments,
     keychain_available,
+    placeholders_in,
 )
 from ..runtime.types import get_tool_metadata
 from ..runtime_lg import (
@@ -135,7 +136,13 @@ from ..tools.connector_permissions import (
     is_read_only,
     name_of,
 )
-from ..tools.mcp import load_mcp_server_configs, validate_mcp_config
+from ..tools.mcp import (
+    load_mcp_server_configs,
+    prepare_for_connect,
+    secret_names_used,
+    validate_mcp_config,
+    with_secrets,
+)
 from ..tools.memory import load_memory
 from ..tools.node_env import install_package as install_node_package
 from ..tools.node_env import list_packages as list_node_packages
@@ -845,6 +852,18 @@ def _mask(value: str) -> str:
     return "*" * (len(value) - 4) + value[-4:]
 
 
+def _mask_value(value: str) -> str:
+    """A connector value for display. One that refers to a secret is shown
+    as written, placeholder and all, with any other text of it hidden (short
+    pieces such as "Bearer " stay readable): the value itself is never in it."""
+    if not placeholders_in(value):
+        return _mask(value)
+    parts = re.split(r"(\{\{secret:[A-Za-z_][A-Za-z0-9_]{0,63}\}\})", value)
+    return "".join(
+        part if placeholders_in(part) or len(part) <= 7 else "*" * len(part) for part in parts
+    )
+
+
 class ConfigUpdate(BaseModel):
     updates: dict[str, str]
 
@@ -1381,6 +1400,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         # Deferred import -- see the top-of-file comment above MCP_STARTUP_TIMEOUT_SECONDS.
         from ..runtime_lg.mcp import connect_one_mcp_server_lg
 
+        try:
+            config = prepare_for_connect(config, settings.state_dir)
+        except (SecretError, RuntimeError) as exc:
+            return False, str(exc)
         extra = {} if connect_timeout is None else {"connect_timeout": connect_timeout}
         new_tools, connection, error = await connect_one_mcp_server_lg(
             name, config, mcp_oauth.auth_for, on_stale=_reconnect_stale_connector, **extra
@@ -1603,7 +1626,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
                 connect_task: asyncio.Task[Any] = asyncio.create_task(
                     connect_mcp_tools_lg(
-                        settings.mcp_config_path, mcp_oauth.auth_for, _reconnect_stale_connector
+                        settings.mcp_config_path,
+                        mcp_oauth.auth_for,
+                        _reconnect_stale_connector,
+                        state_dir=settings.state_dir,
                     )
                 )
                 mcp_connect_task = connect_task
@@ -2852,6 +2878,27 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     # -- Secrets: values are write-only; nothing here ever returns one.
 
+    def _connectors_using_secret(name: str) -> list[str]:
+        if settings.mcp_config_path is None or not settings.mcp_config_path.is_file():
+            return []
+        servers = _read_mcp_servers_raw(settings.mcp_config_path)["mcpServers"]
+        return sorted(
+            server for server, entry in servers.items() if name in _secret_names_in_entry(entry)
+        )
+
+    def _secret_names_in_entry(entry: dict[str, Any]) -> set[str]:
+        # Stored values may be keychain references, so read them back first.
+        resolved: dict[str, Any] = {}
+        for field in ("env", "headers"):
+            values = entry.get(field) or {}
+            resolved[field] = {k: _stored_text(v) for k, v in values.items()}
+        return secret_names_used(resolved)
+
+    def _stored_text(value: Any) -> str:
+        # An unreadable value could be the one that names the secret, so the
+        # caller treats it as in use rather than as nothing.
+        return resolve_secret(value) or ""
+
     @app.get("/api/secrets")
     async def list_secrets() -> dict[str, Any]:
         return {
@@ -2874,6 +2921,25 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/secrets/{name}")
     async def delete_secret_endpoint(name: str) -> Any:
+        try:
+            using = _connectors_using_secret(name)
+        except RuntimeError as exc:
+            return JSONResponse(
+                {
+                    "error": "A connector's saved settings can't be read from the keychain, so "
+                    f"it can't be checked whether {name} is in use: {exc}"
+                },
+                status_code=503,
+            )
+        if using:
+            return JSONResponse(
+                {
+                    "error": f"{name} is used by the connector {', '.join(using)}. "
+                    "Change that connector first.",
+                    "connectors": using,
+                },
+                status_code=409,
+            )
         if not SecretStore(settings.state_dir).delete(name):
             return JSONResponse({"error": f"There is no secret named {name}."}, status_code=404)
         return {"deleted": name}
@@ -3145,7 +3211,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         if settings.mcp_config_path is None or not settings.mcp_config_path.is_file():
             return {}
         result: dict[str, Any] = {}
-        for name, config in load_mcp_server_configs(settings.mcp_config_path).items():
+        for name, config in load_mcp_server_configs(
+            settings.mcp_config_path, settings.state_dir, fill_secrets=False
+        ).items():
             # `connected` reads the same live mcp_connections registry
             # every actual tool call goes through (see its own comment
             # above) -- a real signal, not derived from the static config
@@ -3156,6 +3224,11 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # tab never has (add/bump already surface a real error message
             # at the point of failure; this is just current live state).
             connected = name in mcp_connections
+            try:
+                with_secrets(config, settings.state_dir)
+                secret_error = None
+            except (SecretError, RuntimeError) as exc:
+                secret_error = str(exc)
             if "server_url" in config:
                 # Remote (streamable_http) entry -- a hand-configured
                 # Custom-tab remote-server form. Bearer/auth header values
@@ -3164,9 +3237,10 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 result[name] = {
                     "server_url": config["server_url"],
                     "masked_headers": {
-                        k: _mask(v) for k, v in (config.get("headers") or {}).items()
+                        k: _mask_value(v) for k, v in (config.get("headers") or {}).items()
                     },
                     "connected": connected,
+                    "secret_error": secret_error,
                     "tools": _connector_tools(name),
                 }
                 if config.get("auth") == "oauth":
@@ -3180,8 +3254,9 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                 result[name] = {
                     "command": config.get("command"),
                     "args": config.get("args", []),
-                    "masked_env": {k: _mask(v) for k, v in (config.get("env") or {}).items()},
+                    "masked_env": {k: _mask_value(v) for k, v in (config.get("env") or {}).items()},
                     "connected": connected,
+                    "secret_error": secret_error,
                     "tools": _connector_tools(name),
                 }
         return result
@@ -3203,6 +3278,11 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         try:
             config = validate_mcp_config({"type": "mcp", "name": payload.name, **entry})
         except ValueError as exc:
+            return {"rejected": {payload.name: str(exc)}, "connected": False}
+
+        try:
+            with_secrets(config, settings.state_dir)
+        except (SecretError, RuntimeError) as exc:
             return {"rejected": {payload.name: str(exc)}, "connected": False}
 
         # .resolve() -- see add_provider's identical fallback for why a

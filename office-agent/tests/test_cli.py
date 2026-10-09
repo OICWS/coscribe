@@ -280,7 +280,7 @@ def test_mcp_tools_are_wired_into_the_session(
         """A fake MCP-sourced tool."""
         return "mcp tool result"
 
-    async def _fake_connect(path: Any) -> tuple[list[Any], dict[str, Any]]:
+    async def _fake_connect(path: Any, **kwargs: Any) -> tuple[list[Any], dict[str, Any]]:
         return [fake_mcp_tool], {}
 
     monkeypatch.setattr("coscribe.runtime_lg.mcp.connect_mcp_tools_lg", _fake_connect)

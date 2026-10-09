@@ -424,7 +424,9 @@ async def _chat_async(
         # servers configured. See runtime_lg/__init__.py's __getattr__.
         from .runtime_lg.mcp import connect_mcp_tools_lg
 
-        mcp_tools, mcp_connections = await connect_mcp_tools_lg(settings.mcp_config_path)
+        mcp_tools, mcp_connections = await connect_mcp_tools_lg(
+            settings.mcp_config_path, state_dir=settings.state_dir
+        )
         if mcp_tools:
             typer.echo(f"Loaded {len(mcp_tools)} MCP tool(s).\n")
 
@@ -523,7 +525,9 @@ async def _check_wakes_async(settings: Any) -> None:
     if settings.mcp_config_path is not None:
         from .runtime_lg.mcp import connect_mcp_tools_lg  # see the other call site's note
 
-        mcp_tools, mcp_connections = await connect_mcp_tools_lg(settings.mcp_config_path)
+        mcp_tools, mcp_connections = await connect_mcp_tools_lg(
+            settings.mcp_config_path, state_dir=settings.state_dir
+        )
 
     checkpoint_path = settings.state_dir / "runtime_lg_checkpoints.sqlite"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
