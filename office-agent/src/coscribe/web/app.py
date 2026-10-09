@@ -52,7 +52,6 @@ import argparse
 import asyncio
 import hmac
 import html
-import inspect
 import json
 import logging
 import os
@@ -63,13 +62,13 @@ import sys
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, cast, get_args
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import uvicorn
 from dotenv import dotenv_values, load_dotenv, set_key
-from fastapi import Body, FastAPI, Form, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -77,15 +76,11 @@ from pydantic import ValidationError
 
 from .. import __version__
 from ..cli import _dotenv_path, _load_settings_or_none
-from ..code_runtime.install import CodexUnavailable
-from ..code_runtime.launch import codex_model
-from ..code_runtime.permissions import CodePermissions
 from ..code_runtime.service import (
-    code_service,
     remove_stale_code_sidecars,
     shutdown_code_services,
 )
-from ..config import PermissionMode, Settings
+from ..config import Settings
 from ..conversation.activity import OPENABLE_EXTENSIONS, open_in_os
 from ..conversation.session import ChatSessionLG
 from ..conversation.thread_meta import ThreadMetaStore
@@ -94,9 +89,7 @@ from ..runtime import (
     LLMClient,
     delete_secret,
     empty_hooks_config,
-    env_delete_secret_if_ref,
     env_resolve_secret_for_display,
-    env_value_for_storage,
     harden_file_permissions,
     load_custom_providers,
     load_hooks_config,
@@ -106,11 +99,9 @@ from ..runtime import (
     store_secret,
 )
 from ..runtime.secret_store import (
-    KeychainUnavailable,
     SecretError,
     SecretStore,
     SessionEnvironments,
-    keychain_available,
     placeholders_in,
 )
 from ..runtime.types import get_tool_metadata
@@ -125,22 +116,18 @@ from ..runtime_lg import (
     stop_run,
     strip_mode_note,
 )
-from ..runtime_lg.code_agent import CODE_APPROVAL_RISKS
 from ..tools import (
     SkillInfo,
-    SkillUploadError,
     load_builtin_skills,
     load_skills,
-    save_uploaded_skill,
 )
-from ..tools._workspace import WorkspaceScope
 from ..tools.background_tasks import (
     BackgroundTaskStore,
     forget_finished_background_tasks,
     read_background_log,
     stop_background_task,
 )
-from ..tools.browser import BROWSER_HOST, SCREENSHOT_FOLDER
+from ..tools.browser import BROWSER_HOST
 from ..tools.connector_permissions import (
     POLICIES,
     ConnectorPermissions,
@@ -152,15 +139,9 @@ from ..tools.connector_permissions import (
 from ..tools.mcp import (
     load_mcp_server_configs,
     prepare_for_connect,
-    secret_names_used,
     validate_mcp_config,
     with_secrets,
 )
-from ..tools.memory import load_memory
-from ..tools.node_env import install_package as install_node_package
-from ..tools.node_env import list_packages as list_node_packages
-from ..tools.node_env import uninstall_package as uninstall_node_package
-from ..tools.pdf_pages import pdf_page_count, render_pdf_page
 from ..tools.scheduled_tasks import (
     SCHEDULED_THREAD_PREFIX,
     ScheduledRun,
@@ -172,29 +153,8 @@ from ..tools.scheduled_tasks import (
     record_draft,
     update_trigger,
 )
-from ..tools.script_env import (
-    fallbacks_for_platform,
-    get_interpreter_override,
-    install_package,
-    list_packages,
-    set_interpreter_override,
-    uninstall_package,
-    working_interpreters,
-)
-from ..tools.skill_catalog import SOURCE_MARKER as SKILL_SOURCE_MARKER
 from ..tools.skill_catalog import (
-    SkillCatalogError,
-    all_skills,
-    disabled_skill_names,
     enabled_skill_names,
-    get_plugin,
-    install_catalog_skill,
-    install_plugin,
-    load_catalog,
-    plugin_file,
-    remove_skill,
-    set_skill_enabled,
-    skill_source,
 )
 from ..tools.subagent_tasks import (
     SubAgentTaskStore,
@@ -203,7 +163,7 @@ from ..tools.subagent_tasks import (
     stop_subagent_task,
 )
 from ..tools.tasks import TaskToolkit
-from ..workflows.catalog import describe_params, tool_description
+from ..workflows.catalog import tool_description
 from ..workflows.permissions import granted_by, summarize
 from ..workflows.solidify import DraftFailed
 from ..workflows.spec import BranchStep, LoopStep, parse_workflow, walk, workflow_error
@@ -212,29 +172,24 @@ from .browser_panel import BrowserPanelError, BrowserPanelSession
 from .connector_catalog import MCP_CATALOG, SeenTools
 from .provider_catalog import (
     BUILTIN_PROVIDERS,
-    PROVIDER_CATALOG,
-    PROVIDER_DEFAULT_MODEL_ENV_VARS,
-    PROVIDER_KEY_ENV_VARS,
 )
+from .routes.files import router as files_router
+from .routes.settings import router as settings_router
+from .routes.shared import _mask, _read_mcp_servers_raw, _read_providers_raw
+from .routes.skills import router as skills_router
 from .schemas import (
     BrowserHostReply,
-    ConfigUpdate,
     ConnectorPermissionsUpdate,
     GroupRename,
     InvestigateRequest,
     MCPServerUpdate,
     MCPVersionBump,
-    MemoryUpdate,
     OAuthAppCredentials,
     OAuthAppImport,
     OpenFileRequest,
     PermissionsRequest,
-    ProviderUpdate,
     RunNowRequest,
     ScheduledTaskCreate,
-    ScriptEnvInterpreterUpdate,
-    ScriptEnvPackageInstall,
-    SkillEnabledUpdate,
     TaskNotesUpdate,
     ThreadMetaPatch,
     ThreadRename,
@@ -244,6 +199,7 @@ from .schemas import (
     WorkflowRetry,
 )
 from .setup_app import build_setup_app
+from .state import AppState
 
 if TYPE_CHECKING:
     # Real type only needed for a local variable annotation below (never
@@ -262,28 +218,11 @@ def _oauth_page(message: str) -> str:
         "<body style=\"font-family:system-ui,sans-serif;max-width:32rem;margin:20vh auto;"
         f"padding:0 1rem\"><h2>coscribe</h2><p>{html.escape(message)}</p></body>"
     )
-
-
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # office docs/PDFs, not video files
-_PREVIEW_NAME_RE = re.compile(r"[0-9a-f]{32}\.png")  # tools/_thumbnail.py's uuid4().hex naming
 # How long lifespan() blocks app startup on connect_mcp_tools_lg before
 # letting a still-connecting server finish in the background instead --
 # see lifespan's own comment. Same default Claude Code itself settled on
 # (MCP_CONNECT_TIMEOUT_MS) for the identical problem.
 MCP_STARTUP_TIMEOUT_SECONDS = 5.0
-
-
-def _unique_upload_path(scope: WorkspaceScope, filename: str) -> Path:
-    name = Path(filename).name or "upload"
-    candidate = scope.resolve(name)
-    if not candidate.exists():
-        return candidate
-    stem, suffix, counter = candidate.stem, candidate.suffix, 1
-    while True:
-        candidate = scope.resolve(f"{stem} ({counter}){suffix}")
-        if not candidate.exists():
-            return candidate
-        counter += 1
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -343,83 +282,6 @@ def create_setup_app(configured: asyncio.Future[Settings]) -> FastAPI:
     return build_setup_app(configured, _dotenv_path, _load_settings_or_none)
 
 
-# COSCRIBE_-prefixed Settings fields the panel exposes for editing.
-# state_dir is deliberately omitted -- internal bookkeeping, not something
-# a user needs to reach for.
-COSCRIBE_ENV_VARS = [
-    "COSCRIBE_DEFAULT_MODEL",
-    "COSCRIBE_WORKSPACE_ROOT",
-    "COSCRIBE_SKILLS_DIR",
-    "COSCRIBE_MEMORY_PATH",
-    "COSCRIBE_MCP_CONFIG_PATH",
-    "COSCRIBE_PROVIDERS_CONFIG_PATH",
-    "COSCRIBE_HOOKS_CONFIG_PATH",
-    "COSCRIBE_LOG_LEVEL",
-    "COSCRIBE_EXTRA_READABLE_DIRS",
-    "COSCRIBE_EXTRA_WRITABLE_DIRS",
-    "COSCRIBE_MAX_TURNS",
-    "COSCRIBE_DEFAULT_PERMISSION_MODE",
-    "COSCRIBE_CODE_MODEL",
-    "COSCRIBE_CODE_MODULE_ENABLED",
-]
-
-# Settings update_config applies to the running server as well as .env.
-LIVE_SETTINGS = {
-    "COSCRIBE_DEFAULT_MODEL": "default_model",
-    "COSCRIBE_MAX_TURNS": "max_turns",
-    "COSCRIBE_DEFAULT_PERMISSION_MODE": "default_permission_mode",
-    "COSCRIBE_CODE_MODEL": "code_model",
-    "COSCRIBE_CODE_MODULE_ENABLED": "code_module_enabled",
-}
-
-# Desktop-shell-consumed, not Settings-backed (see office-agent-desktop's
-# sidecar.ts's shouldKeepRunningInBackground(), which reads this same
-# .env file directly -- this Python process never branches on it; the
-# now-legacy Tauri shell's own src-tauri/src/lib.rs did the equivalent
-# before the Electron migration) -- so it's a separate list from
-# COSCRIBE_ENV_VARS above for the same reason
-# PROVIDER_DEFAULT_MODEL_ENV_VARS already is: update_config's own
-# restart_required computation is keyed off COSCRIBE_ENV_VARS membership,
-# and this one needs no coscribe-web restart to take effect (the desktop
-# shell just re-reads the file at the next window-close, live).
-DESKTOP_ENV_VARS = ["COSCRIBE_BACKGROUND_ON_CLOSE", "COSCRIBE_NOTIFICATIONS"]
-
-# Kept in .env rather than the browser's own storage: the desktop app
-# serves the page from a new port each launch, and browser storage
-# doesn't survive an origin change.
-APPEARANCE_ENV_VARS: dict[str, tuple[str, ...]] = {
-    "COSCRIBE_THEME": ("system", "light", "dark"),
-    "COSCRIBE_CHAT_FONT": ("sans", "serif", "system"),
-    "COSCRIBE_MOTION": ("system", "reduced"),
-}
-
-# Blank is a silent footgun for these -- Path("") resolves to Path("."),
-# and blank COSCRIBE_DEFAULT_MODEL/COSCRIBE_LOG_LEVEL make Settings()
-# construction (default_model) or logging.basicConfig (log_level) raise
-# outright on next startup. COSCRIBE_MCP_CONFIG_PATH/HOOKS_CONFIG_PATH
-# are deliberately excluded -- config.py's Settings already treats a blank
-# string there as "unset" gracefully -- and so are provider API keys, where
-# blank just means "not configured," discovered at use time, not startup.
-BLANK_UNSAFE_ENV_VARS = {
-    "COSCRIBE_DEFAULT_MODEL",
-    "COSCRIBE_WORKSPACE_ROOT",
-    "COSCRIBE_SKILLS_DIR",
-    "COSCRIBE_MEMORY_PATH",
-    "COSCRIBE_LOG_LEVEL",
-    "COSCRIBE_MAX_TURNS",
-    "COSCRIBE_DEFAULT_PERMISSION_MODE",
-}
-
-
-_BOOLEAN_CODE_KEYS = {"COSCRIBE_CODE_MODULE_ENABLED"}
-
-
-def _mask(value: str) -> str:
-    if len(value) <= 4:
-        return "*" * len(value)
-    return "*" * (len(value) - 4) + value[-4:]
-
-
 def _mask_value(value: str) -> str:
     """A connector value for display. One that refers to a secret is shown
     as written, placeholder and all, with any other text of it hidden (short
@@ -437,47 +299,6 @@ def _mask_value(value: str) -> str:
 # flag (e.g. a leading "-"), since `package` here comes straight from the
 # browser.
 _NPM_PACKAGE_NAME_RE = re.compile(r"^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$")
-
-
-def _connector_url_key(url: str) -> str:
-    return url.split("#")[0].rstrip("/").lower()
-
-
-def _read_mcp_servers_raw(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {"mcpServers": {}}
-    raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw.get("mcpServers"), dict):
-        raw["mcpServers"] = {}
-    return raw
-
-
-def _read_providers_raw(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        return {"providers": {}}
-    raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw.get("providers"), dict):
-        raw["providers"] = {}
-    return raw
-
-
-FIXED_COMMANDS = [
-    {"name": "plan", "description": "Toggle Plan Mode (read-only tools only)"},
-    {"name": "accept-edits", "description": "Toggle Accept-Edits Mode (no approval prompts)"},
-    {"name": "compact", "description": "Summarize this thread to reclaim context"},
-    {"name": "clear", "description": "Wipe this thread's conversation history and start fresh"},
-    {"name": "stop", "description": "Stop the current in-progress run"},
-    {"name": "init", "description": "Explore the workspace and write OVERVIEW.md"},
-    {
-        "name": "saveworkflow",
-        "description": "Draft a workflow from what this conversation did "
-        "(usage: /saveworkflow [name])",
-    },
-    {
-        "name": "saveskill",
-        "description": "Save this conversation as a reusable Skill (usage: /saveskill <name>)",
-    },
-]
 
 
 class _NoSocket:
@@ -1822,573 +1643,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         await _delete_run_threads(trigger.runs)
         return JSONResponse({"deleted": trigger_id})
 
-    @app.get("/api/commands")
-    async def get_commands() -> list[dict[str, str]]:
-        commands = list(FIXED_COMMANDS)
-        for skill in load_builtin_skills() + load_skills(settings.skills_dir):
-            # skill.slug, not skill.name -- "name" here means "the literal
-            # token typed after /", same as every FIXED_COMMANDS entry
-            # above (e.g. "accept-edits", not a display label); a skill's
-            # own display name can contain spaces ("Skill Creator") and
-            # was never usable as that token to begin with -- see
-            # web/session.py's skills_by_slug for the matching half.
-            commands.append({"name": skill.slug, "description": skill.description})
-        return commands
-
-    @app.get("/api/tools")
-    async def get_tools() -> dict[str, Any]:
-        agent = build_coordinator_agent(settings, thread_id="__tools_probe__")
-        tools = []
-        # Connected connectors' tools can be workflow steps too.
-        for connector_tool in _session_extra_tools():
-            metadata = get_tool_metadata(connector_tool)
-            if not (metadata.category or "").startswith("mcp:"):
-                continue
-            tools.append(
-                {
-                    "name": connector_tool.name,
-                    "category": metadata.category,
-                    "risk_category": metadata.risk_category,
-                    "requires_approval": metadata.requires_approval,
-                    "description": tool_description(connector_tool).split(". ")[0],
-                    "params": describe_params(connector_tool),
-                }
-            )
-        for tool in agent.tools:
-            metadata = get_tool_metadata(tool)
-            doc = inspect.getdoc(tool) or ""
-            # The docstring's first sentence, which often wraps past its
-            # first line.
-            first_paragraph = " ".join(doc.split("\n\n", 1)[0].split())
-            description = first_paragraph.split(". ", 1)[0].rstrip(".") + "." if doc else ""
-            tools.append(
-                {
-                    "name": tool.__name__,
-                    "category": metadata.category or "",
-                    "risk_category": metadata.risk_category,
-                    "requires_approval": metadata.requires_approval,
-                    "description": description,
-                    "params": describe_params(tool),
-                }
-            )
-        return {"tools": tools}
-
-    @app.get("/api/skills")
-    async def get_skills() -> list[dict[str, Any]]:
-        builtin_names = {skill.name for skill in load_builtin_skills()}
-        disabled = disabled_skill_names(settings.state_dir)
-        result = []
-        for skill in all_skills(settings.skills_dir):
-            updated = datetime.fromtimestamp((skill.dir / "SKILL.md").stat().st_mtime, UTC)
-            result.append(
-                {
-                    "name": skill.name,
-                    "description": skill.description,
-                    "source": skill_source(skill, builtin_names),
-                    "enabled": skill.name not in disabled,
-                    "updated": updated.isoformat(),
-                }
-            )
-        return result
-
-    @app.post("/api/skills/{name}/enabled")
-    async def update_skill_enabled(name: str, payload: SkillEnabledUpdate) -> JSONResponse:
-        if name not in _skills_by_name():
-            return JSONResponse({"error": f"No skill named {name!r}."}, status_code=404)
-        set_skill_enabled(settings.state_dir, name, payload.enabled)
-        return JSONResponse({"name": name, "enabled": payload.enabled})
-
-    @app.delete("/api/skills/{name}")
-    async def delete_skill(name: str) -> JSONResponse:
-        try:
-            await asyncio.to_thread(remove_skill, settings.skills_dir, settings.state_dir, name)
-        except SkillCatalogError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse({"removed": name})
-
-    @app.get("/api/skills/catalog")
-    async def get_skill_catalog() -> list[dict[str, Any]]:
-        installed = set(_skills_by_name())
-        return [
-            {
-                "name": entry["name"],
-                "description": entry["description"],
-                "license": entry["license"],
-                "category": entry.get("category", "Other"),
-                "size": sum(file["size"] for file in entry["files"]),
-                "added": entry["name"] in installed,
-            }
-            for entry in load_catalog()["skills"]
-        ]
-
-    @app.post("/api/skills/catalog/{name}")
-    async def add_catalog_skill(name: str) -> JSONResponse:
-        try:
-            await asyncio.to_thread(install_catalog_skill, settings.skills_dir, name)
-        except SkillCatalogError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        set_skill_enabled(settings.state_dir, name, True)
-        return JSONResponse({"added": name})
-
-    _SKILL_FILE_PREVIEW_MAX_BYTES = 500_000
-
-    def _plugin_summary(plugin: dict[str, Any]) -> dict[str, Any]:
-        installed = set(_skills_by_name())
-        return {
-            "id": plugin["id"],
-            "title": plugin["title"],
-            "author": plugin["author"],
-            "repo": plugin["repo"],
-            "version": plugin["version"],
-            "description": plugin["description"],
-            "license": plugin["license"],
-            "updated": plugin["updated"],
-            "skills": plugin["skills"],
-            "added": sum(1 for n in plugin["skills"] if n in installed),
-        }
-
-    @app.get("/api/skills/plugins")
-    async def get_skill_plugins() -> list[dict[str, Any]]:
-        return [_plugin_summary(p) for p in load_catalog()["plugins"]]
-
-    @app.get("/api/skills/plugins/{plugin_id}")
-    async def get_skill_plugin(plugin_id: str) -> JSONResponse:
-        try:
-            plugin = get_plugin(plugin_id)
-        except SkillCatalogError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        hosted = [e for e in MCP_CATALOG if e.get("server_url")]
-        by_url = {_connector_url_key(e["server_url"]): e["name"] for e in hosted}
-        names = {e["name"] for e in hosted}
-
-        def ours(c: dict[str, Any]) -> str | None:
-            found = by_url.get(_connector_url_key(c["url"])) if c["url"] else None
-            plain = c["name"].replace(" ", "-")
-            return found or (plain if plain in names else None)
-
-        descriptions = {s["name"]: s["description"] for s in load_catalog()["skills"]}
-        return JSONResponse(
-            {
-                **_plugin_summary(plugin),
-                "files": [f["path"] for f in plugin["files"]],
-                "skill_details": [
-                    {"name": n, "description": descriptions.get(n, "")} for n in plugin["skills"]
-                ],
-                # `connector` is the coscribe connector that talks to the same
-                # server, or null when coscribe has none for it.
-                "connectors": [
-                    {**c, "connector": ours(c)} for c in plugin["connectors"]
-                ],
-            }
-        )
-
-    @app.get("/api/skills/plugins/{plugin_id}/files/{path:path}")
-    async def get_skill_plugin_file(plugin_id: str, path: str) -> JSONResponse:
-        try:
-            plugin = get_plugin(plugin_id)
-        except SkillCatalogError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        entry = next((f for f in plugin["files"] if f["path"] == path), None)
-        if entry is None:
-            return JSONResponse({"error": f"No such file: {path!r}."}, status_code=404)
-        if entry["size"] > _SKILL_FILE_PREVIEW_MAX_BYTES:
-            return JSONResponse(
-                {"error": f"File is {entry['size']:,} bytes -- too large to preview here."},
-                status_code=413,
-            )
-        try:
-            data = await asyncio.to_thread(plugin_file, plugin_id, path)
-            return JSONResponse({"path": path, "content": data.decode("utf-8")})
-        except UnicodeDecodeError:
-            return JSONResponse(
-                {"error": "This file isn't UTF-8 text -- can't preview it here."}, status_code=415
-            )
-        except SkillCatalogError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=502)
-
-    @app.post("/api/skills/plugins/{plugin_id}")
-    async def add_skill_plugin(plugin_id: str) -> JSONResponse:
-        try:
-            added = await asyncio.to_thread(install_plugin, settings.skills_dir, plugin_id)
-        except SkillCatalogError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        for name in added:
-            set_skill_enabled(settings.state_dir, name, True)
-        return JSONResponse({"added": added})
-
-    @app.get("/api/skills/{name}/files")
-    async def get_skill_files(name: str) -> JSONResponse:
-        # Backs the Skills settings tab's own file-tree browser (a skill
-        # is a real directory -- SKILL.md plus whatever reference docs/
-        # scripts it needs -- so "click a skill to see its folder" is a
-        # real filesystem listing, not a database query). Flat list of
-        # relative posix paths, same shape files.py's own list_files tool
-        # already returns -- the frontend folds path segments into a tree
-        # client-side rather than this endpoint building nested JSON.
-        skill = _skills_by_name().get(name)
-        if skill is None:
-            return JSONResponse({"error": f"No skill named {name!r}."}, status_code=404)
-        files = sorted(
-            path.relative_to(skill.dir).as_posix()
-            for path in skill.dir.rglob("*")
-            if path.is_file() and path.name != SKILL_SOURCE_MARKER
-        )
-        return JSONResponse({"files": files})
-
-    # A skill's own files are typically short prose/scripts meant to be
-    # read whole, not paginated -- this cap exists only to stop a genuinely
-    # huge file (an accidentally-included data dump) from being sent whole
-    # to the browser, matching search_files/list_files' own "bounded, not
-    # unlimited" caps elsewhere in this codebase.
-
-    @app.get("/api/skills/{name}/files/{path:path}")
-    async def get_skill_file_content(name: str, path: str) -> JSONResponse:
-        skill = _skills_by_name().get(name)
-        if skill is None:
-            return JSONResponse({"error": f"No skill named {name!r}."}, status_code=404)
-        scope = WorkspaceScope(skill.dir)
-        try:
-            file_path = scope.resolve(path)
-        except PermissionError:
-            return JSONResponse(
-                {"error": "Path is outside this skill's own directory."}, status_code=400
-            )
-        if not file_path.is_file():
-            return JSONResponse({"error": f"No such file: {path!r}."}, status_code=404)
-        size = file_path.stat().st_size
-        if size > _SKILL_FILE_PREVIEW_MAX_BYTES:
-            return JSONResponse(
-                {"error": f"File is {size:,} bytes -- too large to preview here."}, status_code=413
-            )
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            return JSONResponse(
-                {"error": "This file isn't UTF-8 text -- can't preview it here."}, status_code=415
-            )
-        return JSONResponse({"path": path, "content": content})
-
-    @app.post("/api/skills/upload")
-    async def upload_skill(file: UploadFile) -> JSONResponse:
-        # The real half of Settings > Skills > Add > Upload skill (see
-        # tools/skills.py's save_uploaded_skill for the accepted shapes).
-        # Always writes into settings.skills_dir, i.e.
-        # always a "custom" skill -- there's no UI path to add a builtin
-        # one, those only ever come from the package itself.
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            return JSONResponse({"error": "file too large (max 25MB)"}, status_code=413)
-        try:
-            skill = save_uploaded_skill(settings.skills_dir, file.filename or "", content)
-        except SkillUploadError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse(
-            {"name": skill.name, "description": skill.description, "source": "custom"}
-        )
-
-    @app.post("/api/upload")
-    async def upload_file(
-        file: UploadFile, thread_id: Annotated[str, Form()] = ""
-    ) -> JSONResponse:
-        # Direct port of web/app.py's identical endpoint -- pure file I/O
-        # against settings.workspace_root, nothing runtime-specific about
-        # it (unlike /api/config, /api/mcp/*, /api/providers/*, this one
-        # has no "next new session only" wrinkle: an uploaded file just
-        # needs to exist on disk before the model's next tool call reads
-        # it, which every already-open ChatSessionLG can do immediately).
-        content = await file.read()
-        if len(content) > MAX_UPLOAD_BYTES:
-            return JSONResponse({"error": "file too large (max 25MB)"}, status_code=413)
-        # Into the conversation's own folder when it has one: the model
-        # reads the path relative to that, not to the app's default.
-        scope = (
-            _get_session(thread_id).workspace_scope()
-            if thread_id
-            else WorkspaceScope(settings.workspace_root)
-        )
-        path = _unique_upload_path(scope, file.filename or "upload")
-        path.write_bytes(content)
-        return JSONResponse({"path": scope.relative(path), "bytes_written": len(content)})
-
-    def _attachment_pdf(path: str, thread_id: str) -> Path | JSONResponse:
-        scope = (
-            _get_session(thread_id).workspace_scope()
-            if thread_id
-            else WorkspaceScope(settings.workspace_root)
-        )
-        try:
-            file_path = scope.resolve(path)
-        except PermissionError:
-            return JSONResponse({"error": "Path is outside the workspace."}, status_code=400)
-        if file_path.suffix.lower() != ".pdf" or not file_path.is_file():
-            return JSONResponse({"error": "No such PDF."}, status_code=404)
-        return file_path
-
-    @app.get("/api/attachment/pdf")
-    async def get_attachment_pdf_info(path: str, thread_id: str = "") -> JSONResponse:
-        """How many pages an attached PDF has, for the preview dialog."""
-        found = _attachment_pdf(path, thread_id)
-        if isinstance(found, JSONResponse):
-            return found
-        try:
-            return JSONResponse({"pages": await asyncio.to_thread(pdf_page_count, found)})
-        except Exception:  # noqa: BLE001 -- a PDF PDFium can't open is shown as such
-            return JSONResponse({"error": "This PDF can't be opened."}, status_code=422)
-
-    @app.get("/api/attachment/pdf/page")
-    async def get_attachment_pdf_page(
-        path: str, page: int = 1, width: int = 600, thread_id: str = ""
-    ) -> Response:
-        found = _attachment_pdf(path, thread_id)
-        if isinstance(found, JSONResponse):
-            return found
-        try:
-            png = await asyncio.to_thread(render_pdf_page, found, page, width)
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        except Exception:  # noqa: BLE001 -- see above
-            return JSONResponse({"error": "This PDF can't be opened."}, status_code=422)
-        return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=3600"})
-
-    @app.get("/api/previews/{name}")
-    async def get_preview(name: str) -> Response:
-        # Serves the write_docx/write_xlsx/write_pptx thumbnails written by
-        # tools/_thumbnail.py's render_thumbnail under
-        # settings.state_dir/previews/ -- not a general file-access endpoint
-        # (unlike a WorkspaceScope-backed route, there's no user-supplied
-        # path to sanitize against traversal here: `name` is checked against
-        # the exact `<32 hex chars>.png` shape render_thumbnail always
-        # generates, so it can only ever resolve to a plain filename inside
-        # that one directory).
-        if not _PREVIEW_NAME_RE.fullmatch(name):
-            return JSONResponse({"error": "not found"}, status_code=404)
-        preview_path = settings.state_dir / "previews" / name
-        if not preview_path.is_file():
-            return JSONResponse({"error": "not found"}, status_code=404)
-        return FileResponse(preview_path, media_type="image/png")
-
-    @app.get("/api/screenshots/{name}")
-    async def get_screenshot(name: str) -> Response:
-        # Same shape check as previews: only a page_screenshot file name.
-        if not _PREVIEW_NAME_RE.fullmatch(name):
-            return JSONResponse({"error": "not found"}, status_code=404)
-        path = settings.state_dir / SCREENSHOT_FOLDER / name
-        if not path.is_file():
-            return JSONResponse({"error": "not found"}, status_code=404)
-        return FileResponse(path, media_type="image/png")
-
-    @app.get("/api/pptx-shapes")
-    async def get_pptx_shapes(path: str, slide: int, thread_id: str = "") -> JSONResponse:
-        # Backs the click-a-shape-in-the-preview-to-target-it feature
-        # (ChatLog.tsx's PptxShapeOverlay): the frontend already has
-        # `path` from the tool call's own `arguments.path` and picks
-        # `slide` from `arguments.slide` (edits) or defaults to 1 (a
-        # fresh write_pptx), then overlays clickable regions on top of
-        # the already-rendered preview image using this endpoint's
-        # inch-based bboxes (converted to on-screen percentages -- see
-        # PresentationToolkit.list_pptx_shapes's own docstring for why
-        # inches, not pixels). Same underlying method the LLM-facing
-        # list_pptx_shapes tool calls -- this is a plain, ungated REST
-        # read, not a tool call, since it's UI-only (never reaches the
-        # model, never touches the audit log a real tool call would).
-        from ..tools.presentations import PresentationToolkit
-
-        if thread_id:
-            scope = _get_session(thread_id).workspace_scope()
-            toolkit = PresentationToolkit(
-                scope.root,
-                state_dir=settings.state_dir,
-                extra_readable=scope.extra_readable,
-                extra_writable=scope.extra_writable,
-            )
-        else:
-            toolkit = PresentationToolkit(settings.workspace_root, state_dir=settings.state_dir)
-        try:
-            result = await asyncio.to_thread(toolkit.list_pptx_shapes, path=path, slide=slide)
-        except Exception as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        return JSONResponse(result)
-
-    # -- /api/config, /api/mcp/*, /api/providers/* -- direct ports of
-    # web/app.py's identical endpoints (see this module's docstring for the
-    # one behavioral difference: config changes here apply to the next new
-    # session, not every already-open one).
-
-    @app.get("/api/config")
-    async def get_config() -> dict[str, Any]:
-        values = dotenv_values(".env")
-        result: dict[str, Any] = {}
-        for key in PROVIDER_KEY_ENV_VARS:
-            value = env_resolve_secret_for_display(values.get(key) or None)
-            result[key] = {"set": bool(value), "masked": _mask(value) if value else None}
-        for key in PROVIDER_DEFAULT_MODEL_ENV_VARS:
-            result[key] = values.get(key) or None
-        for key in COSCRIBE_ENV_VARS:
-            result[key] = values.get(key) or None
-        for key in DESKTOP_ENV_VARS:
-            result[key] = values.get(key) or None
-        for key in APPEARANCE_ENV_VARS:
-            result[key] = values.get(key) or None
-        return result
-
-    @app.post("/api/config")
-    async def update_config(payload: ConfigUpdate) -> dict[str, Any]:
-        allowed = (
-            set(PROVIDER_KEY_ENV_VARS)
-            | set(PROVIDER_DEFAULT_MODEL_ENV_VARS)
-            | set(COSCRIBE_ENV_VARS)
-            | set(DESKTOP_ENV_VARS)
-            | set(APPEARANCE_ENV_VARS)
-        )
-        rejected: dict[str, str] = {}
-        applied: set[str] = set()
-        for key, value in payload.updates.items():
-            if key not in allowed:
-                continue
-            if key in BLANK_UNSAFE_ENV_VARS and not value.strip():
-                rejected[key] = "cannot be blank"
-                continue
-            if key == "COSCRIBE_DEFAULT_MODEL" and ":" not in value:
-                rejected[key] = 'must be a "provider:model" string, e.g. "anthropic:sonnet"'
-                continue
-            if key == "COSCRIBE_CODE_MODEL" and value.strip() and ":" not in value:
-                rejected[key] = 'must be a "provider:model" string, or blank for the default model'
-                continue
-            if key in _BOOLEAN_CODE_KEYS and value not in ("true", "false"):
-                rejected[key] = 'must be "true" or "false"'
-                continue
-            if key == "COSCRIBE_MAX_TURNS" and not (value.strip().isdigit() and int(value) > 0):
-                rejected[key] = "must be a positive integer"
-                continue
-            if key == "COSCRIBE_DEFAULT_PERMISSION_MODE" and value not in get_args(PermissionMode):
-                rejected[key] = f"must be one of {', '.join(get_args(PermissionMode))}"
-                continue
-            if key in APPEARANCE_ENV_VARS and value not in APPEARANCE_ENV_VARS[key]:
-                rejected[key] = f"must be one of {', '.join(APPEARANCE_ENV_VARS[key])}"
-                continue
-            if key in PROVIDER_DEFAULT_MODEL_ENV_VARS and ":" in value:
-                rejected[key] = (
-                    'must be a bare model id, e.g. "claude-opus-5" -- no "provider:" prefix'
-                )
-                continue
-            if key in PROVIDER_KEY_ENV_VARS:
-                set_key(".env", key, env_value_for_storage(f"builtin-provider:{key}", value))
-                harden_file_permissions(Path(".env"))
-                # Mirror the real value into the process environment too,
-                # same reason web/app.py's update_config does -- each
-                # provider SDK's own constructor reads straight from
-                # os.environ, and a plain .env-file write (possibly now a
-                # keyring-ref sentinel) is invisible to this already-running
-                # process until a restart. Unlike web/app.py, there's no
-                # client.invalidate_provider(...) call needed here:
-                # resolve_chat_model (runtime_lg/providers.py) builds a
-                # fresh ChatAnthropic/ChatGoogleGenerativeAI/ChatOpenAI
-                # instance from scratch on every call, no cached instance to
-                # go stale in the first place.
-                os.environ[key] = value
-            else:
-                set_key(".env", key, value)
-                if key in LIVE_SETTINGS:
-                    # Read afresh whenever a session starts, so the running
-                    # server can take the new value without a restart.
-                    live_value: str | int | bool | None = value
-                    if key == "COSCRIBE_MAX_TURNS":
-                        live_value = int(value)
-                    elif key in _BOOLEAN_CODE_KEYS:
-                        live_value = value == "true"
-                    elif key == "COSCRIBE_CODE_MODEL":
-                        live_value = value.strip() or None
-                    setattr(settings, LIVE_SETTINGS[key], live_value)
-            applied.add(key)
-        restart_required = any(
-            key in COSCRIBE_ENV_VARS and key not in LIVE_SETTINGS for key in applied
-        )
-        return {"restart_required": restart_required, "rejected": rejected}
-
-    def _code_permissions() -> CodePermissions:
-        return CodePermissions(settings.state_dir, tuple(CODE_APPROVAL_RISKS))
-
-    @app.get("/api/code")
-    async def code_status() -> dict[str, Any]:
-        """The code module's download, and whether Codex can use the model
-        a chat's code task would run on (the chat's own, unless one is set)."""
-        service = code_service(settings)
-        model = settings.code_model or settings.default_model
-        try:
-            codex_model(model, service.custom_providers())
-            model_problem = None
-        except CodexUnavailable as exc:
-            model_problem = str(exc)
-        return {**service.status(), "model": model, "model_problem": model_problem}
-
-    # -- Secrets: values are write-only; nothing here ever returns one.
-
-    def _connectors_using_secret(name: str) -> list[str]:
-        if settings.mcp_config_path is None or not settings.mcp_config_path.is_file():
-            return []
-        servers = _read_mcp_servers_raw(settings.mcp_config_path)["mcpServers"]
-        return sorted(
-            server for server, entry in servers.items() if name in _secret_names_in_entry(entry)
-        )
-
-    def _secret_names_in_entry(entry: dict[str, Any]) -> set[str]:
-        # Stored values may be keychain references, so read them back first.
-        resolved: dict[str, Any] = {}
-        for field in ("env", "headers"):
-            values = entry.get(field) or {}
-            resolved[field] = {k: _stored_text(v) for k, v in values.items()}
-        return secret_names_used(resolved)
-
-    def _stored_text(value: Any) -> str:
-        # An unreadable value could be the one that names the secret, so the
-        # caller treats it as in use rather than as nothing.
-        return resolve_secret(value) or ""
-
-    @app.get("/api/secrets")
-    async def list_secrets() -> dict[str, Any]:
-        return {
-            "keychain": keychain_available(),
-            "secrets": SecretStore(settings.state_dir).entries(),
-        }
-
-    @app.put("/api/secrets/{name}")
-    async def put_secret(name: str, payload: dict[str, Any]) -> Any:
-        try:
-            return SecretStore(settings.state_dir).save(
-                name, payload.get("value"), payload.get("hosts")
-            )
-        except KeychainUnavailable as exc:
-            return JSONResponse(
-                {"error": str(exc), "code": "keychain_unavailable"}, status_code=503
-            )
-        except SecretError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=422)
-
-    @app.delete("/api/secrets/{name}")
-    async def delete_secret_endpoint(name: str) -> Any:
-        try:
-            using = _connectors_using_secret(name)
-        except RuntimeError as exc:
-            return JSONResponse(
-                {
-                    "error": "A connector's saved settings can't be read from the keychain, so "
-                    f"it can't be checked whether {name} is in use: {exc}"
-                },
-                status_code=503,
-            )
-        if using:
-            return JSONResponse(
-                {
-                    "error": f"{name} is used by the connector {', '.join(using)}. "
-                    "Change that connector first.",
-                    "connectors": using,
-                },
-                status_code=409,
-            )
-        if not SecretStore(settings.state_dir).delete(name):
-            return JSONResponse({"error": f"There is no secret named {name}."}, status_code=404)
-        return {"deleted": name}
-
     @app.get("/api/threads/{thread_id}/environment")
     async def get_session_environment(thread_id: str) -> dict[str, Any]:
         return SessionEnvironments(settings.state_dir).get(thread_id)
@@ -2404,95 +1658,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             )
         except SecretError as exc:
             return JSONResponse({"error": str(exc)}, status_code=422)
-
-    @app.get("/api/code/permissions")
-    async def get_code_permissions() -> dict[str, Any]:
-        return _code_permissions().load()
-
-    @app.put("/api/code/permissions")
-    async def put_code_permissions(payload: dict[str, str]) -> Any:
-        try:
-            return _code_permissions().update(payload)
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=422)
-
-    @app.post("/api/code/install")
-    async def install_code() -> Any:
-        try:
-            await code_service(settings).prepare()
-        except Exception as exc:  # noqa: BLE001 -- a failed download is reported to the page
-            return JSONResponse({"error": str(exc) or type(exc).__name__}, status_code=502)
-        return await code_status()
-
-    @app.delete("/api/code/install")
-    async def remove_code() -> Any:
-        if not await code_service(settings).remove():
-            return JSONResponse(
-                {"error": "The code module is working. Try again once it's done."},
-                status_code=409,
-            )
-        return await code_status()
-
-    @app.get("/api/memory")
-    async def get_memory() -> dict[str, Any]:
-        # Settings.memory_path can change mid-session (a folder change
-        # re-resolves it, see set_folders) -- reading settings.memory_path
-        # fresh here rather than caching it at app-build time keeps this
-        # endpoint honest about whichever file the *next* new thread would
-        # actually load, same "read fresh, no stale cache" posture
-        # get_config's own dotenv_values(".env") call takes.
-        return {"content": load_memory(settings.memory_path)}
-
-    @app.post("/api/memory")
-    async def update_memory(payload: MemoryUpdate) -> dict[str, Any]:
-        # Directly overwrites the file -- the Settings panel's own text
-        # box is the whole editing surface here (unlike the `remember`
-        # tool, which only ever appends one bullet at a time), so a full
-        # overwrite is the correct semantics for "save what's in the box."
-        # Same "next new thread only" gap this project already accepts
-        # for provider/skill config changes (see this module's own
-        # docstring) -- an already-open thread keeps whatever memory
-        # content it started with until its process restarts or a fresh
-        # thread opens.
-        path = Path(settings.memory_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(payload.content, encoding="utf-8")
-        return {"status": "ok"}
-
-    @app.get("/api/browse-dirs")
-    async def browse_dirs(path: str | None = None) -> dict[str, Any]:
-        # Direct port of the old hand-rolled runtime's identical endpoint
-        # (deleted in the web cutover, see runtime_lg/README.md) -- missing
-        # here entirely was a real live-reported bug: app.js (shared by
-        # both backends while they coexisted) drives this folder-browser
-        # modal for the Settings panel's extra_readable_dirs/
-        # extra_writable_dirs picker, but this app didn't define the route
-        # yet at the time, so the fetch 404'd and the modal opened empty/
-        # broken with no error surfaced. Same deliberately-unrestricted
-        # trust model as before: no auth, local-only, and the user could
-        # already type any absolute path into that field by hand.
-        target = Path(path).expanduser() if path else Path.home()
-        try:
-            resolved = target.resolve()
-        except OSError as exc:
-            return {"error": str(exc)}
-        if not resolved.is_dir():
-            return {"error": f"Not a directory: {resolved}"}
-        directories = []
-        try:
-            for entry in resolved.iterdir():
-                try:
-                    if entry.is_dir():
-                        directories.append({"name": entry.name, "path": str(entry)})
-                except OSError:
-                    continue  # unreadable entry (permissions, broken link, ...) -- skip it
-        except OSError as exc:
-            return {"error": str(exc)}
-        return {
-            "path": str(resolved),
-            "parent": str(resolved.parent) if resolved.parent != resolved else None,
-            "directories": sorted(directories, key=lambda d: d["name"].lower()),
-        }
 
     @app.get("/api/mcp/catalog")
     async def get_mcp_catalog() -> list[dict[str, Any]]:
@@ -2865,49 +2030,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         await _refresh_all_sessions_extra_tools()
         return {"connected": connected, "error": error}
 
-    @app.get("/api/providers/catalog")
-    async def get_providers_catalog() -> list[dict[str, Any]]:
-        builtin_entries: list[dict[str, Any]] = [
-            {
-                "name": "anthropic",
-                "description": "Anthropic's Claude models.",
-                "base_url": "",
-                # Unlike the third-party PROVIDER_CATALOG below, this one
-                # is worth pinning to a real model ID -- Anthropic doesn't
-                # publish a rolling "-latest" alias the way gemini's own
-                # "gemini-flash-latest" entry below does, so an empty
-                # default would leave the single most common Add-provider
-                # path with the worst experience of any entry here.
-                # Still real drift, caught live: this was "claude-opus-4-6"
-                # until an unrelated bug report exposed it as already
-                # stale (no such model -- the current family is Opus 5/
-                # Sonnet 5/Haiku 4.5). Whoever bumps coscribe's own
-                # supported-model docs should bump this alongside them.
-                "default_model": "claude-opus-5",
-                "builtin": True,
-            },
-            {
-                "name": "openai",
-                "description": "OpenAI's GPT models.",
-                "base_url": "",
-                "default_model": "",
-                "builtin": True,
-            },
-            {
-                "name": "gemini",
-                "description": "Google's Gemini models.",
-                "base_url": "",
-                "default_model": "gemini-flash-latest",
-                "builtin": True,
-            },
-        ]
-        custom_entries = [{**entry, "builtin": False} for entry in PROVIDER_CATALOG]
-        return [*builtin_entries, *custom_entries]
-
-    @app.get("/api/providers")
-    async def get_providers() -> dict[str, Any]:
-        return _providers_info()
-
     def _configured_models() -> list[str]:
         return [
             f"{name}:{info['default_model']}"
@@ -2953,182 +2075,6 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
                     "builtin": False,
                 }
         return result
-
-    @app.post("/api/providers")
-    async def add_provider(payload: ProviderUpdate) -> dict[str, Any]:
-        name = payload.name.strip()
-        if not name:
-            return {"restart_required": False, "rejected": {"name": "cannot be blank"}}
-        if not payload.api_key.strip():
-            return {"restart_required": False, "rejected": {name: "api_key cannot be blank"}}
-
-        builtin = next((p for p in BUILTIN_PROVIDERS if p["key"] == name.lower()), None)
-        if builtin is not None:
-            env_key = builtin["api_key_env"]
-            set_key(
-                ".env",
-                env_key,
-                env_value_for_storage(f"builtin-provider:{env_key}", payload.api_key),
-            )
-            harden_file_permissions(Path(".env"))
-            # os.environ gets the real value, not whatever .env just got
-            # (a keyring ref sentinel there) -- this live process needs the
-            # actual key now, not after the next resolve_env_keyring_refs()
-            # startup pass.
-            os.environ[builtin["api_key_env"]] = payload.api_key
-            if payload.default_model:
-                set_key(".env", builtin["default_model_env"], payload.default_model)
-            # No context_window_client.invalidate_provider(...) equivalent
-            # needed for the *chat* model -- resolve_chat_model builds fresh
-            # every call (see update_config's identical comment above).
-            # context_window_client itself is the old-runtime LLMClient
-            # class, though, so it keeps that class's real caching behavior
-            # and does need this.
-            context_window_client.invalidate_provider(builtin["key"])
-            return {"restart_required": False, "rejected": {}}
-
-        if not payload.base_url.strip():
-            return {"restart_required": False, "rejected": {name: "base_url cannot be blank"}}
-
-        # Stored on disk via store_secret (keyring ref when available, the
-        # real value as a hardened-permission fallback otherwise) --
-        # context_window_client.register_custom_provider below keeps using
-        # payload.api_key directly (the real value), never this.
-        entry: dict[str, Any] = {
-            "base_url": payload.base_url,
-            "api_key": store_secret(f"custom-provider:{name}", payload.api_key),
-        }
-        if payload.default_model:
-            entry["default_model"] = payload.default_model
-
-        # .resolve() matters here: this path gets persisted both into
-        # settings.providers_config_path (kept for the rest of the process's
-        # life) and into .env (read back on every future process start) --
-        # a bare relative "providers.json" would silently start pointing at
-        # a different file the moment the process's cwd ever changes.
-        # Confirmed the hard way: a stray real .env in the repo root with a
-        # relative COSCRIBE_PROVIDERS_CONFIG_PATH from a previous manual
-        # run made a batch of unrelated tests fail with FileNotFoundError,
-        # purely because they didn't all chdir the same way.
-        path = settings.providers_config_path or Path("./providers.json").resolve()
-        raw = _read_providers_raw(path)
-        raw["providers"][name] = entry
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
-        harden_file_permissions(path)
-        if settings.providers_config_path is None:
-            settings.providers_config_path = path
-            set_key(".env", "COSCRIBE_PROVIDERS_CONFIG_PATH", str(path))
-        # Only context_window_client needs live registration -- the next
-        # new session's own model resolves this provider by re-reading
-        # providers.json fresh (see _get_session above), not through this
-        # client at all.
-        context_window_client.register_custom_provider(
-            name, {"base_url": payload.base_url, "api_key": payload.api_key}
-        )
-        return {"restart_required": False, "rejected": {}}
-
-    @app.delete("/api/providers/{name}")
-    async def remove_provider(name: str) -> dict[str, Any]:
-        builtin = next((p for p in BUILTIN_PROVIDERS if p["key"] == name.lower()), None)
-        if builtin is not None:
-            env_delete_secret_if_ref(dotenv_values(".env").get(builtin["api_key_env"]))
-            set_key(".env", builtin["api_key_env"], "")
-            os.environ.pop(builtin["api_key_env"], None)
-            context_window_client.invalidate_provider(builtin["key"])
-            return {"restart_required": False}
-        if settings.providers_config_path is None or not settings.providers_config_path.is_file():
-            return {"restart_required": False}
-        raw = _read_providers_raw(settings.providers_config_path)
-        removed = raw["providers"].pop(name, None)
-        if removed is not None:
-            delete_secret(removed.get("api_key"))
-        settings.providers_config_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
-        harden_file_permissions(settings.providers_config_path)
-        context_window_client.deregister_custom_provider(name)
-        return {"restart_required": False}
-
-    # Every handler below wraps its real work in asyncio.to_thread --
-    # list_packages/install_package/uninstall_package/set_interpreter_override
-    # all shell out via subprocess.run with multi-minute timeouts (venv
-    # creation alone allows 120s, baseline package seeding 300s -- see
-    # tools/script_env.py's _VENV_TIMEOUT/_SETUP_TIMEOUT). Calling them
-    # directly from an `async def` route handler, as this code did before,
-    # runs that blocking subprocess wait *on the single asyncio event
-    # loop* -- not just stalling this one HTTP response, but freezing
-    # every other request this whole process serves for as long as pip
-    # takes: other REST calls (Settings' other tabs all "went empty"),
-    # the WebSocket chat loop (a sent message got no response at all,
-    # looking exactly like a dropped connection), everything. Real,
-    # live-reported bug: setting a new interpreter override (which
-    # deletes the existing script-env venv, see set_interpreter_override's
-    # docstring) followed by an Add-package click rebuilt the venv from
-    # scratch and reseeded 5 baseline packages over the network -- a
-    # multi-minute stretch during which the whole app looked dead. This
-    # bug already existed before the interpreter picker (any first-ever
-    # venv creation hit it too), just rarely enough to go unnoticed; the
-    # picker's rebuild-on-change behavior made it easy to trigger on
-    # purpose and land squarely in the recovery flow meant to fix a
-    # broken setup.
-    @app.get("/api/script-env/packages")
-    async def get_script_env_packages() -> list[dict[str, str]]:
-        return await asyncio.to_thread(list_packages, settings.state_dir)
-
-    @app.post("/api/script-env/packages")
-    async def add_script_env_package(payload: ScriptEnvPackageInstall) -> dict[str, object]:
-        name = payload.package.strip()
-        if not name:
-            return {"success": False, "error": "Package name cannot be blank."}
-        return await asyncio.to_thread(install_package, settings.state_dir, name)
-
-    @app.delete("/api/script-env/packages/{name}")
-    async def remove_script_env_package(name: str) -> dict[str, object]:
-        return await asyncio.to_thread(uninstall_package, settings.state_dir, name)
-
-    @app.get("/api/script-env/interpreter")
-    async def get_script_env_interpreter() -> dict[str, object]:
-        """What ensure_script_env would try, in order, right now -- the
-        Environment tab's manual override (if any) is already reflected
-        first in `candidates` since the override changes what
-        auto-detection itself returns; `auto_detected` is the plain
-        fallback list on its own, filtered to candidates that actually
-        run (see working_interpreters' docstring for why sys.executable
-        specifically needs this on a packaged build) so the UI never
-        offers a chip that's guaranteed to fail validation if clicked."""
-        override = get_interpreter_override(settings.state_dir)
-        candidates = [sys.executable, *fallbacks_for_platform()]
-        return {
-            "configured": override,
-            "auto_detected": await asyncio.to_thread(working_interpreters, candidates),
-        }
-
-    @app.post("/api/script-env/interpreter")
-    async def set_script_env_interpreter(payload: ScriptEnvInterpreterUpdate) -> dict[str, object]:
-        return await asyncio.to_thread(
-            set_interpreter_override, settings.state_dir, payload.path.strip() or None
-        )
-
-    # Mirrors the script-env endpoints above exactly, backed by
-    # tools/node_env.py's npm-based node-env directory instead -- see that
-    # module's docstring for why Node needs a different isolation
-    # mechanism than the Python venv, and why node/npm being genuinely
-    # optional (unlike Python, coscribe's own runtime) means these can
-    # raise where the Python ones effectively never do in practice. Same
-    # asyncio.to_thread reasoning as the script-env handlers above.
-    @app.get("/api/node-env/packages")
-    async def get_node_env_packages() -> list[dict[str, str]]:
-        return await asyncio.to_thread(list_node_packages, settings.state_dir)
-
-    @app.post("/api/node-env/packages")
-    async def add_node_env_package(payload: ScriptEnvPackageInstall) -> dict[str, object]:
-        name = payload.package.strip()
-        if not name:
-            return {"success": False, "error": "Package name cannot be blank."}
-        return await asyncio.to_thread(install_node_package, settings.state_dir, name)
-
-    @app.delete("/api/node-env/packages/{name}")
-    async def remove_node_env_package(name: str) -> dict[str, object]:
-        return await asyncio.to_thread(uninstall_node_package, settings.state_dir, name)
 
     @app.websocket("/ws/browser")
     async def browser_panel_ws(websocket: WebSocket) -> None:
@@ -3325,6 +2271,17 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
             # now-dead connection's teardown must not clobber that.
             if session._live_websocket is websocket:
                 session._live_websocket = None
+
+    state = AppState(
+        settings=settings,
+        context_window_client=context_window_client,
+        get_session=_get_session,
+        session_extra_tools=_session_extra_tools,
+        skills_by_name=_skills_by_name,
+        providers_info=_providers_info,
+    )
+    for build_router in (settings_router, files_router, skills_router):
+        app.include_router(build_router(state))
 
     app.mount("/static", _NoCacheStaticFiles(directory=STATIC_DIR), name="static")
 

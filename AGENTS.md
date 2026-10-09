@@ -12,7 +12,7 @@ read it, then only the document for the area you are touching.
 | `office-agent/src/coscribe/runtime_lg/` | The agent runtime (LangChain/LangGraph): the graph, middleware (approvals, tool deferral, compaction), MCP connectors and their OAuth |
 | `office-agent/src/coscribe/coordinator.py` | The coordinator agent's definition: its tools and prompt |
 | `office-agent/src/coscribe/tools/` | Built-in tools: files, docx/xlsx/pptx/pdf, tasks, skills, scheduled tasks |
-| `office-agent/src/coscribe/web/` | FastAPI server (`app.py` holds nearly every route), the connector catalog |
+| `office-agent/src/coscribe/web/` | FastAPI server: `app.py` builds the app, `routes/<area>.py` holds the routes (being moved out of `app.py`), `state.py` what they share, the connector catalog |
 | `office-agent/src/coscribe/conversation/` | One conversation: `session.py` (turns, approvals, history), shared by the server and the CLI |
 | `office-agent/src/coscribe/code_runtime/` | The code module: Codex, driven as a second agent runtime |
 | `office-agent/src/coscribe/workflows/` | Scheduled workflows |

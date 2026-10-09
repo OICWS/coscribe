@@ -60,7 +60,10 @@ from coscribe.runtime_lg.audit import AuditLog
 from coscribe.runtime_lg.messages import is_steer
 from coscribe.tools.presentations import PresentationToolkit
 from coscribe.tools.subagent_tasks import SubAgentTaskStore
-from coscribe.web.app import ScriptEnvPackageInstall, create_app_lg
+from coscribe.web.app import create_app_lg
+from coscribe.web.schemas import ScriptEnvPackageInstall
+
+from .test_web_routes import _flatten
 
 
 class FakeToolCallingChatModel(BaseChatModel):
@@ -3351,9 +3354,7 @@ def test_upload_sanitizes_path_traversal_attempt_in_filename(
 
 
 def test_upload_rejects_oversized_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from coscribe.web import app as app_module
-
-    monkeypatch.setattr(app_module, "MAX_UPLOAD_BYTES", 10)
+    monkeypatch.setattr("coscribe.web.routes.files.MAX_UPLOAD_BYTES", 10)
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         response = client.post(
@@ -4576,12 +4577,12 @@ def test_script_env_package_install_does_not_block_the_event_loop(
         time.sleep(0.5)
         return {"success": True, "error": None}
 
-    monkeypatch.setattr("coscribe.web.app.install_package", _slow_install)
+    monkeypatch.setattr("coscribe.web.routes.settings.install_package", _slow_install)
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         route = next(
             r
-            for r in client.app.routes
+            for r in _flatten(client.app.routes)
             if getattr(r, "path", None) == "/api/script-env/packages"
             and "POST" in (r.methods or set())
         )
@@ -4946,7 +4947,7 @@ def test_adding_a_discover_skill_downloads_and_checks_it_lg(
         ],
     }
     monkeypatch.setattr(skill_catalog, "load_catalog", lambda: catalog)
-    monkeypatch.setattr("coscribe.web.app.load_catalog", lambda: catalog)
+    monkeypatch.setattr("coscribe.web.routes.skills.load_catalog", lambda: catalog)
     served = {"SKILL.md": skill_md, "scripts/run.py": b"tampered"}
     fetched: list[str] = []
 
@@ -5002,7 +5003,7 @@ def test_skill_plugins_can_be_previewed_then_added_with_connectors_matched_to_ou
         ],
     )
     monkeypatch.setattr(skill_catalog, "load_catalog", lambda: catalog)
-    monkeypatch.setattr("coscribe.web.app.load_catalog", lambda: catalog)
+    monkeypatch.setattr("coscribe.web.routes.skills.load_catalog", lambda: catalog)
     monkeypatch.setattr(skill_catalog, "_download", served.__getitem__)
     skill_catalog._preview_cache.clear()
     fake_model = FakeToolCallingChatModel(responses=[])
