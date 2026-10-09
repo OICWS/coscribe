@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { deleteScheduledTask, deleteThread } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
 import { startNewThread } from "../lib/nav";
+import { threadLabel } from "../lib/threadStatus";
 import { latestRun, RUN_STATUS_LABEL } from "../lib/runLabels";
 import { scheduleKindLabel } from "../lib/scheduleLabels";
 import type { RunStatus, ScheduledTask } from "../types/settings";
@@ -379,7 +380,7 @@ export function NavRail({
       {environmentOf && (
         <EnvironmentDialog
           threadId={environmentOf.thread_id}
-          title={environmentOf.preview || environmentOf.thread_id}
+          title={threadLabel(environmentOf)}
           onClose={() => setEnvironmentOf(null)}
         />
       )}
@@ -387,8 +388,8 @@ export function NavRail({
         <ConfirmDialog
           title="Delete chat?"
           description={
-            <span className="block truncate" title={deleteTarget.preview || deleteTarget.thread_id}>
-              "{deleteTarget.preview || deleteTarget.thread_id}" and its history will be permanently removed.
+            <span className="block truncate" title={threadLabel(deleteTarget)}>
+              "{threadLabel(deleteTarget)}" and its history will be permanently removed.
             </span>
           }
           onCancel={() => setDeleteTarget(null)}
