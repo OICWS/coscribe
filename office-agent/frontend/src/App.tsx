@@ -27,7 +27,7 @@ import { ScheduledTaskModal } from "./components/ScheduledTaskModal";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
-import { SubAgentsPanel } from "./components/SubAgentsPanel";
+import { BackgroundTasksPanel } from "./components/BackgroundTasksPanel";
 import { TaskPanel } from "./components/TaskPanel";
 import { WorkflowDraftPage } from "./components/workflow/WorkflowDraftPage";
 import { WorkflowRunView } from "./components/workflow/WorkflowRunView";
@@ -45,7 +45,7 @@ import {
   patchScheduledTask,
   type WorkflowDraftResult,
 } from "./lib/rest";
-import { useRunningSubAgents } from "./lib/useRunningSubAgents";
+import { useRunningBackgroundTasks } from "./lib/useRunningBackgroundTasks";
 import {
   goToThread,
   readPage,
@@ -273,12 +273,12 @@ function App() {
           renameThreadLocally(threadId, event.title);
           return;
         }
-        if (event.type === "subagents_changed") {
+        if (event.type === "subagents_changed" || event.type === "background_tasks_changed") {
           setSubAgentsTick((tick) => tick + 1);
           return;
         }
         if (event.type === "approval_required" && event.subagent_id) {
-          // Its approval card lives in the Sub Agents panel.
+          // Its approval card lives in the Background tasks panel.
           setSubAgentFocus({ threadId, taskId: event.subagent_id });
           setSidePanel("subagents");
           setSubAgentsTick((tick) => tick + 1);
@@ -356,7 +356,7 @@ function App() {
   const threadTask = isScheduledTaskThread ? taskForThread(scheduledTasks, threadId) : null;
   const threadRun = threadTask?.runs.find((r) => r.thread_id === threadId) ?? null;
   const threadWorkflow = threadRun ? (threadTask?.workflow ?? null) : null;
-  // Browser and Sub Agents take the same right-hand space, so either one
+  // Browser and Background tasks take the same right-hand space, so either one
   // open hides this panel without forgetting that it's wanted.
   const hasPlan = state.items.some((item) => item.kind === "tool" && item.toolName === "task_create");
   const taskPanelWanted = taskPanelChoice[threadId] ?? (threadWorkflow !== null || isScheduledTaskThread || hasPlan);
@@ -382,10 +382,10 @@ function App() {
     }
   };
   const selectedTask = scheduledTasks.find((t) => t.trigger_id === selectedTaskId) ?? null;
-  // Browser and Sub Agents belong to a conversation, not the Scheduled pages.
+  // Browser and Background tasks belong to a conversation, not the Scheduled pages.
   const inConversation = navMode === "create" && !onHome;
-  const subAgents = useRunningSubAgents(threadId, subAgentsTick, inConversation);
-  let subAgentsTitle = "Sub Agents";
+  const subAgents = useRunningBackgroundTasks(threadId, subAgentsTick, inConversation);
+  let subAgentsTitle = "Background tasks";
   if (subAgents.running > 0) {
     subAgentsTitle += ` (${subAgents.running} running`;
     subAgentsTitle += subAgents.waiting > 0 ? `, ${subAgents.waiting} waiting for you)` : ")";
@@ -785,7 +785,7 @@ function App() {
         />
       )}
       {subAgentsPanelOpen && (
-        <SubAgentsPanel
+        <BackgroundTasksPanel
           key={threadId}
           threadId={threadId}
           refreshKey={subAgentsTick}

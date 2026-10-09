@@ -1,10 +1,25 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatElapsed, formatTokenCount } from "../lib/format";
-import { clearFinishedSubAgents, getSubAgentTasks, getSubAgentTranscript, stopSubAgentTask } from "../lib/rest";
+import {
+  type BackgroundEntry,
+  entryId,
+  entryLabel,
+  isEntryActive,
+  loadBackgroundEntries,
+  scriptOutcome,
+} from "../lib/backgroundTasks";
+import {
+  clearFinishedBackgroundScripts,
+  clearFinishedSubAgents,
+  getBackgroundScriptLog,
+  getSubAgentTranscript,
+  stopBackgroundScript,
+  stopSubAgentTask,
+} from "../lib/rest";
 import { followUpOf, orderFollowUps } from "../lib/subagentOrder";
 import { summarizeItemParts } from "../lib/transcriptGrouping";
 import { historyToItems, type LogItem } from "../state/reducer";
-import type { SubAgentTask } from "../types/session";
+import type { BackgroundScriptLog, BackgroundScriptTask, SubAgentTask } from "../types/session";
 import { TranscriptItems } from "./ChatLog";
 import {
   AlertCircleIcon,
@@ -17,8 +32,11 @@ import {
   XCircleIcon,
 } from "./icons";
 
-// A fallback: a running session nudges the panel with "subagents_changed".
+// A fallback: a running session nudges the panel with "subagents_changed" or
+// "background_tasks_changed".
 const POLL_INTERVAL_MS = 5000;
+// A running script's output is what its viewer is waiting for.
+const LOG_POLL_INTERVAL_MS = 2000;
 
 const isActive = (task: SubAgentTask) => task.status === "running" || task.status === "needs_approval";
 
@@ -89,21 +107,29 @@ function FollowUpNote({ of }: { of: string }) {
 }
 
 function RunningCard({
-  task,
+  entry,
   followsUp,
   now,
   busy,
   onStop,
   onOpen,
 }: {
-  task: SubAgentTask;
+  entry: BackgroundEntry;
   followsUp: string | null;
   now: number;
   busy: boolean;
   onStop: () => void;
   onOpen: () => void;
 }) {
-  const doing = activity(task);
+  const task = entry.task;
+  const doing = entry.kind === "agent" ? activity(entry.task) : null;
+  const viewLabel =
+    entry.kind === "script" ? "View output" : entry.task.status === "needs_approval" ? "Review" : "View transcript";
+  const view = (
+    <button type="button" className="text-[var(--accent)] hover:underline" onClick={onOpen}>
+      {viewLabel}
+    </button>
+  );
   return (
     <div className="flex flex-col gap-1.5 rounded-xl bg-[var(--card-bg)] px-3.5 py-3">
       <div className="flex items-start justify-between gap-3">
@@ -112,38 +138,41 @@ function RunningCard({
       </div>
       {followsUp && <FollowUpNote of={followsUp} />}
       <div className="flex items-center gap-2 text-[13px] text-[var(--muted)]">
-        <span>Agent</span>
+        <span>{entryLabel(entry)}</span>
         <span className="tabular-nums">{formatElapsed(now - new Date(task.started_at).getTime())}</span>
-        {task.status === "needs_approval" && (
+        {entry.kind === "agent" && entry.task.status === "needs_approval" && (
           <span className="flex items-center gap-1 font-medium text-[var(--warning)]">
             <AlertCircleIcon className="h-3.5 w-3.5" />
             Needs your approval
           </span>
         )}
       </div>
-      <Facts task={task}>
-        {doing && <span className="shimmer-text">{doing}</span>}
-        <button type="button" className="text-[var(--accent)] hover:underline" onClick={onOpen}>
-          {task.status === "needs_approval" ? "Review" : "View transcript"}
-        </button>
-      </Facts>
+      {entry.kind === "agent" ? (
+        <Facts task={entry.task}>
+          {doing && <span className="shimmer-text">{doing}</span>}
+          {view}
+        </Facts>
+      ) : (
+        <div className="flex items-center gap-2 text-[13px]">{view}</div>
+      )}
     </div>
   );
 }
 
 function FinishedRow({
-  task,
+  entry,
   followsUp,
   onOpen,
 }: {
-  task: SubAgentTask;
+  entry: BackgroundEntry;
   followsUp: string | null;
   onOpen: () => void;
 }) {
+  const task = entry.task;
   const icon =
     task.status === "succeeded" ? (
       <CheckCircleIcon className="h-3.5 w-3.5 text-[var(--muted)]" />
-    ) : task.status === "failed" ? (
+    ) : task.status === "failed" || task.status === "timed_out" ? (
       <XCircleIcon className="h-3.5 w-3.5 text-[var(--danger)]" />
     ) : (
       <StopIcon className="h-3.5 w-3.5 text-[var(--muted)]" />
@@ -167,7 +196,13 @@ function FinishedRow({
         </span>
       )}
       <span className="pl-[22px]">
-        <Facts task={task} />
+        {entry.kind === "agent" ? (
+          <Facts task={entry.task} />
+        ) : (
+          <span className="text-[13px] text-[var(--muted)]">
+            {entryLabel(entry)} · {scriptOutcome(entry.task)}
+          </span>
+        )}
       </span>
     </button>
   );
@@ -288,7 +323,78 @@ function SubAgentDetail({
   );
 }
 
-interface SubAgentsPanelProps {
+function ScriptDetail({
+  taskId,
+  refreshKey,
+  busy,
+  onStop,
+}: {
+  taskId: string;
+  refreshKey: number;
+  busy: boolean;
+  onStop: (task: BackgroundScriptTask) => void;
+}) {
+  const [log, setLog] = useState<BackgroundScriptLog | null>(null);
+  const running = log?.task.status === "running";
+  const outputRef = useRef<HTMLPreElement>(null);
+  const atEnd = useRef(true);
+
+  // A growing log is read at its end, unless the reader scrolled up to look.
+  useLayoutEffect(() => {
+    const el = outputRef.current;
+    if (el && atEnd.current) el.scrollTop = el.scrollHeight;
+  }, [log?.output]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () =>
+      getBackgroundScriptLog(taskId)
+        .then((res) => {
+          if (!cancelled && res.task) setLog(res);
+        })
+        .catch(() => {});
+    refresh();
+    const timer = setInterval(refresh, running ? LOG_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [taskId, refreshKey, running]);
+
+  if (!log) return null;
+  const { task, output } = log;
+  return (
+    <div className="flex flex-col gap-4 px-4 pb-6 pt-3">
+      <div className="flex items-center justify-between gap-3 text-[13px] text-[var(--muted)]">
+        <span>
+          {task.language === "node" ? "Node" : "Python"} script ·{" "}
+          <span className="text-[var(--fg)]">{scriptOutcome(task)}</span>
+        </span>
+        {running && <StopButton onStop={() => onStop(task)} busy={busy} />}
+      </div>
+      {task.note && <p className="text-sm text-[var(--muted)]">{task.note}</p>}
+      <pre
+        ref={outputRef}
+        aria-label="Output"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+        }}
+        className="max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-xl border border-[var(--border)] bg-[var(--bg)] px-4 py-3 font-mono text-[13px] leading-relaxed [overflow-wrap:anywhere]"
+      >
+        {output || (running ? "No output yet." : "No output.")}
+      </pre>
+    </div>
+  );
+}
+
+/** `entries` (newest first) with each follow-up next to the task it carries on from. */
+function orderEntries(entries: BackgroundEntry[]): BackgroundEntry[] {
+  const byId = new Map(entries.map((entry) => [entryId(entry), entry]));
+  return orderFollowUps(entries.map((entry) => entry.task)).map((task) => byId.get(task.task_id)!);
+}
+
+interface BackgroundTasksPanelProps {
   threadId: string;
   /** Bumped when the session reports a change, to refresh now. */
   refreshKey: number;
@@ -298,12 +404,19 @@ interface SubAgentsPanelProps {
   onClose: () => void;
 }
 
-/** This conversation's sub-agents: the running ones as cards (what each
- * is doing, its model, tokens and tool uses, a Stop button), the finished
- * ones folded away; open one for its prompt and transcript, drawn like the
- * chat, where its approvals are answered. */
-export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, onClose }: SubAgentsPanelProps) {
-  const [tasks, setTasks] = useState<SubAgentTask[]>([]);
+/** What this conversation runs in the background: the running ones as cards
+ * (a sub-agent's model, tokens and tool uses; a script's time, a Stop button),
+ * the finished ones folded away. Open a sub-agent for its prompt and transcript,
+ * drawn like the chat, where its approvals are answered; open a script for its
+ * output. */
+export function BackgroundTasksPanel({
+  threadId,
+  refreshKey,
+  focusTaskId,
+  onApprove,
+  onClose,
+}: BackgroundTasksPanelProps) {
+  const [entries, setEntries] = useState<BackgroundEntry[]>([]);
   const [openId, setOpenId] = useState<string | null>(focusTaskId);
   const [showFinished, setShowFinished] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -316,8 +429,8 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
   useEffect(() => {
     let cancelled = false;
     const refresh = () =>
-      getSubAgentTasks(threadId).then((list) => {
-        if (!cancelled) setTasks(list);
+      loadBackgroundEntries(threadId).then((list) => {
+        if (!cancelled) setEntries(list);
       });
     refresh();
     const timer = setInterval(refresh, POLL_INTERVAL_MS);
@@ -327,8 +440,9 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
     };
   }, [threadId, refreshKey]);
 
-  const running = orderFollowUps(tasks.filter(isActive).reverse());
-  const finished = orderFollowUps(tasks.filter((task) => !isActive(task)).reverse());
+  const allTasks = entries.map((entry) => entry.task);
+  const running = orderEntries(entries.filter(isEntryActive).reverse());
+  const finished = orderEntries(entries.filter((entry) => !isEntryActive(entry)).reverse());
 
   useEffect(() => {
     if (running.length === 0) return;
@@ -336,34 +450,34 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
     return () => clearInterval(timer);
   }, [running.length]);
 
-  const stop = async (task: SubAgentTask) => {
-    setBusyId(task.task_id);
+  const stop = async (entry: BackgroundEntry) => {
+    setBusyId(entryId(entry));
     try {
-      await stopSubAgentTask(task.task_id);
-      setTasks(await getSubAgentTasks(threadId));
+      await (entry.kind === "agent" ? stopSubAgentTask : stopBackgroundScript)(entryId(entry));
+      setEntries(await loadBackgroundEntries(threadId));
     } finally {
       setBusyId(null);
     }
   };
 
   const clearFinished = async () => {
-    await clearFinishedSubAgents(threadId);
-    setTasks(await getSubAgentTasks(threadId));
+    await Promise.all([clearFinishedSubAgents(threadId), clearFinishedBackgroundScripts(threadId).catch(() => null)]);
+    setEntries(await loadBackgroundEntries(threadId));
   };
 
-  const opened = openId ? tasks.find((task) => task.task_id === openId) : undefined;
+  const opened = openId ? entries.find((entry) => entryId(entry) === openId) : undefined;
 
   return (
     <aside
-      aria-label="Sub agents"
+      aria-label="Background tasks"
       className="flex h-full w-[460px] shrink-0 flex-col border-l border-[var(--border)] bg-[var(--bg)] max-md:w-full"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 px-3">
         {openId && (
           <button
             type="button"
-            title="All sub-agents"
-            aria-label="All sub-agents"
+            title="All background tasks"
+            aria-label="All background tasks"
             className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)]"
             onClick={() => setOpenId(null)}
           >
@@ -371,7 +485,7 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
           </button>
         )}
         <span className="min-w-0 flex-1 truncate px-1 text-[15px]">
-          {openId ? (opened?.description ?? "Sub-agent") : "Sub agents"}
+          {openId ? (opened?.task.description ?? "Background task") : "Background tasks"}
         </span>
         <button
           type="button"
@@ -386,32 +500,41 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {openId ? (
-          <SubAgentDetail
-            taskId={openId}
-            refreshKey={refreshKey}
-            busy={busyId === openId}
-            onStop={stop}
-            onApprove={onApprove}
-          />
+          opened?.kind === "script" ? (
+            <ScriptDetail
+              taskId={openId}
+              refreshKey={refreshKey}
+              busy={busyId === openId}
+              onStop={() => stop(opened)}
+            />
+          ) : (
+            <SubAgentDetail
+              taskId={openId}
+              refreshKey={refreshKey}
+              busy={busyId === openId}
+              onStop={(task) => stop({ kind: "agent", task })}
+              onApprove={onApprove}
+            />
+          )
         ) : (
           <div className="flex flex-col gap-2 px-3 pb-4">
-            {tasks.length === 0 && (
+            {entries.length === 0 && (
               <p className="px-3 py-8 text-center text-sm text-[var(--muted)]">
-                Sub-agents this conversation delegates to show up here.
+                Sub-agents and scripts this conversation runs in the background show up here.
               </p>
             )}
             {running.length > 0 && (
               <>
                 <h3 className="px-1 pt-1 text-sm text-[var(--muted)]">Running</h3>
-                {running.map((task) => (
+                {running.map((entry) => (
                   <RunningCard
-                    key={task.task_id}
-                    task={task}
-                    followsUp={followUpOf(task, tasks)}
+                    key={entryId(entry)}
+                    entry={entry}
+                    followsUp={followUpOf(entry.task, allTasks)}
                     now={now}
-                    busy={busyId === task.task_id}
-                    onStop={() => stop(task)}
-                    onOpen={() => setOpenId(task.task_id)}
+                    busy={busyId === entryId(entry)}
+                    onStop={() => stop(entry)}
+                    onOpen={() => setOpenId(entryId(entry))}
                   />
                 ))}
               </>
@@ -441,12 +564,12 @@ export function SubAgentsPanel({ threadId, refreshKey, focusTaskId, onApprove, o
                   </button>
                 </div>
                 {showFinished &&
-                  finished.map((task) => (
+                  finished.map((entry) => (
                     <FinishedRow
-                      key={task.task_id}
-                      task={task}
-                      followsUp={followUpOf(task, tasks)}
-                      onOpen={() => setOpenId(task.task_id)}
+                      key={entryId(entry)}
+                      entry={entry}
+                      followsUp={followUpOf(entry.task, allTasks)}
+                      onOpen={() => setOpenId(entryId(entry))}
                     />
                   ))}
               </div>
