@@ -19,8 +19,8 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 /** Compact context-window indicator for the composer's model-picker row --
  * replaces the old full-width UsageBar. Click to expand the exact numbers;
  * collapsed, it's just a small ring (used portion in --accent), the
- * rightmost element in that row (past ModelPicker and the Send/Stop
- * button), same popover idiom ModePill/ModelPicker already use
+ * rightmost element in that row (past ModelPicker), under the Send/Stop
+ * button, same popover idiom ModePill/ModelPicker already use
  * (useClickOutside + an absolutely-positioned panel opening upward).
  * Opens right-aligned (`right-0`) since it sits flush against the
  * composer's own right edge -- a left-aligned panel would run off it. */
@@ -38,7 +38,9 @@ export function ContextRing({ threadId, totalTokens, contextWindow, cacheStats }
   const offset = CIRCUMFERENCE * (1 - percent / 100);
 
   return (
-    <div className="relative" ref={rootRef}>
+    // mr-2.5 puts the ring's centre under the Send button's, which sits inside
+    // the input box above.
+    <div className="relative mr-2.5" ref={rootRef}>
       <button
         type="button"
         title="Context window"

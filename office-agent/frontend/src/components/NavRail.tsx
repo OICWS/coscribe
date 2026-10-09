@@ -155,9 +155,8 @@ function ScheduledTaskRow({ task, active, onSelect, onEdit, onRunNow, onChanged 
 
 export const NAV_RAIL_EXPANDED_WIDTH = 272;
 
-/** How far right of the open panel the pointer may wander before a
- * hover-opened panel closes. */
-const HOVER_CLOSE_MARGIN = 48;
+/** How long a hover-opened panel stays once the pointer is out of it. */
+const HOVER_CLOSE_DELAY_MS = 600;
 
 // In the desktop shell the top row is the title bar's left end.
 const TOP_ROW_HEIGHT = DRAWS_TITLE_BAR ? "h-10" : "h-12";
@@ -205,19 +204,27 @@ export function NavRail({
   const [hovering, setHovering] = useState(false);
   const expanded = pinned || hovering;
 
-  // A hover-opened panel closes once the pointer is well clear of it, not
-  // the moment it leaves: the desktop title bar's drag area swallows mouse
-  // events, so a plain mouseleave fired as soon as the pointer left a
-  // button there.
+  // A hover-opened panel closes a moment after the pointer is out of it,
+  // not the instant it leaves: the desktop title bar's drag area swallows
+  // mouse events, so a plain mouseleave fired as soon as the pointer left a
+  // button there. The pointer's position is read instead, and coming back
+  // within the delay keeps the panel.
   useEffect(() => {
     if (!hovering || pinned) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const onMove = (event: MouseEvent) => {
-      if (event.clientX > NAV_RAIL_EXPANDED_WIDTH + HOVER_CLOSE_MARGIN) setHovering(false);
+      if (event.clientX <= NAV_RAIL_EXPANDED_WIDTH) {
+        clearTimeout(timer);
+        timer = undefined;
+      } else if (timer === undefined) {
+        timer = setTimeout(() => setHovering(false), HOVER_CLOSE_DELAY_MS);
+      }
     };
     const onBlur = () => setHovering(false);
     document.addEventListener("mousemove", onMove);
     window.addEventListener("blur", onBlur);
     return () => {
+      clearTimeout(timer);
       document.removeEventListener("mousemove", onMove);
       window.removeEventListener("blur", onBlur);
     };
