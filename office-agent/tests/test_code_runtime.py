@@ -548,6 +548,8 @@ def _powershell(script: str, flags: str = "-NoProfile -Command") -> str:
         "Get-Item summary.csv",
         "Get-Location",
         "Test-Path summary.csv",
+        "Format-Hex -LiteralPath summary.csv",
+        "fhx summary.csv -Count 16",
     ],
 )
 def test_powershell_reads_of_the_folder_pass(script: str, tmp_path: Path) -> None:
@@ -560,6 +562,7 @@ def test_powershell_reads_of_the_folder_pass(script: str, tmp_path: Path) -> Non
     "script",
     [
         # A read that goes on to do something else.
+        "Format-Hex -LiteralPath ..\\outside.csv",
         "Get-Content summary.csv | Set-Content copy.csv",
         "Get-ChildItem; Remove-Item summary.csv",
         "Get-ChildItem ; Remove-Item summary.csv",
@@ -640,7 +643,7 @@ def test_the_utf8_line_codex_puts_on_every_powershell_command_is_set_aside(
         ("powershell.exe -Command 'python -c \"print(1)\"'", 'python -c "print(1)"'),
         ('powershell.exe -Command "python -c \\"print(1)\\""', 'python -c "print(1)"'),
         ("pwsh -c 'Write-Output '\"'\"'hi'\"'\"''", "Write-Output 'hi'"),
-        ("powershell.exe -Command python -c \"print(1)\"", 'python -c "print(1)"'),
+        ('powershell.exe -Command python -c "print(1)"', 'python -c "print(1)"'),
     ],
 )
 def test_a_powershell_script_is_shown_as_it_was_written(
