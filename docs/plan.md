@@ -22,7 +22,11 @@ Last reviewed: 2026-10-09.
      every HTTP route is in `web/routes/` (one `router(state)` each).
    - Done: the two WebSocket routes are in `web/routes/ws.py`.
    - Done: `tests/test_web.py` is split into `tests/web/` by domain.
-2. **Background commands**: the Background tasks panel lists sub-agents and
+2. **Working with more than one person** (record 0007, proposed): the maintainer
+   accepts or changes it; then an admin adds the second collaborator, their handle
+   goes into `.github/CODEOWNERS`, and the ruleset requires code-owner review for
+   those paths.
+3. **Background commands**: the Background tasks panel lists sub-agents and
    scripts; add `run_background_command` so a shell command can run there too
    (touches `coordinator.py` and the approval rules).
 
@@ -54,8 +58,6 @@ Last reviewed: 2026-10-09.
 
 ## Later (wanted, not scheduled)
 
-- Working with more than one human and their AI sessions (record 0007, proposed; the
-  main session is designing it).
 - Conversations messaging each other (record 0008, proposed; design only).
 
 - Network access per session (an Edit environment setting). Without a sandbox it

@@ -19,4 +19,4 @@ labels: task
 **Out of scope**
 
 **Who is working on it**
-<!-- Claim it here with a comment before starting. -->
+<!-- Claim it with a comment before starting: your GitHub name, the area, and the hot files you will touch. Others' sessions read this to avoid colliding. -->
