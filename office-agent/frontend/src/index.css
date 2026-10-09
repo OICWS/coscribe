@@ -441,6 +441,13 @@ body {
   app-region: no-drag;
 }
 
+/* Desktop shell: a dialog's backdrop leaves the title bar row alone, so the
+   menu, the sidebar button and the drag area stay usable the way the OS window
+   buttons do (components/TitleBarDim.tsx dims the row). */
+html[data-title-bar] .fixed.inset-0 {
+  top: 2.5rem;
+}
+
 /* Keeps the row's content clear of the OS window buttons drawn over its
    right end (Window Controls Overlay); zero everywhere else. */
 .titlebar-controls-space {

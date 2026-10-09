@@ -28,6 +28,7 @@ import { SettingsModal } from "./components/settings/SettingsModal";
 import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { BackgroundTasksPanel } from "./components/BackgroundTasksPanel";
+import { TitleBarDim } from "./components/TitleBarDim";
 import { TaskPanel } from "./components/TaskPanel";
 import { WorkflowDraftPage } from "./components/workflow/WorkflowDraftPage";
 import { WorkflowRunView } from "./components/workflow/WorkflowRunView";
@@ -803,6 +804,7 @@ function App() {
   return (
     <ThreadIdContext.Provider value={threadId}>
     <div className="relative flex h-full flex-col">
+      <TitleBarDim />
       {DRAWS_TITLE_BAR && (
         // The window's title bar: the sidebar's top row covers its left
         // end, the OS window buttons its right end.
