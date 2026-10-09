@@ -2,7 +2,7 @@
 bits (find_browser_executable's env-override escape hatch, _free_port),
 and the /ws/browser route in web/app.py.
 
-The route tests monkeypatch coscribe.web.app.BrowserPanelSession with a
+The route tests monkeypatch coscribe.web.routes.ws.BrowserPanelSession with a
 FakeBrowserPanelSession rather than launching a real browser -- that
 class's own CDP-driving logic (launch/screencast/navigate/input/element
 picking) was already verified against a real headless Chromium via a
@@ -342,7 +342,7 @@ def test_ws_browser_reports_launch_failure_and_closes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     FakeBrowserPanelSession.launch_error = "no browser found"
-    monkeypatch.setattr("coscribe.web.app.BrowserPanelSession", FakeBrowserPanelSession)
+    monkeypatch.setattr("coscribe.web.routes.ws.BrowserPanelSession", FakeBrowserPanelSession)
 
     with _client(tmp_path) as client, client.websocket_connect("/ws/browser") as ws:
         message = ws.receive_json()
@@ -353,7 +353,7 @@ def test_ws_browser_forwards_screencast_frame_on_connect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     FakeBrowserPanelSession.launch_error = None
-    monkeypatch.setattr("coscribe.web.app.BrowserPanelSession", FakeBrowserPanelSession)
+    monkeypatch.setattr("coscribe.web.routes.ws.BrowserPanelSession", FakeBrowserPanelSession)
 
     with _client(tmp_path) as client, client.websocket_connect("/ws/browser") as ws:
         message = ws.receive_json()
@@ -372,7 +372,7 @@ def test_ws_browser_routes_navigate_reload_input_and_pick(
         sessions.append(self)
 
     monkeypatch.setattr(FakeBrowserPanelSession, "__init__", _tracking_init)
-    monkeypatch.setattr("coscribe.web.app.BrowserPanelSession", FakeBrowserPanelSession)
+    monkeypatch.setattr("coscribe.web.routes.ws.BrowserPanelSession", FakeBrowserPanelSession)
 
     with _client(tmp_path) as client, client.websocket_connect("/ws/browser") as ws:
         ws.receive_json()  # initial frame from start_screencast
@@ -416,7 +416,9 @@ def test_ws_browser_reports_mid_session_error_without_closing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     FailingPickBrowserPanelSession.launch_error = None
-    monkeypatch.setattr("coscribe.web.app.BrowserPanelSession", FailingPickBrowserPanelSession)
+    monkeypatch.setattr(
+        "coscribe.web.routes.ws.BrowserPanelSession", FailingPickBrowserPanelSession
+    )
 
     with _client(tmp_path) as client, client.websocket_connect("/ws/browser") as ws:
         ws.receive_json()  # initial frame
