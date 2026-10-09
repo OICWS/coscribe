@@ -10,7 +10,14 @@ import {
 } from "../lib/rest";
 import { goToThread } from "../lib/nav";
 import { readStored, writeStored } from "../lib/storage";
-import { FILTERS, matchesFilter, sectionThreads, STATUS_LABEL, type ThreadFilter } from "../lib/threadStatus";
+import {
+  FILTERS,
+  matchesFilter,
+  sectionThreads,
+  STATUS_LABEL,
+  threadLabel,
+  type ThreadFilter,
+} from "../lib/threadStatus";
 import { useClickOutside } from "../lib/useClickOutside";
 import type { ThreadStatus, ThreadSummary } from "../types/session";
 import {
@@ -108,7 +115,7 @@ function ThreadMenu({
     <div
       ref={ref}
       role="menu"
-      aria-label={`Options for ${menu.thread.preview || menu.thread.thread_id}`}
+      aria-label={`Options for ${threadLabel(menu.thread)}`}
       className={`${menuClass} fixed`}
       style={{ left, top, width: MENU_WIDTH }}
       onClick={(e) => e.stopPropagation()}
@@ -234,8 +241,8 @@ function ThreadRow({
   onDragStart: () => void;
   onDragEnd: () => void;
 }) {
-  const [value, setValue] = useState(thread.preview);
-  const title = thread.preview || thread.thread_id;
+  const [value, setValue] = useState(threadLabel(thread));
+  const title = threadLabel(thread);
 
   if (renaming) {
     return (
@@ -662,7 +669,7 @@ export function ThreadList({ threads, currentId, onChanged, onRenamed, onDeleteR
       {environmentOf && (
         <EnvironmentDialog
           threadId={environmentOf.thread_id}
-          title={environmentOf.preview || environmentOf.thread_id}
+          title={threadLabel(environmentOf)}
           onClose={() => setEnvironmentOf(null)}
         />
       )}

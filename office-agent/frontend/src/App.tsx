@@ -47,6 +47,7 @@ import {
   type WorkflowDraftResult,
 } from "./lib/rest";
 import { useRunningBackgroundTasks } from "./lib/useRunningBackgroundTasks";
+import { shortLabel } from "./lib/threadStatus";
 import {
   goToThread,
   readPage,
@@ -348,7 +349,8 @@ function App() {
     refreshThreads();
   }, [state.turnTick, refreshThreads]);
 
-  const sessionLabel = threads?.find((t) => t.thread_id === threadId)?.preview || "New session";
+  const current = threads?.find((t) => t.thread_id === threadId);
+  const sessionLabel = (current && shortLabel(current.preview)) || "New session";
 
   // A scheduled run's own conversation (see tools/scheduled_tasks.py's
   // run_thread_id): gets the "Scheduled / <task>" breadcrumb instead of
