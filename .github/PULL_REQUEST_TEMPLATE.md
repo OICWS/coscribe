@@ -11,7 +11,7 @@
 - [ ] `cd office-agent && bash scripts/check.sh` passes, or CI is green (frontend `tsc -b` and build, oxlint, ruff, mypy, pytest)
 - [ ] A test fails without this change (or: why none is possible)
 - [ ] A UI change was looked at in the running app (screenshot below)
-- [ ] `office-agent/ROADMAP.md` records what shipped, using the next free phase id from `origin/main`
+- [ ] `docs/log/<date>-<slug>.md` records what shipped (and `docs/plan.md` is updated if the open work changed)
 
 ## Not verified
 

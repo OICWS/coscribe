@@ -2052,7 +2052,7 @@ index.ts`'s own module docs for the design. Browser mode (`coscribe-web`
 + a normal browser tab) keeps working completely independently.
 
 This replaced an earlier Tauri shell at the Browser panel native-window
-migration's Phase 4 cutover (see `../office-agent/ROADMAP.md`); that
+migration's Phase 4 cutover (see `../docs/history/roadmap-through-2026-10-08.md`); that
 shell has since been removed.
 
 **Menu** (the ☰ button; shortcuts work without opening it), laid out

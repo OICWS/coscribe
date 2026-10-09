@@ -2,7 +2,9 @@
 
 This file records *why* coscribe is built the way it is. How each piece was
 verified, and the bugs found on the way, live elsewhere:
-`office-agent/ROADMAP.md` (what shipped, phase by phase),
+`docs/decisions/` (the load-bearing decisions, one short record each),
+`docs/log/` and `office-agent/ROADMAP.md` (what shipped; the full old history is
+in `docs/history/`),
 `office-agent/PPTX_DESIGN.md` (presentation decisions) and
 `office-agent/src/coscribe/runtime_lg/README.md` (the runtime's history).
 
@@ -46,6 +48,9 @@ tools, and repeat work on a schedule. It needs only a model API key.
   tasks, memory) and a SQLite checkpointer for conversation state. No
   database server.
 - **Two modes in the nav rail.** Chat, and Scheduled (tasks and workflows).
+- **Package layers**, top to bottom: `cli`, `web`, `coordinator | runtime_lg`,
+  `workflows | code_runtime`, `tools`, `runtime | config`, `providers`. A package
+  imports only from below; the rule is checked in CI (`lint-imports`).
 
 ## Key decisions
 
@@ -172,9 +177,11 @@ Workflows never use it: a fixed run must not contain an autonomous agent.
   over the DevTools protocol, so the AI uses the user's own logins, works
   where the user can watch, and asks per site. Elements are targeted by
   description, not one-off refs; downloads land in the workspace.
-- **Secrets**: `.env`, `providers.json` and `mcp.json`, always `chmod
-  0600`, with the OS keychain when available and a plain-file fallback
-  when not.
+- **Secrets**: provider keys, connector tokens and `mcp.json` values go to
+  the OS keychain when there is one (a `chmod 0600` file otherwise). *Global
+  secrets* a user gives a conversation are keychain-only and are used through
+  `http_request` placeholders, bound to hosts; the model cannot see a value
+  ([decision 0003](docs/decisions/0003-secrets-promise.md)).
 
 ### Extension points
 
@@ -183,6 +190,9 @@ Workflows never use it: a fixed run must not contain an autonomous agent.
   hosted servers the user signs in to in their own browser (MCP's OAuth,
   dynamic client registration): nothing to install, no app to register, no
   company IT step, so each works wherever the service itself can be opened.
+  A service that refuses to register clients (HubSpot, Google Workspace) gets a
+  guided one-time setup with an app the user registers
+  ([decision 0004](docs/decisions/0004-connectors-sign-in-once-in-the-browser.md)).
 - **Skills**: `SKILL.md` folders loaded on demand. Built-in: pptx, excel,
   word and skill-creator; users add their own in `skills_dir`.
 - **Hooks**: scripts on lifecycle events (above).

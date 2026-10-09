@@ -1,7 +1,7 @@
 # Plan: what is open now
 
 Short on purpose. What shipped lives in [`docs/log/`](log/) (newest) and
-[`office-agent/ROADMAP.md`](../office-agent/ROADMAP.md) (history); why things
+[`office-agent/ROADMAP.md`](../office-agent/ROADMAP.md) (short index of the older history); why things
 are the way they are lives in [`docs/decisions/`](decisions/) and
 [`ARCHITECTURE.md`](../ARCHITECTURE.md). Update this file in the PR that
 changes the picture; keep it under about 150 lines.
@@ -14,10 +14,11 @@ Last reviewed: 2026-10-08.
    - Done: `main` protected by a ruleset (PR only, squash, `test` required),
      `scripts/check.sh` shared by CI and local, root `CLAUDE.md` and
      `AGENTS.md`, templates.
-   - In review: package-dependency checks (`import-linter`, PR #25).
-   - Next: compact `ROADMAP.md` and `ARCHITECTURE.md`, move `web/session.py`
-     out of `web/` (it is the conversation engine and the CLI uses it), then
-     split `web/app.py` into routers by domain, then `tests/test_web.py`.
+   - Done: `ROADMAP.md` compacted (old one archived in `docs/history/`), plan,
+     decisions and log in place, package dependencies checked in CI.
+   - Next: move `web/session.py` out of `web/` (it is the conversation engine and
+     the CLI uses it), then split `web/app.py` into routers by domain, then
+     `tests/test_web.py`.
      `app.py` and `session.py` are hot files: announce a freeze in the PR before
      moving them.
 2. **Secrets, part 3** (backend): apply a conversation's plain variables to

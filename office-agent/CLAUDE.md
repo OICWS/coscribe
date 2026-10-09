@@ -8,10 +8,14 @@ deliberately short; it's a map, not the content.
 
 - `README.md` -- what coscribe is, setup, feature docs.
 - `../ARCHITECTURE.md` -- why the runtime is built the way it is.
-- `ROADMAP.md` -- the running log of shipped/planned architecture and
-  frontend work, phase-numbered, newest near the end. Entries that name
-  `docs/ui-references/*.png` refer to reference screenshots that were
-  deleted once that redesign was built (2026-09-30).
+- `../docs/plan.md` -- what is open now; `../docs/decisions/` -- why the
+  load-bearing decisions were made; `../docs/log/` -- what shipped, one file
+  per piece of work.
+- `ROADMAP.md` -- a short index of what was built, by phase, plus the old open
+  items. The full phase-by-phase history (8.9k lines, frozen 2026-10-08) is
+  `../docs/history/roadmap-through-2026-10-08.md`: `grep -n "^## Phase 8ax"`
+  it, don't read it whole. Entries there that name `docs/ui-references/*.png`
+  refer to reference screenshots deleted once that redesign was built.
 - `PPTX_DESIGN.md` -- every PPTX-tool design decision, numbered
   sections, chronological. Read before touching anything in
   `tools/presentations.py`.
