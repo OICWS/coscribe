@@ -85,6 +85,18 @@ class CodeService:
 _services: dict[Path, CodeService] = {}
 
 
+def remove_stale_code_sidecars(state_dir: Path) -> int:
+    """Code conversations once kept their Codex thread id in `code-<id>.codex`.
+    Those conversations open as ordinary chats now and nothing reads the file;
+    returns how many were removed."""
+    removed = 0
+    for path in state_dir.glob("code-*.codex"):
+        if path.is_file():
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def code_service(settings: Settings) -> CodeService:
     key = Path(settings.state_dir).resolve()
     if key not in _services:

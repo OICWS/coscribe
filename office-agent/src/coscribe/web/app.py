@@ -80,7 +80,11 @@ from ..cli import _dotenv_path, _load_settings_or_none
 from ..code_runtime.install import CodexUnavailable
 from ..code_runtime.launch import codex_model
 from ..code_runtime.permissions import CodePermissions
-from ..code_runtime.service import code_service, shutdown_code_services
+from ..code_runtime.service import (
+    code_service,
+    remove_stale_code_sidecars,
+    shutdown_code_services,
+)
 from ..config import PermissionMode, Settings
 from ..coordinator import build_coordinator_agent
 from ..runtime import (
@@ -1603,6 +1607,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        remove_stale_code_sidecars(settings.state_dir)
         async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
             checkpointer_holder["checkpointer"] = checkpointer
             mcp_connect_task: asyncio.Task[Any] | None = None
