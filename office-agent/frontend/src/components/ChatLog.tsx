@@ -422,13 +422,13 @@ function TurnView({
   );
 }
 
-/** The Sub Agents panel leaves out the "+N -M" line counts. */
+/** The Background tasks panel leaves out the "+N -M" line counts. */
 const ShowDiffStats = createContext(true);
 
 const NO_CONNECTOR_TOOLS: ReadonlySet<string> = new Set();
 const ConnectorTools = createContext(NO_CONNECTOR_TOOLS);
 
-/** A read-only transcript -- a sub-agent's, in the Sub Agents panel --
+/** A read-only transcript -- a sub-agent's, in the Background tasks panel --
  * drawn with the chat's own components. `live` shows its last call as
  * running. */
 export function TranscriptItems({

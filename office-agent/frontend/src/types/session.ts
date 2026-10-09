@@ -73,6 +73,27 @@ export interface SubAgentTask {
   continues?: string;
 }
 
+/** A script started with run_background_script -- tools/background_tasks.py's
+ * BackgroundTask.to_dict(). */
+export interface BackgroundScriptTask {
+  task_id: string;
+  thread_id: string;
+  language: "python" | "node";
+  description: string;
+  status: "running" | "succeeded" | "failed" | "timed_out" | "killed" | "interrupted";
+  started_at: string;
+  finished_at: string | null;
+  exit_code: number | null;
+  pid: number | null;
+  /** Why it is settled as interrupted. */
+  note: string | null;
+}
+
+export interface BackgroundScriptLog {
+  task: BackgroundScriptTask;
+  output: string;
+}
+
 export type SubAgentTasksResponse = SubAgentTask[];
 
 /** GET /api/subagents/{task_id}/transcript's response -- `entries` reuses

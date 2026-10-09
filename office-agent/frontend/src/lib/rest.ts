@@ -42,6 +42,8 @@ import type {
 import type {
   CommandsResponse,
   ContextBreakdown,
+  BackgroundScriptLog,
+  BackgroundScriptTask,
   SubAgentActionResult,
   SubAgentTasksResponse,
   SubAgentTranscriptResponse,
@@ -405,7 +407,7 @@ export const renameThreadGroup = (name: string, newName: string) =>
 export const deleteThreadGroup = (name: string) =>
   del<{ groups: string[] }>(`/api/thread-groups/${encodeURIComponent(name)}`);
 
-// -- Sub Agents (background spawn_agent_background runs) --------------------
+// -- Background tasks: sub-agents and scripts --------------------
 
 export const getThreadActivity = (threadId: string) =>
   getJson<ThreadActivity>(`/api/threads/${encodeURIComponent(threadId)}/activity`);
@@ -433,6 +435,18 @@ export const stopSubAgentTask = (taskId: string) =>
   postJson<SubAgentActionResult>(`/api/subagents/${encodeURIComponent(taskId)}/stop`, {});
 export const clearFinishedSubAgents = (threadId: string) =>
   del<{ removed: number }>(`/api/threads/${encodeURIComponent(threadId)}/subagents`);
+
+export const getBackgroundScripts = (threadId: string) =>
+  getJson<BackgroundScriptTask[]>(`/api/threads/${encodeURIComponent(threadId)}/background-tasks`);
+export const getBackgroundScriptLog = (taskId: string) =>
+  getJson<BackgroundScriptLog>(`/api/background-tasks/${encodeURIComponent(taskId)}/log`);
+export const stopBackgroundScript = (taskId: string) =>
+  postJson<BackgroundScriptTask | { error: string }>(
+    `/api/background-tasks/${encodeURIComponent(taskId)}/stop`,
+    {},
+  );
+export const clearFinishedBackgroundScripts = (threadId: string) =>
+  del<{ removed: number }>(`/api/threads/${encodeURIComponent(threadId)}/background-tasks`);
 
 // -- Context-window breakdown -------------------------------------------
 

@@ -238,7 +238,7 @@ function planStatusOf(result: string): "auto" | "manual" | "revise" {
 }
 
 /** A checkpointed transcript as chat items -- the main conversation's
- * history, and a sub-agent's in the Sub Agents panel. */
+ * history, and a sub-agent's in the Background tasks panel. */
 export function historyToItems(entries: HistoryEntry[]): LogItem[] {
   let userTurnIndex = 0;
   return entries.map((entry): LogItem => {
@@ -548,7 +548,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
 
     case "approval_required":
-      // A sub-agent's approval is shown in the Sub Agents panel.
+      // A sub-agent's approval is shown in the Background tasks panel.
       if (action.subagent_id) return state;
       return {
         ...state,
@@ -676,6 +676,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
 
     case "subagents_changed":
+    case "background_tasks_changed":
     case "thread_titled":
       // Handled in App.tsx.
       return state;

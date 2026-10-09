@@ -21,10 +21,9 @@ Last reviewed: 2026-10-09.
      `tests/test_web.py`.
      `app.py` and `session.py` are hot files: announce a freeze in the PR before
      moving them.
-2. **One Background tasks panel** (frontend, after the backend part lands): the
-   Sub Agents panel is renamed and also lists background scripts (stop, log,
-   clear, the same groups). The model-facing tools are unchanged. Later: a
-   `run_background_command` for shell commands (touches `coordinator.py`).
+2. **Background commands**: the Background tasks panel lists sub-agents and
+   scripts; add `run_background_command` so a shell command can run there too
+   (touches `coordinator.py` and the approval rules).
 3. **Connector add form: pick a secret** (frontend). The backend takes
    `{{secret:NAME}}` in a connector's header or env value; the form should offer
    the secrets from Settings > Secrets and say a header's secret must be allowed
