@@ -6,12 +6,6 @@ import { setTitleBarColors, titleBarPlatform } from "./electron";
 export const TITLE_BAR_PLATFORM = titleBarPlatform();
 export const DRAWS_TITLE_BAR = TITLE_BAR_PLATFORM !== null;
 
-/** Height of the title bar row (h-10). */
-export const TITLE_BAR_HEIGHT_PX = 40;
-
-// index.css starts a dialog's backdrop below the title bar when this is set.
-if (DRAWS_TITLE_BAR) document.documentElement.dataset.titleBar = "";
-
 /** Width of the top-left cluster (menu, sidebar toggle, back, forward)
  * while the sidebar is collapsed: 36px buttons, 2px gaps, 6px padding. */
 export const COLLAPSED_CLUSTER_WIDTH = DRAWS_TITLE_BAR ? 4 * 38 + 10 : 48;
@@ -134,27 +128,4 @@ export function useBackdropOpen(): boolean {
     };
   }, []);
   return open;
-}
-
-/** The dimmed backdrops open now, bottom-most first, kept current. */
-export function useBackdropLayers(): { rgb: Rgb; alpha: number }[] {
-  const [layers, setLayers] = useState<{ rgb: Rgb; alpha: number }[]>([]);
-  useEffect(() => {
-    let frame = 0;
-    const check = () => setLayers(openBackdrops());
-    check();
-    const observer = new MutationObserver(() => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        check();
-      });
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    return () => {
-      observer.disconnect();
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, []);
-  return layers;
 }
