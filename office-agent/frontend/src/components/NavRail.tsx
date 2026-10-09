@@ -217,7 +217,13 @@ export function NavRail({
         clearTimeout(timer);
         timer = undefined;
       } else if (timer === undefined) {
-        timer = setTimeout(() => setHovering(false), HOVER_CLOSE_DELAY_MS);
+        timer = setTimeout(() => {
+          timer = undefined;
+          // A dialog opened from the panel (Edit environment) is mounted in it:
+          // closing the panel would take the dialog away mid-use. The next
+          // move, once it is closed, starts the delay again.
+          if (!document.querySelector(".fixed.inset-0")) setHovering(false);
+        }, HOVER_CLOSE_DELAY_MS);
       }
     };
     const onBlur = () => setHovering(false);
