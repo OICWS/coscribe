@@ -384,7 +384,7 @@ def test_a_save_folder_outside_the_workspace_fails_before_waiting(tmp_path: Path
 
 
 def test_a_turn_or_run_tells_the_desktop_app_when_it_starts_and_ends() -> None:
-    from coscribe.web.turn_lock import TurnLock
+    from coscribe.conversation.turn_lock import TurnLock
 
     host = BrowserHost()
 

@@ -12,7 +12,8 @@ read it, then only the document for the area you are touching.
 | `office-agent/src/coscribe/runtime_lg/` | The agent runtime (LangChain/LangGraph): the graph, middleware (approvals, tool deferral, compaction), MCP connectors and their OAuth |
 | `office-agent/src/coscribe/coordinator.py` | The coordinator agent's definition: its tools and prompt |
 | `office-agent/src/coscribe/tools/` | Built-in tools: files, docx/xlsx/pptx/pdf, tasks, skills, scheduled tasks |
-| `office-agent/src/coscribe/web/` | FastAPI server (`app.py` holds nearly every route), per-conversation `session.py`, the connector catalog |
+| `office-agent/src/coscribe/web/` | FastAPI server (`app.py` holds nearly every route), the connector catalog |
+| `office-agent/src/coscribe/conversation/` | One conversation: `session.py` (turns, approvals, history), shared by the server and the CLI |
 | `office-agent/src/coscribe/code_runtime/` | The code module: Codex, driven as a second agent runtime |
 | `office-agent/src/coscribe/workflows/` | Scheduled workflows |
 | `office-agent/src/coscribe/runtime/` | Shared pieces: secrets, types, hooks, provider config |
@@ -48,11 +49,11 @@ read it, then only the document for the area you are touching.
   PKCE). Services that need a registered app get the guided setup page; never
   ship a shared client secret.
 - **Package dependencies are checked** by `lint-imports` (part of `check.sh`).
-  Layers, top to bottom: `cli`, `web`, `coordinator | runtime_lg`,
+  Layers, top to bottom: `cli`, `web`, `conversation`, `coordinator | runtime_lg`,
   `workflows | code_runtime`, `tools`, `runtime | config`, `providers`; a
   package imports only from below. Only `web` imports FastAPI, only
   `runtime.secrets` imports the keychain, `tools` and `runtime` never import
-  LangChain. Four known upward imports are listed in `pyproject.toml`
+  LangChain. Three known upward imports are listed in `pyproject.toml`
   (`[tool.importlinter]`); fix them to shrink the list, never add one without a
   decision record.
 - **UI text is English only.** Code comments explain WHY, never WHAT or history

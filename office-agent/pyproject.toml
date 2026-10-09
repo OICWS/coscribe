@@ -283,6 +283,7 @@ type = "layers"
 layers = [
     "coscribe.cli",
     "coscribe.web",
+    "coscribe.conversation",
     "coscribe.coordinator | coscribe.runtime_lg",
     "coscribe.workflows | coscribe.code_runtime",
     "coscribe.tools",
@@ -293,15 +294,15 @@ ignore_imports = [
     "coscribe.tools.scheduled_tasks -> coscribe.workflows.spec",
     "coscribe.workflows.solidify -> coscribe.runtime_lg.messages",
     "coscribe.web.app -> coscribe.cli",
-    "coscribe.web.session -> coscribe.cli",
 ]
 
 [[tool.importlinter.contracts]]
 name = "Only runtime.secrets talks to the OS keychain"
 type = "forbidden"
 source_modules = [
-    "coscribe.cli", "coscribe.web", "coscribe.coordinator", "coscribe.runtime_lg",
-    "coscribe.workflows", "coscribe.code_runtime", "coscribe.tools", "coscribe.config",
+    "coscribe.cli", "coscribe.web", "coscribe.conversation", "coscribe.coordinator",
+    "coscribe.runtime_lg", "coscribe.workflows", "coscribe.code_runtime", "coscribe.tools",
+    "coscribe.config",
 ]
 forbidden_modules = ["keyring"]
 allow_indirect_imports = true
@@ -310,11 +311,11 @@ allow_indirect_imports = true
 name = "Only coscribe.web knows about HTTP"
 type = "forbidden"
 source_modules = [
-    "coscribe.cli", "coscribe.coordinator", "coscribe.runtime_lg", "coscribe.workflows",
-    "coscribe.code_runtime", "coscribe.tools", "coscribe.runtime", "coscribe.config",
+    "coscribe.cli", "coscribe.conversation", "coscribe.coordinator", "coscribe.runtime_lg",
+    "coscribe.workflows", "coscribe.code_runtime", "coscribe.tools", "coscribe.runtime",
+    "coscribe.config",
 ]
 forbidden_modules = ["fastapi", "starlette", "uvicorn"]
-ignore_imports = ["coscribe.cli -> coscribe.web.session"]
 
 [[tool.importlinter.contracts]]
 name = "Built-in tools do not depend on LangChain or LangGraph"

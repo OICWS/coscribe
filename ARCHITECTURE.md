@@ -48,7 +48,7 @@ tools, and repeat work on a schedule. It needs only a model API key.
   tasks, memory) and a SQLite checkpointer for conversation state. No
   database server.
 - **Two modes in the nav rail.** Chat, and Scheduled (tasks and workflows).
-- **Package layers**, top to bottom: `cli`, `web`, `coordinator | runtime_lg`,
+- **Package layers**, top to bottom: `cli`, `web`, `conversation`, `coordinator | runtime_lg`,
   `workflows | code_runtime`, `tools`, `runtime | config`, `providers`. A package
   imports only from below; the rule is checked in CI (`lint-imports`).
 

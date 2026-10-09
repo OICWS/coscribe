@@ -120,7 +120,7 @@ Nothing is pushed to `main` directly.
 - Open a *draft* PR with your first push, titled `[area] goal`, with a
   "Touches:" line naming the hot files you expect to edit. The list of open PRs
   is the board of who is doing what.
-- Before editing a hot file (`web/app.py`, `web/session.py`,
+- Before editing a hot file (`web/app.py`, `conversation/session.py`,
   `tests/test_web.py`, `coordinator.py`, `frontend/src/App.tsx`,
   `frontend/src/types/*.ts`), look at the open PRs; if someone is changing the
   same part, tell the maintainer instead of racing.

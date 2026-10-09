@@ -92,7 +92,7 @@ def _env(tmp_path: Path, **overrides: str | None) -> dict[str, str | None]:
 
 def _patch_model(monkeypatch: pytest.MonkeyPatch, fake_model: FakeToolCallingChatModel) -> None:
     monkeypatch.setattr(
-        "coscribe.web.session.resolve_chat_model",
+        "coscribe.conversation.session.resolve_chat_model",
         lambda model, custom_providers=None: fake_model,
     )
     monkeypatch.setattr(

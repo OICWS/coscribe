@@ -49,15 +49,6 @@ both this CLI and the web session) is separate, future work, not
 something to fake here.
 """
 
-# ruff: noqa: E402 -- INIT_PROMPT/_load_settings are defined below,
-# *before* `from .web.session import ChatSessionLG` further down, on
-# purpose: session.py itself does `from ..cli import INIT_PROMPT`, so
-# importing it any earlier in this file (before that name exists as an
-# attribute on this partially-initialized module) is a real circular
-# import (confirmed the hard way -- ImportError: cannot import name
-# 'INIT_PROMPT' from partially initialized module 'coscribe.cli').
-# Python resolves this fine as long as the name is already bound by the
-# time the circular back-import happens, which this ordering guarantees.
 from __future__ import annotations
 
 import asyncio
@@ -70,9 +61,11 @@ from typing import Any
 
 import typer
 from dotenv import load_dotenv
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
 from .config import Settings
+from .conversation.session import ChatSessionLG
 from .runtime import (
     LLMClient,
     empty_hooks_config,
@@ -88,16 +81,6 @@ from .tools.skill_catalog import enabled_skill_names
 
 app = typer.Typer(add_completion=False, no_args_is_help=False)
 logger = logging.getLogger(__name__)
-
-INIT_PROMPT = (
-    "Explore the workspace directory with your file tools (list/read/search) "
-    "and write a project overview to OVERVIEW.md at its root, covering: what "
-    "the workspace contains, its structure, key files, and anything a future "
-    "session of this assistant should know before working in it. Keep it "
-    "concise. If OVERVIEW.md already exists, refresh it rather than "
-    "duplicating content."
-)
-
 
 def _app_data_dir() -> Path:
     """Per-user application-data directory -- the fallback _dotenv_path
@@ -205,10 +188,6 @@ def _load_settings_or_none() -> Settings | None:
     except ValidationError:
         return None
 
-
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver  # noqa: E402
-
-from .web.session import ChatSessionLG  # noqa: E402
 
 
 def _ask(question: dict[str, Any]) -> str | None:
@@ -452,7 +431,7 @@ async def _chat_async(
             socket = _CliSocket(session)
 
             if message is not None:
-                await session.handle_user_message(message, socket)  # type: ignore[arg-type]
+                await session.handle_user_message(message, socket)
                 if socket.had_error:
                     raise typer.Exit(code=1)
                 return
@@ -470,8 +449,8 @@ async def _chat_async(
             # A pending approval or real conversation history from a
             # previous process (this same --thread resumed) -- redeliver/
             # replay both before prompting, same as a fresh WS connection.
-            await session.send_history(socket)  # type: ignore[arg-type]
-            await session.resume_after_reconnect(socket)  # type: ignore[arg-type]
+            await session.send_history(socket)
+            await session.resume_after_reconnect(socket)
 
             while True:
                 mode_flags = (("plan", session.plan_mode), ("accept-edits", session.accept_edits))
@@ -493,7 +472,7 @@ async def _chat_async(
                 # handled entirely inside handle_user_message itself (see
                 # _handle_user_message_locked); nothing left for this loop
                 # to pre-parse.
-                await session.handle_user_message(user_input, socket)  # type: ignore[arg-type]
+                await session.handle_user_message(user_input, socket)
                 typer.echo()
     finally:
         for connection in mcp_connections.values():
