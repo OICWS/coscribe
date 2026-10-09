@@ -3204,7 +3204,9 @@ def test_internal_events_endpoint_is_a_registered_sse_stream(
     subscription it opened doesn't linger."""
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        route = next(r for r in client.app.routes if getattr(r, "path", None) == "/internal/events")
+        route = next(
+            r for r in _flatten(client.app.routes) if getattr(r, "path", None) == "/internal/events"
+        )
         assert route.methods == {"GET"}
 
         async def _probe() -> None:
@@ -6647,7 +6649,8 @@ def test_opening_a_thread_file_only_hands_documents_to_the_os_lg(
 ) -> None:
     opened: list[tuple[str, bool]] = []
     monkeypatch.setattr(
-        "coscribe.web.app.open_in_os", lambda path, *, reveal: opened.append((path.name, reveal))
+        "coscribe.web.routes.threads.open_in_os",
+        lambda path, *, reveal: opened.append((path.name, reveal)),
     )
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -6679,7 +6682,9 @@ def test_a_json_body_without_a_json_content_type_is_refused_lg(
     only if it sends no JSON Content-Type -- such a body must not be
     parsed, or any website could drive these endpoints."""
     opened: list[Any] = []
-    monkeypatch.setattr("coscribe.web.app.open_in_os", lambda path, *, reveal: opened.append(path))
+    monkeypatch.setattr(
+        "coscribe.web.routes.threads.open_in_os", lambda path, *, reveal: opened.append(path)
+    )
     (tmp_path / "workspace").mkdir()
     (tmp_path / "workspace" / "report.xlsx").write_bytes(b"x")
     fake_model = FakeToolCallingChatModel(responses=[])
