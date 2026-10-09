@@ -548,7 +548,7 @@ function ToolRunGroupView({
 
   if (groupHasPendingApproval(group)) {
     return (
-      <div className="flex flex-col gap-1.5 self-start">
+      <div className="flex max-w-full flex-col gap-1.5 self-start">
         {group.items.map((item) => (
           <ToolCallRow key={item.id} item={item} onApprove={onApprove} onPptxShapePicked={onPptxShapePicked} />
         ))}
