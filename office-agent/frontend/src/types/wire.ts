@@ -131,7 +131,7 @@ export interface ApprovalRequiredEvent {
    * an error, just nothing to show beside the raw arguments below. */
   before_preview: string | null;
   after_preview: string | null;
-  /** Set when a sub-agent is the one asking: the Sub Agents panel shows
+  /** Set when a sub-agent is the one asking: the Background tasks panel shows
    * it, not the chat. */
   subagent_id?: string;
   subagent?: string;
@@ -143,6 +143,13 @@ export interface ApprovalRequiredEvent {
  * approval or finished. */
 export interface SubAgentsChangedEvent {
   type: "subagents_changed";
+  task_id: string;
+  status: string;
+}
+
+/** A background script of this conversation started or ended. */
+export interface BackgroundTasksChangedEvent {
+  type: "background_tasks_changed";
   task_id: string;
   status: string;
 }
@@ -328,6 +335,7 @@ export type WsServerEvent =
   | AgentDeltaEvent
   | ToolStartedEvent
   | SubAgentsChangedEvent
+  | BackgroundTasksChangedEvent
   | ToolResultEvent
   | ApprovalRequiredEvent
   | QuestionRequiredEvent
