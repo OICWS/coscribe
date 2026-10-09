@@ -1646,6 +1646,43 @@ def test_pending_approval_is_redelivered_on_reconnect(
     assert (tmp_path / "workspace" / "note.txt").read_text() == "hi"
 
 
+def test_a_pending_question_is_redelivered_every_time_the_conversation_is_reopened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Leaving a conversation and coming back again and again, never answering:
+    # a redelivered question that outlives its connection must not keep the
+    # turn lock, or the next reconnect finds nothing to answer.
+    call = _tool_call(
+        "call_1",
+        "ask_user_question",
+        {"questions": [{"question": "Budget?", "options": [{"label": "Low"}, {"label": "High"}]}]},
+    )
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_q_again") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "plan"})
+            assert ws.receive_json()["type"] == "question_required"
+
+        for _ in range(3):
+            with client.websocket_connect("/ws/t_q_again") as ws:
+                ws.receive_json()  # state
+                ws.receive_json()  # history
+                assert ws.receive_json()["type"] == "question_required"
+
+        with client.websocket_connect("/ws/t_q_again") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            question = ws.receive_json()
+            ws.send_json({"type": "question_response", "id": question["id"], "answers": ["Low"]})
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert next(m for m in messages if m["type"] == "agent_message")["text"] == "done"
+
+
 def test_concurrent_sub_agents_ask_for_approval_in_the_panel_independently(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -7260,26 +7297,47 @@ def test_a_new_default_model_applies_to_the_next_session_without_a_restart_lg(
     assert dotenv_values(tmp_path / ".env")["COSCRIBE_MAX_TURNS"] == "7"
 
 
-def test_a_conversation_is_named_after_its_first_exchange_lg(
+class _TitlingModel(FakeToolCallingChatModel):
+    """Answers the naming request on its own, so that it neither takes a
+    scripted reply nor depends on whether it comes before or after the
+    turn's own call."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        if "Name this conversation" in str(messages[0].content):
+            self.received.append(list(messages))
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content='"Q3 销售汇总"'))]
+            )
+        return super()._generate(messages, stop, run_manager, **kwargs)
+
+
+def test_a_conversation_is_named_from_its_first_message_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_model = FakeToolCallingChatModel(
-        responses=[AIMessage(content="Here's the summary."), AIMessage(content='"Q3 销售汇总"')]
-    )
+    fake_model = _TitlingModel(responses=[AIMessage(content="Here's the summary.")])
     with _client_lg(tmp_path, monkeypatch, fake_model, auto_title_threads=True) as client:
         with client.websocket_connect("/ws/t_named") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
             ws.send_json({"type": "user_message", "text": "帮我汇总一下第三季度的销售数据"})
-            _receive_until(ws, "tasks_changed")
             titled = _receive_until(ws, "thread_titled")[-1]
+            _receive_until(ws, "tasks_changed")
         threads = client.get("/api/threads").json()
 
     assert titled == {"type": "thread_titled", "title": "Q3 销售汇总"}
     [thread] = [t for t in threads if t["thread_id"] == "t_named"]
     assert thread["preview"] == "Q3 销售汇总"
-    title_request = str(fake_model.received[-1][-1].content)
-    assert title_request.startswith("User: 帮我汇总一下第三季度的销售数据")
+    [title_request] = [
+        str(m[-1].content) for m in fake_model.received if "Name this" in str(m[0].content)
+    ]
+    # Asked for before there is a reply, so a long first turn is not unnamed.
+    assert title_request == "User: 帮我汇总一下第三季度的销售数据"
 
 
 def test_a_tool_call_is_announced_before_it_runs_lg(
