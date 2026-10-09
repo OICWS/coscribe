@@ -122,7 +122,7 @@ Nothing is pushed to `main` directly.
   "Touches:" line naming the hot files you expect to edit. The list of open PRs
   is the board of who is doing what.
 - Before editing a hot file (`web/app.py`, `conversation/session.py`,
-  `tests/test_web.py`, `coordinator.py`, `frontend/src/App.tsx`,
+  `coordinator.py`, `frontend/src/App.tsx`,
   `frontend/src/types/*.ts`), look at the open PRs; if someone is changing the
   same part, tell the maintainer instead of racing.
 - One area per PR, about 600 changed lines at most (generated catalogs and
@@ -139,6 +139,11 @@ cached read -- if the branch state looks wrong, cross-check with
 `git ls-remote origin main` (a live query) before trusting `fetch`.
 
 ## Test discipline
+
+Tests of the web server live in `tests/web/test_<domain>.py` (chat, threads,
+connectors, settings, skills, scheduled, subagents, internal); a new test goes into
+the file of its domain, and fakes and builders shared by several files go into
+`tests/web/helpers.py`. Do not start a new catch-all file.
 
 CI is the gate. Before pushing run `bash scripts/check.sh --fast` (frontend
 build, oxlint, ruff, mypy) and the test files for what you touched; before

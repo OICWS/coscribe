@@ -21,7 +21,7 @@ Last reviewed: 2026-10-09.
    - Done: the setup page, request models and provider catalog are out of `web/app.py`;
      every HTTP route is in `web/routes/` (one `router(state)` each).
    - Done: the two WebSocket routes are in `web/routes/ws.py`.
-   - Next: split `tests/test_web.py` into `tests/web/` by domain (hot file).
+   - Done: `tests/test_web.py` is split into `tests/web/` by domain.
 2. **Working with more than one person** (record 0007, proposed): the maintainer
    accepts or changes it; then an admin adds the second collaborator, their handle
    goes into `.github/CODEOWNERS`, and the ruleset requires code-owner review for

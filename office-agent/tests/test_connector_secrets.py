@@ -20,7 +20,7 @@ from coscribe.tools.mcp import (
     with_secrets,
 )
 
-from .test_web import FakeToolCallingChatModel, _client_lg
+from .web.helpers import FakeToolCallingChatModel, _client_lg
 
 KEY = "sk-connector-abcdef123456"
 
