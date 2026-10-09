@@ -895,30 +895,41 @@ class ChatSessionLG:
             and (self._title_task is None or self._title_task.done())
         )
 
-    async def _name_thread(self, websocket: WebSocket) -> None:
-        """A short title from the conversation's first exchange."""
+    async def _name_thread(self, websocket: WebSocket, first_message: str | None = None) -> None:
+        """A short title from the conversation's first message, asked for as
+        soon as it is sent so that a long first turn (or one waiting on the
+        user) doesn't leave the raw message as the label; the end of the first
+        turn asks again, with the reply, if that one got nothing."""
         try:
-            state = await self.lg_agent.aget_state(self.config)
-            messages = list(state.values.get("messages", [])) if state.values else []
-            first_user = next(
-                (strip_mode_note(_extract_text(m.content)) for m in messages if m.type == "human"),
-                "",
-            )
-            last_reply = next(
-                (
-                    _extract_text(m.content)
-                    for m in reversed(messages)
-                    if m.type == "ai" and _extract_text(m.content)
-                ),
-                "",
-            )
+            first_user = first_message or ""
+            last_reply = ""
+            if first_message is None:
+                state = await self.lg_agent.aget_state(self.config)
+                messages = list(state.values.get("messages", [])) if state.values else []
+                first_user = next(
+                    (
+                        strip_mode_note(_extract_text(m.content))
+                        for m in messages
+                        if m.type == "human"
+                    ),
+                    "",
+                )
+                last_reply = next(
+                    (
+                        _extract_text(m.content)
+                        for m in reversed(messages)
+                        if m.type == "ai" and _extract_text(m.content)
+                    ),
+                    "",
+                )
             if not first_user.strip():
                 return
             reply = await self.model.ainvoke(
                 [
                     SystemMessage(content=_TITLE_INSTRUCTIONS),
                     HumanMessage(
-                        content=f"User: {first_user[:1500]}\n\nAssistant: {last_reply[:1500]}"
+                        content=f"User: {first_user[:1500]}"
+                        + (f"\n\nAssistant: {last_reply[:1500]}" if last_reply else "")
                     ),
                 ],
                 config={"tags": [TAG_NOSTREAM]},
@@ -2946,6 +2957,10 @@ class ChatSessionLG:
             return
         async with self._turn_lock:
             self._current_turn_task = asyncio.current_task()
+            # So that this connection closing releases the lock too:
+            # abandon_orphaned_turn only cancels a turn driven by the socket
+            # that went away, and a question redelivered here waits on it.
+            self._turn_websocket = websocket
             # A turn hard-cancelled mid-tool also leaves state.next set, but
             # with no interrupt to redeliver -- resuming it would silently
             # re-run that tool (possibly minutes of work the user just
@@ -3525,6 +3540,8 @@ class ChatSessionLG:
         # left over from one that already finished) must not immediately
         # halt this new one.
         self._stop_requested = False
+        if not history and self._wants_title():
+            self._title_task = asyncio.create_task(self._name_thread(websocket, text))
 
         retried_after_grpc_metadata_overflow = False
         reply_text = ""  # narrowing hint only -- always reassigned before use, see the loop below

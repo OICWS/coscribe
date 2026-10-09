@@ -92,6 +92,8 @@ def _settings(tmp_path: Path) -> Settings:
         state_dir=tmp_path / "state",
         skills_dir=tmp_path / "skills",
         memory_path=tmp_path / "MEMORY.md",
+        # A naming call would take one of the scripted replies these tests count.
+        auto_title_threads=False,
     )  # type: ignore[arg-type]
 
 
