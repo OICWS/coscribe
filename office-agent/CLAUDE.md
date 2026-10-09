@@ -86,9 +86,10 @@ message or gets deleted outright -- never both.
 
 ## Commit authorship
 
-Commits are authored as the user, not as Claude (decided 2026-09-26).
-A fresh container starts with git's identity set to Claude, so set it
-in the clone before the first commit:
+Commits are authored as the human whose session it is, not as Claude (decided
+2026-09-26, per person since 0007). A fresh container starts with git's identity
+set to Claude, so set it in the clone before the first commit, to that person's
+own GitHub name and email (the maintainer's are below):
 
 ```bash
 git config user.name "OICWS"
