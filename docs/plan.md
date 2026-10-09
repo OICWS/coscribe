@@ -54,6 +54,10 @@ Last reviewed: 2026-10-09.
 
 ## Later (wanted, not scheduled)
 
+- Working with more than one human and their AI sessions (record 0007, proposed; the
+  main session is designing it).
+- Conversations messaging each other (record 0008, proposed; design only).
+
 - Network access per session (an Edit environment setting). Without a sandbox it
   could only switch off coscribe's own web tools; it must say so on its face.
 - A callback helper so a script can use a secret (needs its own local
