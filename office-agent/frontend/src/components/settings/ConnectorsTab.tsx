@@ -7,6 +7,7 @@ import {
   getMcpOAuthApps,
   getMcpServers,
   getNpmLatestVersion,
+  getSecrets,
   reconnectMcpServer,
   removeMcpServer,
   setConnectorToolPolicies,
@@ -19,6 +20,7 @@ import type {
   McpOAuthApps,
   McpServerInfo,
   McpServersResponse,
+  SecretInfo,
 } from "../../types/settings";
 import {
   ArrowLeftIcon,
@@ -67,6 +69,71 @@ function parseEnvLines(text: string): Record<string, string> {
     env[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
   }
   return env;
+}
+
+function parseHeaderLines(text: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx > 0) headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+  return headers;
+}
+
+const SECRET_PLACEHOLDER = /\{\{secret:([A-Za-z_][A-Za-z0-9_]{0,63})\}\}/g;
+
+// Mirrors runtime/secret_store.py's host_allowed: "*.b.com" covers subdomains, not b.com.
+function hostAllowed(pattern: string, host: string): boolean {
+  const lower = host.toLowerCase();
+  return pattern.startsWith("*.") ? lower.endsWith(pattern.slice(1)) && lower !== pattern.slice(2) : lower === pattern;
+}
+
+/** What is wrong with the secrets `text` refers to, in the server's own terms:
+ * one that doesn't exist, or (for a header, which goes to `host`) one not allowed
+ * for that host. The server checks again when the connector is added. */
+function secretProblems(text: string, secrets: SecretInfo[], host: string | null): string[] {
+  const problems: string[] = [];
+  for (const match of text.matchAll(SECRET_PLACEHOLDER)) {
+    const secret = secrets.find((s) => s.name === match[1]);
+    if (!secret) problems.push(`There is no secret named ${match[1]}.`);
+    else if (host && !secret.hosts.some((pattern) => hostAllowed(pattern, host))) {
+      problems.push(`${match[1]} may only be sent to ${secret.hosts.join(", ")}, not ${host}.`);
+    }
+  }
+  return problems;
+}
+
+/** Puts `{{secret:NAME}}` into the text field it sits under, at the caret. */
+function SecretPicker({
+  secrets,
+  onPick,
+}: {
+  secrets: SecretInfo[];
+  onPick: (placeholder: string) => void;
+}) {
+  if (secrets.length === 0) return null;
+  return (
+    <select
+      aria-label="Insert a secret"
+      className={`${fieldClass} h-8 w-fit text-[13px]`}
+      value=""
+      onChange={(e) => e.target.value && onPick(`{{secret:${e.target.value}}}`)}
+    >
+      <option value="">Insert a secret…</option>
+      {secrets.map((secret) => (
+        <option key={secret.name} value={secret.name}>
+          {secret.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function insertAtCaret(field: HTMLTextAreaElement | null, text: string, insert: string): string {
+  if (!field) return text + insert;
+  const start = field.selectionStart ?? text.length;
+  const end = field.selectionEnd ?? text.length;
+  return text.slice(0, start) + insert + text.slice(end);
 }
 
 type LocalServerArgs = { command: string; args: string[]; env?: Record<string, string> };
@@ -391,11 +458,13 @@ function ConnectorDetail({
           <span className="flex-1 text-[var(--muted)]">
             {pending
               ? "Connecting…"
-              : info.signin
-                ? "Waiting for you to sign in in your browser."
-                : info.auth === "oauth"
-                  ? (info.signin_error ?? "Not signed in. Its tools show up here once you sign in.")
-                  : "Not connected. Its tools show up here once it connects."}
+              : info.secret_error
+                ? info.secret_error
+                : info.signin
+                  ? "Waiting for you to sign in in your browser."
+                  : info.auth === "oauth"
+                    ? (info.signin_error ?? "Not signed in. Its tools show up here once you sign in.")
+                    : "Not connected. Its tools show up here once it connects."}
           </span>
           {info.signin && (
             <a href={info.signin.url} target="_blank" rel="noreferrer" className="text-[var(--accent)] hover:underline">
@@ -561,7 +630,7 @@ function CatalogConnectorPage({
         </p>
       ) : info && !info.connected && !pending ? (
         <p role="status" className="text-sm text-[var(--danger)]">
-          {showError(info.signin_error ?? "Not connected.")}
+          {showError(info.secret_error ?? info.signin_error ?? "Not connected.")}
         </p>
       ) : (
         notice && <NoticeText notice={{ ...notice, text: notice.error ? showError(notice.text) : notice.text }} />
@@ -728,6 +797,16 @@ function AddCustomConnectorDialog({
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [env, setEnv] = useState("");
+  const [headers, setHeaders] = useState("");
+  const [secrets, setSecrets] = useState<SecretInfo[]>([]);
+  const envRef = useRef<HTMLTextAreaElement>(null);
+  const headersRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    getSecrets()
+      .then((res) => setSecrets(res.secrets))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -739,6 +818,15 @@ function AddCustomConnectorDialog({
   const nameTaken = existing.includes(trimmedName);
   const urlOk = /^https?:\/\/\S+$/i.test(serverUrl.trim());
   const ready = trimmedName !== "" && !nameTaken && (local ? command.trim() !== "" : urlOk);
+  let serverHost: string | null = null;
+  try {
+    serverHost = urlOk ? new URL(serverUrl.trim()).hostname : null;
+  } catch {
+    serverHost = null;
+  }
+  // A header goes to this server only, so its secrets must be allowed for the
+  // host; an env value goes to the local command, which has no host.
+  const problems = local ? secretProblems(env, secrets, null) : secretProblems(headers, secrets, serverHost);
 
   const submit = () => {
     if (!ready) return;
@@ -746,7 +834,7 @@ function AddCustomConnectorDialog({
       trimmedName,
       local
         ? { command: command.trim(), args: args.split(/\s+/).filter(Boolean), env: parseEnvLines(env) }
-        : { server_url: serverUrl.trim() },
+        : { server_url: serverUrl.trim(), ...(headers.trim() ? { headers: parseHeaderLines(headers) } : {}) },
     );
   };
 
@@ -806,12 +894,14 @@ function AddCustomConnectorDialog({
               onChange={(e) => setArgs(e.target.value)}
             />
             <textarea
+              ref={envRef}
               aria-label="Environment variables"
               className={`${fieldClass} h-auto min-h-20 w-full py-2 font-mono text-[13px]`}
               placeholder="Environment variables, one per line: KEY=value"
               value={env}
               onChange={(e) => setEnv(e.target.value)}
             />
+            <SecretPicker secrets={secrets} onPick={(p) => setEnv(insertAtCaret(envRef.current, env, p))} />
             <p className="text-[13px] text-[var(--muted)]">It runs as a program on this computer, with your permissions.</p>
           </div>
         ) : (
@@ -827,7 +917,29 @@ function AddCustomConnectorDialog({
             <p className={hint}>
               The HTTPS address where the server accepts MCP requests, for example https://mcp.example.com/mcp.
             </p>
+            <textarea
+              ref={headersRef}
+              aria-label="Headers"
+              className={`${fieldClass} mt-3 h-auto min-h-16 w-full py-2 font-mono text-[13px]`}
+              placeholder="Headers, one per line: Authorization: Bearer {{secret:NAME}}"
+              value={headers}
+              onChange={(e) => setHeaders(e.target.value)}
+            />
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <SecretPicker
+                secrets={secrets}
+                onPick={(p) => setHeaders(insertAtCaret(headersRef.current, headers, p))}
+              />
+              <span className="text-[13px] text-[var(--muted)]">
+                A secret from Settings &gt; Secrets is sent to this server only, so it must be allowed for its host.
+              </span>
+            </div>
           </div>
+        )}
+        {problems.length > 0 && (
+          <p role="alert" className="-mt-2 text-sm text-[var(--danger)]">
+            {problems.join(" ")}
+          </p>
         )}
         <button
           type="button"
@@ -862,6 +974,13 @@ function StatusCell({ row, pending }: { row: ConnectorRow; pending: boolean }) {
     return <span className="running-wave-ring rounded-md px-2.5 py-1 text-sm">Connecting…</span>;
   }
   if (info?.connected) return <CheckIcon aria-label="Connected" className="h-4 w-4" />;
+  if (info?.secret_error) {
+    return (
+      <span className="text-sm text-[var(--danger)]" title={info.secret_error}>
+        Secret problem
+      </span>
+    );
+  }
   if (info?.signin) return <span className="text-sm text-[var(--muted)]">Waiting for sign-in</span>;
   if (info?.auth === "oauth") return <span className="text-sm text-[var(--danger)]">Sign in</span>;
   return <span className="text-sm text-[var(--danger)]">Not connected</span>;

@@ -228,6 +228,9 @@ export interface McpServerInfo {
   signin?: { url: string } | null;
   /** Why the last sign-in didn't work. */
   signin_error?: string | null;
+  /** Why a secret this connector refers to can't be filled in (missing, or
+   * not allowed for its host); the connector isn't started until it is. */
+  secret_error?: string | null;
   /** Live signal, not derived from the static config the rest of this
    * entry comes from -- whether this server is currently connected in
    * the running coscribe-web process (see web/app.py's mcp_connections). */

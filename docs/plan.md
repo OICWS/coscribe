@@ -24,12 +24,6 @@ Last reviewed: 2026-10-09.
 2. **Background commands**: the Background tasks panel lists sub-agents and
    scripts; add `run_background_command` so a shell command can run there too
    (touches `coordinator.py` and the approval rules).
-3. **Connector add form: pick a secret** (frontend). The backend takes
-   `{{secret:NAME}}` in a connector's header or env value; the form should offer
-   the secrets from Settings > Secrets and say a header's secret must be allowed
-   for that connector's host. Also show the `connectors` list of the 409 when a
-   secret in use is deleted, and drop "Scripts and the code module don't receive
-   these yet" from `EnvironmentDialog.tsx`.
 
 ## Needs the maintainer's testing (could not be verified here)
 
@@ -39,7 +33,8 @@ Last reviewed: 2026-10-09.
   vendors' guides, tested only against a local OAuth server. Google's Workspace
   MCP servers are a Developer Preview; whether HubSpot accepts a `localhost`
   redirect is not documented.
-- Secrets against a real Windows Credential Manager.
+- Secrets against a real Windows Credential Manager, and a real remote connector
+  with a header from Settings > Secrets.
 - The attachment cards and the new question-card colours in the desktop app; the
   thin scrollbar on pages in the built-in browser.
 - The code module on real Windows.

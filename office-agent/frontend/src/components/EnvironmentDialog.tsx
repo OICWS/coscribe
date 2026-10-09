@@ -102,7 +102,8 @@ export function EnvironmentDialog({
                 <h3 className="text-[15px] font-medium">Variables</h3>
                 <p className="mt-0.5 text-xs text-[var(--muted)]">
                   Plain text the assistant can read, such as a mode or a project name. Don't put a key here: use a
-                  secret. Scripts and the code module don't receive these yet.
+                  secret. Scripts and the code module's commands get them as environment variables too, so a name
+                  such as PATH, PYTHONPATH, NODE_OPTIONS or a proxy variable changes how they run.
                 </p>
                 <div className="mt-3 flex flex-col gap-2">
                   {rows.map((row, index) => (
