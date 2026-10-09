@@ -1,16 +1,20 @@
-"""The server's route table, in registration order, against a checked-in list.
+"""The server's routes: which there are, and the one order that matters.
 
-FastAPI matches routes in the order they were added (`/ws/browser` has to come
-before `/ws/{thread_id}`), so a route dropped or reordered while `web/app.py` is
-being split up changes behaviour without any other test noticing. A change that
-adds, removes or moves a route edits `tests/web_routes.txt` in the same PR;
-`UPDATE_ROUTES=1 pytest tests/test_web_routes.py` rewrites it.
+A route dropped or added by mistake while `web/app.py` is split into routers
+changes behaviour without any other test noticing, so the table is compared with
+a checked-in list (`tests/web_routes.txt`; a change that adds, removes or moves a
+route edits it in the same PR, and `UPDATE_ROUTES=1 pytest tests/test_web_routes.py`
+rewrites it). The list is sorted: which module registers a route first does not
+matter. What does matter, because FastAPI takes the first route that matches, is
+that a fixed path comes before a pattern that would also match it (`/ws/browser`
+before `/ws/{thread_id}`), and the static-files mount comes last.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from starlette.routing import Mount, WebSocketRoute
 
@@ -20,7 +24,7 @@ from coscribe.web.app import create_app_lg
 SNAPSHOT = Path(__file__).with_name("web_routes.txt")
 
 
-def _route_table(tmp_path: Path) -> list[str]:
+def _routes(tmp_path: Path) -> list[Any]:
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None,
         default_model="fake:model",
@@ -29,22 +33,46 @@ def _route_table(tmp_path: Path) -> list[str]:
         skills_dir=tmp_path / "skills",
         memory_path=tmp_path / "MEMORY.md",
     )
-    lines = []
-    for route in create_app_lg(settings).routes:
-        if isinstance(route, WebSocketRoute):
-            lines.append(f"WS {route.path}")
-        elif isinstance(route, Mount):
-            lines.append(f"MOUNT {route.path}")
-        else:
-            methods = sorted(getattr(route, "methods", None) or [])
-            lines.append(f"{','.join(methods)} {route.path}")
-    return lines
+    return list(create_app_lg(settings).routes)
 
 
-def test_the_route_table_is_the_checked_in_one(tmp_path: Path) -> None:
-    table = _route_table(tmp_path)
+def _describe(route: Any) -> str:
+    if isinstance(route, WebSocketRoute):
+        return f"WS {route.path}"
+    if isinstance(route, Mount):
+        return f"MOUNT {route.path}"
+    methods = sorted(getattr(route, "methods", None) or [])
+    return f"{','.join(methods)} {route.path}"
+
+
+def _methods(route: Any) -> set[str]:
+    return set(getattr(route, "methods", None) or {"WS"})
+
+
+def test_the_routes_are_the_checked_in_ones(tmp_path: Path) -> None:
+    table = sorted(_describe(route) for route in _routes(tmp_path))
     if os.environ.get("UPDATE_ROUTES"):
         SNAPSHOT.write_text("\n".join(table) + "\n", encoding="utf-8")
-    expected = SNAPSHOT.read_text(encoding="utf-8").splitlines()
 
-    assert table == expected
+    assert table == SNAPSHOT.read_text(encoding="utf-8").splitlines()
+
+
+def test_a_fixed_path_is_registered_before_a_pattern_that_would_match_it(tmp_path: Path) -> None:
+    routes = [route for route in _routes(tmp_path) if not isinstance(route, Mount)]
+    shadowed = [
+        (earlier.path, later.path)
+        for index, later in enumerate(routes)
+        if "{" not in later.path
+        for earlier in routes[:index]
+        if "{" in earlier.path
+        and _methods(earlier) & _methods(later)
+        and earlier.path_regex.match(later.path)
+    ]
+
+    assert shadowed == []
+
+
+def test_the_static_files_mount_is_last(tmp_path: Path) -> None:
+    routes = _routes(tmp_path)
+
+    assert [i for i, route in enumerate(routes) if isinstance(route, Mount)] == [len(routes) - 1]
