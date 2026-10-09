@@ -21,7 +21,7 @@ Last reviewed: 2026-10-09.
    - Done: the setup page, request models and provider catalog are out of `web/app.py`;
      every HTTP route is in `web/routes/` (one `router(state)` each).
    - Done: the two WebSocket routes are in `web/routes/ws.py`.
-   - Next: split `tests/test_web.py` into `tests/web/` by domain (hot file).
+   - Done: `tests/test_web.py` is split into `tests/web/` by domain.
 2. **Background commands**: the Background tasks panel lists sub-agents and
    scripts; add `run_background_command` so a shell command can run there too
    (touches `coordinator.py` and the approval rules).

@@ -21,7 +21,7 @@ from coscribe.tools.background_tasks import (
     stop_background_task,
 )
 
-from .test_web import FakeToolCallingChatModel, _client_lg
+from .web.helpers import FakeToolCallingChatModel, _client_lg
 
 
 def _task(task_id: str, status: str = "succeeded", thread_id: str = "t1") -> BackgroundTask:

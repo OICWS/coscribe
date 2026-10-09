@@ -39,7 +39,7 @@ jobs:
       # web/static/ is a gitignored build artifact (see frontend/README.md
       # and web/app.py's own module docstring) -- create_app_lg() mounts
       # it with check_dir=True, so any test that constructs the FastAPI
-      # app (most of tests/test_web.py) fails at app-construction time
+      # app (most of tests/web/) fails at app-construction time
       # with a bare checkout that never built it. Real, live-reported gap:
       # this step was missing from CI since the frontend cutover itself,
       # silently failing every run after -- caught only by finally

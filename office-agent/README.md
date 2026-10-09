@@ -2111,7 +2111,7 @@ ruff check src tests
 mypy src
 ```
 
-Running the full suite (including `tests/test_web.py`) needs the `web`
+Running the full suite (including `tests/web/`) needs the `web`
 extra installed too: `pip install -e ".[dev,web]"`.
 
 Tests do not require an API key or network access — they exercise
