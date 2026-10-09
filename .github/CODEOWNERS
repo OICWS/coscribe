@@ -1,0 +1,11 @@
+# Invariant paths (office-agent/CLAUDE.md, decision 0007). A second owner is added
+# on each line when the second maintainer joins; only then does the ruleset
+# require code-owner review.
+/office-agent/src/coscribe/runtime/secrets*.py @OICWS
+/office-agent/src/coscribe/runtime/secret_store.py @OICWS
+/office-agent/src/coscribe/runtime_lg/tool_deferral.py @OICWS
+/office-agent/src/coscribe/runtime_lg/mcp_oauth.py @OICWS
+/office-agent/src/coscribe/code_runtime/permissions.py @OICWS
+/office-agent/src/coscribe/coordinator.py @OICWS
+/.github/CODEOWNERS @OICWS
+/.github/workflows/ @OICWS

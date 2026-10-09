@@ -23,7 +23,11 @@ Last reviewed: 2026-10-09.
    - Next: the connectors, threads, internal, scheduled and websocket routes the same
      way (verbatim moves, one `router(state)` each), then `tests/test_web.py`.
      `app.py` and `tests/test_web.py` are hot files.
-2. **Background commands**: the Background tasks panel lists sub-agents and
+2. **Working with more than one person** (proposed record 0007, replaces the
+   draft in #53): the maintainer accepts or changes it; then an admin adds the
+   second collaborator, their handle goes into `.github/CODEOWNERS`, and the
+   ruleset requires code-owner review for those paths.
+3. **Background commands**: the Background tasks panel lists sub-agents and
    scripts; add `run_background_command` so a shell command can run there too
    (touches `coordinator.py` and the approval rules).
 
