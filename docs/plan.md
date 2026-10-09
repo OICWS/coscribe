@@ -20,8 +20,8 @@ Last reviewed: 2026-10-09.
      it; it no longer imports `cli` or FastAPI).
    - Done: the setup page, request models and provider catalog are out of `web/app.py`;
      every HTTP route is in `web/routes/` (one `router(state)` each).
-   - Next: the two WebSocket routes, then `tests/test_web.py`.
-     `app.py` and `tests/test_web.py` are hot files.
+   - Done: the two WebSocket routes are in `web/routes/ws.py`.
+   - Next: split `tests/test_web.py` into `tests/web/` by domain (hot file).
 2. **Background commands**: the Background tasks panel lists sub-agents and
    scripts; add `run_background_command` so a shell command can run there too
    (touches `coordinator.py` and the approval rules).
