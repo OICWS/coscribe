@@ -18,6 +18,9 @@ Last reviewed: 2026-10-09.
      decisions and log in place, package dependencies checked in CI.
    - Done: `web/session.py` and its helpers moved to `conversation/` (the CLI uses
      it; it no longer imports `cli` or FastAPI).
+   - Proposed, awaiting the maintainer: working with more than one human and their
+     sessions (record 0007: GitHub as the channel, one identity per human,
+     CODEOWNERS for invariant paths).
    - Next: split `web/app.py` into routers by domain (a route-table test first,
      then `AppState`, then the routes in one announced freeze), then
      `tests/test_web.py`. `app.py` and `tests/test_web.py` are hot files.
@@ -52,6 +55,8 @@ Last reviewed: 2026-10-09.
   one file at a time.
 
 ## Later (wanted, not scheduled)
+
+- Conversations messaging each other (record 0008, proposed; design only).
 
 - Network access per session (an Edit environment setting). Without a sandbox it
   could only switch off coscribe's own web tools; it must say so on its face.
