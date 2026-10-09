@@ -36,6 +36,34 @@ export function matchesFilter(thread: Filterable, filter: ThreadFilter, query: s
   return !text || (thread.preview || thread.thread_id).toLowerCase().includes(text);
 }
 
+// Characters of room, counting a Chinese, Japanese or Korean one as two.
+const LABEL_WIDTH = 40;
+
+const isWide = (char: string) => /[\u1100-\u11ff\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\uff00-\uff60]/.test(char);
+
+/** A name for a conversation that has no title yet: the first line of its
+ * first message, cut short, so that a long message doesn't become a long name. */
+export function shortLabel(text: string): string {
+  const line = (text.split("\n").find((l) => l.trim() !== "") ?? "").replace(/\s+/g, " ").trim();
+  let width = 0;
+  let end = 0;
+  const chars = [...line];
+  for (const char of chars) {
+    width += isWide(char) ? 2 : 1;
+    if (width > LABEL_WIDTH) break;
+    end += 1;
+  }
+  if (end === chars.length) return line;
+  const cut = chars.slice(0, end).join("");
+  const space = cut.lastIndexOf(" ");
+  // At a word, unless that would throw most of it away.
+  return `${(space > cut.length * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+/** What a conversation is called in the sidebar, its header and its dialogs. */
+export const threadLabel = (thread: { preview: string; thread_id: string }) =>
+  shortLabel(thread.preview) || thread.thread_id;
+
 export interface ThreadSection<T> {
   /** null is the ungrouped section. */
   group: string | null;
