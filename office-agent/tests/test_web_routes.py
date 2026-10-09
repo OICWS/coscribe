@@ -24,6 +24,18 @@ from coscribe.web.app import create_app_lg
 SNAPSHOT = Path(__file__).with_name("web_routes.txt")
 
 
+def _flatten(routes: list[Any]) -> list[Any]:
+    """The routes in the order they are tried. A router added with include_router is one entry
+    in `app.routes` that holds its routes."""
+    flat: list[Any] = []
+    for route in routes:
+        if hasattr(route, "effective_route_contexts"):
+            flat.extend(route.effective_route_contexts())
+        else:
+            flat.append(route)
+    return flat
+
+
 def _routes(tmp_path: Path) -> list[Any]:
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None,
@@ -33,11 +45,11 @@ def _routes(tmp_path: Path) -> list[Any]:
         skills_dir=tmp_path / "skills",
         memory_path=tmp_path / "MEMORY.md",
     )
-    return list(create_app_lg(settings).routes)
+    return _flatten(list(create_app_lg(settings).routes))
 
 
 def _describe(route: Any) -> str:
-    if isinstance(route, WebSocketRoute):
+    if isinstance(getattr(route, "original_route", route), WebSocketRoute):
         return f"WS {route.path}"
     if isinstance(route, Mount):
         return f"MOUNT {route.path}"
@@ -46,6 +58,8 @@ def _describe(route: Any) -> str:
 
 
 def _methods(route: Any) -> set[str]:
+    if isinstance(getattr(route, "original_route", route), WebSocketRoute):
+        return {"WS"}
     return set(getattr(route, "methods", None) or {"WS"})
 
 
