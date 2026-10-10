@@ -269,3 +269,29 @@ def test_an_unreadable_connector_setting_blocks_deleting_a_secret(
 
     assert blocked.status_code == 503
     assert SecretStore(tmp_path / "state").names() == {"SVC_KEY"}
+
+
+def test_a_keychain_value_that_cannot_be_read_skips_that_connector_only(
+    tmp_path: Path, keychain: _FakeKeyring
+) -> None:
+    path = tmp_path / "mcp.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "gone": {
+                        "command": "npx",
+                        "env": {"TOKEN": {"keyring_ref": "mcp-gone-token"}},
+                    },
+                    "plain": {"command": "npx", "env": {"B": "literal"}},
+                }
+            }
+        )
+    )
+
+    loaded = load_mcp_server_configs(path, tmp_path)
+    listed = load_mcp_server_configs(path, tmp_path, fill_secrets=False)
+
+    assert set(loaded) == {"plain"}
+    assert set(listed) == {"gone", "plain"}
+    assert listed["gone"]["env"] == {"TOKEN": ""}
