@@ -221,6 +221,18 @@ def secret_names_used(entry: dict[str, Any]) -> set[str]:
     return names
 
 
+def _read_back(stored: Any, strict: bool) -> str:
+    """A stored value read back from the keychain. When the connector is only
+    being listed (`strict` false) a value that can't be read is shown as empty,
+    so the connector stays in the list and can be removed."""
+    try:
+        return resolve_secret(stored) or ""
+    except RuntimeError:
+        if strict:
+            raise
+        return ""
+
+
 def load_mcp_server_configs(
     config_path: Path, state_dir: Path | None = None, *, fill_secrets: bool = True
 ) -> dict[str, MCPConfig]:
@@ -241,17 +253,21 @@ def load_mcp_server_configs(
     result: dict[str, MCPConfig] = {}
     for name, entry in servers.items():
         config = validate_mcp_config({"type": "mcp", "name": name, **entry})
-        if "env" in config:
-            config["env"] = {k: resolve_secret(v) or "" for k, v in config["env"].items()}
-        if "headers" in config:
-            config["headers"] = {k: resolve_secret(v) or "" for k, v in config["headers"].items()}
         try:
+            if "env" in config:
+                config["env"] = {k: _read_back(v, fill_secrets) for k, v in config["env"].items()}
+            if "headers" in config:
+                config["headers"] = {
+                    k: _read_back(v, fill_secrets) for k, v in config["headers"].items()
+                }
             result[name] = (
                 with_interpreter(with_secrets(config, state_dir), state_dir)
                 if fill_secrets
                 else config
             )
-        except SecretError as exc:
-            # One connector's missing secret must not take the others down.
+        except (SecretError, RuntimeError) as exc:
+            # One connector's missing or unreadable secret (a keychain entry
+            # that is gone, or a keychain that is locked) must not take the
+            # others down, or the server's start.
             logger.warning("Skipping connector %s: %s", name, exc)
     return result
