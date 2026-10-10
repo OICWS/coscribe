@@ -1,6 +1,7 @@
 import type {
   SecretInfo,
   SecretsResponse,
+  MessagingPolicy,
   SessionEnvironment,
   BrowseDirsResponse,
   ConfigResponse,
@@ -484,3 +485,9 @@ export const getSessionEnvironment = (threadId: string) =>
 
 export const saveSessionEnvironment = (threadId: string, environment: SessionEnvironment) =>
   sendForResult<SessionEnvironment>(`/api/threads/${encodeURIComponent(threadId)}/environment`, "PUT", environment);
+
+export const getMessagingPolicy = (threadId: string) =>
+  getJson<MessagingPolicy>(`/api/threads/${encodeURIComponent(threadId)}/messaging`);
+
+export const saveMessagingPolicy = (threadId: string, policy: MessagingPolicy) =>
+  sendForResult<MessagingPolicy>(`/api/threads/${encodeURIComponent(threadId)}/messaging`, "PUT", policy);

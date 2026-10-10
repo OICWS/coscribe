@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { getSecrets, getSessionEnvironment, saveSessionEnvironment } from "../lib/rest";
-import type { SecretInfo } from "../types/settings";
+import {
+  getMessagingPolicy,
+  getSecrets,
+  getSessionEnvironment,
+  saveMessagingPolicy,
+  saveSessionEnvironment,
+} from "../lib/rest";
+import type { MessagingPolicy, SecretInfo } from "../types/settings";
 import { CloseIcon, PlusIcon } from "./icons";
 import { fieldClass, primaryButtonClass, secondaryButtonClass } from "./settings/SettingRow";
 
@@ -15,10 +21,13 @@ interface VariableRow {
 export function EnvironmentDialog({
   threadId,
   title,
+  others,
   onClose,
 }: {
   threadId: string;
   title: string;
+  /** The conversations this one could be messaged by, for the "selected" choice. */
+  others: { id: string; label: string }[];
   onClose: () => void;
 }) {
   const [rows, setRows] = useState<VariableRow[] | null>(null);
@@ -27,20 +36,22 @@ export function EnvironmentDialog({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState("");
+  const [messaging, setMessaging] = useState<MessagingPolicy>({ mode: "off", senders: [] });
 
-  const snapshot = (current: VariableRow[], picked: Set<string>) =>
-    JSON.stringify([current, [...picked].sort()]);
-  const dirty = rows !== null && snapshot(rows, chosen) !== loaded;
+  const snapshot = (current: VariableRow[], picked: Set<string>, policy: MessagingPolicy) =>
+    JSON.stringify([current, [...picked].sort(), policy.mode, [...policy.senders].sort()]);
+  const dirty = rows !== null && snapshot(rows, chosen, messaging) !== loaded;
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getSessionEnvironment(threadId), getSecrets()])
-      .then(([environment, known]) => {
+    Promise.all([getSessionEnvironment(threadId), getSecrets(), getMessagingPolicy(threadId)])
+      .then(([environment, known, policy]) => {
         if (cancelled) return;
         const loadedRows = Object.entries(environment.variables).map(([key, value]) => ({ key, value }));
         setRows(loadedRows);
         setChosen(new Set(environment.secrets));
-        setLoaded(snapshot(loadedRows, new Set(environment.secrets)));
+        setMessaging(policy);
+        setLoaded(snapshot(loadedRows, new Set(environment.secrets), policy));
         setSecrets(known.secrets);
       })
       .catch(() => !cancelled && setError("Couldn't load this conversation's environment."));
@@ -73,8 +84,9 @@ export function EnvironmentDialog({
     setSaving(true);
     setError(null);
     const result = await saveSessionEnvironment(threadId, { variables, secrets: [...chosen] });
+    const policy = "error" in result ? result : await saveMessagingPolicy(threadId, messaging);
     setSaving(false);
-    if ("error" in result) setError(result.error);
+    if ("error" in policy) setError(policy.error);
     else onClose();
   };
 
@@ -217,6 +229,64 @@ export function EnvironmentDialog({
                     ))}
                   </ul>
                 )}
+              </section>
+
+              <section>
+                <h3 className="text-[15px] font-medium">Messages from other conversations</h3>
+                <p className="mt-1 text-[13px] leading-relaxed text-[var(--muted)]">
+                  Lets the assistant in another conversation send this one a message, which arrives as a turn of its
+                  own. This conversation treats it as information, not as something you said, and still asks you before
+                  it acts. Off by default.
+                </p>
+                <div className="mt-3 flex flex-col gap-2">
+                  {(
+                    [
+                      ["off", "Off"],
+                      ["any", "Any other conversation"],
+                      ["selected", "Only the ones I pick"],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <label key={mode} className="flex cursor-pointer items-center gap-2.5 text-sm">
+                      <input
+                        type="radio"
+                        name="messaging-mode"
+                        className="h-4 w-4 accent-[var(--accent)]"
+                        checked={messaging.mode === mode}
+                        onChange={() => setMessaging((current) => ({ ...current, mode }))}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                {messaging.mode === "selected" &&
+                  (others.length === 0 ? (
+                    <p className="mt-3 rounded-xl border border-dashed border-[var(--border)] px-4 py-4 text-center text-sm text-[var(--muted)]">
+                      No other conversations yet.
+                    </p>
+                  ) : (
+                    <ul className="mt-3 flex max-h-48 flex-col gap-1 overflow-y-auto">
+                      {others.map((other) => (
+                        <li key={other.id}>
+                          <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--card-bg)]">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+                              checked={messaging.senders.includes(other.id)}
+                              onChange={(e) =>
+                                setMessaging((current) => ({
+                                  ...current,
+                                  senders: e.target.checked
+                                    ? [...current.senders, other.id]
+                                    : current.senders.filter((id) => id !== other.id),
+                                }))
+                              }
+                            />
+                            <span className="min-w-0 truncate">{other.label}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  ))}
               </section>
             </div>
           )}

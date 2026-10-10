@@ -1,7 +1,7 @@
 # 0008: Conversations can message each other
 
-Status: accepted (2026-10-10). Built: the tools, the inbox and the policy API. Edit
-environment's switch is the next PR.
+Status: accepted (2026-10-10). Built: the tools, the inbox, the policy API and, in Edit
+environment, the switch.
 
 ## Context
 Conversations are isolated: they share a workspace's files and nothing else

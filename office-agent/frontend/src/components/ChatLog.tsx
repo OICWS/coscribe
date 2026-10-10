@@ -25,6 +25,7 @@ import { type PptxShapeCapture, PptxShapeOverlay } from "./PptxShapeOverlay";
 import { type PlanChoice, PlanCard, type PlanItem } from "./PlanCard";
 import { QuestionRecord } from "./QuestionCard";
 import { INVESTIGATION_PREFIX, InvestigationCard, RUN_PROMPT_PREFIX, ScheduledRunCard } from "./ScheduledRunCard";
+import { CONVERSATION_MESSAGE_PREFIX, ConversationMessageCard } from "./ConversationMessageCard";
 import { SUBAGENT_REPORT_PREFIX, SubAgentReportCard } from "./SubAgentReportCard";
 import { TaskDraftCard } from "./TaskDraftCard";
 import { BlockedFolderCard } from "./BlockedFolderCard";
@@ -1130,6 +1131,7 @@ function LogItemView({
     if (item.text.startsWith(RUN_PROMPT_PREFIX)) return <ScheduledRunCard text={item.text} />;
     if (item.text.startsWith(INVESTIGATION_PREFIX)) return <InvestigationCard text={item.text} />;
     if (item.text.startsWith(SUBAGENT_REPORT_PREFIX)) return <SubAgentReportCard text={item.text} />;
+    if (item.text.startsWith(CONVERSATION_MESSAGE_PREFIX)) return <ConversationMessageCard text={item.text} />;
     return <UserMessageView item={item} onEditMessage={onEditMessage} />;
   }
 
