@@ -6,7 +6,7 @@ from .files import build_file_tools
 from .images import build_image_tools
 from .interaction import QUESTION_TOOL_NAMES, build_interaction_tools
 from .mcp import load_mcp_server_configs
-from .memory import build_memory_tools, format_memory_section, load_memory
+from .memory import format_memory_section, load_memory
 from .node_scripts import build_node_script_tools
 from .pptx_templates import (
     TemplateInfo,
@@ -67,7 +67,6 @@ __all__ = [
     "build_file_tools",
     "build_image_tools",
     "build_interaction_tools",
-    "build_memory_tools",
     "build_node_script_tools",
     "build_presentation_tools",
     "build_scheduled_task_tools",

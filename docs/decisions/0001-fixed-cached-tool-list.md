@@ -14,7 +14,7 @@ The tool list bound to the model is the same for every conversation. Most tools
 start hidden: `search_tools` returns the ones the model asks for with their
 parameters, and `use_tool(name, arguments)` runs them. Middleware rewrites the
 calls so approvals, hooks, audit and the UI still see the real tool name.
-Per-conversation facts (folders, remembered facts, a conversation's secret names)
+Per-conversation facts (folders, global instructions, a conversation's secret names)
 arrive as a note on the user's message or through a tool result, never in a tool
 schema or the system prompt.
 

@@ -248,8 +248,7 @@ def test_get_and_post_memory_round_trip_the_global_instructions_file(
 ) -> None:
     """GET/POST /api/memory back the Settings panel's Global Instructions
     editor (GeneralTab.tsx's GlobalInstructionsSection) -- a direct
-    read/overwrite of MEMORY.md's content, distinct from the `remember`
-    tool (which only ever appends one bullet at a time)."""
+    read/overwrite of MEMORY.md's content, the only way it is written."""
     fake_model = FakeToolCallingChatModel(responses=[])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
         empty = client.get("/api/memory")

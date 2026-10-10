@@ -102,9 +102,7 @@ def test_skill_creator_is_a_builtin_skill_with_a_skills_dir_note(tmp_path: Path)
 
 
 def test_skills_dir_note_absent_when_skill_creator_is_filtered_out(tmp_path: Path) -> None:
-    agent = build_coordinator_agent(
-        _settings(tmp_path), "thread-1", skill_names={"PPTX Slides"}
-    )
+    agent = build_coordinator_agent(_settings(tmp_path), "thread-1", skill_names={"PPTX Slides"})
 
     assert agent.instructions is not None
     assert "Skill Creator" not in agent.instructions
@@ -142,9 +140,7 @@ def test_skill_names_none_means_every_skill_unfiltered(tmp_path: Path) -> None:
 
 
 def test_skill_names_subset_only_splices_those(tmp_path: Path) -> None:
-    agent = build_coordinator_agent(
-        _settings(tmp_path), "thread-1", skill_names={"PPTX Slides"}
-    )
+    agent = build_coordinator_agent(_settings(tmp_path), "thread-1", skill_names={"PPTX Slides"})
 
     assert agent.instructions is not None
     assert "PPTX Slides:" in agent.instructions
@@ -163,13 +159,14 @@ def test_skill_names_empty_set_splices_no_skills_at_all(tmp_path: Path) -> None:
     assert "Available skills" not in (agent.instructions or "")
 
 
-def test_remember_tool_present_even_with_no_memory_file_yet(tmp_path: Path) -> None:
+def test_the_model_has_no_tool_to_write_the_global_instructions(tmp_path: Path) -> None:
     agent = build_coordinator_agent(_settings(tmp_path), "thread-1")
 
     tool_names = [tool.__name__ for tool in agent.tools]  # type: ignore[attr-defined]
-    assert "remember" in tool_names
+    assert "remember" not in tool_names
     assert agent.instructions is not None
-    assert "Remembered facts" not in agent.instructions
+    assert "remember(" not in agent.instructions
+    assert "global instructions" not in agent.instructions
 
 
 def test_all_tool_schemas_are_gemini_compatible(tmp_path: Path) -> None:
@@ -199,7 +196,7 @@ def test_all_tool_schemas_are_gemini_compatible(tmp_path: Path) -> None:
             )
 
 
-def test_remembered_facts_go_in_the_conversation_context(tmp_path: Path) -> None:
+def test_global_instructions_go_in_the_conversation_context(tmp_path: Path) -> None:
     from coscribe.coordinator import conversation_context
 
     memory_path = tmp_path / "MEMORY.md"
@@ -208,7 +205,7 @@ def test_remembered_facts_go_in_the_conversation_context(tmp_path: Path) -> None
 
     context = conversation_context(settings)
 
-    assert "Remembered facts from earlier sessions:" in context
+    assert "The user's global instructions:" in context
     assert "The user prefers metric units." in context
     assert "metric units" not in (build_coordinator_agent(settings, "t1").instructions or "")
 

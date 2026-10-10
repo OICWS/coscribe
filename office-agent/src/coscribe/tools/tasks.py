@@ -118,9 +118,8 @@ def build_task_tools(thread_id: str, state_dir: str | Path) -> list[Callable[...
         # thread-scoped, disposable bookkeeping the model uses constantly as
         # part of ordinary multi-step work (visible throughout this
         # project's own live-verification sessions as routine
-        # task_create/task_update calls), unlike memory.py's remember,
-        # which persists a durable, cross-session, system-prompt-injected
-        # fact -- gating this the same way would make approval-fatigue the
+        # task_create/task_update calls), unlike a tool that persists
+        # something durable -- gating this the same way would make approval-fatigue the
         # normal state of using the tool at all, for something with no
         # real externally-visible consequence.
         tool_metadata(task_create, risk_category="READ", category="tasks"),

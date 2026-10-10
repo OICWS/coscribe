@@ -141,7 +141,7 @@ _CONTEXT_NOTE_RE = re.compile(
 
 
 def context_note(context: str) -> str:
-    """The conversation's folders and remembered facts, sent ahead of the
+    """The conversation's folders and global instructions, sent ahead of the
     user's text when they differ from what the conversation was last told
     (see coordinator.conversation_context)."""
     return f"[Conversation context]\n{context}\n[/Conversation context]\n"

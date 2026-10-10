@@ -24,7 +24,6 @@ from .tools import (
     build_file_tools,
     build_image_tools,
     build_interaction_tools,
-    build_memory_tools,
     build_node_script_tools,
     build_presentation_tools,
     build_scheduled_task_tools,
@@ -514,9 +513,7 @@ to run them, and wait for the user to turn plan mode off. When skills are \
 available, they're listed below with a name and description; call \
 load_skill(name) to read a skill's full instructions before following them, \
 and read_skill_file(name, path) for any reference files it points you to. \
-Use remember(fact) to save a short, durable fact worth recalling in future \
-sessions (a user preference, a stable project detail) -- keep it short and \
-curated, not a log. For a focused, self-contained sub-task, delegate it: \
+For a focused, self-contained sub-task, delegate it: \
 spawn_agent(description, prompt, ...) waits for the sub-agent's report, \
 spawn_agent_background(...) returns a task_id at once so this \
 conversation can go on -- when it ends, its report or its error comes to \
@@ -776,7 +773,7 @@ def conversation_context(
     extra_folders: Sequence[Path] = (),
 ) -> str:
     """What the model needs to know about this conversation in particular:
-    its folders and the facts remembered across sessions. Sent with the
+    its folders and the user's global instructions. Sent with the
     user's message whenever it differs from what the conversation was last
     told, not in the system prompt."""
     root = workspace_root if workspace_root is not None else settings.workspace_root
@@ -905,7 +902,6 @@ def build_coordinator_agent(
         )
         + build_task_tools(thread_id, settings.state_dir)
         + build_interaction_tools()
-        + build_memory_tools(settings.memory_path)
         + build_selfwake_tools(thread_id, settings.state_dir)
         + build_scheduled_task_tools(settings.state_dir, thread_id)
         + build_websearch_tools()
@@ -925,7 +921,7 @@ def build_coordinator_agent(
         + build_subagent_task_tools(thread_id, settings.state_dir)
     )
     # Nothing that differs between conversations goes in here (the folders
-    # and remembered facts are in conversation_context): providers cache
+    # and the global instructions are in conversation_context): providers cache
     # by prefix, and the tool list comes after the system prompt, so a
     # per-conversation line here makes every new conversation re-read the
     # rest of the prompt and every tool schema uncached.

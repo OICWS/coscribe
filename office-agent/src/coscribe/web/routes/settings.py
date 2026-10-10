@@ -179,7 +179,6 @@ def router(state: AppState) -> APIRouter:
     _providers_info = state.providers_info
     context_window_client = state.context_window_client
 
-
     @router.get("/api/commands")
     async def get_commands() -> list[dict[str, str]]:
         commands = list(FIXED_COMMANDS)
@@ -452,8 +451,7 @@ def router(state: AppState) -> APIRouter:
     @router.post("/api/memory")
     async def update_memory(payload: MemoryUpdate) -> dict[str, Any]:
         # Directly overwrites the file -- the Settings panel's own text
-        # box is the whole editing surface here (unlike the `remember`
-        # tool, which only ever appends one bullet at a time), so a full
+        # box is the whole editing surface here, so a full
         # overwrite is the correct semantics for "save what's in the box."
         # Same "next new thread only" gap this project already accepts
         # for provider/skill config changes (see this module's own

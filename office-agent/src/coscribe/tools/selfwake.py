@@ -321,9 +321,8 @@ def build_selfwake_tools(thread_id: str, state_dir: str | Path) -> list[Callable
 
     return [
         # WRITE_LOCAL: each of these persists a durable record that changes
-        # this thread's future unattended behavior -- same reasoning
-        # memory.py's remember got in the Phase 4 risk-taxonomy pass, not a
-        # disposable, thread-scoped bookkeeping tool like task_create.
+        # this thread's future unattended behavior -- not a disposable,
+        # thread-scoped bookkeeping tool like task_create.
         tool_metadata(sleep_until, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(sleep_for, risk_category="WRITE_LOCAL", category="selfwake"),
         tool_metadata(wake_on_task, risk_category="WRITE_LOCAL", category="selfwake"),

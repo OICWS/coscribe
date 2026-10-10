@@ -31,7 +31,7 @@ from typing import Any, Literal
 #   external (web_search, search_images -- reaching out to the internet
 #   isn't itself a side effect, since nothing is written anywhere).
 # WRITE_LOCAL: side effects confined to this machine (write_file,
-#   write_pptx, task_create, remember, ...).
+#   write_pptx, task_create, ...).
 # EXEC: arbitrary code execution -- run_python_script/run_node_script (see
 #   tools/scripts.py's docstring for the "no sandbox, the approval prompt
 #   IS the safety mechanism" posture this implies). Real tools exist here
