@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { deleteScheduledTask, deleteThread } from "../lib/rest";
 import { useClickOutside } from "../lib/useClickOutside";
-import { startNewThread } from "../lib/nav";
+import { SCHEDULED_THREAD_PREFIX, startNewThread } from "../lib/nav";
 import { threadLabel } from "../lib/threadStatus";
 import { latestRun, RUN_STATUS_LABEL } from "../lib/runLabels";
 import { scheduleKindLabel } from "../lib/scheduleLabels";
@@ -381,6 +381,9 @@ export function NavRail({
         <EnvironmentDialog
           threadId={environmentOf.thread_id}
           title={threadLabel(environmentOf)}
+          others={threads
+            .filter((t) => t.thread_id !== environmentOf.thread_id && !t.thread_id.startsWith(SCHEDULED_THREAD_PREFIX))
+            .map((t) => ({ id: t.thread_id, label: threadLabel(t) }))}
           onClose={() => setEnvironmentOf(null)}
         />
       )}
