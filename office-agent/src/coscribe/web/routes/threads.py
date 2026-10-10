@@ -26,6 +26,7 @@ from ...tools.background_tasks import (
     read_background_log,
     stop_background_task,
 )
+from ...tools.conversations import MessagingError, MessagingStore
 from ...tools.scheduled_tasks import (
     SCHEDULED_THREAD_PREFIX,
 )
@@ -58,7 +59,6 @@ def router(state: AppState) -> APIRouter:
     _delete_thread_data = state.delete_thread_data
     _get_session = state.get_session
     _get_session_async = state.get_session_async
-
 
     @router.get("/api/threads")
     async def list_threads() -> list[dict[str, Any]]:
@@ -149,7 +149,7 @@ def router(state: AppState) -> APIRouter:
         return {row[0] for row in await cursor.fetchall()}
 
     def _thread_status(thread_id: str, waiting: set[str], meta: dict[str, Any]) -> str:
-        """"needs_input" | "working" | "ready" | "idle"."""
+        """ "needs_input" | "working" | "ready" | "idle"."""
         session = sessions.get(thread_id)
         if thread_id in waiting:
             return "needs_input"
@@ -369,6 +369,19 @@ def router(state: AppState) -> APIRouter:
                 SecretStore(settings.state_dir).names(),
             )
         except SecretError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+
+    @router.get("/api/threads/{thread_id}/messaging")
+    async def get_messaging(thread_id: str) -> dict[str, Any]:
+        return MessagingStore(settings.state_dir).get_policy(thread_id)
+
+    @router.put("/api/threads/{thread_id}/messaging")
+    async def put_messaging(thread_id: str, payload: dict[str, Any]) -> Any:
+        try:
+            return MessagingStore(settings.state_dir).set_policy(
+                thread_id, payload.get("mode"), payload.get("senders", [])
+            )
+        except MessagingError as exc:
             return JSONResponse({"error": str(exc)}, status_code=422)
 
     return router

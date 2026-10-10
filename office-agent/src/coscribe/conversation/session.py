@@ -35,6 +35,7 @@ HumanInTheLoopMiddleware's own exactly).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import shutil
@@ -137,6 +138,7 @@ from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
 from ..tools.background_tasks import BackgroundTask, set_change_listener
 from ..tools.browser import BROWSER_HOST, page_screenshot
+from ..tools.conversations import MessagingStore, format_incoming, set_inbox_listener
 from ..tools.documents import DocumentToolkit
 from ..tools.http_request import build_http_tools
 from ..tools.interaction import (
@@ -450,6 +452,11 @@ def _fit_title(title: str) -> str:
 
 _WIND_DOWN_REPORT_TURN = 3
 _MAX_REPORT_TURNS_IN_ROW = 5
+_MESSAGE_WIND_DOWN_NOTE = (
+    "\n\n(Several messages from other conversations have come in without a word from "
+    "the user. Tell the user where things stand rather than replying again, unless "
+    "they asked for more rounds.)"
+)
 _WIND_DOWN_NOTE = (
     "\n\n(Several sub-agent reports in a row have come in without a word from the "
     "user. Tell the user where things stand now rather than starting more sub-agents, "
@@ -535,6 +542,10 @@ class ChatSessionLG:
         # Report turns since the user last spoke: each can start another
         # sub-agent, whose report starts another turn, with nobody there.
         self._report_turns_in_row = 0
+        self._delivering_inbox = False
+        self._loop: asyncio.AbstractEventLoop | None = None
+        with contextlib.suppress(RuntimeError):
+            self._loop = asyncio.get_running_loop()
         self.settings = settings
         # None (the old default, still used by anything that hasn't been
         # taught about per-thread workspaces) falls back to the global
@@ -697,6 +708,7 @@ class ChatSessionLG:
         # needs a place to live outside any single call's stack).
         self._live_websocket: EventSink | None = None
         set_change_listener(self.thread_id, self._background_task_changed)
+        set_inbox_listener(self.thread_id, self.schedule_inbox_delivery)
         # A reply is being worked on -- unlike the turn lock, not held for the
         # moments a reconnect or a folder change takes it.
         self.turn_running = False
@@ -894,6 +906,68 @@ class ChatSessionLG:
             logger.exception("reporting sub-agent %s to its conversation failed", task_id)
         finally:
             self._reporting_subagents.discard(task_id)
+
+    def schedule_inbox_delivery(self) -> None:
+        """Messages from other conversations are waiting: turn them into a turn
+        of this one, once. Callable from a tool thread or a connect, with or
+        without a running loop (then they wait for the next call)."""
+        if self._delivering_inbox or self.is_workflow_run():
+            return
+        if MessagingStore(self.settings.state_dir).pending(self.thread_id) == 0:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # A sync tool runs in a worker thread: hand over to the server's loop.
+            if self._loop is not None and not self._loop.is_closed():
+                self._loop.call_soon_threadsafe(self.schedule_inbox_delivery)
+            return
+        self._loop = loop
+        self._delivering_inbox = True
+        task = loop.create_task(self._deliver_inbox())
+        self._report_tasks.add(task)
+        task.add_done_callback(self._report_tasks.discard)
+
+    async def _deliver_inbox(self) -> None:
+        """Tells the conversation what other conversations sent it, as a turn of
+        its own after the one in progress. Bounded like sub-agent reports: past
+        the cap the messages stay in the inbox until the user next speaks."""
+        store = MessagingStore(self.settings.state_dir)
+        # A message that arrives during the turn it started needs another one.
+        again = True
+        try:
+            async with self._turn_lock:
+                if self._report_turns_in_row >= _MAX_REPORT_TURNS_IN_ROW:
+                    again = False
+                    await self.notify_resync()
+                    return
+                messages = store.take_all(self.thread_id)
+                if not messages:
+                    return
+                self._report_turns_in_row += 1
+                text = format_incoming(messages)
+                if self._report_turns_in_row >= _WIND_DOWN_REPORT_TURN:
+                    text += _MESSAGE_WIND_DOWN_NOTE
+                ThreadMetaStore(self.settings.state_dir).update(self.thread_id, archived=False)
+                websocket: Any = self._live_websocket
+                if websocket is not None:
+                    try:
+                        await websocket.send_json({"type": "turn_started", "text": text})
+                    except Exception:  # noqa: BLE001 -- the tab went away; run unwatched
+                        websocket = None
+                self._current_turn_task = asyncio.current_task()
+                await self._handle_user_message_locked(
+                    text, websocket or SilentSocket(), notice=True
+                )
+            if websocket is None:
+                await self.notify_resync()
+        except Exception:
+            again = False
+            logger.exception("delivering messages from other conversations failed")
+        finally:
+            self._delivering_inbox = False
+            if again:
+                self.schedule_inbox_delivery()
 
     def _stop_waited_on_subagents(self) -> None:
         """Stop the sub-agents a turn is waiting on; background ones were
@@ -3446,6 +3520,8 @@ class ChatSessionLG:
             ThreadMetaStore(self.settings.state_dir).mark_finished(
                 self.thread_id, watched=self._live_websocket is not None
             )
+            # Messages that came in during the turn, or waited on the cap.
+            self.schedule_inbox_delivery()
 
     async def _handle_user_message_locked(
         self,

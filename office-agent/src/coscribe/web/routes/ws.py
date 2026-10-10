@@ -122,6 +122,7 @@ def router(state: AppState) -> APIRouter:
             # Tracked, so shutdown stops it before the checkpointer it reads
             # closes.
             _track_background(asyncio.create_task(session.resume_after_reconnect(websocket)))
+            session.schedule_inbox_delivery()
             while True:
                 data = await websocket.receive_json()
                 message_type = data.get("type")

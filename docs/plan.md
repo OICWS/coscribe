@@ -26,6 +26,9 @@ Last reviewed: 2026-10-09.
    accepts or changes it; then an admin adds the second collaborator, their handle
    goes into `.github/CODEOWNERS`, and the ruleset requires code-owner review for
    those paths.
+3. **Conversations message each other** (record 0008, accepted): the tools, inbox and
+   policy API are in; next, the Edit environment switch ("other conversations may message
+   this one", and which) and a card for an incoming message in the chat.
 
 ## Needs the maintainer's testing (could not be verified here)
 
