@@ -12,9 +12,10 @@ export const entryId = (entry: BackgroundEntry) => entry.task.task_id;
 export const isEntryActive = (entry: BackgroundEntry) =>
   entry.task.status === "running" || entry.task.status === "needs_approval";
 
-/** What an entry is, in a word: "Agent", "Python", "Node". */
+/** What an entry is, in a word: "Agent", "Python", "Node", "Command". */
 export function entryLabel(entry: BackgroundEntry): string {
   if (entry.kind === "agent") return "Agent";
+  if (entry.task.language === "shell") return "Command";
   return entry.task.language === "node" ? "Node" : "Python";
 }
 

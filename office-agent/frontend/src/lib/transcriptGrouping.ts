@@ -389,6 +389,11 @@ const TOOL_SUMMARIES: Record<string, (args: ArgRecord) => SummaryParts> = {
     object: str(a, "description") ?? null,
     glue: ": ",
   }),
+  run_background_command: (a) => ({
+    verb: "Started a background command",
+    object: str(a, "description") ?? null,
+    glue: ": ",
+  }),
   check_background_task: () => ({ verb: "Checked a background task", object: null }),
   kill_background_task: () => ({ verb: "Killed a background task", object: null }),
   wake_on_task: (a) => ({
@@ -597,7 +602,8 @@ const NOT_AN_EDIT = /^(read|write|list|check|render|extract)_/;
 
 function categoryOf(toolName: string, connectorTools: ReadonlySet<string>): Category {
   if (connectorTools.has(toolName)) return "connector";
-  if (COMMAND_TOOL_NAMES.has(toolName) || toolName === "run_background_script") return "command";
+  if (COMMAND_TOOL_NAMES.has(toolName) || toolName === "run_background_script" || toolName === "run_background_command")
+    return "command";
   if (SUBAGENT_TOOL_NAMES.has(toolName)) return "subagent";
   if (FETCH_TOOL_NAMES.has(toolName)) return "fetch";
   if (toolName === "web_search" || (toolName.startsWith("search_") && toolName !== "search_tools")) return "search";

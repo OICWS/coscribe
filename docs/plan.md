@@ -26,9 +26,6 @@ Last reviewed: 2026-10-09.
    accepts or changes it; then an admin adds the second collaborator, their handle
    goes into `.github/CODEOWNERS`, and the ruleset requires code-owner review for
    those paths.
-3. **Background commands**: the Background tasks panel lists sub-agents and
-   scripts; add `run_background_command` so a shell command can run there too
-   (touches `coordinator.py` and the approval rules).
 
 ## Needs the maintainer's testing (could not be verified here)
 

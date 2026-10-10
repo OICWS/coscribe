@@ -367,7 +367,7 @@ function ScriptDetail({
     <div className="flex flex-col gap-4 px-4 pb-6 pt-3">
       <div className="flex items-center justify-between gap-3 text-[13px] text-[var(--muted)]">
         <span>
-          {task.language === "node" ? "Node" : "Python"} script ·{" "}
+          {task.language === "shell" ? "Command" : `${task.language === "node" ? "Node" : "Python"} script`} ·{" "}
           <span className="text-[var(--fg)]">{scriptOutcome(task)}</span>
         </span>
         {running && <StopButton onStop={() => onStop(task)} busy={busy} />}
@@ -522,7 +522,7 @@ export function BackgroundTasksPanel({
           <div className="flex flex-col gap-2 px-3 pb-4">
             {entries.length === 0 && (
               <p className="px-3 py-8 text-center text-sm text-[var(--muted)]">
-                Sub-agents and scripts this conversation runs in the background show up here.
+                Sub-agents, scripts and commands this conversation runs in the background show up here.
               </p>
             )}
             {running.length > 0 && (
