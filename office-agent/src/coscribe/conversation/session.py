@@ -879,10 +879,26 @@ class ChatSessionLG:
                 store = SubAgentTaskStore(self.settings.state_dir)
                 task = store.load(task_id)
                 if task is None or task.reported or self.is_workflow_run():
+                    logger.info(
+                        "sub-agent %s not reported to %s: %s",
+                        task_id,
+                        self.thread_id,
+                        "its record is gone"
+                        if task is None
+                        else "already read by the model"
+                        if task.reported
+                        else "a workflow run",
+                    )
                     return
                 if self._report_turns_in_row >= _MAX_REPORT_TURNS_IN_ROW:
                     # Left unreported: the model finds it with
                     # list_subagent_tasks once the user is back.
+                    logger.info(
+                        "sub-agent %s not reported to %s: %d report turns without the user",
+                        task_id,
+                        self.thread_id,
+                        self._report_turns_in_row,
+                    )
                     await self.notify_resync()
                     return
                 self._report_turns_in_row += 1
