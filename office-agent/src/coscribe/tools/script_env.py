@@ -31,6 +31,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -211,7 +212,18 @@ def venv_python(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
+# Two first-ever runs at once (two scripts started together) would otherwise both
+# create the venv in one directory, and the second would use it while the first is
+# still installing the baseline packages into it.
+_ENV_LOCK = threading.Lock()
+
+
 def ensure_script_env(state_dir: Path) -> Path:
+    with _ENV_LOCK:
+        return _ensure_script_env(state_dir)
+
+
+def _ensure_script_env(state_dir: Path) -> Path:
     """Return the script-env venv's directory, creating (and seeding with
     _BASELINE_PACKAGES) it on first use. Never raises for an environment
     that already exists and works; raises RuntimeError with the real

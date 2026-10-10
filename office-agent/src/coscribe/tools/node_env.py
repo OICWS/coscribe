@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 _NPM_TIMEOUT = 120.0
@@ -73,7 +74,16 @@ def _npm() -> str:
     return shutil.which("npm") or "npm"
 
 
+# See script_env's lock: two first runs at once must not both run `npm install`.
+_ENV_LOCK = threading.Lock()
+
+
 def ensure_node_env(state_dir: Path) -> Path:
+    with _ENV_LOCK:
+        return _ensure_node_env(state_dir)
+
+
+def _ensure_node_env(state_dir: Path) -> Path:
     """Return the node-env directory, creating (and seeding with
     _BASELINE_PACKAGES) it on first use. Never raises for an environment
     that already exists and works; raises RuntimeError with the real
