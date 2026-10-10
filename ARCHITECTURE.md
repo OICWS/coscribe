@@ -156,7 +156,7 @@ Workflows never use it: a fixed run must not contain an autonomous agent.
 ### Cost is part of the design
 
 - **Prompt caching works by prefix**, so nothing that differs between
-  conversations goes into the system prompt: folders and remembered facts
+  conversations goes into the system prompt: folders and the global instructions
   are a note on the user's message, sent again only when they change.
 - The tool list is fixed for the whole conversation: most tools start
   hidden, `search_tools` returns the ones the model asks for with their
@@ -196,8 +196,8 @@ Workflows never use it: a fixed run must not contain an autonomous agent.
 - **Skills**: `SKILL.md` folders loaded on demand. Built-in: pptx, excel,
   word and skill-creator; users add their own in `skills_dir`.
 - **Hooks**: scripts on lifecycle events (above).
-- **Memory**: one `MEMORY.md` of instructions and remembered facts, shared
-  by every conversation.
+- **Global instructions**: one `MEMORY.md` the user edits in Settings, read into
+  every conversation. The model cannot write to it.
 
 ## Scope
 

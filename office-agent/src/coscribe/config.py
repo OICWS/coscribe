@@ -101,10 +101,9 @@ class Settings(BaseSettings):
     """
 
     memory_path: Path = Path("./MEMORY.md")
-    """File of durable facts the Coordinator remembers across sessions (distinct
+    """The user's global instructions, read into every conversation (distinct
     from a thread's own conversation history). Auto-created like workspace_root/skills_dir;
-    empty/missing = no memory yet. The Coordinator can append to it via the
-    remember tool.
+    empty/missing = none. Only the user writes to it (Settings); the model cannot.
     """
 
     hooks_config_path: Path | None = None

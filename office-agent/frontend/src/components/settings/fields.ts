@@ -69,7 +69,7 @@ export const WORKSPACE_FIELDS: SettingsField[] = [
     key: "COSCRIBE_MEMORY_PATH",
     label: "Memory file",
     placeholder: "./MEMORY.md",
-    description: "Where your instructions and anything coscribe is asked to remember are kept.",
+    description: "Where your global instructions are kept.",
   },
   {
     key: "COSCRIBE_MCP_CONFIG_PATH",
