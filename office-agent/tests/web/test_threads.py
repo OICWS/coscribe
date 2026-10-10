@@ -2077,3 +2077,35 @@ def test_deleting_a_conversation_removes_its_environment_lg(
         client.delete("/api/threads/envthread")
 
     assert not (tmp_path / "state" / "envthread.env.json").exists()
+
+
+def test_messaging_policy_round_trips_and_refuses_a_bad_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        assert client.get("/api/threads/b/messaging").json() == {"mode": "off", "senders": []}
+
+        saved = client.put("/api/threads/b/messaging", json={"mode": "selected", "senders": ["a"]})
+        refused = client.put("/api/threads/b/messaging", json={"mode": "everyone", "senders": []})
+
+        assert saved.json() == {"mode": "selected", "senders": ["a"]}
+        assert client.get("/api/threads/b/messaging").json() == saved.json()
+        assert refused.status_code == 422
+
+
+def test_deleting_a_conversation_forgets_who_may_message_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/b") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            ws.send_json({"type": "user_message", "text": "hello"})
+            _receive_until(ws, "tasks_changed")
+        client.put("/api/threads/b/messaging", json={"mode": "any", "senders": []})
+
+        client.delete("/api/threads/b")
+
+        assert client.get("/api/threads/b/messaging").json()["mode"] == "off"

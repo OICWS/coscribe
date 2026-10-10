@@ -1,5 +1,6 @@
 from .background_tasks import BackgroundTask, BackgroundTaskStore, build_background_task_tools
 from .browser import build_browser_tools
+from .conversations import build_conversation_tools
 from .convert import build_convert_tools
 from .documents import build_document_tools
 from .files import build_file_tools
@@ -62,6 +63,7 @@ __all__ = [
     "WakeRequest",
     "WakeStore",
     "build_background_task_tools",
+    "build_conversation_tools",
     "build_convert_tools",
     "build_document_tools",
     "build_file_tools",

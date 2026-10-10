@@ -2400,3 +2400,87 @@ def test_modes_are_one_at_a_time_lg(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         False,
         False,
     )
+
+
+def test_a_message_from_another_conversation_becomes_a_turn_of_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools.conversations import build_conversation_tools
+
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="Noted the totals.")])
+    state_dir = tmp_path / "state"
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        client.put("/api/threads/b/messaging", json={"mode": "any", "senders": []})
+        with client.websocket_connect("/ws/b") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            send = {t.__name__: t for t in build_conversation_tools("a", state_dir)}[  # type: ignore[attr-defined]
+                "send_to_conversation"
+            ]
+            # A sync tool runs in a worker thread, as it does inside a turn.
+            send("b", "The totals are in col F.")  # type: ignore[operator]
+            messages = _receive_until(ws, "tasks_changed")
+
+    started = next(m for m in messages if m["type"] == "turn_started")
+    assert 'from "a"' in started["text"] or "(conversation a)" in started["text"]
+    assert "The totals are in col F." in started["text"]
+    reply = next(m for m in messages if m["type"] == "agent_message")
+    assert reply["text"] == "Noted the totals."
+    seen = fake_model.received[0][-1].content
+    assert "The totals are in col F." in str(seen)
+
+
+def test_a_message_to_a_conversation_nobody_has_opened_waits_until_it_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.tools.conversations import MessagingStore, build_conversation_tools
+
+    fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="Read it.")])
+    state_dir = tmp_path / "state"
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        client.put("/api/threads/b/messaging", json={"mode": "selected", "senders": ["a"]})
+        send = {t.__name__: t for t in build_conversation_tools("a", state_dir)}[  # type: ignore[attr-defined]
+            "send_to_conversation"
+        ]
+        send("b", "Please check sheet 2.")  # type: ignore[operator]
+        assert MessagingStore(state_dir).pending("b") == 1
+
+        with client.websocket_connect("/ws/b") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            messages = _receive_until(ws, "tasks_changed")
+
+    assert any("Please check sheet 2." in m.get("text", "") for m in messages)
+    assert MessagingStore(state_dir).pending("b") == 0
+
+
+def test_messages_stop_after_the_cap_until_the_user_speaks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from coscribe.conversation.session import _MAX_REPORT_TURNS_IN_ROW
+    from coscribe.tools.conversations import MessagingStore, build_conversation_tools
+
+    fake_model = FakeToolCallingChatModel(
+        responses=[AIMessage(content=f"reply {i}") for i in range(_MAX_REPORT_TURNS_IN_ROW + 2)]
+    )
+    state_dir = tmp_path / "state"
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        client.put("/api/threads/b/messaging", json={"mode": "any", "senders": []})
+        send = {t.__name__: t for t in build_conversation_tools("a", state_dir)}[  # type: ignore[attr-defined]
+            "send_to_conversation"
+        ]
+        with client.websocket_connect("/ws/b") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            for i in range(_MAX_REPORT_TURNS_IN_ROW):
+                send("b", f"ping {i}")  # type: ignore[operator]
+                _receive_until(ws, "tasks_changed")
+
+            send("b", "one too many")  # type: ignore[operator]
+            ws.send_json({"type": "user_message", "text": "hello"})
+            messages = _receive_until(ws, "tasks_changed")
+            more = _receive_until(ws, "tasks_changed")
+
+    assert any(m["type"] == "agent_message" for m in messages)
+    assert any("one too many" in m.get("text", "") for m in [*messages, *more])
+    assert MessagingStore(state_dir).pending("b") == 0

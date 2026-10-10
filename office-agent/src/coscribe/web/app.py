@@ -111,6 +111,7 @@ from ..tools.connector_permissions import (
     is_read_only,
     name_of,
 )
+from ..tools.conversations import MessagingStore
 from ..tools.mcp import (
     prepare_for_connect,
     validate_mcp_config,
@@ -722,6 +723,7 @@ def create_app_lg(settings: Settings | None = None) -> FastAPI:
         _workspace_sidecar_path(thread_id).unlink(missing_ok=True)
         _title_sidecar_path(thread_id).unlink(missing_ok=True)
         SessionEnvironments(settings.state_dir).delete(thread_id)
+        MessagingStore(settings.state_dir).delete(thread_id)
         ThreadMetaStore(settings.state_dir).delete(thread_id)
         sessions.pop(thread_id, None)
         return existed

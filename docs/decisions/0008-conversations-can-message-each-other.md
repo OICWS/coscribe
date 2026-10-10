@@ -1,6 +1,7 @@
 # 0008: Conversations can message each other
 
-Status: proposed (2026-10-09), design only; nothing is built.
+Status: accepted (2026-10-10). Built: the tools, the inbox and the policy API. Edit
+environment's switch is the next PR.
 
 ## Context
 Conversations are isolated: they share a workspace's files and nothing else
@@ -29,5 +30,7 @@ user running an Excel analysis in one and a deck in another has to relay by hand
 ## Consequences
 - Touches `conversation/session.py` and `coordinator.py` (invariant path: needs an
   independent review) and the Edit environment dialog (frontend).
-- Open: do messages cross a restart; may a scheduled task send one; is a
-  broadcast to "all allowed conversations" wanted.
+- Settled while building: a message crosses a restart (an inbox file per conversation, up
+  to 50 unread); a scheduled task's conversation is not special-cased (it can send only
+  where the receiver allowed it); no broadcast; `send_to_conversation` asks like any
+  durable side effect (WRITE_LOCAL), `list_conversations` does not.

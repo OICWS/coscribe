@@ -54,6 +54,7 @@ GET /api/threads/{thread_id}/background-tasks
 GET /api/threads/{thread_id}/context-breakdown
 GET /api/threads/{thread_id}/environment
 GET /api/threads/{thread_id}/files/download
+GET /api/threads/{thread_id}/messaging
 GET /api/threads/{thread_id}/subagents
 GET /api/threads/{thread_id}/tasks
 GET /api/tools
@@ -107,5 +108,6 @@ PUT /api/scheduled-tasks/{trigger_id}
 PUT /api/scheduled-tasks/{trigger_id}/notes
 PUT /api/secrets/{name}
 PUT /api/threads/{thread_id}/environment
+PUT /api/threads/{thread_id}/messaging
 WS /ws/browser
 WS /ws/{thread_id}
