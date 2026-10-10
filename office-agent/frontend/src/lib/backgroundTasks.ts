@@ -38,15 +38,22 @@ export function scriptOutcome(task: BackgroundScriptTask): string {
 
 /** This conversation's sub-agents and background scripts, oldest first. The
  * two lists are read apart so that a failing one (an older server has no
- * script endpoint) leaves the other on screen. */
-export async function loadBackgroundEntries(threadId: string): Promise<BackgroundEntry[]> {
+ * script endpoint, or one request timed out while the server was busy starting
+ * a task) leaves the other on screen and keeps `previous` entries of its own
+ * kind: an empty answer from a failed read would close the task being viewed. */
+export async function loadBackgroundEntries(
+  threadId: string,
+  previous: BackgroundEntry[] = [],
+): Promise<BackgroundEntry[]> {
   const [agents, scripts] = await Promise.all([
-    getSubAgentTasks(threadId).catch(() => [] as SubAgentTask[]),
-    getBackgroundScripts(threadId).catch(() => [] as BackgroundScriptTask[]),
+    getSubAgentTasks(threadId).catch(() => null),
+    getBackgroundScripts(threadId).catch(() => null),
   ]);
   const entries: BackgroundEntry[] = [
-    ...agents.map((task) => ({ kind: "agent" as const, task })),
-    ...scripts.map((task) => ({ kind: "script" as const, task })),
+    ...(agents ? agents.map((task) => ({ kind: "agent" as const, task })) : previous.filter((e) => e.kind === "agent")),
+    ...(scripts
+      ? scripts.map((task) => ({ kind: "script" as const, task }))
+      : previous.filter((e) => e.kind === "script")),
   ];
   return entries.sort((a, b) => a.task.started_at.localeCompare(b.task.started_at));
 }
