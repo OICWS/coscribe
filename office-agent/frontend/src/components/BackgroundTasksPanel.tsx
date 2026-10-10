@@ -417,6 +417,8 @@ export function BackgroundTasksPanel({
   onClose,
 }: BackgroundTasksPanelProps) {
   const [entries, setEntries] = useState<BackgroundEntry[]>([]);
+  const entriesRef = useRef<BackgroundEntry[]>([]);
+  entriesRef.current = entries;
   const [openId, setOpenId] = useState<string | null>(focusTaskId);
   const [showFinished, setShowFinished] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -429,7 +431,7 @@ export function BackgroundTasksPanel({
   useEffect(() => {
     let cancelled = false;
     const refresh = () =>
-      loadBackgroundEntries(threadId).then((list) => {
+      loadBackgroundEntries(threadId, entriesRef.current).then((list) => {
         if (!cancelled) setEntries(list);
       });
     refresh();
@@ -454,7 +456,7 @@ export function BackgroundTasksPanel({
     setBusyId(entryId(entry));
     try {
       await (entry.kind === "agent" ? stopSubAgentTask : stopBackgroundScript)(entryId(entry));
-      setEntries(await loadBackgroundEntries(threadId));
+      setEntries(await loadBackgroundEntries(threadId, entriesRef.current));
     } finally {
       setBusyId(null);
     }
@@ -462,7 +464,7 @@ export function BackgroundTasksPanel({
 
   const clearFinished = async () => {
     await Promise.all([clearFinishedSubAgents(threadId), clearFinishedBackgroundScripts(threadId).catch(() => null)]);
-    setEntries(await loadBackgroundEntries(threadId));
+    setEntries(await loadBackgroundEntries(threadId, entriesRef.current));
   };
 
   const opened = openId ? entries.find((entry) => entryId(entry) === openId) : undefined;

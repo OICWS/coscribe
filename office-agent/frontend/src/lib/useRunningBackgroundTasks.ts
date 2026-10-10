@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type BackgroundEntry, isEntryActive, loadBackgroundEntries } from "./backgroundTasks";
 
 // A backstop: the server says when the list changes.
@@ -13,6 +13,8 @@ export function useRunningBackgroundTasks(threadId: string, tick: number, enable
   // this one while its own is on the way.
   const [read, setRead] = useState<{ threadId: string; tasks: BackgroundEntry[] }>({ threadId, tasks: [] });
   const tasks = read.threadId === threadId ? read.tasks : [];
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
   const active = tasks.filter(isEntryActive);
   const anyActive = active.length > 0;
 
@@ -20,7 +22,7 @@ export function useRunningBackgroundTasks(threadId: string, tick: number, enable
     if (!enabled) return;
     let cancelled = false;
     const refresh = () =>
-      loadBackgroundEntries(threadId)
+      loadBackgroundEntries(threadId, tasksRef.current)
         .then((list) => {
           if (!cancelled) setRead({ threadId, tasks: list });
         })
