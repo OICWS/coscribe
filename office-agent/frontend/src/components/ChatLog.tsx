@@ -544,6 +544,16 @@ function ToolRunGroupView({
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Which calls are opened, held here rather than in each row: a row is unmounted
+  // when a newer call arrives (one call has no list, several do) or an approval
+  // takes the group over, and would otherwise come back closed.
+  const [openCalls, setOpenCalls] = useState<ReadonlySet<string>>(new Set());
+  const toggleCall = (id: string) =>
+    setOpenCalls((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   const connectorTools = useContext(ConnectorTools);
 
   if (groupHasPendingApproval(group)) {
@@ -564,7 +574,11 @@ function ToolRunGroupView({
         type="button"
         aria-expanded={open}
         className="inline-flex max-w-full items-center gap-1 text-left text-[var(--muted)] hover:text-[var(--fg)]"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          // A lone call's detail is its group's body; it stays open when more calls join.
+          if (single) toggleCall(single.id);
+          setOpen((v) => !v);
+        }}
       >
         <span className="min-w-0">
           {header.shown.map((parts, index) => (
@@ -600,6 +614,8 @@ function ToolRunGroupView({
                 item={item}
                 running={isRunning(item, live)}
                 first={index === 0}
+                open={openCalls.has(item.id)}
+                onToggle={() => toggleCall(item.id)}
                 onApprove={onApprove}
                 onPptxShapePicked={onPptxShapePicked}
               />
@@ -616,23 +632,26 @@ function ToolStepRow({
   item,
   running,
   first,
+  open,
+  onToggle,
   onApprove,
   onPptxShapePicked,
 }: {
   item: ToolOrApprovalItem;
   running: boolean;
   first: boolean;
+  open: boolean;
+  onToggle: () => void;
   onApprove: (id: string, approved: boolean, scope?: "task") => void;
   onPptxShapePicked: (capture: PptxShapeCapture) => void;
 }) {
-  const [open, setOpen] = useState(false);
   return (
     <div className={first ? "" : "border-t border-[var(--border)]"}>
       <button
         type="button"
         aria-expanded={open}
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--card-bg)]"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
       >
         <span className="min-w-0 flex-1 truncate">
           <SummaryLabel parts={summarizeItemParts(item, running)} />
