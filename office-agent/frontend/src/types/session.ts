@@ -73,12 +73,12 @@ export interface SubAgentTask {
   continues?: string;
 }
 
-/** A script started with run_background_script -- tools/background_tasks.py's
+/** A script or command started with run_background_script / run_background_command -- tools/background_tasks.py's
  * BackgroundTask.to_dict(). */
 export interface BackgroundScriptTask {
   task_id: string;
   thread_id: string;
-  language: "python" | "node";
+  language: "python" | "node" | "shell";
   description: string;
   status: "running" | "succeeded" | "failed" | "timed_out" | "killed" | "interrupted";
   started_at: string;

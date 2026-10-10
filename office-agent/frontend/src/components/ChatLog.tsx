@@ -883,8 +883,11 @@ function ApprovalDetail({
     item.toolName === "run_python_script" ||
     item.toolName === "run_code_command" ||
     item.toolName === "run_node_script" ||
-    item.toolName === "run_background_script";
+    item.toolName === "run_background_script" ||
+    item.toolName === "run_background_command";
   const scriptArgs = item.arguments;
+  const isShellCommand = item.toolName === "run_background_command";
+  const scriptText = isShellCommand ? scriptArgs.command : scriptArgs.script;
   const hasPreview = Boolean(item.beforePreview || item.afterPreview);
   const pptxTarget = pptxOverlayTargetOf(item.arguments);
   // The code module's actions can be allowed for the rest of their task.
@@ -908,12 +911,14 @@ function ApprovalDetail({
             <div className="text-xs text-[var(--muted)]">{scriptArgs.description}</div>
           )}
           <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 font-mono text-xs leading-normal">
-            {typeof scriptArgs.script === "string" ? scriptArgs.script : JSON.stringify(scriptArgs.script)}
+            {typeof scriptText === "string" ? scriptText : JSON.stringify(scriptText)}
           </pre>
           <div className="text-xs text-[var(--muted)]">
             {item.toolName === "run_code_command"
               ? "The code module runs this with this app's own access and no sandbox: it can read and change any file this app can and use the network. Review it before approving."
-              : "This script isn’t sandboxed: it can read any file this app can and use the network. It can write only in the workspace and folders you added -- a safeguard against mistakes, not a security boundary. Review it before approving."}
+              : isShellCommand
+                ? "This command runs through your shell with this app's own access and no sandbox: it can read and change any file this app can and use the network. Unlike a script, nothing limits where it writes. Review it before approving."
+                : "This script isn’t sandboxed: it can read any file this app can and use the network. It can write only in the workspace and folders you added -- a safeguard against mistakes, not a security boundary. Review it before approving."}
           </div>
         </div>
       ) : (

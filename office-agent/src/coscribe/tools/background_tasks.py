@@ -47,6 +47,9 @@ import json
 import os
 import re
 import shutil
+import signal
+import subprocess
+import sys
 import tempfile
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -73,6 +76,8 @@ from .script_guard import (
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 VALID_LANGUAGES = ("python", "node")
+# What a task ran: a script in one of the two languages, or a shell command line.
+TASK_KINDS = (*VALID_LANGUAGES, "shell")
 VALID_STATUSES = ("running", "succeeded", "failed", "timed_out", "killed", "interrupted")
 FINISHED_STATUSES = tuple(status for status in VALID_STATUSES if status != "running")
 
@@ -142,7 +147,7 @@ def _now_iso() -> str:
 class BackgroundTask:
     task_id: str
     thread_id: str
-    language: str  # "python" | "node"
+    language: str  # "python" | "node" | "shell"
     description: str
     status: str  # "running" | "succeeded" | "failed" | "timed_out" | "killed"
     started_at: str
@@ -264,11 +269,28 @@ class BackgroundTaskStore:
         return text
 
 
+def _kill(task: BackgroundTask, proc: asyncio.subprocess.Process) -> None:
+    """A shell command's children outlive a kill of the shell alone, so a command
+    is stopped as a whole tree; a script has no children worth chasing."""
+    if task.language != "shell":
+        proc.kill()
+        return
+    if sys.platform == "win32":
+        subprocess.run(  # noqa: S603 -- fixed arguments, a pid we started
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, check=False
+        )
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 async def _supervise(
     store: BackgroundTaskStore,
     task: BackgroundTask,
     proc: asyncio.subprocess.Process,
-    scratch_dir: Path,
+    scratch_dir: Path | None,
     timeout_seconds: float,
 ) -> None:
     """Owns a started process end to end: streams its combined stdout/
@@ -301,11 +323,12 @@ async def _supervise(
                 exit_code = await asyncio.wait_for(_drain_then_wait(), timeout=timeout_seconds)
             except TimeoutError:
                 timed_out = True
-                proc.kill()
+                _kill(task, proc)
                 exit_code = await proc.wait()
     finally:
         _LIVE.pop(task.task_id, None)
-        shutil.rmtree(scratch_dir, ignore_errors=True)
+        if scratch_dir is not None:
+            shutil.rmtree(scratch_dir, ignore_errors=True)
 
     task.finished_at = _now_iso()
     task.exit_code = exit_code
@@ -346,7 +369,7 @@ def stop_background_task(
     live_task, proc = live
     live_task.status = "killed"
     BackgroundTaskStore(state_dir).save(live_task)
-    proc.kill()
+    _kill(live_task, proc)
     return live_task.to_dict()
 
 
@@ -480,7 +503,56 @@ def build_background_task_tools(
             # stream, not two separate ones to correlate by hand).
             stderr=asyncio.subprocess.STDOUT,
         )
+        return _register(proc, language, description, scratch_dir, timeout)
 
+    async def run_background_command(
+        command: str, description: str, timeout_seconds: float = _DEFAULT_TIMEOUT
+    ) -> dict[str, Any]:
+        """Start a shell command line running in the background and return
+        immediately -- for a command expected to take long (a build, a
+        download, a sync, a long-running tool) where waiting would tie up the
+        whole conversation, or that should keep going while you do other work.
+        It runs through the machine's own shell (sh, or cmd on Windows) with
+        the workspace root as its working directory, as the user, with no
+        sandbox: unlike run_background_script it has no write safeguard either,
+        so it can change any file this app can. Prefer run_background_script
+        for anything a Python or Node script can do.
+
+        This call does NOT return the command's output -- only a task_id
+        confirming it started. Use check_background_task(task_id) to read its
+        output/status later, wake_on_task(task_id, reason) to end this turn
+        and be resumed once it finishes, or kill_background_task(task_id) to
+        stop it (the command and the processes it started).
+
+        Args:
+            command: the command line, exactly as typed in a terminal.
+            description: one sentence, plain language, what this command
+                does -- shown with the command wherever it is presented for
+                approval.
+            timeout_seconds: how long it may run before being killed (capped
+                at 21600 = 6 hours).
+        """
+        if not command.strip():
+            raise ValueError("command must not be empty")
+        timeout = min(max(timeout_seconds, 1.0), _MAX_TIMEOUT)
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(root),
+            env=overlay_env(os.environ, session_env() if session_env else None),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            # Its own process group, so a kill reaches what the shell started.
+            start_new_session=sys.platform != "win32",
+        )
+        return _register(proc, "shell", description, None, timeout)
+
+    def _register(
+        proc: asyncio.subprocess.Process,
+        language: str,
+        description: str,
+        scratch_dir: Path | None,
+        timeout: float,
+    ) -> dict[str, Any]:
         task = BackgroundTask(
             task_id=uuid.uuid4().hex[:12],
             thread_id=thread_id,
@@ -554,6 +626,7 @@ def build_background_task_tools(
 
     return [
         tool_metadata(run_background_script, risk_category="EXEC", category="background_tasks"),
+        tool_metadata(run_background_command, risk_category="EXEC", category="background_tasks"),
         tool_metadata(check_background_task, risk_category="READ", category="background_tasks"),
         tool_metadata(list_background_tasks, risk_category="READ", category="background_tasks"),
         tool_metadata(
