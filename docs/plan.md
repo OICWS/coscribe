@@ -55,7 +55,9 @@ Last reviewed: 2026-10-09.
 
 ## Later (wanted, not scheduled)
 
-- Conversations messaging each other (record 0008, proposed; design only).
+- Conversations messaging each other (record 0008): part 1, the backend, is in (switched
+  off, nothing can turn it on yet); next the switch in the environment endpoint, then
+  the Edit environment toggle and a message card in the frontend.
 
 - Network access per session (an Edit environment setting). Without a sandbox it
   could only switch off coscribe's own web tools; it must say so on its face.

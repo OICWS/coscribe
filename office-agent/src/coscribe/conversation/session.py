@@ -42,6 +42,7 @@ import tempfile
 import time
 import unicodedata
 import uuid
+import weakref
 from asyncio import Future, get_running_loop
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -137,6 +138,11 @@ from ..tools._thumbnail import render_single_page_preview
 from ..tools._workspace import WorkspaceScope
 from ..tools.background_tasks import BackgroundTask, set_change_listener
 from ..tools.browser import BROWSER_HOST, page_screenshot
+from ..tools.conversation_messages import (
+    ConversationMessages,
+    build_conversation_message_tools,
+    message_turn_text,
+)
 from ..tools.documents import DocumentToolkit
 from ..tools.http_request import build_http_tools
 from ..tools.interaction import (
@@ -450,6 +456,18 @@ def _fit_title(title: str) -> str:
 
 _WIND_DOWN_REPORT_TURN = 3
 _MAX_REPORT_TURNS_IN_ROW = 5
+
+# Conversations of this process by thread id, so a message sent from one can
+# start a turn in another that is open; a closed one finds it in its inbox.
+_LIVE_SESSIONS: weakref.WeakValueDictionary[str, ChatSessionLG] = weakref.WeakValueDictionary()
+
+
+def deliver_to_conversation(thread_id: str) -> None:
+    session = _LIVE_SESSIONS.get(thread_id)
+    if session is not None:
+        session.schedule_inbox_delivery()
+
+
 _WIND_DOWN_NOTE = (
     "\n\n(Several sub-agent reports in a row have come in without a word from the "
     "user. Tell the user where things stand now rather than starting more sub-agents, "
@@ -519,6 +537,7 @@ class ChatSessionLG:
         configured_models: Callable[[], list[str]] | None = None,
     ) -> None:
         self.thread_id = thread_id
+        _LIVE_SESSIONS[thread_id] = self
         # "provider:model" for every configured provider -- what a sub-agent
         # may be run on.
         self._configured_models = configured_models or (lambda: [self._model_string])
@@ -532,6 +551,9 @@ class ChatSessionLG:
         # tasks doing it (held so they aren't garbage-collected mid-turn).
         self._reporting_subagents: set[str] = set()
         self._report_tasks: set[asyncio.Task[None]] = set()
+        self._inbox_delivering = False
+        # Where a message sent from another conversation's tool thread starts its turn.
+        self._loop: asyncio.AbstractEventLoop | None = None
         # Report turns since the user last spoke: each can start another
         # sub-agent, whose report starts another turn, with nobody there.
         self._report_turns_in_row = 0
@@ -756,6 +778,9 @@ class ChatSessionLG:
             *delegation_tools,
             *code_tools,
             *build_http_tools(self.settings.state_dir, self.thread_id),
+            *build_conversation_message_tools(
+                self.settings.state_dir, self.thread_id, deliver_to_conversation
+            ),
             review_work_tool,
             self._build_draft_workflow_tool(),
             self._build_revise_workflow_tool(),
@@ -894,6 +919,60 @@ class ChatSessionLG:
             logger.exception("reporting sub-agent %s to its conversation failed", task_id)
         finally:
             self._reporting_subagents.discard(task_id)
+
+    def schedule_inbox_delivery(self) -> None:
+        """Takes what other conversations sent as a turn of its own, once. Safe to
+        call from another conversation's tool thread."""
+        loop = self._loop
+        if loop is None:
+            # Never opened in this process: the inbox waits for the first open.
+            return
+        loop.call_soon_threadsafe(self._start_inbox_delivery)
+
+    def _start_inbox_delivery(self) -> None:
+        if self._inbox_delivering:
+            return
+        if ConversationMessages(self.settings.state_dir).pending(self.thread_id) == 0:
+            return
+        self._inbox_delivering = True
+        delivery = asyncio.get_running_loop().create_task(self._deliver_inbox())
+        self._report_tasks.add(delivery)
+        delivery.add_done_callback(self._report_tasks.discard)
+
+    async def _deliver_inbox(self) -> None:
+        """Tells the conversation what other conversations sent it, after the
+        turn in progress, the way a finished background sub-agent reports."""
+        try:
+            async with self._turn_lock:
+                if self.is_workflow_run():
+                    return
+                if self._report_turns_in_row >= _MAX_REPORT_TURNS_IN_ROW:
+                    # Left in the inbox until the user speaks again, so two
+                    # conversations can't keep each other going alone.
+                    await self.notify_resync()
+                    return
+                messages = ConversationMessages(self.settings.state_dir).take(self.thread_id)
+                if not messages:
+                    return
+                self._report_turns_in_row += 1
+                text = message_turn_text(messages)
+                if self._report_turns_in_row >= _WIND_DOWN_REPORT_TURN:
+                    text += _WIND_DOWN_NOTE
+                websocket: Any = self._live_websocket
+                if websocket is not None:
+                    try:
+                        await websocket.send_json({"type": "turn_started", "text": text})
+                    except Exception:  # noqa: BLE001 -- the tab went away; run unwatched
+                        websocket = None
+                self._current_turn_task = asyncio.current_task()
+                socket: Any = websocket or SilentSocket()
+                await self._handle_user_message_locked(text, socket, notice=True)
+            if websocket is None:
+                await self.notify_resync()
+        except Exception:
+            logger.exception("delivering messages to conversation %s failed", self.thread_id)
+        finally:
+            self._inbox_delivering = False
 
     def _stop_waited_on_subagents(self) -> None:
         """Stop the sub-agents a turn is waiting on; background ones were
@@ -1875,6 +1954,8 @@ class ChatSessionLG:
         ):
             entries.append({"kind": "user", "text": prompt})
         await websocket.send_json({"type": "history", "entries": entries, "has_older": has_older})
+        self._loop = asyncio.get_running_loop()
+        self.schedule_inbox_delivery()
 
     async def load_older_messages(self, websocket: EventSink) -> None:
         """Scroll-up pagination for a thread that's been /compact'd: send_
