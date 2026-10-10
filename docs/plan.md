@@ -26,6 +26,7 @@ Last reviewed: 2026-10-09.
    accepts or changes it; then an admin adds the second collaborator, their handle
    goes into `.github/CODEOWNERS`, and the ruleset requires code-owner review for
    those paths.
+
 ## Needs the maintainer's testing (could not be verified here)
 
 - Sign-in of the 13 connectors added for the skill plugins (only the
