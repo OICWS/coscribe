@@ -40,7 +40,7 @@ the preload object `coscribeDesktop` of `office-agent-desktop/`. `npm run build`
 ## Tests
 Unit tests (vitest, `npm test`) sit next to the file as `x.test.ts`: `src/state/reducer.test.ts`,
 `src/lib/launchToken.test.ts`, `src/lib/dockLayout.test.ts`, `src/lib/dockArrangement.test.ts`,
-`src/lib/docxReview.test.ts`, `src/lib/transcriptGrouping.test.ts`,
+`src/lib/docxReview.test.ts`, `src/lib/slides.test.ts`, `src/lib/transcriptGrouping.test.ts`,
 `src/components/chatlog/helpers.test.ts`. `tests/e2e/*.spec.ts` (Playwright, `npm run test:e2e`)
 runs against a live `coscribe-web` and `npm run dev` (nightly in `.github/workflows/e2e.yml` with
 a stub model, not a required check). `office-agent/tests/test_wire_ts.py` covers the generator.

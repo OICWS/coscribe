@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { isDocx } from "../../lib/docxReview";
+import { isViewable } from "../../lib/viewers";
 import type { PanelId } from "../../lib/dockLayout";
 import {
   dockPanelWindow,
@@ -12,7 +12,7 @@ import {
 import { useTitleBarColors } from "../../lib/titleBar";
 import { BackgroundTasksPanel } from "../BackgroundTasksPanel";
 import { BrowserPanel } from "../BrowserPanel";
-import { DocxViewerPanel } from "../DocxViewerPanel";
+import { ViewerPanel } from "../ViewerPanel";
 import { DockBackIcon, PinIcon } from "./windowIcons";
 import { TaskPanel } from "../TaskPanel";
 import { DockPanelContext, type DockPanelApi } from "./dockContext";
@@ -111,7 +111,7 @@ function PanelContent({ state }: { state: PanelWindowState }) {
         onOpenTask={(task) => sendPanelWindowAction({ type: "openTask", task })}
         onSaveAsWorkflow={state.canSaveAsWorkflow ? () => sendPanelWindowAction({ type: "saveAsWorkflow" }) : undefined}
         onView={(path) => {
-          if (!isDocx(path)) return false;
+          if (!isViewable(path)) return false;
           sendPanelWindowAction({ type: "view", path });
           return true;
         }}
@@ -140,7 +140,7 @@ function PanelContent({ state }: { state: PanelWindowState }) {
   }
   if (state.path) {
     return (
-      <DocxViewerPanel
+      <ViewerPanel
         key={`${state.threadId}:${state.path}`}
         threadId={state.threadId}
         path={state.path}
@@ -155,7 +155,7 @@ function EmptyViewer() {
   return (
     <ViewerHeader>
       <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-[var(--muted)]">
-        No file is open in this conversation. Open a Word file from Task details.
+        No file is open in this conversation. Open a Word file or a presentation from Task details.
       </div>
     </ViewerHeader>
   );

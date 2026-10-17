@@ -94,6 +94,8 @@
   --kind-loop: #17767c;
   --accent-ink: #1d5fb0;
   --card-bg: #f0f0ef;
+  /* The grey a slide sits on in the Slides panel. */
+  --stage-bg: #ebe9e5;
   --primary: #171614;
   --primary-hover: #322f2c;
   --primary-fg: #fcfcfb;
@@ -148,6 +150,7 @@
   --kind-loop: #7fd2d6;
   --accent-ink: #9cc3f3;
   --card-bg: #322f2e;
+  --stage-bg: #1b1a19;
   --primary: #f7f5f3;
   --primary-hover: #ffffff;
   --primary-fg: #232120;

@@ -30,12 +30,12 @@ import { SettingsModal } from "./components/settings/SettingsModal";
 import { StartupSplash } from "./components/StartupSplash";
 import { ShortcutsDialog } from "./components/ShortcutsDialog";
 import { BackgroundTasksPanel } from "./components/BackgroundTasksPanel";
-import { DocxViewerPanel } from "./components/DocxViewerPanel";
+import { ViewerPanel } from "./components/ViewerPanel";
 import { TaskPanel } from "./components/TaskPanel";
 import { PanelDock } from "./components/dock/PanelDock";
 import { PanelToggles } from "./components/dock/PanelToggles";
 import type { PanelId } from "./lib/dockLayout";
-import { isDocx } from "./lib/docxReview";
+import { isViewable } from "./lib/viewers";
 import { canOpenPanelWindows, focusPanelWindow, usePanelWindows } from "./lib/panelWindows";
 import { WorkflowDraftPage } from "./components/workflow/WorkflowDraftPage";
 import { WorkflowRunView } from "./components/workflow/WorkflowRunView";
@@ -776,7 +776,7 @@ function App() {
     },
   });
   const viewFile = (path: string) => {
-    if (!isDocx(path)) return false;
+    if (!isViewable(path)) return false;
     setViewerFiles((files) => ({ ...files, [threadIdRef.current]: path }));
     setPanelOpen("viewer", true);
     if (poppedOut.includes("viewer")) focusPanelWindow("viewer");
@@ -851,7 +851,7 @@ function App() {
     }
     if (panel === "viewer" && viewerFile) {
       return (
-        <DocxViewerPanel key={`${threadId}:${viewerFile}`} threadId={threadId} path={viewerFile} refreshKey={refreshKey} />
+        <ViewerPanel key={`${threadId}:${viewerFile}`} threadId={threadId} path={viewerFile} refreshKey={refreshKey} />
       );
     }
     if (panel === "browser") {
