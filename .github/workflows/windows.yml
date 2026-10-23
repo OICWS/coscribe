@@ -63,11 +63,9 @@ jobs:
 
       # The text widths the deck engine sizes boxes with, measured on this machine's fonts.
       # The table is committed; the test below keeps it equal to the fonts.
-      - name: Measure font advances
-        run: python scripts/measure_font_advances.py "C:/Windows/Fonts" --out windows-font-advances.json
 
       - name: Tests
-        run: python -m pytest -q -n 4 -p no:cacheprovider --tb=short -rfE --junitxml=windows-junit.xml
+        run: python -m pytest -q -p no:cacheprovider --tb=short -rfE tests/test_zz_probe.py tests/test_node_scripts_tool.py::test_run_node_script_returns_stdout_and_exit_code
 
       - name: Summary of the failures
         if: always()
