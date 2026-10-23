@@ -13,10 +13,20 @@ pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="probe")
 
 
 def _run(argv, cwd, iso):
+    import threading
     proc = isolation.start(argv, str(cwd), dict(os.environ), iso)
-    out = proc.stdout.read()
-    err = proc.stderr.read()
-    code = proc.wait(60)
+    got = {}
+    t1 = threading.Thread(target=lambda: got.__setitem__("out", proc.stdout.read()), daemon=True)
+    t2 = threading.Thread(target=lambda: got.__setitem__("err", proc.stderr.read()), daemon=True)
+    t1.start(); t2.start()
+    t1.join(20); t2.join(5)
+    try:
+        code = proc.wait(5)
+    except Exception:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        code = "HUNG"
+    out = got.get("out", b"<none>")
+    err = got.get("err", b"<none>")
     return f"exit={code} out={out.decode('utf-8','replace')[-300:]!r} err={err.decode('utf-8','replace')[-500:]!r}"
 
 

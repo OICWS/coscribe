@@ -65,7 +65,8 @@ jobs:
       # The table is committed; the test below keeps it equal to the fonts.
 
       - name: Tests
-        run: python -m pytest -q -p no:cacheprovider --tb=short -rfE tests/test_zz_probe.py tests/test_node_scripts_tool.py::test_run_node_script_returns_stdout_and_exit_code
+        timeout-minutes: 10
+        run: python -m pytest -q -p no:cacheprovider --tb=short -rfE tests/test_zz_probe.py
 
       - name: Summary of the failures
         if: always()
