@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -172,6 +173,16 @@ def _alive(pid: int) -> bool:
 
 
 @real
+async def test_the_first_sandboxed_command_after_setup_runs(
+    tmp_path: Path, sandboxed_state: Path
+) -> None:
+    tools = _tools(tmp_path, sandboxed_state)
+    started = await tools["run_background_command"](command="whoami", description="first")
+    result = await _finished(tools, started["task_id"])
+    assert "codexsandbox" in result.get("output", "").lower(), result.get("output")
+
+
+@real
 @pytest.mark.parametrize("sandboxed", [False, True])
 async def test_stopping_a_background_command_ends_its_whole_process_tree(
     sandboxed: bool, tmp_path: Path, request: pytest.FixtureRequest
@@ -268,10 +279,13 @@ def test_a_script_without_node_installed_says_what_is_missing(
 async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the_profile(
     tmp_path: Path, sandboxed_state: Path
 ) -> None:
-    tools = _tools(tmp_path, sandboxed_state)
-    # Two secrets the sandbox user must not read: one beside the workspace (tmp_path is in the
-    # runner's profile, as a workspace in Documents would be) and one at the profile's top.
-    outside = tmp_path / "outside"
+    # A workspace in Documents, as a person's would be, with a secret beside it, and one at the
+    # profile's top: the sandbox user reads neither. Not in tmp_path: under the temp folder a
+    # sibling was readable (its ACLs are printed on failure).
+    base = Path(os.environ["USERPROFILE"]) / "Documents" / f"coscribe-{uuid.uuid4().hex}"
+    base.mkdir(parents=True)
+    tools = _tools(base, sandboxed_state)
+    outside = base / "outside"
     outside.mkdir()
     beside = outside / "secret.txt"
     beside.write_text("BESIDE-SECRET")
@@ -290,21 +304,21 @@ async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the
     try:
         started = await tools["run_background_command"](command=command, description="probe")
         result = await _finished(tools, started["task_id"])
+        output = result.get("output", "")
+        acls = "\n".join(
+            subprocess.run(["icacls", str(p)], capture_output=True, text=True, check=False).stdout
+            for p in (*reversed(beside.parents[:4]), beside, tmp_path.parents[2], tmp_path)
+        )
+        assert (base / "workspace" / "made.txt").read_text().strip() == "inside"
+        assert not made.exists(), output
+        assert "TOP-SECRET" not in output, output
+        assert "BESIDE-SECRET" not in output, output + acls
+        assert "codexsandbox" in output.lower(), output
+        # Default's network is not Full, so the command is offline.
+        assert "PY-RAN" in output and "NET-OPEN" not in output, output
     finally:
         top.unlink()
-
-    output = result.get("output", "")
-    acls = "\n".join(
-        subprocess.run(["icacls", str(p)], capture_output=True, text=True, check=False).stdout
-        for p in (tmp_path, outside, beside, tmp_path / "workspace")
-    )
-    assert (tmp_path / "workspace" / "made.txt").read_text().strip() == "inside"
-    assert not made.exists(), output
-    assert "TOP-SECRET" not in output, output
-    assert "BESIDE-SECRET" not in output, output + acls
-    assert "codexsandbox" in output.lower(), output
-    # Default's network is not Full, so the command is offline.
-    assert "PY-RAN" in output and "NET-OPEN" not in output, output
+        shutil.rmtree(base, ignore_errors=True)
 
 
 # Last in the file: it removes the sandbox the tests above share.
