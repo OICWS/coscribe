@@ -32,11 +32,12 @@ logger = logging.getLogger(__name__)
 
 IDLE_SECONDS = 600.0
 
-# `codex features list` (0.160.0): stable features on by default that
+# `codex features list` (0.163.0): stable features on by default that
 # coscribe covers itself or doesn't want, plus self-update so the pinned
 # version stays the one that runs.
 DISABLED_FEATURES = (
     "apps",
+    "browser_annotation_api",
     "browser_use",
     "browser_use_external",
     "computer_use",
@@ -48,6 +49,7 @@ DISABLED_FEATURES = (
     "in_app_dictation",
     "in_app_local_automation",
     "in_app_updates",
+    "in_app_voice",
     "multi_agent",
     "plugin_sharing",
     "plugins",

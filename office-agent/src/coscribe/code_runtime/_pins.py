@@ -2,98 +2,98 @@
 
 from typing import Any
 
-CODEX_VERSION = "0.160.0"
+CODEX_VERSION = "0.163.0"
 
 WHEELS: dict[str, dict[str, Any]] = {
     "win32/amd64": {
-        "filename": "openai_codex_cli_bin-0.160.0-py3-none-win_amd64.whl",
-        "url": "https://files.pythonhosted.org/packages/60/3c/3d5936011336a6e88b03fbfe532afe50527d534eacba5cfd2d4c9ec35ada/openai_codex_cli_bin-0.160.0-py3-none-win_amd64.whl",
-        "sha256": "a1245cc0c7d390d22af4920d512ceae8519dee2cf51d8eec56f3899861a8160a",
-        "size": 149416482,
+        "filename": "openai_codex_cli_bin-0.163.0-py3-none-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/a3/0e/ac903da78d517bb0c4f83ad52dd44a7eefddf23c806e147adc123e4e1d3c/openai_codex_cli_bin-0.163.0-py3-none-win_amd64.whl",
+        "sha256": "b759f212cc0deec6da9f297800797232c73d3f0d963842deaa02df965ee0b8b6",
+        "size": 153991643,
         "members": {
             "codex_cli_bin/bin/codex.exe": {
-                "sha256": "fdda5fa3cf3fb3d000b876720742857676293e4315e4b045fae6f8bd7e866d1d",
-                "size": 326872368,
+                "sha256": "2692c8c7bb2cf8b0aefe638741fc90236f4b824c59578ce84994f9de58200993",
+                "size": 341270320,
             },
             "codex_cli_bin/codex-path/rg.exe": {
                 "sha256": "14231169855ec5205cf5a1b6f1db358ff4aed4247c86b69ce8aae647c77f6680",
                 "size": 4218880,
             },
             "codex_cli_bin/codex-resources/codex-command-runner.exe": {
-                "sha256": "dd13f8e95faba5cf539d870dd3b64c226b00d062a5b523e7e08c44fdc8235224",
-                "size": 8207152,
+                "sha256": "fc89dc66c806f25675b9be1e7dafb226807d22761e9741a3bb24b667b803d46c",
+                "size": 8217904,
             },
             "codex_cli_bin/codex-resources/codex-windows-sandbox-setup.exe": {
-                "sha256": "8f91d62aca2aca87b0ebf446848b817720415dd3080905ffc3085c17b70bd57a",
-                "size": 17685808,
+                "sha256": "2efc67f77de2658667c1481e00a1c4c964d3e8f6d4f39b638620d80b9d0f6d8a",
+                "size": 17700144,
             },
         },
     },
     "win32/arm64": {
-        "filename": "openai_codex_cli_bin-0.160.0-py3-none-win_arm64.whl",
-        "url": "https://files.pythonhosted.org/packages/7b/06/87c8137481a5ed334e2e61bf22859b99947f759182ce1c3b12d15e7515d2/openai_codex_cli_bin-0.160.0-py3-none-win_arm64.whl",
-        "sha256": "64e9a3b64b92babd7cb3c35b5ee518a3983c891ce1fe839ce052eb4040307391",
-        "size": 138102109,
+        "filename": "openai_codex_cli_bin-0.163.0-py3-none-win_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/f3/e8/acbc8fdf8a0160a807b0e8be249ab7d4077bd00679e8ee825c4afdafc82d/openai_codex_cli_bin-0.163.0-py3-none-win_arm64.whl",
+        "sha256": "64c7d113e1bf6cefa87159c1d21115654a716e1b505295d8520aa91e399ad115",
+        "size": 142706698,
         "members": {
             "codex_cli_bin/bin/codex.exe": {
-                "sha256": "1f090167e94ed25969c47381868c6ffb78be2a195e13891fcdc969531ca16eaf",
-                "size": 274925872,
+                "sha256": "babd1ee5a76e4299d18f7ef99aa39d330e176e837566d3e2325d9b6b64e1ca61",
+                "size": 288519472,
             },
             "codex_cli_bin/codex-path/rg.exe": {
                 "sha256": "d33a29a9ef03c9f4c03be9e8d88498e6e2d2e566d64cdbdef97f9afc8f13120c",
                 "size": 3859456,
             },
             "codex_cli_bin/codex-resources/codex-command-runner.exe": {
-                "sha256": "e46a43aa9ad1ecaca67b57f2dcbc016868e932ec1bed2c616d59646e5b26316c",
-                "size": 7342384,
+                "sha256": "ca6c28849935b4d762d83a7147973e79cbb6a86ccb5f60a8db142b76eed432e3",
+                "size": 7355184,
             },
             "codex_cli_bin/codex-resources/codex-windows-sandbox-setup.exe": {
-                "sha256": "cf4d66e2e7a78843b9aff9680a3d52d54a56f6c2c3f889e78f4196d840e8d9e6",
-                "size": 15758128,
+                "sha256": "7e1004cd7fa850cc029b60d234d852f2e602ccb527416486b68360fd08c413a9",
+                "size": 15829296,
             },
         },
     },
     "darwin/arm64": {
-        "filename": "openai_codex_cli_bin-0.160.0-py3-none-macosx_11_0_arm64.whl",
-        "url": "https://files.pythonhosted.org/packages/26/a1/105c05e179242f0a030cf4a2f7c2bcd574b1001e30379cb4959624294048/openai_codex_cli_bin-0.160.0-py3-none-macosx_11_0_arm64.whl",
-        "sha256": "c9b472e8928d8f94f65e43ba4928e3ecac071ccf8680bbb8281334e32cec409b",
-        "size": 121753021,
+        "filename": "openai_codex_cli_bin-0.163.0-py3-none-macosx_11_0_arm64.whl",
+        "url": "https://files.pythonhosted.org/packages/d1/c2/a26dc89782bb9fd94d6efeee1d22677084aba89c28fcb34c4699e490dfb1/openai_codex_cli_bin-0.163.0-py3-none-macosx_11_0_arm64.whl",
+        "sha256": "dd0e6570930167f0e15ec94c5fb494a4a5a9dceb0a97113176c7b47c826cda05",
+        "size": 125132575,
         "members": {
             "codex_cli_bin/bin/codex": {
-                "sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b",
-                "size": 241555024,
+                "sha256": "8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31",
+                "size": 249952688,
             },
             "codex_cli_bin/codex-path/rg": {
-                "sha256": "7c7d5b09c3a57de864500c65dc2e9c4d2a5e96a3fc7b7d5318480c19887a739b",
+                "sha256": "27d09e29c478fddbfc750a2cb5fd06965bad0ea223e776f8667160a0de63c6e4",
                 "size": 4030432,
             },
         },
     },
     "darwin/x86_64": {
-        "filename": "openai_codex_cli_bin-0.160.0-py3-none-macosx_10_9_x86_64.whl",
-        "url": "https://files.pythonhosted.org/packages/ed/83/9fb994efa9da1e21a44c4a610d9884e398168503b90ebe31f4edeb289370/openai_codex_cli_bin-0.160.0-py3-none-macosx_10_9_x86_64.whl",
-        "sha256": "06571f34b99feee1f1116577f66b82b1b6d582993e07d2099e20e346c73de374",
-        "size": 132620323,
+        "filename": "openai_codex_cli_bin-0.163.0-py3-none-macosx_10_9_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/da/15/d83ddbe97e5eb691e77afed6772c01fc8878fedd68aac129d56c312048fa/openai_codex_cli_bin-0.163.0-py3-none-macosx_10_9_x86_64.whl",
+        "sha256": "6b4a9e614e30442f9c2b804604b7fba12f218627f709fe5ba1960c01dac15ca1",
+        "size": 136246260,
         "members": {
             "codex_cli_bin/bin/codex": {
-                "sha256": "5383ef71dd1bd8d2f3658c04a219e2cf165c7969aebd0cceced1bc9f0f68877f",
-                "size": 260633072,
+                "sha256": "73697f229103f463acaafd8659976caaa4892ec11e2c246c7fa97f93d523f90e",
+                "size": 269718432,
             },
             "codex_cli_bin/codex-path/rg": {
-                "sha256": "752ed62687b44ffd417352d444db825a7b75ca7b859c7a9f1f4edec77ba5e01d",
+                "sha256": "e70f1eec3964dff023fd87ca4ac8018a9a6955fdd6ba6668363803167a7945c7",
                 "size": 4437184,
             },
         },
     },
     "linux/x86_64": {
-        "filename": "openai_codex_cli_bin-0.160.0-py3-none-manylinux_2_17_x86_64.whl",
-        "url": "https://files.pythonhosted.org/packages/82/36/a9d77dd01f0397f178d52ce3da543fec1e59cfa7b85bd4125b97a30957c2/openai_codex_cli_bin-0.160.0-py3-none-manylinux_2_17_x86_64.whl",
-        "sha256": "b0664ef64a57f1d00ebac1b783089557b97a53872383bb7cbe288e4015769a15",
-        "size": 139465828,
+        "filename": "openai_codex_cli_bin-0.163.0-py3-none-manylinux_2_17_x86_64.whl",
+        "url": "https://files.pythonhosted.org/packages/5f/64/eb70467d717510b78da54e2ae604a1b5348c17f535086e2825a283e540e2/openai_codex_cli_bin-0.163.0-py3-none-manylinux_2_17_x86_64.whl",
+        "sha256": "76db41fb07fdf9ddacbe892b48d21dfde270031ec0f5666b5e558114355f006d",
+        "size": 142400402,
         "members": {
             "codex_cli_bin/bin/codex": {
-                "sha256": "12eb3e81114588aca3b7998f4f19e8997b056aca08e57a7ca7c8a3ec8c652aad",
-                "size": 289101384,
+                "sha256": "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215",
+                "size": 296865480,
             },
             "codex_cli_bin/codex-path/rg": {
                 "sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
@@ -102,14 +102,14 @@ WHEELS: dict[str, dict[str, Any]] = {
         },
     },
     "linux/aarch64": {
-        "filename": "openai_codex_cli_bin-0.160.0-py3-none-manylinux_2_17_aarch64.whl",
-        "url": "https://files.pythonhosted.org/packages/a2/e5/4e93ad22c849636d26ca993e78eaa285d9ec035d3a8a0faa885cd4e3ef56/openai_codex_cli_bin-0.160.0-py3-none-manylinux_2_17_aarch64.whl",
-        "sha256": "6543e1d7f9ffb3f84c61b0234b62fd95c1d5f896310392cc8b03605100293f32",
-        "size": 129958661,
+        "filename": "openai_codex_cli_bin-0.163.0-py3-none-manylinux_2_17_aarch64.whl",
+        "url": "https://files.pythonhosted.org/packages/ed/50/5d60d97ebfa2f238fcc209d1764077a11d24eebd028f8a80bd0a180e1125/openai_codex_cli_bin-0.163.0-py3-none-manylinux_2_17_aarch64.whl",
+        "sha256": "bb2b0d117eeb02608738cf2bcdf51f6a036343d0028272e11a94e72b0d23b141",
+        "size": 132956731,
         "members": {
             "codex_cli_bin/bin/codex": {
-                "sha256": "50b06603bdcdac39b714f5c3e68583c002b8ad8779ebfdaaf4932ff016b379c0",
-                "size": 248966648,
+                "sha256": "8a96f66d059d653e68bfd5f3c79337e6f1d7d170d80bf705eb7d0249b34c0ece",
+                "size": 257816200,
             },
             "codex_cli_bin/codex-path/rg": {
                 "sha256": "e36d0eb52e70696bdf1781392722e05a21bb91d3b7b762ef5ec20e5df2ec687b",

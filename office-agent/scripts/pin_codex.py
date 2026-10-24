@@ -7,7 +7,7 @@ sandbox needs). The code module
 then downloads just those members and checks them against these values, so
 a pin is only ever made from a wheel whose full hash matched.
 
-    python scripts/pin_codex.py 0.160.0
+    python scripts/pin_codex.py 0.163.0
 
 Upgrading Codex is this script plus a re-run of the code module's tests and
 a live turn: the app-server protocol is marked experimental upstream.
