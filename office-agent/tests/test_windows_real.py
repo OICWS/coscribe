@@ -367,6 +367,75 @@ async def test_a_deny_read_entry_hides_a_folder_from_the_sandbox_but_not_its_wor
         shutil.rmtree(base, ignore_errors=True)
 
 
+@real
+async def test_probe_what_the_sandbox_reads_and_what_denies_do(
+    tmp_path: Path, sandboxed_state: Path
+) -> None:
+    profile = Path(os.environ["USERPROFILE"])
+    tag = uuid.uuid4().hex[:8]
+    places = {
+        "documents": profile / "Documents",
+        "desktop": profile / "Desktop",
+        "downloads": profile / "Downloads",
+        "pictures": profile / "Pictures",
+        "roaming": Path(os.environ["APPDATA"]),
+        "localappdata": Path(os.environ["LOCALAPPDATA"]),
+        "temp": Path(os.environ["TEMP"]),
+        "public": Path("C:/Users/Public"),
+        "programdata": Path("C:/ProgramData"),
+        "croot": Path("C:/"),
+        "ddrive": Path("D:/"),
+    }
+    secrets = {}
+    for key, folder in places.items():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            f = folder / f"coscribe-probe-{tag}-{key}.txt"
+            f.write_text(f"SECRET-{key.upper()}")
+            secrets[key] = f
+        except OSError as e:
+            print("cannot write", key, e)
+    base = profile / "Documents" / f"coscribe-{tag}"
+    base.mkdir()
+    ref = base / "ref"
+    ref.mkdir()
+    (ref / "r.txt").write_text("REF-READ")
+    tools = _tools(base, sandboxed_state)
+    report = []
+
+    async def run(command: str) -> str:
+        started = await tools["run_background_command"](command=command, description="probe")
+        return str((await _finished(tools, started["task_id"])).get("output", ""))
+
+    survey = " & ".join(f'type "{f}"' for f in secrets.values())
+    try:
+        report.append("SURVEY:\n" + await run(survey + " & set"))
+        denies = [places["documents"], places["temp"]]
+        for d in denies:
+            report.append(subprocess.run(
+                ["icacls", str(d), "/deny", "CodexSandboxUsers:(OI)(CI)(RD)"],
+                capture_output=True, text=True, check=False).stdout)  # fmt: skip
+        report.append("AFTER DENY, NO GRANT:\n" + await run(
+            f'echo inside> made.txt & type made.txt & type "{ref / "r.txt"}" & ' + survey))
+        report.append(subprocess.run(
+            ["icacls", str(ref), "/grant", "CodexSandboxUsers:(OI)(CI)(RX)"],
+            capture_output=True, text=True, check=False).stdout)  # fmt: skip
+        report.append("AFTER GRANT ON REF:\n" + await run(
+            f'echo inside2> made2.txt & type made2.txt & type "{ref / "r.txt"}" & '
+            f'"{sys.executable}" -c "import tempfile; print(\'TMP\', tempfile.gettempdir())"'))
+        report.append(_icacls(places["documents"], places["temp"], base, ref, base / "workspace"))
+        for d in denies:
+            subprocess.run(["icacls", str(d), "/remove:d", "CodexSandboxUsers"], check=False)
+        report.append("AFTER REMOVE:\n" + await run(survey))
+    finally:
+        for d in (places["documents"], places["temp"]):
+            subprocess.run(["icacls", str(d), "/remove:d", "CodexSandboxUsers"], check=False)
+        for f in secrets.values():
+            f.unlink(missing_ok=True)
+        shutil.rmtree(base, ignore_errors=True)
+    raise AssertionError("PROBE REPORT\n" + "\n----\n".join(report))
+
+
 # Last in the file: it removes the sandbox the tests above share.
 @real
 async def test_a_command_fails_closed_when_the_sandbox_was_removed_behind_the_apps_back(
