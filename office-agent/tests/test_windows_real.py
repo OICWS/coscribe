@@ -186,7 +186,7 @@ async def test_stopping_a_background_command_ends_its_whole_process_tree(
         f"p = subprocess.Popen([sys.executable, '-c', '{child}']); "
         f"open(r'{pid_file}', 'w').write(str(p.pid)); time.sleep(120)"
     )
-    command = f'"{sys.executable}" -c "{parent}"'
+    command = f'whoami & "{sys.executable}" -c "{parent}"'
 
     started = await tools["run_background_command"](command=command, description="tree")
     # A sandboxed command's first run in a folder waits for Codex to grant it to the sandbox user.
@@ -269,27 +269,39 @@ async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the
     tmp_path: Path, sandboxed_state: Path
 ) -> None:
     tools = _tools(tmp_path, sandboxed_state)
-    # tmp_path is under the runner's user profile, which the sandbox user cannot read.
+    # Two secrets the sandbox user must not read: one beside the workspace (tmp_path is in the
+    # runner's profile, as a workspace in Documents would be) and one at the profile's top.
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "secret.txt").write_text("secret")
-    secret, made = outside / "secret.txt", outside / "made.txt"
+    beside = outside / "secret.txt"
+    beside.write_text("BESIDE-SECRET")
+    top = Path(os.environ["USERPROFILE"]) / f"coscribe-secret-{uuid.uuid4().hex}.txt"
+    top.write_text("TOP-SECRET")
+    made = outside / "made.txt"
     connect = (
         "print('PY-RAN'); import socket; "
         "socket.create_connection(('1.1.1.1', 443), 5); print('NET-OPEN')"
     )
     command = (
-        f'whoami & echo inside> made.txt & type "{secret}" & echo outside> "{made}" & '
-        f'"{sys.executable}" -c "{connect}"'
+        f'whoami & echo inside> made.txt & type "{beside}" & type "{top}" & '
+        f'echo outside> "{made}" & "{sys.executable}" -c "{connect}"'
     )
 
-    started = await tools["run_background_command"](command=command, description="probe")
-    result = await _finished(tools, started["task_id"])
+    try:
+        started = await tools["run_background_command"](command=command, description="probe")
+        result = await _finished(tools, started["task_id"])
+    finally:
+        top.unlink()
 
     output = result.get("output", "")
+    acls = "\n".join(
+        subprocess.run(["icacls", str(p)], capture_output=True, text=True, check=False).stdout
+        for p in (tmp_path, outside, beside, tmp_path / "workspace")
+    )
     assert (tmp_path / "workspace" / "made.txt").read_text().strip() == "inside"
     assert not made.exists(), output
-    assert "secret" not in output.replace("secret.txt", ""), output
+    assert "TOP-SECRET" not in output, output
+    assert "BESIDE-SECRET" not in output, output + acls
     assert "codexsandbox" in output.lower(), output
     # Default's network is not Full, so the command is offline.
     assert "PY-RAN" in output and "NET-OPEN" not in output, output
