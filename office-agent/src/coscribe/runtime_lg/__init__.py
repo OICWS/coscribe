@@ -10,6 +10,7 @@ from .audit import Decision as AuditDecision
 from .audit import Reason as AuditReason
 from .auto_review import Verdict, recent_user_requests, review_action
 from .code_agent import CODE_APPROVAL_RISKS, CODE_TASK_TOOL, CodeTaskContext, build_code_task_tool
+from .conversation_source import CheckpointConversations
 from .exec_policy import EXEC_POLICY_TOOL_NAMES, ExecPolicy, load_exec_policy
 from .mcp_oauth import (
     APP_REDIRECT_URI,
@@ -74,6 +75,7 @@ __all__ = [
     "AUTO_MODE_NOTE",
     "CODE_TASK_TOOL",
     "CallbackPortBusy",
+    "CheckpointConversations",
     "CodeTaskContext",
     "LoopbackCallback",
     "McpOAuth",

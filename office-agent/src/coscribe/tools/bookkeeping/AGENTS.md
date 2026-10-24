@@ -21,7 +21,7 @@ triggers: `SCHEDULED_THREAD_PREFIX`, `TASK_DRAFT_TOOL_NAMES`, `compute_next_run_
 `forget_finished_subagents`. Questions, plans and messages: `QUESTION_TOOL_NAMES`,
 `PLAN_CHOICE_AUTO`, `PLAN_CHOICE_MANUAL`, `PLAN_CHOICE_REVISE`, `PLAN_CHOICE_REJECT`, `format_question_answers`,
 `normalize_questions`, `format_incoming`. Memory: `load_memory`, `format_memory_section`.
-Also exported: `FINISHED_STATUSES`, `MessagingError`, `TaskToolkit`, `register_subagent_run`,
+Also exported: `FINISHED_STATUSES`, `ConversationSource`, `ConversationTranscript`, `MessagingError`, `TaskToolkit`, `register_subagent_run`,
 `take_stop_requester`, `set_change_listener`, `set_inbox_listener`, `adopt_running_command`,
 `forget_finished_background_tasks`, `read_background_log`, `stop_background_task`. Callers outside
 `tools` reach all of these through `coscribe.tools`.

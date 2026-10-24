@@ -580,22 +580,7 @@ def test_deleting_a_conversation_lets_go_of_its_environment_lg(
     assert [e["used_by"] for e in after if e["id"] == env["id"]] == [0]
 
 
-def test_messaging_policy_round_trips_and_refuses_a_bad_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    fake_model = FakeToolCallingChatModel(responses=[])
-    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        assert client.get("/api/threads/b/messaging").json() == {"mode": "off", "senders": []}
-
-        saved = client.put("/api/threads/b/messaging", json={"mode": "selected", "senders": ["a"]})
-        refused = client.put("/api/threads/b/messaging", json={"mode": "everyone", "senders": []})
-
-        assert saved.json() == {"mode": "selected", "senders": ["a"]}
-        assert client.get("/api/threads/b/messaging").json() == saved.json()
-        assert refused.status_code == 422
-
-
-def test_deleting_a_conversation_forgets_who_may_message_it(
+def test_deleting_a_conversation_forgets_its_waiting_messages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="hi")])
@@ -605,11 +590,12 @@ def test_deleting_a_conversation_forgets_who_may_message_it(
             ws.receive_json()
             ws.send_json({"type": "user_message", "text": "hello"})
             _receive_until(ws, "tasks_changed")
-        client.put("/api/threads/b/messaging", json={"mode": "any", "senders": []})
+        inbox = tmp_path / "state" / "b.inbox.json"
+        inbox.write_text("[]", encoding="utf-8")
 
         client.delete("/api/threads/b")
 
-        assert client.get("/api/threads/b/messaging").json()["mode"] == "off"
+        assert not inbox.exists()
 
 
 class _SuggestingModel(FakeToolCallingChatModel):

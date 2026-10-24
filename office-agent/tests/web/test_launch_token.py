@@ -136,7 +136,8 @@ def test_the_real_app_hands_its_page_the_token_and_refuses_a_post_without_it(
             assert page.headers["cache-control"] == "no-store"
             bare = TestClient(client.app, base_url="http://127.0.0.1:8000")
             local = {"Host": "127.0.0.1:8000"}
-            assert bare.post("/api/threads/x/messaging", json={}, headers=local).status_code == 403
+            posted = bare.post("/api/threads/x/docs/blocks", json={}, headers=local)
+            assert posted.status_code == 403
             with pytest.raises(WebSocketDisconnect) as refused:
                 with bare.websocket_connect("/ws/some-thread", headers=local):
                     pass
@@ -210,7 +211,6 @@ AUDITED_READ_ONLY_GETS = {
     "/api/threads/{thread_id}/docx-review",
     "/api/threads/{thread_id}/docx-review/original",
     "/api/threads/{thread_id}/files/download",
-    "/api/threads/{thread_id}/messaging",
     "/api/threads/{thread_id}/slides",
     "/api/threads/{thread_id}/slides/comments",
     "/api/threads/{thread_id}/slides/design-system",

@@ -14,6 +14,8 @@ from .background_tasks import (
     stop_background_task,
 )
 from .conversations import (
+    ConversationSource,
+    ConversationTranscript,
     MessagingError,
     MessagingStore,
     build_conversation_tools,
@@ -88,6 +90,8 @@ __all__ = [
     "BackgroundTask",
     "BackgroundTaskStore",
     "adopt_running_command",
+    "ConversationSource",
+    "ConversationTranscript",
     "MessagingStore",
     "ScheduleRule",
     "ScheduledRun",

@@ -3,7 +3,7 @@
 
 system prompt: 33771 chars, ~8442 tokens, sha256 68a46314a6
 
-bound to the model: 22 tools, ~4936 tokens
+bound to the model: 22 tools, ~4941 tokens
   ask_user_question (questions:array) desc 1435 chars sha256 e846e64163
   draft_workflow (name?:string) desc 983 chars sha256 e91334c9ee
   edit_file (new_text:string, old_text:string, path:string, replace_all?:boolean) desc 1330 chars sha256 3f5ab0dd7e
@@ -18,7 +18,7 @@ bound to the model: 22 tools, ~4936 tokens
   read_xlsx (path:string, sheet?:string|null) desc 548 chars sha256 299925b715
   revise_workflow (draft_id?:string, request:string, task_id?:string) desc 632 chars sha256 bb65f01516
   search_files (path?:string, pattern?:string, query:string, regex?:boolean) desc 1842 chars sha256 f741658379
-  search_tools (query:string) desc 1797 chars sha256 f12ce3db7c
+  search_tools (query:string) desc 1816 chars sha256 9d58fef0ea
   task_create (content:string) desc 149 chars sha256 dea506b85f
   task_list () desc 54 chars sha256 7bc88160db
   task_update (status:string, task_id:string) desc 284 chars sha256 e5aa5260b7
@@ -27,7 +27,7 @@ bound to the model: 22 tools, ~4936 tokens
   web_search (max_results?:integer, query:string) desc 410 chars sha256 ebd4b8a7ac
   write_file (content:string, overwrite?:boolean, path:string) desc 517 chars sha256 786f2a4211
 
-registered: 116 tools, ~36398 tokens (the ones not bound are found through search_tools)
+registered: 117 tools, ~36517 tokens (the ones not bound are found through search_tools)
   accept_docx_tracked_changes | WRITE_LOCAL | documents | deferred | sha256 c0db3f117a
   add_docx_chart | WRITE_LOCAL | documents | deferred | sha256 a20460f4a8
   add_docx_image | WRITE_LOCAL | documents | deferred | sha256 51c929e9ea
@@ -77,7 +77,7 @@ registered: 116 tools, ~36398 tokens (the ones not bound are found through searc
   insert_docx_text | WRITE_LOCAL | documents | deferred | sha256 8af341a5aa
   kill_background_task | WRITE_LOCAL | background_tasks | deferred | sha256 7491d2828c
   list_background_tasks | READ | background_tasks | deferred | sha256 d99c0b74f9
-  list_conversations | READ | conversations | deferred | sha256 2274d7e8c3
+  list_conversations | READ | conversations | deferred | sha256 1eac1b002a
   list_files | READ | filesystem | core | sha256 f70a9b3342
   list_pptx_animation_types | READ | documents | deferred | sha256 f73581da45
   list_pptx_icons | READ | documents | deferred | sha256 9675fb6e78
@@ -93,6 +93,7 @@ registered: 116 tools, ~36398 tokens (the ones not bound are found through searc
   modify_xlsx | WRITE_LOCAL | documents | deferred | sha256 3e15498c5f
   move_file | WRITE_LOCAL | filesystem | deferred | sha256 75892076be
   pause_scheduled_task | WRITE_LOCAL | scheduled_tasks | deferred | sha256 53a449b0cb
+  read_conversation | READ | conversations | deferred | sha256 c9b3e6f4e0
   read_docx | READ | documents | core | sha256 dbcba018fc
   read_docx_review | READ | documents | deferred | sha256 a86f850225
   read_file | READ | filesystem | core | sha256 ee32c83a8a
@@ -122,7 +123,7 @@ registered: 116 tools, ~36398 tokens (the ones not bound are found through searc
   search_images | READ | web | deferred | sha256 4a88b5659a
   search_licensed_images | READ | web | deferred | sha256 bcc4e1115d
   search_pdf | READ | documents | deferred | sha256 c8830261fb
-  send_to_conversation | WRITE_LOCAL | conversations | deferred | sha256 2d3321f165
+  send_to_conversation | WRITE_LOCAL | conversations | deferred | sha256 fffdb99c2e
   set_pptx_background_image | WRITE_LOCAL | documents | deferred | sha256 5759df0f14
   set_pptx_notes | WRITE_LOCAL | documents | deferred | sha256 fca90d132f
   set_pptx_transition | WRITE_LOCAL | documents | deferred | sha256 c02028878b

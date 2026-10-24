@@ -64,6 +64,7 @@ from ..runtime import (
 from ..runtime_lg import (
     ORPHANED_TOOL_CALL_NOTE,
     AutoApproveReason,
+    CheckpointConversations,
     ExecPolicy,
     SilentSocket,
     SubAgentHost,
@@ -276,6 +277,7 @@ class ChatSessionLG:
         self.pending_save_skill_proposal: dict[str, Any] | None = None
 
         self.enabled_skill_names: set[str] = set(enabled_skill_names or ())
+        self._checkpointer = checkpointer
         agent = self._build_agent()
         # Unrestricted by enabled_skill_names deliberately -- a /<slug>
         # slash command is an explicit, one-off user request to follow
@@ -299,12 +301,9 @@ class ChatSessionLG:
             skill.slug: skill for skill in load_builtin_skills() + load_skills(settings.skills_dir)
         }
 
-        # Kept for switch_model, which needs to rebuild both the tool list
-        # (spawn_agent/review_work are bound to a specific model) and the
-        # compiled graph itself against a *new* model, reusing everything
-        # else about this session unchanged (same checkpointer/thread_id,
-        # same base tools, same instructions).
-        self._checkpointer = checkpointer
+        # Kept for switch_model, which rebuilds the tool list (spawn_agent/review_work
+        # are bound to a model) and the compiled graph against a *new* model, reusing
+        # everything else unchanged (checkpointer/thread_id, base tools, instructions).
         self._custom_providers = custom_providers
         self._base_tools: list[Callable[..., Any] | BaseTool] = list(agent.tools)
         # Kept separate from self._base_tools (not just concatenated once
@@ -746,6 +745,7 @@ class ChatSessionLG:
             skill_names=self.enabled_skill_names,
             workspace_root=self.workspace_root,
             extra_folders=self.extra_folders,
+            conversation_source=CheckpointConversations(self._checkpointer),
         )
 
     @property

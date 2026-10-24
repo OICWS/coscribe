@@ -18,6 +18,7 @@ from .config import Settings
 from .runtime import Agent, NetworkGuard, SessionEnvironments
 from .tools import (
     NEW_DECK_INSTRUCTIONS,
+    ConversationSource,
     Detachable,
     ScheduledTriggerStore,
     WorkspaceScope,
@@ -699,6 +700,7 @@ def build_coordinator_agent(
     skill_names: set[str] | None = None,
     workspace_root: Path | None = None,
     extra_folders: Sequence[Path] = (),
+    conversation_source: ConversationSource | None = None,
 ) -> Agent:
     """skill_names=None (the default) splices every skill found -- built-in
     plus the user-local settings.skills_dir -- exactly like before this
@@ -712,10 +714,8 @@ def build_coordinator_agent(
     before this parameter existed -- every tool factory below already takes
     a plain root path per call (nothing baked in below Settings), so a
     per-thread override just means passing a different Path here. Only
-    web/app.py's _get_session passes an explicit override (the thread's
-    resolved folders, see web/app.py's _resolve_folders);
-    the /api/tools probe agent and any future CLI caller keep getting the
-    global default."""
+    web/app.py's _get_session passes one (the thread's resolved folders);
+    the /api/tools probe agent and any CLI caller keep the global default."""
     root = workspace_root if workspace_root is not None else settings.workspace_root
     # A conversation's other folders are as open to it as the configured
     # extra directories, and described to the model the same way.
@@ -771,7 +771,7 @@ def build_coordinator_agent(
         )
         + build_task_tools(thread_id, settings.state_dir)
         + build_interaction_tools()
-        + build_conversation_tools(thread_id, settings.state_dir)
+        + build_conversation_tools(thread_id, settings.state_dir, conversation_source)
         + build_design_system_tools(settings.state_dir)
         + build_selfwake_tools(thread_id, settings.state_dir)
         + build_scheduled_task_tools(settings.state_dir, thread_id)

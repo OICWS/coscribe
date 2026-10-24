@@ -521,3 +521,25 @@ def _write_test_deck(workspace: Path, name: str = "deck.pptx") -> None:
     box.text_frame.text = "hello"
     (workspace).mkdir(parents=True, exist_ok=True)
     prs.save(str(workspace / name))
+
+
+class _FixedConversations:
+    """Two conversations that exist, whatever the checkpointer holds."""
+
+    def __init__(self, *ids: str) -> None:
+        self._ids = list(ids)
+
+    async def thread_ids(self) -> list[str]:
+        return self._ids
+
+    async def transcript(self, thread_id: str) -> None:
+        return None
+
+
+def _send_between(client: Any, state_dir: Path, sender: str, receiver: str, text: str) -> None:
+    """The sender's send_to_conversation, run on the server's event loop as it is in a turn."""
+    from coscribe.tools.bookkeeping.conversations import build_conversation_tools
+
+    tools = build_conversation_tools(sender, state_dir, _FixedConversations(sender, receiver))
+    send = next(t for t in tools if t.__name__ == "send_to_conversation")  # type: ignore[attr-defined]
+    client.portal.call(send, receiver, text)

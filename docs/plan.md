@@ -282,7 +282,7 @@ Last reviewed: 2026-10-15.
 - A second model family (Codex) reviewing invariant paths: when the second maintainer
   joins (decision 0009).
 
-- Conversations messaging each other (record 0008, accepted and built; see its record).
+- Conversations reading and messaging each other (records 0008 and 0023, built: every non-archived conversation is reachable; the Edit environment dialog still has its old messages section until the redesign in issue 560 lands).
 
 - A callback helper so a script can use a secret (needs its own local
   authentication).

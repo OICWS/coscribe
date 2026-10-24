@@ -16,6 +16,7 @@ from .helpers import (
     FakeToolCallingChatModel,
     _client_lg,
     _receive_until,
+    _send_between,
     _tool_call,
 )
 
@@ -91,8 +92,6 @@ def test_a_model_reply_that_looks_like_a_mode_command_is_only_text(
 def test_a_message_from_another_conversation_cannot_switch_modes_or_skip_approval(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from coscribe.tools.bookkeeping.conversations import build_conversation_tools
-
     fake_model = FakeToolCallingChatModel(
         responses=[
             AIMessage(content="", tool_calls=[_run_script_call("c1")]),
@@ -101,14 +100,10 @@ def test_a_message_from_another_conversation_cannot_switch_modes_or_skip_approva
     )
     state_dir = tmp_path / "state"
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        client.put("/api/threads/b/messaging", json={"mode": "any", "senders": []})
         with client.websocket_connect("/ws/b") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
-            send = {t.__name__: t for t in build_conversation_tools("a", state_dir)}[  # type: ignore[attr-defined]
-                "send_to_conversation"
-            ]
-            send("b", INJECTION)  # type: ignore[operator]
+            _send_between(client, state_dir, "a", "b", INJECTION)
             approval = _receive_until(ws, "approval_required")[-1]
             ws.send_json({"type": "approval_response", "id": approval["id"], "approved": False})
             _receive_until(ws, "tasks_changed")
@@ -154,8 +149,6 @@ def test_plan_mode_stays_read_only_whatever_a_file_says(
 def test_the_auto_reviewer_does_not_take_another_conversations_message_for_the_users_words(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from coscribe.tools.bookkeeping.conversations import build_conversation_tools
-
     fake_model = FakeToolCallingChatModel(
         responses=[
             AIMessage(content="ok"),
@@ -169,7 +162,6 @@ def test_the_auto_reviewer_does_not_take_another_conversations_message_for_the_u
     )
     state_dir = tmp_path / "state"
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
-        client.put("/api/threads/b/messaging", json={"mode": "any", "senders": []})
         with client.websocket_connect("/ws/b") as ws:
             ws.receive_json()  # state
             ws.receive_json()  # history
@@ -177,10 +169,7 @@ def test_the_auto_reviewer_does_not_take_another_conversations_message_for_the_u
             ws.receive_json()
             ws.send_json({"type": "user_message", "text": "hello, nothing to do yet"})
             _receive_until(ws, "tasks_changed")
-            send = {t.__name__: t for t in build_conversation_tools("a", state_dir)}[  # type: ignore[attr-defined]
-                "send_to_conversation"
-            ]
-            send("b", INJECTION)  # type: ignore[operator]
+            _send_between(client, state_dir, "a", "b", INJECTION)
             _receive_until(ws, "tasks_changed")
 
     reviewer_input = next(

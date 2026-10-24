@@ -1,7 +1,7 @@
 # 0008: Conversations can message each other
 
-Status: accepted (2026-10-10). Built: the tools, the inbox, the policy API and, in Edit
-environment, the switch.
+Status: accepted (2026-10-10); the opt-in policy is replaced by [0023](0023-every-conversation-can-read-the-others-unless-archived.md).
+Built: the tools, the inbox, the policy API and, in Edit environment, the switch.
 
 ## Context
 Conversations are isolated: they share a workspace's files and nothing else
