@@ -368,63 +368,70 @@ async def test_a_deny_read_entry_hides_a_folder_from_the_sandbox_but_not_its_wor
 
 
 @real
-async def test_probe_what_the_sandbox_reads_and_what_denies_do(
-    tmp_path: Path, sandboxed_state: Path
+async def test_probe_codex_deny_entries(
+    tmp_path: Path, sandboxed_state: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from coscribe.tools.exec import command_sandbox, sandboxed_command
+
     profile = Path(os.environ["USERPROFILE"])
     tag = uuid.uuid4().hex[:8]
-    # A state dir where coscribe keeps it, not in Temp.
     state = Path(os.environ["LOCALAPPDATA"]) / f"coscribe-probe-{tag}"
     state.mkdir()
     record_sandbox_setup(state, sandbox_codex(sandboxed_state))
-    warm_up_sandbox(state)
     places = {
         "documents": profile / "Documents",
         "desktop": profile / "Desktop",
         "downloads": profile / "Downloads",
         "roaming": Path(os.environ["APPDATA"]),
+        "localappdata": Path(os.environ["LOCALAPPDATA"]),
         "temp": Path(os.environ["TEMP"]),
     }
     secrets = {}
     for key, folder in places.items():
-        folder.mkdir(parents=True, exist_ok=True)
         f = folder / f"coscribe-probe-{tag}-{key}.txt"
         f.write_text(f"SECRET-{key.upper()}")
         secrets[key] = f
     base = profile / "Documents" / f"coscribe-{tag}"
-    base.mkdir()
+    workspace = base / "workspace"
+    workspace.mkdir(parents=True)
     ref = base / "ref"
     ref.mkdir()
     (ref / "r.txt").write_text("REF-READ")
-    tools = _tools(base, state)
-    report = []
-    watched = (profile, profile / "AppData", *places.values(), base, ref, state)
+    denied = [places[k] for k in ("documents", "desktop", "downloads", "roaming", "localappdata")]
+    original = command_sandbox._section
 
-    async def run(command: str) -> str:
-        started = await tools["run_background_command"](command=command, description="probe")
-        return str((await _finished(tools, started["task_id"])).get("output", ""))
+    def with_denies(name: str, prof: dict) -> str:
+        text = original(name, prof)
+        lines = "".join(f'{command_sandbox._toml_key(str(d))} = "deny"\n' for d in denied)
+        return text.replace('":root" = "read"\n', '":root" = "read"\n' + lines, 1)
 
     survey = " & ".join(f'type "{f}"' for f in secrets.values())
-    denies = [places[k] for k in ("documents", "desktop", "downloads", "roaming")]
+    report = []
+
+    def run(command: str, deny: bool) -> str:
+        monkeypatch.setattr(command_sandbox, "_section", with_denies if deny else original)
+        # A fresh home each time, so the profile's text is rebuilt.
+        shutil.rmtree(sandbox_home(state), ignore_errors=True)
+        sandboxed = sandboxed_command(state, command, workspace, [workspace], [ref], False)
+        assert sandboxed is not None
+        argv, env = sandboxed
+        done = subprocess.run(argv, env={**os.environ, **env}, capture_output=True,
+                              text=True, timeout=300, check=False)  # fmt: skip
+        return f"rc={done.returncode}\n{done.stdout}\n{done.stderr}"
+
     try:
-        report.append("ACL BEFORE:\n" + _icacls(*watched))
-        report.append("SURVEY:\n" + await run(survey))
-        report.append("ACL AFTER A RUN:\n" + _icacls(*watched))
-        for d in denies:
-            subprocess.run(["icacls", str(d), "/deny", "CodexSandboxUsers:(OI)(CI)(RD)"],
-                           capture_output=True, check=False)  # fmt: skip
-        report.append("AFTER DENY, NO GRANT:\n" + await run(
-            f'echo inside> made.txt & type made.txt & type "{ref / "r.txt"}" & ' + survey))
-        report.append("ACL AFTER DENY AND A RUN:\n" + _icacls(*watched))
-        subprocess.run(["icacls", str(ref), "/grant", "CodexSandboxUsers:(OI)(CI)(RX)"],
-                       capture_output=True, check=False)  # fmt: skip
-        report.append("AFTER GRANT ON REF:\n" + await run(
-            f'echo inside2> made2.txt & type made2.txt & type "{ref / "r.txt"}" & '
-            f'"{sys.executable}" -c "print(42)"'))
-        report.append("WORKSPACE ACL:\n" + _icacls(base / "workspace", ref))
+        run("rem", deny=False)
+        report.append("NO DENY:\n" + run(survey, deny=False))
+        report.append("CONFIG:\n" + (sandbox_home(state) / "config.toml").read_text()[:600])
+        report.append("WITH DENY (warm):\n" + run("rem", deny=True))
+        report.append("WITH DENY:\n" + run(
+            f'echo inside> made.txt & type made.txt & type "{ref / "r.txt"}" & '
+            f'"{sys.executable}" -c "print(42)" & ' + survey, deny=True))
+        report.append("CONFIG:\n" + (sandbox_home(state) / "config.toml").read_text()[:900])
+        report.append("ACL WITH DENY:\n" + _icacls(*places.values(), base, workspace, ref, state))
+        report.append("DENY OFF AGAIN:\n" + run(survey, deny=False))
+        report.append("ACL AFTER OFF:\n" + _icacls(*places.values()))
     finally:
-        for d in denies:
-            subprocess.run(["icacls", str(d), "/remove:d", "CodexSandboxUsers"], check=False)
         for f in secrets.values():
             f.unlink(missing_ok=True)
         shutil.rmtree(base, ignore_errors=True)
