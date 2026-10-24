@@ -323,6 +323,50 @@ async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the
         shutil.rmtree(base, ignore_errors=True)
 
 
+def _icacls(*paths: Path) -> str:
+    return "\n".join(
+        subprocess.run(["icacls", str(p)], capture_output=True, text=True, check=False).stdout
+        for p in paths
+    )
+
+
+@real
+async def test_a_deny_read_entry_hides_a_folder_from_the_sandbox_but_not_its_workspace(
+    tmp_path: Path, sandboxed_state: Path
+) -> None:
+    base = Path(os.environ["USERPROFILE"]) / "Documents" / f"coscribe-{uuid.uuid4().hex}"
+    base.mkdir(parents=True)
+    tools = _tools(base, sandboxed_state)
+    private = base / "private"
+    private.mkdir()
+    secret = private / "secret.txt"
+    secret.write_text("PRIVATE-SECRET")
+    command = f'whoami & echo inside> made.txt & type made.txt & type "{secret}"'
+
+    async def run() -> str:
+        started = await tools["run_background_command"](command=command, description="probe")
+        return str((await _finished(tools, started["task_id"])).get("output", ""))
+
+    try:
+        denied = subprocess.run(
+            ["icacls", str(base), "/deny", "CodexSandboxUsers:(OI)(CI)(RD)"],
+            capture_output=True, text=True, check=False,
+        )  # fmt: skip
+        assert denied.returncode == 0, denied.stdout + denied.stderr
+        hidden = await run()
+        acls = _icacls(base, base / "workspace", base / "workspace" / "made.txt", secret)
+        print(hidden, acls)
+        assert "PRIVATE-SECRET" not in hidden, hidden + acls
+        assert (base / "workspace" / "made.txt").read_text().strip() == "inside", hidden + acls
+        assert "inside" in hidden, hidden + acls
+
+        subprocess.run(["icacls", str(base), "/remove:d", "CodexSandboxUsers"], check=True)
+        shown = await run()
+        assert "PRIVATE-SECRET" in shown, shown + _icacls(base, secret)
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
 # Last in the file: it removes the sandbox the tests above share.
 @real
 async def test_a_command_fails_closed_when_the_sandbox_was_removed_behind_the_apps_back(
