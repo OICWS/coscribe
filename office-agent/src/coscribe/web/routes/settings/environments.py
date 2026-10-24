@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 from typing import Any
 
 from fastapi import (
@@ -10,6 +12,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 
+from ....code_runtime import CodexUnavailable, code_service
 from ....runtime_lg import AuditLog, record_decision
 from ....tools import (
     Capabilities,
@@ -20,6 +23,12 @@ from ....tools import (
     isolation_status,
     list_node_packages,
     own_python_offer,
+    record_sandbox_setup,
+    sandbox_codex,
+    sandbox_home,
+    sandbox_setup_argv,
+    sandbox_status,
+    sandbox_uninstall_argv,
     set_interpreter_override,
     uninstall_node_package,
 )
@@ -79,11 +88,76 @@ def _capability_routes(router: APIRouter, state: AppState) -> None:
     router.add_api_route("/api/capabilities/{name}", put_capability, methods=["PUT"])
 
 
+_SANDBOX_SETUP_SECONDS = 600
+
+
+def _run_codex(argv: list[str], state_dir: Any) -> str:
+    """Runs a `codex sandbox` admin command; the error to show, or "" when it worked."""
+    env = {**os.environ, "CODEX_HOME": str(sandbox_home(state_dir))}
+    sandbox_home(state_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        done = subprocess.run(
+            argv, env=env, capture_output=True, text=True, timeout=_SANDBOX_SETUP_SECONDS
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"Codex didn't finish: {exc}"
+    if done.returncode == 0:
+        return ""
+    output = (done.stderr or done.stdout).strip().splitlines()
+    return output[-1] if output else f"Codex exited with {done.returncode}."
+
+
+def _sandbox_routes(router: APIRouter, state: AppState) -> None:
+    """Settings › Capabilities: the command sandbox (decision 0022), set up once by an
+    administrator and removed from here."""
+    state_dir = state.settings.state_dir
+
+    def audit(action: str, error: str) -> None:
+        record_decision(
+            AuditLog(state_dir),
+            thread_id="",
+            tool_name=f"command_sandbox_{action}",
+            arguments={"error": error} if error else {},
+            decision="reject" if error else "approve",
+            reason="human",
+        )
+
+    async def get_sandbox() -> dict[str, str]:
+        return sandbox_status(state_dir)
+
+    async def set_up_sandbox() -> dict[str, str]:
+        if sandbox_status(state_dir)["state"] == "unsupported":
+            return sandbox_status(state_dir)
+        try:
+            codex = await code_service(state.settings).download()
+        except CodexUnavailable as exc:
+            record_sandbox_setup(state_dir, None, exc.args[0] if exc.args else "")
+            return sandbox_status(state_dir)
+        error = await asyncio.to_thread(_run_codex, sandbox_setup_argv(codex), state_dir)
+        record_sandbox_setup(state_dir, None if error else codex, error)
+        audit("setup", error)
+        return sandbox_status(state_dir)
+
+    async def remove_sandbox() -> dict[str, str]:
+        codex = sandbox_codex(state_dir)
+        error = ""
+        if codex is not None:
+            error = await asyncio.to_thread(_run_codex, sandbox_uninstall_argv(codex), state_dir)
+        record_sandbox_setup(state_dir, codex if error else None)
+        audit("uninstall", error)
+        return {**sandbox_status(state_dir), "error": error}
+
+    router.add_api_route("/api/command-sandbox", get_sandbox, methods=["GET"])
+    router.add_api_route("/api/command-sandbox", set_up_sandbox, methods=["POST"])
+    router.add_api_route("/api/command-sandbox", remove_sandbox, methods=["DELETE"])
+
+
 def router(state: AppState) -> APIRouter:
     router = APIRouter()
     settings = state.settings
     _isolation_routes(router, state)
     _capability_routes(router, state)
+    _sandbox_routes(router, state)
 
     # Every handler below wraps its real work in asyncio.to_thread --
     # list_packages/install_package/uninstall_package/set_interpreter_override

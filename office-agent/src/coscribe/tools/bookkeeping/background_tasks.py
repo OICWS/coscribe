@@ -71,6 +71,7 @@ from ..exec import (
     refusal_note,
     require_capability,
     script_scratch_root,
+    start_command,
     suggested_folder,
     venv_python,
     without_guard_warnings,
@@ -470,7 +471,7 @@ async def _start_contained(
 ) -> dict[str, Any] | None:
     """Starts the run in the container and hands it to `_watch`, or returns None when this
     machine cannot hold it (then the caller starts it as before)."""
-    require_capability(state, "commands" if language == "shell" else "scripts", thread_id)
+    require_capability(state, "scripts", thread_id)
     isolation = await asyncio.to_thread(
         isolation_for_scripts, state, runtime=runtime, thread_id=thread_id, **folders
     )
@@ -671,9 +672,12 @@ def build_background_task_tools(
         would tie up the conversation, or should run while you do other work.
         It runs through the machine's shell (sh, or cmd on Windows) in the
         workspace root, once the person turned commands on in Settings ›
-        Capabilities. Where coscribe's isolation check passed on Windows it is
-        refused (the shell can't work isolated); otherwise it runs as the user
-        and can change any file. Prefer run_background_script when you can.
+        Capabilities. Where the command sandbox is set up (Windows) it can
+        write only this conversation's folders, can't read the person's
+        files elsewhere, and reaches the network only if the environment
+        allows it; otherwise it runs as the user, can change any file, and
+        the person approves each one. Prefer run_background_script when you
+        can.
 
         This call does NOT return the command's output -- only a task_id
         confirming it started. Use check_background_task(task_id) to read its
@@ -693,22 +697,7 @@ def build_background_task_tools(
             raise ValueError("command must not be empty")
         timeout = min(max(timeout_seconds, 1.0), _MAX_TIMEOUT)
         env = overlay_env(os.environ, session_env() if session_env else None)
-        # One command line as cmd reads it: list2cmdline would quote the user's own quotes.
-        line = f'"{os.environ.get("COMSPEC", "cmd.exe")}" /d /s /c "{command}"'
-        started = await _start_contained(
-            state, thread_id, root, line, env, folders, [], "shell", description, None, timeout
-        )
-        if started is not None:
-            return started
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            cwd=str(root),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            # Its own process group, so a kill reaches what the shell started.
-            start_new_session=sys.platform != "win32",
-        )
+        proc = await start_command(state, thread_id, root, folders, command, env)
         return _register(proc, "shell", description, None, timeout)
 
     def _register(

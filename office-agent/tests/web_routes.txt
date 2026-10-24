@@ -1,5 +1,6 @@
 DELETE /api/artifacts/{artifact}
 DELETE /api/code/install
+DELETE /api/command-sandbox
 DELETE /api/design-systems/{system_id}
 DELETE /api/environments/{env_id}
 DELETE /api/mcp/oauth-apps/{group}
@@ -27,6 +28,7 @@ GET /api/browse-dirs
 GET /api/capabilities
 GET /api/code
 GET /api/code/permissions
+GET /api/command-sandbox
 GET /api/commands
 GET /api/config
 GET /api/design-systems
@@ -96,6 +98,7 @@ POST /api/artifacts/{artifact}/rename
 POST /api/artifacts/{artifact}/show
 POST /api/background-tasks/{task_id}/stop
 POST /api/code/install
+POST /api/command-sandbox
 POST /api/config
 POST /api/design-systems
 POST /api/environments

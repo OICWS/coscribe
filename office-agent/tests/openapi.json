@@ -1832,6 +1832,68 @@
         "summary": "Put Code Permissions"
       }
     },
+    "/api/command-sandbox": {
+      "delete": {
+        "operationId": "remove_sandbox_api_command_sandbox_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Remove Sandbox Api Command Sandbox Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Remove Sandbox"
+      },
+      "get": {
+        "operationId": "get_sandbox_api_command_sandbox_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Sandbox Api Command Sandbox Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Sandbox"
+      },
+      "post": {
+        "operationId": "set_up_sandbox_api_command_sandbox_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Set Up Sandbox Api Command Sandbox Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Set Up Sandbox"
+      }
+    },
     "/api/commands": {
       "get": {
         "operationId": "get_commands_api_commands_get",

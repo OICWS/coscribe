@@ -43,8 +43,11 @@ from ..tools import (
     format_question_answers,
     normalize_questions,
     parse_run_thread_id,
+    sandbox_codex,
 )
 from .events import EventSink
+
+_COMMAND_TOOL = "run_background_command"
 
 
 def can_resolve_approvals(websocket: Any) -> bool:
@@ -290,6 +293,10 @@ class ApprovalDecider:
             )
             self._audit(audit_log, name, args, "reject", "plan_mode", message)
             return {"type": "reject", "message": message}
+        if name == _COMMAND_TOOL and sandbox_codex(self._host.settings.state_dir) is None:
+            # Outside the sandbox a command runs as the person, with nothing to hold it: only
+            # they approve it, in every mode (decision 0022).
+            return await self._ask_person_only(audit_log, name, args, websocket)
         if exec_policy_decision == "allow":
             return await self._approved(
                 audit_log, name, args, websocket, "exec_policy", exec_policy_detail
@@ -306,6 +313,16 @@ class ApprovalDecider:
             )
             if decision is not None:
                 return decision
+        return await self._ask_person_only(audit_log, name, args, websocket, reviewer_note)
+
+    async def _ask_person_only(
+        self,
+        audit_log: AuditLog,
+        name: str,
+        args: dict[str, Any],
+        websocket: Any,
+        reviewer_note: str | None = None,
+    ) -> Any:
         if not can_resolve_approvals(websocket):
             # Reached only when this call is genuinely gated and neither
             # exec_policy nor accept_edits already decided it above --

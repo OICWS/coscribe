@@ -329,7 +329,7 @@
   "src/coscribe/runtime_lg/subagents.py::build_delegation_tools": 154,
   "src/coscribe/runtime_lg/subagents.py::build_review_work_tool": 133,
   "src/coscribe/runtime_lg/subagents.py::build_review_work_tool.review_work": 103,
-  "src/coscribe/tools/bookkeeping/background_tasks.py::build_background_task_tools": 224,
+  "src/coscribe/tools/bookkeeping/background_tasks.py::build_background_task_tools": 212,
   "src/coscribe/tools/bookkeeping/scheduled_tasks.py::build_scheduled_task_tools": 225,
   "src/coscribe/tools/bookkeeping/selfwake.py::build_selfwake_tools": 151,
   "src/coscribe/tools/files.py::build_file_tools": 247,

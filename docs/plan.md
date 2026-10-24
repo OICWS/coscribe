@@ -237,8 +237,9 @@ Last reviewed: 2026-10-15.
 5. **One place for what coscribe may run** (#588, kurtosisOC). Shipped: deleting the open
    conversation (#589), Settings › Capabilities (#590), named environments with the picker below
    the message box and the move of each conversation's own settings into them, scheduled tasks
-   choosing an environment. Open: commands in Codex's Windows sandbox (with a decision record that
-   changes 0021's "Codex runs no commands").
+   choosing an environment, commands in Codex's Windows sandbox (decision 0022, proposed: needs
+   the maintainer's independent review). Open: Codex's own commands in the code module through
+   the same sandbox (4b).
 
 ## Needs the maintainer's testing (could not be verified here)
 

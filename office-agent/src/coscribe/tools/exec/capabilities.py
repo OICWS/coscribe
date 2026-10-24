@@ -12,11 +12,14 @@ from pathlib import Path
 from typing import Literal
 
 from ...runtime import Environments
+from .command_sandbox import sandbox_codex
 
 Capability = Literal["scripts", "commands"]
 
 _FILE = "capabilities.json"
-_DEFAULTS: dict[Capability, bool] = {"scripts": True, "commands": False}
+# "commands_without_sandbox" is the second confirmation (decision 0022): where the command
+# sandbox is not set up, a command runs as the person only once they accepted that too.
+_DEFAULTS: dict[str, bool] = {"scripts": True, "commands": False, "commands_without_sandbox": False}
 _lock = threading.Lock()
 
 
@@ -60,11 +63,22 @@ _REFUSALS: dict[Capability, str] = {
 }
 
 
+_NO_SANDBOX = (
+    "Commands are on, but the command sandbox isn't set up on this computer and the person "
+    "hasn't allowed commands without it (Settings › Capabilities). Tell them if the task needs "
+    "a command. Prefer a Python or Node script, which runs isolated."
+)
+
+
 def require_capability(state_dir: Path, name: Capability, thread_id: str | None = None) -> None:
     """Raises CapabilityOff, which the model reads, when `name` is turned off on this computer or
     in the environment of `thread_id`'s conversation."""
-    if not Capabilities(state_dir).get()[name]:
+    allowed = Capabilities(state_dir).get()
+    if not allowed[name]:
         raise CapabilityOff(_REFUSALS[name])
+    if name == "commands" and not allowed["commands_without_sandbox"]:
+        if sandbox_codex(state_dir) is None:
+            raise CapabilityOff(_NO_SANDBOX)
     env = Environments(state_dir).for_thread(thread_id)
     if not env[name]:
         raise CapabilityOff(

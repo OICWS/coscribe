@@ -13,6 +13,7 @@ import type { Capabilities } from "../../types/settings";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ToggleSwitch } from "../ToggleSwitch";
 import { CodeTab } from "./CodeTab";
+import { CommandSandboxRow } from "./CommandSandboxRow";
 import { PackageListSection } from "./PackageListSection";
 import { PythonInterpreterSection } from "./PythonInterpreterSection";
 import { ScriptIsolationCard } from "./ScriptIsolationCard";
@@ -74,22 +75,64 @@ function ScriptsSection({ active, on, onToggle }: { active: boolean; on: boolean
   );
 }
 
-function CommandsSection({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+function CommandsSection({
+  active,
+  capabilities,
+  onToggle,
+  onToggleWithoutSandbox,
+}: {
+  active: boolean;
+  capabilities: Capabilities;
+  onToggle: () => void;
+  onToggleWithoutSandbox: () => void;
+}) {
+  const [sandboxReady, setSandboxReady] = useState(false);
   return (
     <SettingsSection
       title="Commands"
-      description="Command lines in cmd or PowerShell, for what a script can't do: build tools, git, installers. They run as you, outside coscribe's isolation, and can change or delete anything you can. You approve each one, in every mode."
+      description="Command lines in cmd or PowerShell, for what a script can't do: build tools, git, installers. In the command sandbox a command can write only its environment's folders. Without it, a command runs as you and can change or delete anything you can, so you approve each one, in every mode."
     >
       <SettingRows>
         <SettingRow
           label="Run commands"
           description="Off by default. Turning it on is recorded in the audit log."
-          control={<ToggleSwitch label="Run commands" on={on} onClick={onToggle} />}
+          control={<ToggleSwitch label="Run commands" on={capabilities.commands} onClick={onToggle} />}
         />
+        <CommandSandboxRow active={active} onChange={setSandboxReady} />
+        {!sandboxReady && (
+          <SettingRow
+            label="Run commands without the sandbox"
+            description="Off, commands are refused until the sandbox is set up."
+            control={
+              <ToggleSwitch
+                label="Run commands without the sandbox"
+                on={capabilities.commands_without_sandbox}
+                onClick={onToggleWithoutSandbox}
+              />
+            }
+          />
+        )}
       </SettingRows>
     </SettingsSection>
   );
 }
+
+// Turning commands on, and then letting them run outside the sandbox, are two separate risks,
+// each confirmed once (decision 0022).
+const CONFIRMATIONS = {
+  commands: {
+    title: "Turn on commands?",
+    description:
+      "In the command sandbox a command can write only its environment's folders. Without it, a command runs as you: one you approve can change or delete any of your files.",
+    confirmLabel: "Turn on",
+  },
+  commands_without_sandbox: {
+    title: "Run commands without the sandbox?",
+    description:
+      "A command would run as you, with nothing to hold it to its folders: one you approve can change or delete any of your files and reach the internet. coscribe asks before each command, in every mode, and never lets Auto mode approve one.",
+    confirmLabel: "Allow",
+  },
+} as const;
 
 interface CapabilitiesTabProps {
   active: boolean;
@@ -101,7 +144,7 @@ interface CapabilitiesTabProps {
  * can only narrow what is on here. */
 export function CapabilitiesTab({ active, values, onChange }: CapabilitiesTabProps) {
   const { capabilities, error, set } = useCapabilities(active);
-  const [confirmCommands, setConfirmCommands] = useState(false);
+  const [confirm, setConfirm] = useState<keyof typeof CONFIRMATIONS | null>(null);
   if (capabilities === null) {
     return <p className="text-sm text-[var(--muted)]">{error ?? "Loading…"}</p>;
   }
@@ -110,8 +153,14 @@ export function CapabilitiesTab({ active, values, onChange }: CapabilitiesTabPro
       {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
       <ScriptsSection active={active} on={capabilities.scripts} onToggle={() => set("scripts", !capabilities.scripts)} />
       <CommandsSection
-        on={capabilities.commands}
-        onToggle={() => (capabilities.commands ? set("commands", false) : setConfirmCommands(true))}
+        active={active}
+        capabilities={capabilities}
+        onToggle={() => (capabilities.commands ? set("commands", false) : setConfirm("commands"))}
+        onToggleWithoutSandbox={() =>
+          capabilities.commands_without_sandbox
+            ? set("commands_without_sandbox", false)
+            : setConfirm("commands_without_sandbox")
+        }
       />
       <CodeTab values={values} onChange={onChange} />
       <SettingsSection
@@ -120,15 +169,13 @@ export function CapabilitiesTab({ active, values, onChange }: CapabilitiesTabPro
       >
         {null}
       </SettingsSection>
-      {confirmCommands && (
+      {confirm && (
         <ConfirmDialog
-          title="Turn on commands?"
-          description="A command runs as you, outside coscribe's isolation: one you approve can change or delete any of your files. coscribe asks before each command, in every mode."
-          confirmLabel="Turn on"
-          onCancel={() => setConfirmCommands(false)}
+          {...CONFIRMATIONS[confirm]}
+          onCancel={() => setConfirm(null)}
           onConfirm={() => {
-            setConfirmCommands(false);
-            set("commands", true);
+            setConfirm(null);
+            set(confirm, true);
           }}
         />
       )}

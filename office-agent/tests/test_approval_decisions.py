@@ -31,6 +31,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from coscribe.code_runtime import CodePermissions
 from coscribe.config import Settings
+from coscribe.conversation import approvals as approvals_module
 from coscribe.conversation import session as session_module
 from coscribe.conversation.session import ChatSessionLG, _SubAgentApprovalChannel
 from coscribe.runtime import empty_hooks_config
@@ -42,12 +43,14 @@ from .wire_check import check_event
 
 READ, LOCAL, EXEC, EXTERNAL = "read_file", "write_file", "run_python_script", "send_email"
 CODE_COMMAND, CODE_CHANGE = "run_code_command", "apply_code_change"
+COMMAND = "run_background_command"
 RISKS = {
     LOCAL: "WRITE_LOCAL",
     EXEC: "EXEC",
     EXTERNAL: "EXTERNAL",
     CODE_COMMAND: "EXEC",
     CODE_CHANGE: "WRITE_LOCAL",
+    COMMAND: "EXEC",
 }
 
 
@@ -130,6 +133,7 @@ class Row:
     human: bool | None = None  # the person's answer, when the conversation asks
     announced: bool = False  # a `tool_started` message goes to the client
     asked: bool = False  # an `approval_required` message goes to the client
+    sandboxed: bool = False  # the command sandbox is set up
 
 
 ROWS: dict[str, Row] = {
@@ -213,6 +217,19 @@ ROWS: dict[str, Row] = {
     "ask_and_the_person_approves": Row(LOCAL, "approve", "human", human=True, asked=True),
     "ask_and_the_person_refuses": Row(LOCAL, "reject", "human", human=False, asked=True),
     "unattended_refuses_instead_of_waiting": Row(LOCAL, "reject", "unattended", attended=False),
+    # -- a command outside the sandbox runs as the person, so only the person approves it
+    "a_command_outside_the_sandbox_asks_even_when_preapproved": Row(
+        COMMAND, "approve", "human", preapproved=True, human=True, asked=True
+    ),
+    "a_command_outside_the_sandbox_asks_under_accept_edits": Row(
+        COMMAND, "reject", "human", accept_edits=True, human=False, asked=True
+    ),
+    "a_command_outside_the_sandbox_is_refused_in_a_run_that_skips_approval": Row(
+        COMMAND, "reject", "unattended", run_mode="skip", attended=False
+    ),
+    "a_sandboxed_command_follows_the_standing_approvals": Row(
+        COMMAND, "approve", "preapproved", preapproved=True, sandboxed=True, announced=True
+    ),
 }
 
 
@@ -282,6 +299,8 @@ async def test_the_decision_for_one_situation(
     session.preapproved_tools = frozenset({row.tool}) if row.preapproved else frozenset()
     _write_exec_rule(session, row.exec_rule)
     _veto(monkeypatch, session, row.veto)
+    sandbox = Path("codex.exe") if row.sandboxed else None
+    monkeypatch.setattr(approvals_module, "sandbox_codex", lambda state_dir: sandbox)
     socket = _Socket(row.attended)
 
     result = await _decide(session, row.tool, socket, answer=row.human)

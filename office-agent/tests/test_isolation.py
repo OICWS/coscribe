@@ -14,6 +14,7 @@ import pytest
 from coscribe.runtime import Environments
 from coscribe.tools.exec import (
     Capabilities,
+    CapabilityOff,
     FolderGrants,
     Isolation,
     IsolationRefused,
@@ -413,11 +414,12 @@ async def test_the_script_tools_run_contained(tmp_path: Path) -> None:
         assert (workspace / "old.txt").exists()
         assert "delete_file" in str(removed["stderr"]), removed
 
+        # Isolated scripts don't make a command safe: it needs the sandbox or a second yes.
         Capabilities(state).set("commands", True)
         tools = {
             tool.__name__: tool for tool in build_background_task_tools("t1", workspace, state)
         }
-        with pytest.raises(IsolationRefused):
+        with pytest.raises(CapabilityOff, match="sandbox"):
             await tools["run_background_command"](
                 command=f'echo x > "{outside / "shell.txt"}"', description="write outside"
             )

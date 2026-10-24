@@ -169,6 +169,7 @@ AUDITED_READ_ONLY_GETS = {
     "/api/code",
     "/api/environments",
     "/api/code/permissions",
+    "/api/command-sandbox",
     "/api/commands",
     "/api/config",
     "/api/design-systems",

@@ -2,7 +2,7 @@ name: Windows more checks
 
 # The checks that used to wait for a person on a Windows machine and can be scripted on a runner:
 # the real Credential Manager, cmd and PowerShell hooks, Format-Hex, taskkill on a process tree,
-# the Store python stub, YaHei in resvg, and the Slides editor's e2e specs. Kept in its own workflow so a failure here does not reset
+# the Store python stub, YaHei in resvg, Codex's command sandbox, and the Slides editor's e2e specs. Kept in its own workflow so a failure here does not reset
 # windows.yml's run of green nights (decision 0009) or block windows-checks.yml.
 "on":
   schedule:
@@ -15,6 +15,8 @@ name: Windows more checks
       - "office-agent/frontend/tests/e2e/fixtures/build_*deck.py"
       - "office-agent/scripts/stub_llm.py"
       - "office-agent/tests/test_windows_real.py"
+      - "office-agent/src/coscribe/tools/exec/command_sandbox.py"
+      - "office-agent/src/coscribe/tools/bookkeeping/background_tasks.py"
       - ".github/CODEOWNERS"
 
 permissions:

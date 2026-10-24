@@ -561,4 +561,14 @@ export interface Environment extends EnvironmentFields {
 export interface Capabilities {
   scripts: boolean;
   commands: boolean;
+  /** The second confirmation: commands may run as the person where the sandbox isn't set up. */
+  commands_without_sandbox: boolean;
+}
+
+/** Codex's Windows sandbox for commands (decision 0022). */
+export interface CommandSandbox {
+  state: "ready" | "off" | "failed" | "unsupported";
+  detail: string;
+  /** Set when removing it failed. */
+  error?: string;
 }

@@ -62,6 +62,16 @@ class CodeService:
             await asyncio.to_thread(ensure_script_env, self.state_dir)
         return self.host
 
+    async def download(self) -> Path:
+        """Codex alone, for the command sandbox, which needs no script env."""
+        async with self._ready:
+            try:
+                return await asyncio.to_thread(
+                    ensure_codex, self.state_dir, self.settings.codex_wheel_url, self._report
+                )
+            finally:
+                self._progress = None
+
     def status(self) -> dict[str, Any]:
         progress = self._progress
         return {

@@ -14,8 +14,8 @@ posix_only = pytest.mark.skipif(sys.platform == "win32", reason="uses sh syntax"
 
 @pytest.fixture(autouse=True)
 def unisolated(monkeypatch: pytest.MonkeyPatch) -> None:
-    """How a command line runs where nothing isolates it; where something does, it is refused
-    (tests/test_isolation.py)."""
+    """How a command line runs where the sandbox isn't set up and the person allowed that; the
+    sandbox itself is tests/test_command_sandbox.py."""
     monkeypatch.setattr(isolation, "available", lambda: False)
 
 
@@ -24,6 +24,7 @@ def _tools(tmp_path: Path, thread_id: str = "t1") -> dict[str, Any]:
     workspace.mkdir(exist_ok=True)
     state = tmp_path / "state"
     Capabilities(state).set("commands", True)
+    Capabilities(state).set("commands_without_sandbox", True)
     return {
         tool.__name__: tool for tool in build_background_task_tools(thread_id, workspace, state)
     }

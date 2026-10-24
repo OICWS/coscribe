@@ -98,7 +98,11 @@ that; to let a script read another place, the person adds it as a read-only fold
 trusted tools stay outside. Where the self-test failed, scripts are refused
 unless the person lets that one conversation run them without isolation
 (audited). Then, and off Windows, only a folder guard
-remains (Codex runs no commands); it refuses writes outside the folders and is not a security boundary. The UI and docs say which one holds. No
+remains (Codex's code module runs no commands); it refuses writes outside the folders and is not a security boundary.
+A command line (`run_background_command`) runs in Codex's Windows sandbox once the person set it
+up in Settings › Capabilities (decision 0022): it writes only the conversation's folders and
+can't read the person's profile. Without it, a command runs as the user only after a second
+confirmation, and the person approves every one. The UI and docs say which one holds. No
 import allow/deny lists: they are easy to bypass and only look like safety.
 
 ### Office formats are built in, not MCP
