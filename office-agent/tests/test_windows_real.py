@@ -373,66 +373,62 @@ async def test_probe_what_the_sandbox_reads_and_what_denies_do(
 ) -> None:
     profile = Path(os.environ["USERPROFILE"])
     tag = uuid.uuid4().hex[:8]
+    # A state dir where coscribe keeps it, not in Temp.
+    state = Path(os.environ["LOCALAPPDATA"]) / f"coscribe-probe-{tag}"
+    state.mkdir()
+    record_sandbox_setup(state, sandbox_codex(sandboxed_state))
+    warm_up_sandbox(state)
     places = {
         "documents": profile / "Documents",
         "desktop": profile / "Desktop",
         "downloads": profile / "Downloads",
-        "pictures": profile / "Pictures",
         "roaming": Path(os.environ["APPDATA"]),
-        "localappdata": Path(os.environ["LOCALAPPDATA"]),
         "temp": Path(os.environ["TEMP"]),
-        "public": Path("C:/Users/Public"),
-        "programdata": Path("C:/ProgramData"),
-        "croot": Path("C:/"),
-        "ddrive": Path("D:/"),
     }
     secrets = {}
     for key, folder in places.items():
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            f = folder / f"coscribe-probe-{tag}-{key}.txt"
-            f.write_text(f"SECRET-{key.upper()}")
-            secrets[key] = f
-        except OSError as e:
-            print("cannot write", key, e)
+        folder.mkdir(parents=True, exist_ok=True)
+        f = folder / f"coscribe-probe-{tag}-{key}.txt"
+        f.write_text(f"SECRET-{key.upper()}")
+        secrets[key] = f
     base = profile / "Documents" / f"coscribe-{tag}"
     base.mkdir()
     ref = base / "ref"
     ref.mkdir()
     (ref / "r.txt").write_text("REF-READ")
-    tools = _tools(base, sandboxed_state)
+    tools = _tools(base, state)
     report = []
+    watched = (profile, profile / "AppData", *places.values(), base, ref, state)
 
     async def run(command: str) -> str:
         started = await tools["run_background_command"](command=command, description="probe")
         return str((await _finished(tools, started["task_id"])).get("output", ""))
 
     survey = " & ".join(f'type "{f}"' for f in secrets.values())
+    denies = [places[k] for k in ("documents", "desktop", "downloads", "roaming")]
     try:
-        report.append("SURVEY:\n" + await run(survey + " & set"))
-        denies = [places["documents"], places["temp"]]
+        report.append("ACL BEFORE:\n" + _icacls(*watched))
+        report.append("SURVEY:\n" + await run(survey))
+        report.append("ACL AFTER A RUN:\n" + _icacls(*watched))
         for d in denies:
-            report.append(subprocess.run(
-                ["icacls", str(d), "/deny", "CodexSandboxUsers:(OI)(CI)(RD)"],
-                capture_output=True, text=True, check=False).stdout)  # fmt: skip
+            subprocess.run(["icacls", str(d), "/deny", "CodexSandboxUsers:(OI)(CI)(RD)"],
+                           capture_output=True, check=False)  # fmt: skip
         report.append("AFTER DENY, NO GRANT:\n" + await run(
             f'echo inside> made.txt & type made.txt & type "{ref / "r.txt"}" & ' + survey))
-        report.append(subprocess.run(
-            ["icacls", str(ref), "/grant", "CodexSandboxUsers:(OI)(CI)(RX)"],
-            capture_output=True, text=True, check=False).stdout)  # fmt: skip
+        report.append("ACL AFTER DENY AND A RUN:\n" + _icacls(*watched))
+        subprocess.run(["icacls", str(ref), "/grant", "CodexSandboxUsers:(OI)(CI)(RX)"],
+                       capture_output=True, check=False)  # fmt: skip
         report.append("AFTER GRANT ON REF:\n" + await run(
             f'echo inside2> made2.txt & type made2.txt & type "{ref / "r.txt"}" & '
-            f'"{sys.executable}" -c "import tempfile; print(\'TMP\', tempfile.gettempdir())"'))
-        report.append(_icacls(places["documents"], places["temp"], base, ref, base / "workspace"))
-        for d in denies:
-            subprocess.run(["icacls", str(d), "/remove:d", "CodexSandboxUsers"], check=False)
-        report.append("AFTER REMOVE:\n" + await run(survey))
+            f'"{sys.executable}" -c "print(42)"'))
+        report.append("WORKSPACE ACL:\n" + _icacls(base / "workspace", ref))
     finally:
-        for d in (places["documents"], places["temp"]):
+        for d in denies:
             subprocess.run(["icacls", str(d), "/remove:d", "CodexSandboxUsers"], check=False)
         for f in secrets.values():
             f.unlink(missing_ok=True)
         shutil.rmtree(base, ignore_errors=True)
+        shutil.rmtree(state, ignore_errors=True)
     raise AssertionError("PROBE REPORT\n" + "\n----\n".join(report))
 
 
