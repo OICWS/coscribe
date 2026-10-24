@@ -6,6 +6,7 @@ $env:CODEX_HOME = Join-Path $root "codex-home"
 New-Item -ItemType Directory -Force $work, $outside, $env:CODEX_HOME | Out-Null
 Set-Content (Join-Path $work "existing.txt") "inside"
 Set-Content (Join-Path $outside "secret.txt") "secret"
+Set-Content (Join-Path $root "other.txt") "other"
 @"
 default_permissions = "coscribe"
 
@@ -32,6 +33,9 @@ Check 'delete inside' { Remove-Item -ErrorAction Stop new.txt }
 Check 'write outside' { Set-Content -ErrorAction Stop '$outside\probe.txt' 'x' }
 Check 'read outside' { Get-Content -ErrorAction Stop '$outside\secret.txt' }
 Check 'list outside' { Get-ChildItem -ErrorAction Stop '$env:USERPROFILE\Documents' }
+Check 'read other drive' { Get-Content -ErrorAction Stop '$root\other.txt' }
+Check 'read program files' { Get-ChildItem -ErrorAction Stop 'C:\Program Files' }
+Check 'read desktop' { Get-ChildItem -ErrorAction Stop '$env:USERPROFILE\Desktop' }
 Check 'network' { (New-Object Net.Sockets.TcpClient).Connect('1.1.1.1', 443) }
 Check 'whoami' { whoami | Write-Host }
 "@
@@ -40,7 +44,7 @@ Set-Content (Join-Path $root "probe.ps1") $probe
 "===== setup --elevated --current-user"
 codex sandbox setup --elevated --current-user 2>&1 | ForEach-Object { "$_" }
 "exit $LASTEXITCODE"
-foreach ($impl in @("unelevated", "elevated")) {
+foreach ($impl in @("elevated")) {
   "===== $impl powershell"
   Push-Location $work
   codex -c "windows.sandbox=$impl" sandbox --permission-profile coscribe -C $work -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "probe.ps1") 2>&1 | ForEach-Object { "$_" }
