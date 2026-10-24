@@ -195,7 +195,7 @@ async def test_stopping_a_background_command_ends_its_whole_process_tree(
             break
         await asyncio.sleep(0.1)
     task = tools["check_background_task"](started["task_id"])
-    assert pid_file.exists(), task
+    assert pid_file.exists(), task.get("output")
     grandchild = int(pid_file.read_text())
     assert _alive(grandchild)
     assert tools["check_background_task"](started["task_id"])["status"] == "running"
@@ -274,7 +274,10 @@ async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the
     outside.mkdir()
     (outside / "secret.txt").write_text("secret")
     secret, made = outside / "secret.txt", outside / "made.txt"
-    connect = "import socket; socket.create_connection(('1.1.1.1', 443), 5); print('NET-OPEN')"
+    connect = (
+        "print('PY-RAN'); import socket; "
+        "socket.create_connection(('1.1.1.1', 443), 5); print('NET-OPEN')"
+    )
     command = (
         f'whoami & echo inside> made.txt & type "{secret}" & echo outside> "{made}" & '
         f'"{sys.executable}" -c "{connect}"'
@@ -289,7 +292,7 @@ async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the
     assert "secret" not in output.replace("secret.txt", ""), output
     assert "codexsandbox" in output.lower(), output
     # Default's network is not Full, so the command is offline.
-    assert "NET-OPEN" not in output, output
+    assert "PY-RAN" in output and "NET-OPEN" not in output, output
 
 
 # Last in the file: it removes the sandbox the tests above share.
