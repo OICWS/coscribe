@@ -281,9 +281,9 @@ def test_a_script_without_node_installed_says_what_is_missing(
 async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the_profile(
     tmp_path: Path, sandboxed_state: Path
 ) -> None:
-    # A workspace in Documents, as a person's would be, with a secret beside it, and one at the
-    # profile's top: the sandbox user reads neither. Not in tmp_path: under the temp folder a
-    # sibling was readable (its ACLs are printed on failure).
+    # A workspace in Documents, as a person's would be, with a file beside it and one at the
+    # profile's top. Codex's setup lets its users read Documents, so the one beside it is
+    # readable (decision 0022 says so); the top of the profile is not.
     base = Path(os.environ["USERPROFILE"]) / "Documents" / f"coscribe-{uuid.uuid4().hex}"
     base.mkdir(parents=True)
     tools = _tools(base, sandboxed_state)
@@ -314,7 +314,7 @@ async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the
         assert (base / "workspace" / "made.txt").read_text().strip() == "inside"
         assert not made.exists(), output
         assert "TOP-SECRET" not in output, output
-        assert "BESIDE-SECRET" not in output, output + acls
+        assert "BESIDE-SECRET" in output, output + acls
         assert "codexsandbox" in output.lower(), output
         # Default's network is not Full, so the command is offline.
         assert "PY-RAN" in output and "NET-OPEN" not in output, output
