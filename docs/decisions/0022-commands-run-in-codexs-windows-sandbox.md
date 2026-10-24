@@ -42,6 +42,13 @@ administrator approves.
   command fail rather than run as the person (a real-Windows check).
 - The command gets the server's environment variables, as scripts do; coscribe keeps provider
   keys in the Credential Manager, not there.
+- An offline sandboxed command in Auto or a run that skips approval still reads Documents and
+  can copy what it reads into a writable folder, where another tool could send it on; the
+  approvals of those tools are what stand in the way.
+- A command approved without the person because the sandbox was set up is refused if the
+  sandbox is gone when it starts, rather than run as the person.
+- An unattended run in manual mode leaves an unsandboxed command waiting for the person, as it
+  does every gated call; a run that resolves approvals itself refuses it.
 - A limited network list can't be held by the sandbox, so a command is offline unless the
   network is Full.
 - Setting up needs an administrator once per machine; a standard user without one keeps the

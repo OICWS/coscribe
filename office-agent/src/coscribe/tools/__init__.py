@@ -92,6 +92,7 @@ from .exec import (
     build_script_tools,
     ensure_own_python,
     ensure_script_env,
+    expect_sandbox,
     fallbacks_for_platform,
     find_pythons,
     get_interpreter_override,
@@ -398,5 +399,6 @@ __all__ = [
     "sandbox_setup_argv",
     "sandbox_status",
     "sandbox_uninstall_argv",
+    "expect_sandbox",
     "warm_up_sandbox",
 ]

@@ -10,11 +10,15 @@ from pathlib import Path
 import pytest
 
 from coscribe.tools.exec import (
+    Capabilities,
+    CapabilityOff,
     command_sandbox,
+    expect_sandbox,
     record_sandbox_setup,
     sandbox_home,
     sandbox_status,
     sandboxed_command,
+    start_command,
 )
 
 
@@ -100,3 +104,18 @@ def test_the_same_folders_share_a_profile_and_old_profiles_are_dropped(tmp_path:
     config = (sandbox_home(tmp_path) / "config.toml").read_text(encoding="utf-8")
     assert f"[permissions.{first}.filesystem]" not in config
     assert config.count(".filesystem]") == command_sandbox._PROFILES_KEPT + 1
+
+
+async def test_a_command_approved_for_the_sandbox_does_not_run_once_it_is_gone(
+    tmp_path: Path,
+) -> None:
+    Capabilities(tmp_path).set("commands", True)
+    Capabilities(tmp_path).set("commands_without_sandbox", True)
+    folders: dict[str, list[Path]] = {"writable": [tmp_path], "readable": []}
+    expect_sandbox("t1")
+
+    with pytest.raises(CapabilityOff, match="removed after this command was approved"):
+        await start_command(tmp_path, "t1", tmp_path, folders, "exit 0", {})
+    # The next one was not approved on that ground, so it runs as before.
+    proc = await start_command(tmp_path, "t1", tmp_path, folders, "exit 0", {})
+    assert await proc.wait() == 0

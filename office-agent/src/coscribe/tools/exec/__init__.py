@@ -15,7 +15,7 @@ from .command_sandbox import (
     sandboxed_command,
     warm_up_sandbox,
 )
-from .commands import start_command
+from .commands import expect_sandbox, start_command
 from .find_python import find_pythons
 from .isolation import (
     FolderGrants,
@@ -74,6 +74,7 @@ __all__ = [
     "sandbox_uninstall_argv",
     "sandboxed_command",
     "start_command",
+    "expect_sandbox",
     "warm_up_sandbox",
     "Detachable",
     "FolderGrants",

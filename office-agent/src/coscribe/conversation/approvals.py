@@ -41,6 +41,7 @@ from ..tools import (
     TASK_DRAFT_TOOL_NAMES,
     ScheduledTriggerStore,
     edit_draft,
+    expect_sandbox,
     format_question_answers,
     normalize_questions,
     parse_run_thread_id,
@@ -294,8 +295,10 @@ class ApprovalDecider:
             )
             self._audit(audit_log, name, args, "reject", "plan_mode", message)
             return {"type": "reject", "message": message}
-        if name == _COMMAND_TOOL and self._command_needs_the_person():
-            return await self._ask_person_only(audit_log, name, args, websocket)
+        if name == _COMMAND_TOOL:
+            if self._command_needs_the_person():
+                return await self._ask_person_only(audit_log, name, args, websocket)
+            expect_sandbox(self._host.thread_id)
         if exec_policy_decision == "allow":
             return await self._approved(
                 audit_log, name, args, websocket, "exec_policy", exec_policy_detail
