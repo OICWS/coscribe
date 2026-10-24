@@ -52,24 +52,13 @@ jobs:
           cache: npm
           cache-dependency-path: office-agent/frontend/package-lock.json
 
-      # web/static/ is a build output that tests constructing the app need.
-      - name: Build the frontend
-        working-directory: office-agent/frontend
+      - name: Codex sandbox probe
+        shell: pwsh
+        working-directory: .
         run: |
-          npm ci
-          npm run build
-
-      - name: Install coscribe
-        run: |
-          pip install -e ".[dev,web]"
-
-      # The text widths the deck engine sizes boxes with, measured on this machine's fonts.
-      # The table is committed; the test below keeps it equal to the fonts.
-      - name: Measure font advances
-        run: python scripts/measure_font_advances.py "C:/Windows/Fonts" --out windows-font-advances.json
-
-      - name: Tests
-        run: python -m pytest -q -n 4 -p no:cacheprovider --tb=short -rfE --junitxml=windows-junit.xml
+          npm i -g @openai/codex@0.164.0
+          codex --version
+          ./.github/probe/codex_sandbox.ps1
 
       - name: Summary of the failures
         if: always()
