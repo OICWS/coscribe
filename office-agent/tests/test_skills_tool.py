@@ -155,6 +155,7 @@ def test_load_builtin_skills_finds_the_four_shipped_skills() -> None:
         "Word Documents",
         "Skill Creator",
         "SVG and HTML Design",
+        "markdown",
     }
     for skill in skills:
         assert skill.description

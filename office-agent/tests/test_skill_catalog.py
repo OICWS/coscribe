@@ -185,3 +185,16 @@ def test_connectors_that_need_an_app_describe_their_setup_and_plugin_names_find_
     assert len({e["name"] for e in MCP_CATALOG}) == len(MCP_CATALOG)
     # Google's three share one app.
     assert {e["setup"]["group"] for e in needing if e["made_by"] == "Google"} == {"google"}
+
+
+def test_markdown_skill_is_built_in_and_off_until_switched_on(tmp_path: Path) -> None:
+    from coscribe.tools import disabled_skill_names, load_builtin_skills, set_skill_enabled
+
+    assert "markdown" in {skill.name for skill in load_builtin_skills()}
+    assert "markdown" in disabled_skill_names(tmp_path)
+    set_skill_enabled(tmp_path, "markdown", True)
+    assert "markdown" not in disabled_skill_names(tmp_path)
+    set_skill_enabled(tmp_path, "markdown", False)
+    assert "markdown" in disabled_skill_names(tmp_path)
+    set_skill_enabled(tmp_path, "word", False)
+    assert disabled_skill_names(tmp_path) == {"markdown", "word"}

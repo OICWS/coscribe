@@ -87,6 +87,7 @@ def test_get_skills_lists_the_builtin_skills(
         "Word Documents",
         "Skill Creator",
         "SVG and HTML Design",
+        "markdown",
     }
 
 

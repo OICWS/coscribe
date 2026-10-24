@@ -9,8 +9,8 @@ directory and checks each against the catalog's SHA-256, so a changed or
 truncated download never lands.
 
 On/off is one global setting per skill, stored in `<state_dir>/skills.json`
-as the set of switched-off names; every skill not in it is offered to the
-model in every conversation.
+as the set of switched-off names plus the set of default-off skills the user
+switched on; every other skill is offered to the model in every conversation.
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ CATALOG_PATH = Path(__file__).resolve().parent.parent / "skill_catalog.json"
 # to have come from the catalog (it can be removed and added back).
 SOURCE_MARKER = ".coscribe-source.json"
 _STATE_FILE = "skills.json"
+# Built-in skills that stay off until the user switches them on in Settings.
+DEFAULT_OFF_SKILLS = frozenset({"markdown"})
 _RAW_URL = "https://raw.githubusercontent.com/{repo}/{commit}/{src}"
 
 SkillSource = Literal["builtin", "anthropic", "custom"]
@@ -53,23 +55,34 @@ def skill_source(skill: SkillInfo, builtin_names: set[str]) -> SkillSource:
     return "custom"
 
 
-def disabled_skill_names(state_dir: Path) -> set[str]:
+def _read_state(state_dir: Path) -> dict[str, set[str]]:
     try:
         data = json.loads((state_dir / _STATE_FILE).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return set()
-    return {str(name) for name in data.get("disabled", [])} if isinstance(data, dict) else set()
+        data = None
+    if not isinstance(data, dict):
+        data = {}
+    return {key: {str(name) for name in data.get(key, [])} for key in ("disabled", "enabled")}
+
+
+def disabled_skill_names(state_dir: Path) -> set[str]:
+    state = _read_state(state_dir)
+    return state["disabled"] | (DEFAULT_OFF_SKILLS - state["enabled"])
 
 
 def set_skill_enabled(state_dir: Path, name: str, enabled: bool) -> None:
-    disabled = disabled_skill_names(state_dir)
-    if enabled:
-        disabled.discard(name)
-    else:
-        disabled.add(name)
+    state = _read_state(state_dir)
+    state["disabled"].discard(name)
+    state["enabled"].discard(name)
+    if name in DEFAULT_OFF_SKILLS:
+        if enabled:
+            state["enabled"].add(name)
+    elif not enabled:
+        state["disabled"].add(name)
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / _STATE_FILE).write_text(
-        json.dumps({"disabled": sorted(disabled)}, indent=1), encoding="utf-8"
+        json.dumps({key: sorted(names) for key, names in state.items() if names}, indent=1),
+        encoding="utf-8",
     )
 
 
