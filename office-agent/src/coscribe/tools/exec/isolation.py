@@ -424,7 +424,9 @@ def for_scripts(
     if not python.is_file():
         ensure_script_env(state_dir)
     python_runtime = venv_runtime(venv)
-    if not self_test(state_dir, python, python_runtime).ok:
+    _probe_result = self_test(state_dir, python, python_runtime)
+    print("PROBE for_scripts", state_dir, python_runtime, _probe_result, flush=True)
+    if not _probe_result.ok:
         if UnisolatedConversations(state_dir).allowed(thread_id):
             return None
         raise IsolationRefused(

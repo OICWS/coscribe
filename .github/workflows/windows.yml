@@ -69,7 +69,7 @@ jobs:
         run: python scripts/measure_font_advances.py "C:/Windows/Fonts" --out windows-font-advances.json
 
       - name: Tests
-        run: python -m pytest -q -p no:cacheprovider -s tests/test_zz_probe.py
+        run: python -m pytest -q -p no:cacheprovider -s -x tests/test_scripts_tool.py tests/test_node_scripts_tool.py
 
       - name: Summary of the failures
         if: always()

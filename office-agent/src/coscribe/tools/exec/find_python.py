@@ -174,7 +174,8 @@ def _usual_folders() -> Iterator[str]:
         if base.is_dir():
             for exe in sorted(base.glob(pattern), reverse=True):
                 yield str(exe)
-    for folder in ("anaconda3", "miniconda3", "Anaconda3", "Miniconda3"):
+    # Windows paths ignore case, so one spelling of each finds either.
+    for folder in ("anaconda3", "miniconda3"):
         for base in (home, program_data, local):
             exe = base / folder / "python.exe"
             if exe.is_file():
