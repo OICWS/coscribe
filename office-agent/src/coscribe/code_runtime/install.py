@@ -71,7 +71,14 @@ def codex_path_dir(state_dir: Path) -> Path:
 
 
 def installed(state_dir: Path) -> bool:
-    return codex_executable(state_dir).is_file()
+    """Every pinned member is there, so an install made before a member was pinned (the Windows
+    sandbox helpers) is completed by the next download."""
+    try:
+        members = _wheel()["members"]
+    except CodexUnavailable:
+        return codex_executable(state_dir).is_file()
+    root = install_dir(state_dir)
+    return all(_member_target(root, name).is_file() for name in members)
 
 
 def installed_size() -> int | None:
@@ -232,7 +239,14 @@ def ensure_codex(
         # The finished directory appears in one rename, so a half-written
         # install never looks installed.
         shutil.rmtree(final, ignore_errors=True)
-        os.replace(staging, final)
+        try:
+            os.replace(staging, final)
+        except OSError as exc:
+            # Windows keeps a running codex.exe; completing an older install waits for it.
+            raise CodexUnavailable(
+                f"Couldn't finish installing Codex {CODEX_VERSION} while it is running; "
+                f"close code conversations and try again ({exc})."
+            ) from exc
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     return codex_executable(state_dir)

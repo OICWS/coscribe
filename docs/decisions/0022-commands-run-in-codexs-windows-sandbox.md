@@ -28,8 +28,14 @@ administrator approves.
 - Scripts stay in the AppContainer (0021).
 
 ## Consequences
-- The sandbox reads the whole disk outside the person's profile; a secret kept elsewhere is
-  readable. The UI says "can't read your files elsewhere", meaning the profile.
+- The sandbox user reads whatever the disk's ACLs let a local user read: other drives, the
+  Public folders, Program Files. Only the person's profile is closed to it (checked on the
+  runner's profile). The UI's "can't read your files elsewhere" means the profile.
+- "Ready" means the setup's Codex is still where it was recorded. A Codex upgrade installs to a
+  new folder, so the old record stops counting; a sandbox removed outside the app makes the
+  command fail rather than run as the person (a real-Windows check).
+- The command gets the server's environment variables, as scripts do; coscribe keeps provider
+  keys in the Credential Manager, not there.
 - A limited network list can't be held by the sandbox, so a command is offline unless the
   network is Full.
 - Setting up needs an administrator once per machine; a standard user without one keeps the

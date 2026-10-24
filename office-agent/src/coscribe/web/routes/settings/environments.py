@@ -131,7 +131,9 @@ def _sandbox_routes(router: APIRouter, state: AppState) -> None:
         try:
             codex = await code_service(state.settings).download()
         except CodexUnavailable as exc:
-            record_sandbox_setup(state_dir, None, exc.args[0] if exc.args else "")
+            error = exc.args[0] if exc.args else "Codex couldn't be downloaded."
+            record_sandbox_setup(state_dir, None, error)
+            audit("setup", error)
             return sandbox_status(state_dir)
         error = await asyncio.to_thread(_run_codex, sandbox_setup_argv(codex), state_dir)
         record_sandbox_setup(state_dir, None if error else codex, error)

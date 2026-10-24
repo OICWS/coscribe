@@ -16,6 +16,7 @@ name: Windows more checks
       - "office-agent/scripts/stub_llm.py"
       - "office-agent/tests/test_windows_real.py"
       - "office-agent/src/coscribe/tools/exec/command_sandbox.py"
+      - "office-agent/src/coscribe/code_runtime/_pins.py"
       - "office-agent/src/coscribe/tools/bookkeeping/background_tasks.py"
       - ".github/CODEOWNERS"
 

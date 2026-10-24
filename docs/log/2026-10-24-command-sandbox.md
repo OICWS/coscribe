@@ -16,9 +16,13 @@ step 4; decision 0022).
 - Where it isn't, commands need a second switch, "Run commands without the sandbox", with its own
   confirmation; then each command is approved by the person in every mode, and an unattended
   run refuses it.
+- The Codex download on Windows also keeps the two helpers `codex sandbox` starts
+  (`codex-resources/codex-command-runner.exe`, `codex-windows-sandbox-setup.exe`), pinned by
+  `scripts/pin_codex.py`; an install made before them is completed by the next download.
 - The real-Windows checks set the sandbox up on the runner and run a command in it (writes only
-  the workspace, can't read the profile, runs as the sandbox user) and stop a sandboxed process
-  tree.
+  the workspace, can't read the profile, runs as the sandbox user, is offline) and stop a
+  sandboxed process tree; a sandbox removed behind the app's back makes a command fail, not run
+  as the person.
 
 ## Not verified
 - Setting it up from the app on a standard-user laptop, where Windows shows the administrator

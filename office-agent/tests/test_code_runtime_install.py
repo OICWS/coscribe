@@ -184,6 +184,17 @@ def test_an_installed_codex_is_used_without_downloading(
     assert ranged.served == served
 
 
+def test_an_install_without_a_newly_pinned_member_is_completed(
+    pinned: dict[str, Any], ranged: _Server, tmp_path: Path
+) -> None:
+    ensure_codex(tmp_path, ranged.url)
+    (install.codex_path_dir(tmp_path) / f"rg{EXE}").unlink()
+
+    assert not install.installed(tmp_path)
+    ensure_codex(tmp_path, ranged.url)
+    assert (install.codex_path_dir(tmp_path) / f"rg{EXE}").read_bytes() == RG
+
+
 def test_an_unreachable_host_is_a_clear_error(pinned: dict[str, Any], tmp_path: Path) -> None:
     with pytest.raises(CodexUnavailable, match="Couldn't download"):
         ensure_codex(tmp_path, "http://127.0.0.1:9/unreachable")
@@ -212,10 +223,15 @@ def test_every_pinned_build_has_both_members_and_full_hashes() -> None:
         assert f"-{_pins.CODEX_VERSION}-" in wheel["filename"]
         assert re.fullmatch(r"[0-9a-f]{64}", wheel["sha256"])
         suffix = ".exe" if key.startswith("win32/") else ""
+        # Windows also keeps the two helpers `codex sandbox` starts (decision 0022).
+        helpers = {
+            "codex_cli_bin/codex-resources/codex-command-runner.exe",
+            "codex_cli_bin/codex-resources/codex-windows-sandbox-setup.exe",
+        }
         assert set(wheel["members"]) == {
             f"codex_cli_bin/bin/codex{suffix}",
             f"codex_cli_bin/codex-path/rg{suffix}",
-        }
+        } | (helpers if suffix else set())
         for member in wheel["members"].values():
             assert re.fullmatch(r"[0-9a-f]{64}", member["sha256"])
             assert member["size"] > 0

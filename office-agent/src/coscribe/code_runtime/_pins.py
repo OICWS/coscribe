@@ -19,6 +19,14 @@ WHEELS: dict[str, dict[str, Any]] = {
                 "sha256": "14231169855ec5205cf5a1b6f1db358ff4aed4247c86b69ce8aae647c77f6680",
                 "size": 4218880,
             },
+            "codex_cli_bin/codex-resources/codex-command-runner.exe": {
+                "sha256": "dd13f8e95faba5cf539d870dd3b64c226b00d062a5b523e7e08c44fdc8235224",
+                "size": 8207152,
+            },
+            "codex_cli_bin/codex-resources/codex-windows-sandbox-setup.exe": {
+                "sha256": "8f91d62aca2aca87b0ebf446848b817720415dd3080905ffc3085c17b70bd57a",
+                "size": 17685808,
+            },
         },
     },
     "win32/arm64": {
@@ -34,6 +42,14 @@ WHEELS: dict[str, dict[str, Any]] = {
             "codex_cli_bin/codex-path/rg.exe": {
                 "sha256": "d33a29a9ef03c9f4c03be9e8d88498e6e2d2e566d64cdbdef97f9afc8f13120c",
                 "size": 3859456,
+            },
+            "codex_cli_bin/codex-resources/codex-command-runner.exe": {
+                "sha256": "e46a43aa9ad1ecaca67b57f2dcbc016868e932ec1bed2c616d59646e5b26316c",
+                "size": 7342384,
+            },
+            "codex_cli_bin/codex-resources/codex-windows-sandbox-setup.exe": {
+                "sha256": "cf4d66e2e7a78843b9aff9680a3d52d54a56f6c2c3f889e78f4196d840e8d9e6",
+                "size": 15758128,
             },
         },
     },

@@ -24,8 +24,10 @@ from coscribe.tools.bookkeeping.background_tasks import build_background_task_to
 from coscribe.tools.exec import (
     Capabilities,
     record_sandbox_setup,
+    sandbox_codex,
     sandbox_home,
     sandbox_setup_argv,
+    sandbox_uninstall_argv,
     script_env,
 )
 
@@ -269,7 +271,11 @@ async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the
     outside.mkdir()
     (outside / "secret.txt").write_text("secret")
     secret, made = outside / "secret.txt", outside / "made.txt"
-    command = f'whoami & echo inside> made.txt & type "{secret}" & echo outside> "{made}"'
+    connect = "import socket; socket.create_connection(('1.1.1.1', 443), 5); print('NET-OPEN')"
+    command = (
+        f'whoami & echo inside> made.txt & type "{secret}" & echo outside> "{made}" & '
+        f'"{sys.executable}" -c "{connect}"'
+    )
 
     started = await tools["run_background_command"](command=command, description="probe")
     result = await _finished(tools, started["task_id"])
@@ -279,3 +285,29 @@ async def test_a_sandboxed_command_writes_only_its_workspace_and_cannot_read_the
     assert not made.exists(), output
     assert "secret" not in output.replace("secret.txt", ""), output
     assert "codexsandbox" in output.lower(), output
+    # Default's network is not Full, so the command is offline.
+    assert "NET-OPEN" not in output, output
+
+
+# Last in the file: it removes the sandbox the tests above share.
+@real
+async def test_a_command_fails_closed_when_the_sandbox_was_removed_behind_the_apps_back(
+    tmp_path: Path, sandboxed_state: Path
+) -> None:
+    tools = _tools(tmp_path, sandboxed_state)
+    codex = sandbox_codex(sandboxed_state)
+    assert codex is not None
+    home = {**os.environ, "CODEX_HOME": str(sandbox_home(sandboxed_state))}
+    removed = subprocess.run(
+        sandbox_uninstall_argv(codex), env=home, capture_output=True, text=True, check=False
+    )
+    assert removed.returncode == 0, removed.stdout + removed.stderr
+
+    started = await tools["run_background_command"](
+        command="whoami & echo inside> made.txt", description="after removal"
+    )
+    result = await _finished(tools, started["task_id"])
+
+    output = result.get("output", "")
+    assert result["status"] == "failed", output
+    assert not (tmp_path / "workspace" / "made.txt").exists(), output
