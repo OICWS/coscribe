@@ -314,6 +314,12 @@ async def test_a_command_fails_closed_when_the_sandbox_was_removed_behind_the_ap
     )
     result = await _finished(tools, started["task_id"])
 
+    # Codex either refuses or sets the sandbox up again (the runner is an administrator); never
+    # does the command run as the person.
     output = result.get("output", "")
-    assert result["status"] == "failed", output
-    assert not (tmp_path / "workspace" / "made.txt").exists(), output
+    ran_as = output.splitlines()[0].lower() if output.strip() else ""
+    assert os.environ["USERNAME"].lower() not in ran_as, output
+    if result["status"] == "succeeded":
+        assert "codexsandbox" in ran_as, output
+    else:
+        assert not (tmp_path / "workspace" / "made.txt").exists(), output

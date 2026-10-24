@@ -59,10 +59,14 @@ def test_a_command_runs_through_cmd_in_a_profile_for_exactly_its_folders(tmp_pat
     home = sandbox_home(tmp_path)
     assert env == {"CODEX_HOME": str(home)}
     profile = argv[3]
+    script = Path(argv[-1])
     assert argv == [
         str(codex), "sandbox", "--permission-profile", profile, "-C", str(root), "--",
-        "cmd.exe", "/d", "/s", "/c", 'echo "hi"',
+        "cmd.exe", "/d", "/c", str(script),
     ]  # fmt: skip
+    # The line goes in a batch file: Codex would turn its quotes into \" for cmd.
+    assert script.read_bytes() == b'@echo off\r\nchcp 65001 >nul\r\necho "hi"\r\n'
+    assert script.parent == tmp_path / "command-sandbox" / "commands"
     config = (home / "config.toml").read_text(encoding="utf-8")
     assert config.startswith(
         'default_permissions = "coscribe-default"\n\n[windows]\nsandbox = "elevated"\n'
@@ -71,6 +75,7 @@ def test_a_command_runs_through_cmd_in_a_profile_for_exactly_its_folders(tmp_pat
         f"[permissions.{profile}.filesystem]\n"
         '":root" = "read"\n'
         f'"{extra.as_posix()}" = "read"\n'
+        f'"{script.parent.as_posix()}" = "read"\n'
         f'"{root.as_posix()}" = "write"\n\n'
         f"[permissions.{profile}.network]\n"
         "enabled = false\n"

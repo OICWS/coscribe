@@ -10,11 +10,14 @@ need nothing from the code module. Elsewhere, or until it is set up, a command r
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import sys
 import threading
+import time
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -24,6 +27,8 @@ _RECORD = "command-sandbox.json"
 # named after them, so commands running at once in different environments never share one.
 _PROFILES_KEPT = 64
 _DEFAULT = "coscribe-default"
+# A command's batch file outlives its start only so a slow sandbox can read it.
+_COMMAND_FILES_KEPT_SECONDS = 3600
 _lock = threading.Lock()
 
 
@@ -134,15 +139,35 @@ def sandboxed_command(
     if codex is None:
         return None
     home = sandbox_home(state_dir)
+    script = _command_file(state_dir, command)
     folders = {
         "writable": [str(p) for p in writable],
-        "readable": [str(p) for p in readable],
+        "readable": [*(str(p) for p in readable), str(script.parent)],
         "network": network,
     }
     profile = _ensure_profile(home, folders)
     argv = [str(codex), "sandbox", "--permission-profile", profile, "-C", str(root), "--"]
-    argv += ["cmd.exe", "/d", "/s", "/c", command]
+    argv += ["cmd.exe", "/d", "/c", str(script)]
     return argv, {"CODEX_HOME": str(home)}
+
+
+def _command_file(state_dir: Path, command: str) -> Path:
+    """`command` as a batch file. Codex quotes each argument for CommandLineToArgvW, so a quote
+    in a command line passed as one argument reaches cmd as \\", which cmd doesn't read; a batch
+    file keeps the line as typed, %VARIABLES% included. UTF-8 with chcp 65001 keeps non-ASCII
+    paths."""
+    folder = Path(state_dir) / "command-sandbox" / "commands"
+    folder.mkdir(parents=True, exist_ok=True)
+    cutoff = time.time() - _COMMAND_FILES_KEPT_SECONDS
+    for old in folder.glob("*.cmd"):
+        with contextlib.suppress(OSError):
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+    script = folder / f"{uuid.uuid4().hex}.cmd"
+    script.write_text(
+        f"@echo off\r\nchcp 65001 >nul\r\n{command}\r\n", encoding="utf-8", newline=""
+    )
+    return script
 
 
 def sandbox_setup_argv(codex: Path) -> list[str]:
