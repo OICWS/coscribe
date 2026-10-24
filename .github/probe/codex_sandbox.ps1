@@ -10,7 +10,8 @@ Set-Content (Join-Path $outside "secret.txt") "secret"
 default_permissions = "coscribe"
 
 [permissions.coscribe.filesystem]
-":minimal" = "read"
+":root" = "read"
+"$($outside -replace '\\','/')" = "deny"
 
 [permissions.coscribe.filesystem.":workspace_roots"]
 "." = "write"
@@ -36,7 +37,10 @@ Check 'whoami' { whoami | Write-Host }
 "@
 Set-Content (Join-Path $root "probe.ps1") $probe
 
-foreach ($impl in @("mxc", "unelevated", "elevated")) {
+"===== setup --elevated --current-user"
+codex sandbox setup --elevated --current-user 2>&1 | ForEach-Object { "$_" }
+"exit $LASTEXITCODE"
+foreach ($impl in @("unelevated", "elevated")) {
   "===== $impl powershell"
   Push-Location $work
   codex -c "windows.sandbox=$impl" sandbox --permission-profile coscribe -C $work -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "probe.ps1") 2>&1 | ForEach-Object { "$_" }
@@ -48,5 +52,3 @@ foreach ($impl in @("mxc", "unelevated", "elevated")) {
   "outside now:"; Get-ChildItem $outside | ForEach-Object Name
   Remove-Item -ErrorAction SilentlyContinue "$outside\probe.txt", "$outside\cmd.txt"
 }
-"===== setup --elevated"
-codex sandbox setup --help 2>&1 | Select-Object -First 20
