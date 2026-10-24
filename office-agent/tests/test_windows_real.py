@@ -410,8 +410,9 @@ async def test_probe_codex_deny_entries(
 
     def run(command: str, deny: bool) -> str:
         monkeypatch.setattr(command_sandbox, "_section", with_denies if deny else original)
-        # A fresh home each time, so the profile's text is rebuilt.
-        shutil.rmtree(sandbox_home(state), ignore_errors=True)
+        # Rebuild the profile's text but keep Codex's own records in the home.
+        for name in ("profiles.json", "config.toml"):
+            (sandbox_home(state) / name).unlink(missing_ok=True)
         sandboxed = sandboxed_command(state, command, workspace, [workspace], [ref], False)
         assert sandboxed is not None
         argv, env = sandboxed
@@ -419,19 +420,30 @@ async def test_probe_codex_deny_entries(
                               text=True, timeout=300, check=False)  # fmt: skip
         return f"rc={done.returncode}\n{done.stdout}\n{done.stderr}"
 
+    grants = [ref, state / "command-sandbox" / "commands"]
     try:
         run("rem", deny=False)
         report.append("NO DENY:\n" + run(survey, deny=False))
+        for g in grants:
+            g.mkdir(parents=True, exist_ok=True)
+            report.append(subprocess.run(
+                ["icacls", str(g), "/grant", "CodexSandboxUsers:(OI)(CI)(RX)"],
+                capture_output=True, text=True, check=False).stdout)  # fmt: skip
         report.append("CONFIG:\n" + (sandbox_home(state) / "config.toml").read_text()[:600])
         report.append("WITH DENY (warm):\n" + run("rem", deny=True))
         report.append("WITH DENY:\n" + run(
             f'echo inside> made.txt & type made.txt & type "{ref / "r.txt"}" & '
-            f'"{sys.executable}" -c "print(42)" & ' + survey, deny=True))
-        report.append("CONFIG:\n" + (sandbox_home(state) / "config.toml").read_text()[:900])
+            f'"{sys.executable}" -c "print(42)" & set TEMP & set TMP & ' + survey, deny=True))
+        report.append("HOME:\n" + "\n".join(str(p) for p in sandbox_home(state).rglob("*") if "deny" in p.name.lower() or p.suffix == ".json"))
         report.append("ACL WITH DENY:\n" + _icacls(*places.values(), base, workspace, ref, state))
         report.append("DENY OFF AGAIN:\n" + run(survey, deny=False))
+        report.append("DENY OFF, SECOND RUN:\n" + run(survey, deny=False))
         report.append("ACL AFTER OFF:\n" + _icacls(*places.values()))
     finally:
+        for g in grants:
+            subprocess.run(["icacls", str(g), "/remove:g", "CodexSandboxUsers"], check=False)
+        for d in denied:
+            subprocess.run(["icacls", str(d), "/remove:d", "CodexSandboxUsers"], check=False)
         for f in secrets.values():
             f.unlink(missing_ok=True)
         shutil.rmtree(base, ignore_errors=True)
