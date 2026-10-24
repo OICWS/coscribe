@@ -84,6 +84,7 @@ from .tools import (
 app = typer.Typer(add_completion=False, no_args_is_help=False)
 logger = logging.getLogger(__name__)
 
+
 def _load_settings() -> Settings:
     dotenv_path = prepare_env()
     try:
@@ -162,7 +163,7 @@ class _CliSocket:
                     **fields,
                     notes_enabled=existing.notes_enabled,
                     workflow=existing.workflow,
-                    workspace=existing.workspace,
+                    environment=existing.environment,
                 )
             else:
                 trigger = create_trigger(store, **fields)

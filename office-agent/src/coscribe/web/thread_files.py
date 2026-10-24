@@ -100,30 +100,24 @@ class ThreadFiles:
         Environments(self._settings.state_dir).forget_thread(thread_id)
         MessagingStore(self._settings.state_dir).delete(thread_id)
 
-    def run_workspace(self, thread_id: str) -> str | None:
-        """A scheduled run's thread works in its task's folder."""
-        parsed = parse_run_thread_id(thread_id)
-        if parsed is None:
-            return None
-        trigger = ScheduledTriggerStore(self._settings.state_dir).load(parsed[0])
-        return trigger.workspace if trigger is not None else None
-
     def run_folders(self, thread_id: str) -> list[str]:
-        """A scheduled run's folders: its task's own, then the existing
-        ones its workflow names or the person allowed while a run waited."""
+        """A scheduled run's folders: its task's environment's, then the existing ones its
+        workflow names or the person allowed while a run waited."""
         parsed = parse_run_thread_id(thread_id)
         trigger = (
             ScheduledTriggerStore(self._settings.state_dir).load(parsed[0]) if parsed else None
         )
         if trigger is None:
             return []
+        environment = Environments(self._settings.state_dir).get(trigger.environment)
+        own = list(environment["folders"]) if environment else []
         extra = list(trigger.permissions.get("folders", []))
         if trigger.workflow is not None:
             extra = [*granted_by(parse_workflow(trigger.workflow))["folders"], *extra]
-        extra = [folder for folder in dict.fromkeys(extra) if Path(folder).is_dir()]
+        extra = [f for f in dict.fromkeys(extra) if Path(f).is_dir() and f not in own]
         if not extra:
-            return [trigger.workspace] if trigger.workspace else []
-        return [trigger.workspace or str(self._settings.workspace_root), *extra]
+            return own
+        return [*(own or [str(self._settings.workspace_root)]), *extra]
 
     def resolve_folders(self, thread_id: str) -> list[Path]:
         """The folders a session opens in. A scheduled run's come from its task the first time
@@ -133,8 +127,5 @@ class ThreadFiles:
         if self.workspace_sidecar_path(thread_id).is_file():
             return [Path(folder) for folder in self._read_sidecar(thread_id)]
         run_folders = self.run_folders(thread_id)
-        if not run_folders:
-            workspace = self.run_workspace(thread_id)
-            run_folders = [workspace] if workspace else []
         self.write_workspace_sidecar(thread_id, run_folders)
         return [Path(folder) for folder in run_folders]

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   deleteScheduledTask,
+  getEnvironments,
   getTaskNotes,
   pauseScheduledTask,
   resumeScheduledTask,
@@ -15,6 +16,7 @@ import { allSteps } from "../lib/workflowTree";
 import type { ScheduledTask } from "../types/settings";
 import type { Workflow } from "../types/workflow";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { DEFAULT_ENVIRONMENT } from "./EnvironmentDialog";
 import { ChevronRightIcon, PencilIcon, PlayIcon, TrashIcon } from "./icons";
 import { RunStatusIcon } from "./RunStatusIcon";
 import { ToggleSwitch } from "./ToggleSwitch";
@@ -263,6 +265,21 @@ function WorkflowBadge({ task }: { task: ScheduledTask }) {
 
 /** One scheduled task: its settings, its notes, and every run it has made --
  * each run opening its own conversation. */
+/** The name of the environment a task's runs use; it is edited from the picker below a message. */
+function EnvironmentName({ id }: { id: string }) {
+  const [name, setName] = useState(id === DEFAULT_ENVIRONMENT ? "Default" : "");
+  useEffect(() => {
+    let cancelled = false;
+    getEnvironments()
+      .then(({ environments }) => !cancelled && setName(environments.find((e) => e.id === id)?.name ?? "Default"))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+  return <div className="break-all text-sm font-medium">{name}</div>;
+}
+
 export function ScheduledTaskDetail({
   task,
   onEdit,
@@ -371,8 +388,8 @@ export function ScheduledTaskDetail({
             <div className="text-sm font-medium">{describeSchedule(task.schedule)}</div>
           </div>
           <div>
-            <SectionLabel>Workspace</SectionLabel>
-            <div className="break-all text-sm font-medium">{task.workspace || "Default workspace"}</div>
+            <SectionLabel>Environment</SectionLabel>
+            <EnvironmentName id={task.environment ?? DEFAULT_ENVIRONMENT} />
           </div>
           <div>
             <SectionLabel>Permissions</SectionLabel>

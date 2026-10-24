@@ -6,7 +6,8 @@ import type { ApprovalMode, ScheduledTask, ScheduleKind } from "../types/setting
 import type { TaskDraft } from "../types/wire";
 import { CloseIcon } from "./icons";
 import { allSteps } from "../lib/workflowTree";
-import { WorkspacePicker } from "./WorkspacePicker";
+import { DEFAULT_ENVIRONMENT } from "./EnvironmentDialog";
+import { EnvironmentPicker } from "./EnvironmentPicker";
 
 const FREQUENCY_OPTIONS: { value: ScheduleKind; label: string }[] = [
   { value: "manual", label: "Manual" },
@@ -135,8 +136,8 @@ interface ScheduledTaskModalProps {
    * on its page). */
   newWorkflow?: Workflow;
   initialName?: string;
-  /** The folder runs work in, when the task comes from a conversation. */
-  initialWorkspace?: string | null;
+  /** The environment runs use, when the task comes from a conversation: that conversation's. */
+  initialEnvironment?: string | null;
   /** The conversation draft `newWorkflow` came from, and that conversation. */
   fromDraft?: string;
   fromThread?: string;
@@ -154,7 +155,7 @@ export function ScheduledTaskModal({
   onSaved,
   newWorkflow,
   initialName,
-  initialWorkspace,
+  initialEnvironment,
   fromDraft,
   fromThread,
 }: ScheduledTaskModalProps) {
@@ -164,7 +165,7 @@ export function ScheduledTaskModal({
   const [name, setName] = useState(initial.name);
   const [instructions, setInstructions] = useState(initial.instructions);
   const [model, setModel] = useState(initial.model);
-  const [workspace, setWorkspace] = useState(task ? (task.workspace ?? "") : (initialWorkspace ?? ""));
+  const [environment, setEnvironment] = useState(task?.environment ?? initialEnvironment ?? DEFAULT_ENVIRONMENT);
   const [kind, setKind] = useState<ScheduleKind>(initial.kind);
   const [date, setDate] = useState(() => initialDateFor(task, draft));
   const [time, setTime] = useState(initial.time);
@@ -205,7 +206,7 @@ export function ScheduledTaskModal({
       approval_mode: approvalMode,
       notes_enabled: task?.notes_enabled ?? true,
       workflow,
-      workspace: workspace || null,
+      environment,
       ...(fromDraft ? { from_draft: fromDraft } : {}),
       ...(fromThread ? { from_thread: fromThread } : {}),
     };
@@ -268,7 +269,7 @@ export function ScheduledTaskModal({
             <div className="overflow-hidden rounded-md border border-[var(--border)] text-sm">
               <div className="px-3 py-2.5 text-[var(--muted)]">{workflowSummary(workflow, isEdit)}</div>
               <div className="border-t border-[var(--border)] bg-[var(--card-bg)] px-3 py-2">
-                <WorkspacePicker value={workspace} onChange={setWorkspace} />
+                <EnvironmentPicker current={environment} disabled={false} onPick={setEnvironment} forTask />
               </div>
             </div>
           ) : (
@@ -285,7 +286,7 @@ export function ScheduledTaskModal({
                   onChange={(e) => setInstructions(e.target.value)}
                 />
                 <div className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--card-bg)] px-3 py-2 text-sm">
-                  <WorkspacePicker value={workspace} onChange={setWorkspace} />
+                  <EnvironmentPicker current={environment} disabled={false} onPick={setEnvironment} forTask />
                   <select
                     aria-label="Model"
                     className="bg-transparent text-[var(--muted)] outline-none"

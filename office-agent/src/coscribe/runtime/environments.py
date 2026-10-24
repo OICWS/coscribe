@@ -279,6 +279,21 @@ class Environments:
             data["environments"][env_id]["folders"] = list(dict.fromkeys(folders))
             self._write(data)
 
+    def with_folders(self, folders: list[str], name: str) -> str:
+        """An environment that differs from a blank one only in these folders: one already there,
+        else a new one named `name`."""
+        with _LOCK:
+            data = self._read()
+            wanted = _settings_key({**blank(""), "folders": folders})
+            for env_id, env in data["environments"].items():
+                if env_id != DEFAULT_ID and _settings_key(env) == wanted:
+                    return str(env_id)
+            env_id = f"env_{uuid.uuid4().hex[:12]}"
+            env = {**blank(self._free_name(data, name)), "folders": folders}
+            data["environments"][env_id] = env
+            self._write(data)
+        return env_id
+
     def forget_thread(self, thread_id: str) -> None:
         with _LOCK:
             data = self._read()

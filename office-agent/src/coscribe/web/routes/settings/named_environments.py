@@ -5,6 +5,7 @@ so it waits until none of them is running a turn."""
 from __future__ import annotations
 
 import contextlib
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +13,9 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ....conversation import ChatSessionLG
-from ....runtime import EnvironmentRefused, Environments, SecretStore
+from ....runtime import DEFAULT_ENVIRONMENT, EnvironmentRefused, Environments, SecretStore
 from ....runtime_lg import AuditLog, record_decision
-from ....tools import SCHEDULED_THREAD_PREFIX
+from ....tools import SCHEDULED_THREAD_PREFIX, ScheduledTriggerStore
 from ...state import AppState
 
 # What changes how far a conversation reaches: kept in the audit log like an approval.
@@ -89,7 +90,12 @@ def router(state: AppState) -> APIRouter:
     state_dir = state.settings.state_dir
 
     async def list_environments() -> dict[str, Any]:
-        return {"environments": Environments(state_dir).all()}
+        tasks = Counter(t.environment for t in ScheduledTriggerStore(state_dir).list_all())
+        return {
+            "environments": [
+                {**env, "tasks": tasks[env["id"]]} for env in Environments(state_dir).all()
+            ]
+        }
 
     async def create_environment(payload: dict[str, Any]) -> Any:
         try:
@@ -134,6 +140,11 @@ def router(state: AppState) -> APIRouter:
         except EnvironmentRefused as exc:
             return _refused(exc.reason)
         await _move_folders(state_dir, sessions)
+        store = ScheduledTriggerStore(state_dir)
+        for trigger in store.list_all():
+            if trigger.environment == env_id:
+                trigger.environment = DEFAULT_ENVIRONMENT
+                store.save(trigger)
         return {"moved": len(moved)}
 
     # Registered by reference rather than decorated, so the dead-code check sees them used.

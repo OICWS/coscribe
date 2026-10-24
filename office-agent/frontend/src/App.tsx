@@ -165,7 +165,7 @@ function App() {
     draft?: TaskDraftItem;
     newWorkflow?: Workflow;
     initialName?: string;
-    initialWorkspace?: string | null;
+    initialEnvironment?: string | null;
     fromDraft?: string;
     fromThread?: string;
   } | null>(null);
@@ -176,7 +176,7 @@ function App() {
     threadTitle: string;
     nameHint: string;
     initial?: WorkflowDraftResult;
-    workspace: string | null;
+    environment: string | null;
     /** Proposed changes to this saved task's workflow. */
     revision?: { triggerId: string; changes: string[] };
     /** The conversation draft under review. */
@@ -480,10 +480,10 @@ function App() {
   };
 
   // A task made from this conversation works in the conversation's folder.
-  const threadWorkspace = state.folders[0] ?? null;
+  const threadEnvironment = state.environment;
 
   const startWorkflowDraft = (nameHint: string) => {
-    setWorkflowDraft({ threadId, threadTitle: sessionLabel, nameHint, workspace: threadWorkspace });
+    setWorkflowDraft({ threadId, threadTitle: sessionLabel, nameHint, environment: threadEnvironment });
     setScheduledTaskModal(null);
     setNavMode("run");
   };
@@ -494,7 +494,7 @@ function App() {
       threadTitle: sessionLabel,
       nameHint: entry.name,
       initial: { name: entry.name, workflow: entry.workflow, notes: entry.notes },
-      workspace: entry.workspace ?? threadWorkspace,
+      environment: entry.environment ?? threadEnvironment,
       revision: entry.triggerId ? { triggerId: entry.triggerId, changes: entry.changes } : undefined,
       draftId: entry.draftId ?? undefined,
     });
@@ -579,7 +579,7 @@ function App() {
     const existing = item.draft.trigger_id
       ? (scheduledTasks.find((task) => task.trigger_id === item.draft.trigger_id) ?? null)
       : null;
-    setScheduledTaskModal({ task: existing, draft: item, initialWorkspace: threadWorkspace });
+    setScheduledTaskModal({ task: existing, draft: item, initialEnvironment: threadEnvironment });
   };
 
   const saveWorkflowRevision = async (triggerId: string, workflow: Workflow) => {
@@ -1012,7 +1012,7 @@ function App() {
                       task: null,
                       newWorkflow: workflow,
                       initialName: name,
-                      initialWorkspace: workflowDraft.workspace,
+                      initialEnvironment: workflowDraft.environment,
                       fromDraft: workflowDraft.draftId,
                       fromThread: workflowDraft.threadId,
                     })
@@ -1038,7 +1038,7 @@ function App() {
                   draft={scheduledTaskModal.draft?.draft}
                   newWorkflow={scheduledTaskModal.newWorkflow}
                   initialName={scheduledTaskModal.initialName}
-                  initialWorkspace={scheduledTaskModal.initialWorkspace}
+                  initialEnvironment={scheduledTaskModal.initialEnvironment}
                   fromDraft={scheduledTaskModal.fromDraft}
                   fromThread={scheduledTaskModal.fromThread}
                   onClose={() => setScheduledTaskModal(null)}

@@ -82,13 +82,15 @@ class WorkflowDraftingHost(Protocol):
     model: Any
     lg_agent: Any
     config: dict[str, Any]
-    _workspace_explicit: bool
     _base_tools: list[Callable[..., Any] | BaseTool]
     _extra_tools: list[Callable[..., Any] | BaseTool]
     _model_string: str
     _turn_lock: TurnLock
     _live_websocket: EventSink | None
     _turn_websocket: Any
+
+    @property
+    def environment(self) -> str: ...
 
     def is_workflow_run(self) -> bool: ...
 
@@ -119,9 +121,7 @@ class WorkflowDrafting:
                     "status": "drafted",
                     "draft_id": self._host._next_draft_id(),
                     **draft.to_dict(),
-                    "workspace": str(self._host.workspace_root)
-                    if self._host._workspace_explicit
-                    else None,
+                    "environment": self._host.environment,
                     "next": "Test it now with test_workflow, unless it only sends or deletes "
                     "things the user hasn't agreed to repeat -- then ask first. Nothing is "
                     "saved: the user reviews it on a card after testing.",
@@ -174,7 +174,7 @@ class WorkflowDrafting:
                         "status": "drafted",
                         "draft_id": self._host._next_draft_id(),
                         **draft.to_dict(),
-                        "workspace": _draft_from(messages, draft_id).get("workspace"),
+                        "environment": _draft_from(messages, draft_id).get("environment"),
                         "next": "Test this version with test_workflow; the user reviews "
                         "it on a card after that.",
                     },
@@ -186,7 +186,7 @@ class WorkflowDrafting:
                     "draft_id": self._host._next_draft_id(),
                     **draft.to_dict(),
                     "trigger_id": trigger.trigger_id,
-                    "workspace": trigger.workspace,
+                    "environment": trigger.environment,
                     "next": "Test this version with test_workflow; the user reviews the "
                     "changes on a card after that, and the task is unchanged until they "
                     "save them.",

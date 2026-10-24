@@ -164,7 +164,7 @@ describe("groupToolRuns", () => {
       name: "Untitled workflow",
       workflow,
       notes: [],
-      workspace: null,
+      environment: null,
       triggerId: null,
       changes: [],
       draftId: null,
@@ -176,7 +176,7 @@ describe("groupToolRuns", () => {
       result: draftResult({
         name: "Nightly sync",
         notes: ["a", 2],
-        workspace: "C:\\work",
+        environment: "env_reports",
         trigger_id: "trg-1",
         changes: ["moved to 9:00"],
         draft_id: "d-1",
@@ -186,7 +186,7 @@ describe("groupToolRuns", () => {
     expect(entry).toMatchObject({
       name: "Nightly sync",
       notes: ["a", "2"],
-      workspace: "C:\\work",
+      environment: "env_reports",
       triggerId: "trg-1",
       changes: ["moved to 9:00"],
       draftId: "d-1",

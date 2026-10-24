@@ -148,7 +148,7 @@ def _task_routes(router: APIRouter, state: AppState) -> None:
                 approval_mode=payload.approval_mode,
                 notes_enabled=payload.notes_enabled,
                 workflow=payload.workflow,
-                workspace=payload.workspace,
+                environment=payload.environment,
             )
         except (ValueError, KeyError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -178,7 +178,7 @@ def _task_routes(router: APIRouter, state: AppState) -> None:
                 approval_mode=payload.approval_mode,
                 notes_enabled=payload.notes_enabled,
                 workflow=payload.workflow,
-                workspace=payload.workspace,
+                environment=payload.environment,
             )
         except KeyError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)

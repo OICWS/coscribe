@@ -553,6 +553,17 @@
             ],
             "title": "Day Of Month"
           },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
           "from_draft": {
             "anyOf": [
               {
@@ -637,17 +648,6 @@
               }
             ],
             "title": "Workflow"
-          },
-          "workspace": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace"
           }
         },
         "required": [

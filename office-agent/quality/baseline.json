@@ -234,7 +234,7 @@
   "src/coscribe/conversation/session.py": 1312,
   "src/coscribe/coordinator.py": 844,
   "src/coscribe/runtime_lg/subagents.py": 842,
-  "src/coscribe/tools/bookkeeping/scheduled_tasks.py": 1054,
+  "src/coscribe/tools/bookkeeping/scheduled_tasks.py": 1052,
   "src/coscribe/web/browser_panel.py": 813,
   "src/coscribe/web/connector_catalog.py": 948,
   "src/coscribe/workflows/engine.py": 898

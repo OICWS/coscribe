@@ -43,16 +43,20 @@ const BLANK: EnvironmentFields = {
   unisolated: false,
 };
 
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 function usedBy(environment: Environment | null): string {
   if (environment === null) return "A new environment";
-  if (environment.id === DEFAULT_ENVIRONMENT) return "Used by every conversation that hasn't chosen another";
-  const n = environment.used_by;
-  return `Used by ${n} conversation${n === 1 ? "" : "s"}`;
+  const tasks = environment.tasks > 0 ? ` and ${plural(environment.tasks, "scheduled task")}` : "";
+  if (environment.id === DEFAULT_ENVIRONMENT) return `Used by every conversation that hasn't chosen another${tasks}`;
+  return `Used by ${plural(environment.used_by, "conversation")}${tasks}`;
 }
 
 function whereItsConversationsGo(environment: Environment): string {
-  const n = environment.used_by;
-  return n > 0 ? `Its ${n} conversation${n === 1 ? "" : "s"} move to Default.` : "No conversation uses it.";
+  const users = [environment.used_by, environment.tasks].some((n) => n > 0);
+  return users ? "Its conversations and scheduled tasks move to Default." : "Nothing uses it.";
 }
 
 interface EnvironmentDialogProps {

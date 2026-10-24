@@ -102,7 +102,7 @@ export interface WorkflowDraftEntry {
   name: string;
   workflow: Workflow;
   notes: string[];
-  workspace: string | null;
+  environment: string | null;
   /** A revision of this saved task's workflow, not a new one. */
   triggerId: string | null;
   /** What the revision changes, one line each. */
@@ -231,7 +231,7 @@ function workflowDraftOf(item: ToolOrApprovalItem): WorkflowDraftEntry | null {
     name: typeof draft.name === "string" ? draft.name : "Untitled workflow",
     workflow: draft.workflow as Workflow,
     notes: Array.isArray(draft.notes) ? draft.notes.map(String) : [],
-    workspace: typeof draft.workspace === "string" ? draft.workspace : null,
+    environment: typeof draft.environment === "string" ? draft.environment : null,
     triggerId: typeof draft.trigger_id === "string" ? draft.trigger_id : null,
     changes: Array.isArray(draft.changes) ? draft.changes.map(String) : [],
     draftId: typeof draft.draft_id === "string" ? draft.draft_id : null,

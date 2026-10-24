@@ -398,8 +398,8 @@ export interface ScheduledTask {
   runs: ScheduledRun[];
   /** Set when the task runs fixed steps instead of `prompt`. */
   workflow: Workflow | null;
-  /** The folder runs work in; null is the app's default workspace. */
-  workspace?: string | null;
+  /** The id of the environment runs use ("default" for Default). */
+  environment?: string;
   /** Ids of the conversation drafts saved into this task. */
   drafts?: string[];
   /** The conversation the task was saved from. */
@@ -422,7 +422,7 @@ export interface CreateScheduledTaskPayload {
   approval_mode?: ApprovalMode;
   notes_enabled?: boolean;
   workflow?: Workflow | null;
-  workspace?: string | null;
+  environment?: string;
   /** The conversation draft this task is saved from, and that conversation. */
   from_draft?: string;
   from_thread?: string;
@@ -553,6 +553,8 @@ export interface Environment extends EnvironmentFields {
   id: string;
   /** How many conversations chose it; Default's count leaves out the ones that never chose. */
   used_by: number;
+  /** How many scheduled tasks run in it. */
+  tasks: number;
 }
 
 /** What coscribe may run on this computer (Settings › Capabilities). */

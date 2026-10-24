@@ -166,7 +166,7 @@ class ScheduledTaskCreate(BaseModel):
     approval_mode: str = "manual"
     notes_enabled: bool = True
     workflow: dict[str, Any] | None = None
-    workspace: str | None = None
+    environment: str | None = None
     # The conversation draft this task was saved from, and that
     # conversation, if any.
     from_draft: str | None = None

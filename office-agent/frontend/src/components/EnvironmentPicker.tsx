@@ -7,11 +7,14 @@ import { DEFAULT_ENVIRONMENT, EnvironmentDialog } from "./EnvironmentDialog";
 import { CheckIcon, PlusIcon, SearchIcon, SettingsIcon } from "./icons";
 
 interface EnvironmentPickerProps {
-  /** The id of the environment this conversation uses. */
+  /** The id of the environment this conversation (or task) uses. */
   current: string;
   /** While a turn runs: the turn keeps the environment it started with. */
   disabled: boolean;
   onPick: (id: string) => void;
+  /** A scheduled task's form: its runs use the environment, and the menu's Choose Environment…
+   * stays with the conversation. */
+  forTask?: boolean;
 }
 
 /** The open picker: a search box, the environments with a gear each, and New environment (an
@@ -88,7 +91,7 @@ function EnvironmentMenu({
 
 /** Which environment this conversation uses: search, pick, edit one with its gear, or make a new
  * one. An edit applies to every conversation using that environment. */
-export function EnvironmentPicker({ current, disabled, onPick }: EnvironmentPickerProps) {
+export function EnvironmentPicker({ current, disabled, onPick, forTask = false }: EnvironmentPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -103,7 +106,7 @@ export function EnvironmentPicker({ current, disabled, onPick }: EnvironmentPick
   }, []);
   useEffect(reload, [reload, current]);
   useComposerAction("open-folder", () => {
-    if (!disabled) setOpen(true);
+    if (!disabled && !forTask) setOpen(true);
   });
 
   const chosen = environments.find((e) => e.id === current);
@@ -119,7 +122,13 @@ export function EnvironmentPicker({ current, disabled, onPick }: EnvironmentPick
       <button
         type="button"
         disabled={disabled}
-        title={disabled ? "The environment can't change while a reply is running" : "Choose this conversation's environment"}
+        title={
+          forTask
+            ? "Choose the environment this task's runs use"
+            : disabled
+              ? "The environment can't change while a reply is running"
+              : "Choose this conversation's environment"
+        }
         aria-expanded={open}
         className="flex h-8 max-w-48 items-center rounded-lg px-2 text-sm text-[var(--muted)] hover:bg-[var(--card-bg)] hover:text-[var(--fg)] disabled:opacity-50 disabled:hover:bg-transparent"
         onClick={() => {

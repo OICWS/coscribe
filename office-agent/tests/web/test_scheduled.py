@@ -952,7 +952,7 @@ def test_the_chat_model_drafts_a_fixed_workflow_without_saving_it_lg(
     [result] = [e for e in history["entries"] if e.get("tool_name") == "draft_workflow"]
     assert result["result"]["status"] == "drafted", result["result"]
     assert result["result"]["workflow"]["steps"][0]["tool"] == "read_file"
-    assert result["result"]["workspace"] is None
+    assert result["result"]["environment"] == "default"
     # The curator saw the read that worked, not the draft call itself.
     curator_request = str(fake_model.received[2][-1].content)
     assert '[tool call #1] read_file({"path": "input.txt"})' in curator_request
@@ -966,9 +966,11 @@ def test_the_chat_model_drafts_a_fixed_workflow_without_saving_it_lg(
     assert ScheduledTriggerStore(tmp_path / "state").list_all() == []
 
 
-def test_a_tasks_runs_work_in_its_own_workspace_lg(
+def test_a_tasks_runs_work_in_its_environment_until_it_is_deleted_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from coscribe.runtime import Environments, NetworkAccess
+
     folder = tmp_path / "elsewhere"
     folder.mkdir()
     (folder / "only-here.txt").write_text("found me", encoding="utf-8")
@@ -978,23 +980,36 @@ def test_a_tasks_runs_work_in_its_own_workspace_lg(
     }  # fmt: skip
     fake_model = FakeToolCallingChatModel(responses=[AIMessage(content="unused")])
     with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        env_id = client.post(
+            "/api/environments",
+            json={"name": "Elsewhere", "folders": [str(folder)], "network": {"mode": "none"}},
+        ).json()["id"]
         missing = client.post(
             "/api/scheduled-tasks",
             json={"name": "R", "kind": "manual", "at": "", "workflow": workflow,
-                  "workspace": str(tmp_path / "nowhere")},
+                  "environment": "env_gone"},
         )  # fmt: skip
         task = client.post(
             "/api/scheduled-tasks",
             json={"name": "R", "kind": "manual", "at": "", "workflow": workflow,
-                  "workspace": str(folder)},
+                  "environment": env_id},
         ).json()  # fmt: skip
         run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
         done = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        [listed] = [e for e in client.get("/api/environments").json()["environments"]
+                    if e["id"] == env_id]  # fmt: skip
+        network = NetworkAccess(tmp_path / "state").get(run["thread_id"])
+        client.delete(f"/api/environments/{env_id}")
+        [after] = client.get("/api/scheduled-tasks").json()
 
-    assert missing.status_code == 400 and "isn't an existing folder" in missing.json()["error"]
-    assert task["workspace"] == str(folder)
+    assert missing.status_code == 400 and "no environment" in missing.json()["error"]
+    assert task["environment"] == env_id and listed["tasks"] == 1
     assert done["status"] == "completed", done.get("error")
     assert done["steps"][0]["output"] == "found me"
+    # The run's conversation reaches only what the environment allows.
+    assert network["mode"] == "none"
+    assert after["environment"] == "default"
+    assert Environments(tmp_path / "state").environment_of(run["thread_id"]) == "default"
 
 
 def _saved_workflow_task(tmp_path: Path) -> Any:

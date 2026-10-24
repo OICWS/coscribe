@@ -11,7 +11,7 @@ from typing import Any
 from ..config import Settings
 from ..runtime import Environments
 from ..runtime_lg import extract_text, strip_mode_note
-from ..tools import SCHEDULED_THREAD_PREFIX
+from ..tools import SCHEDULED_THREAD_PREFIX, ScheduledTriggerStore
 from .thread_files import ThreadFiles
 
 _TITLE_LENGTH = 40
@@ -74,9 +74,26 @@ async def _titles(settings: Settings, checkpointer: Any, thread_ids: list[str]) 
     return titles
 
 
+def _migrate_scheduled_tasks(settings: Settings) -> None:
+    """A task saved with its own folder runs in an environment with that folder, named after the
+    task; tasks with the same folder share one."""
+    store, environments = (
+        ScheduledTriggerStore(settings.state_dir),
+        Environments(settings.state_dir),
+    )
+    for trigger in store.list_all():
+        if trigger.legacy_workspace:
+            trigger.environment = environments.with_folders(
+                [trigger.legacy_workspace], trigger.name
+            )
+            trigger.legacy_workspace = None
+            store.save(trigger)
+
+
 async def migrate_to_environments(settings: Settings, checkpointer: Any) -> None:
     environments = Environments(settings.state_dir)
-    if environments.exists():
-        return
-    configs = _legacy_settings(settings)
-    environments.migrate(configs, await _titles(settings, checkpointer, sorted(configs)))
+    if not environments.exists():
+        configs = _legacy_settings(settings)
+        environments.migrate(configs, await _titles(settings, checkpointer, sorted(configs)))
+    # Not only on the first start: tasks came to environments after conversations did.
+    _migrate_scheduled_tasks(settings)

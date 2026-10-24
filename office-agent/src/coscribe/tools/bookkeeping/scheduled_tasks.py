@@ -40,7 +40,7 @@ from typing import Any, Optional
 
 from pydantic import ValidationError
 
-from ...runtime import tool_metadata
+from ...runtime import DEFAULT_ENVIRONMENT, Environments, tool_metadata
 from ...workflow_spec import parse_workflow, workflow_error
 
 VALID_KINDS = ("manual", "once", "hourly", "daily", "weekdays", "weekly", "monthly")
@@ -323,28 +323,24 @@ class ScheduledTrigger:
     schedule: ScheduleRule
     enabled: bool
     created_at: str
-    next_run_at: str | None  # None only once a "once" trigger has fired,
-    # or always for a "manual" schedule (see ScheduleRule.kind)
+    next_run_at: str | None  # None once a "once" trigger fired, and always for "manual"
     prompt: str = ""
     last_run_at: str | None = None
     last_run_status: str | None = None  # "completed" | "failed" | "stopped"
-    model: str | None = None  # "provider:model", e.g. "anthropic:claude-
-    # opus-5" -- None means the app's own configured default model, same
-    # meaning None already has wherever a per-thread model override is
-    # optional elsewhere in this codebase.
-    approval_mode: str = "manual"  # one of VALID_APPROVAL_MODES. Default
-    # "manual" matches this field's real pre-existing behavior for every
-    # trigger created before this field existed (ChatSessionLG.
-    # accept_edits itself defaults to False) -- loading an old on-disk
-    # trigger with no "approval_mode" key via from_dict must not silently
-    # change its real behavior.
+    # "provider:model"; None is the app's configured default model.
+    model: str | None = None
+    # One of VALID_APPROVAL_MODES. "manual" is how triggers saved before this field ran, so
+    # loading one without it must not change its behavior.
+    approval_mode: str = "manual"
     notes_enabled: bool = True
     runs: list[ScheduledRun] = field(default_factory=list)  # oldest first
     # A workflow_spec Workflow as JSON: when set, a run executes these
     # steps instead of handing `prompt` to the model.
     workflow: dict[str, Any] | None = None
-    # The folder a run reads and writes in; None is the app's default.
-    workspace: str | None = None
+    # The environment a run works in: its folders, network, secrets and what may run.
+    environment: str = DEFAULT_ENVIRONMENT
+    # A task's folder from before environments, until the startup migration moves it into one.
+    legacy_workspace: str | None = None
     # The conversation drafts (draft_workflow/revise_workflow ids) saved
     # into this task, so a conversation can show a draft as saved.
     drafts: list[str] = field(default_factory=list)
@@ -372,7 +368,8 @@ class ScheduledTrigger:
             "notes_enabled": self.notes_enabled,
             "runs": [run.to_dict() for run in self.runs],
             "workflow": self.workflow,
-            "workspace": self.workspace,
+            "environment": self.environment,
+            **({"workspace": self.legacy_workspace} if self.legacy_workspace else {}),
             "drafts": self.drafts,
             "source_thread": self.source_thread,
             "auto_investigate": self.auto_investigate,
@@ -411,7 +408,8 @@ class ScheduledTrigger:
             notes_enabled=data.get("notes_enabled", True),
             runs=runs,
             workflow=data.get("workflow"),
-            workspace=data.get("workspace"),
+            environment=data.get("environment") or DEFAULT_ENVIRONMENT,
+            legacy_workspace=data.get("workspace"),
             drafts=list(data.get("drafts") or []),
             source_thread=data.get("source_thread"),
             auto_investigate=bool(data.get("auto_investigate", False)),
@@ -431,7 +429,8 @@ class ScheduledTriggerStore:
     this codebase uses."""
 
     def __init__(self, state_dir: str | Path) -> None:
-        self.root = Path(state_dir) / "scheduled_tasks"
+        self.state_dir = Path(state_dir)
+        self.root = self.state_dir / "scheduled_tasks"
 
     def save(self, trigger: ScheduledTrigger) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -505,6 +504,10 @@ class ScheduledTriggerStore:
         trigger.last_run_at = run.started_at
         trigger.last_run_status = run.status
         self.save(trigger)
+        # The run's conversation reaches what its task's environment allows, like any other.
+        environments = Environments(self.state_dir)
+        if environments.get(trigger.environment) is not None:
+            environments.assign(run.thread_id, trigger.environment)
         return trigger, run, pruned
 
     def finish_run(
@@ -641,13 +644,12 @@ def _validate_and_build_schedule(
     return rule, next_run_at, normalized_workflow
 
 
-def _checked_workspace(workspace: str | None) -> str | None:
-    if not workspace or not workspace.strip():
-        return None
-    path = Path(workspace.strip()).expanduser()
-    if not path.is_absolute() or not path.is_dir():
-        raise ValueError(f"The workspace {workspace!r} isn't an existing folder")
-    return str(path)
+def _checked_environment(store: ScheduledTriggerStore, environment: str | None) -> str:
+    if not environment:
+        return DEFAULT_ENVIRONMENT
+    if Environments(store.state_dir).get(environment) is None:
+        raise ValueError(f"There is no environment {environment!r}")
+    return environment
 
 
 def create_trigger(
@@ -664,14 +666,10 @@ def create_trigger(
     approval_mode: str = "manual",
     notes_enabled: bool = True,
     workflow: dict[str, Any] | None = None,
-    workspace: str | None = None,
+    environment: str | None = None,
 ) -> ScheduledTrigger:
-    """Validate and persist a new ScheduledTrigger -- shared by
-    build_scheduled_task_tools' model-callable create_scheduled_task and
-    web/app.py's POST /api/scheduled-tasks endpoint (the UI's create form,
-    which needs the exact same validation without going through a live
-    conversation), so the two creation paths can never silently drift out
-    of sync with each other."""
+    """Validate and persist a new ScheduledTrigger. Shared by the model's create_scheduled_task
+    and POST /api/scheduled-tasks (the UI's form), so the two can't drift apart."""
     rule, next_run_at, normalized_workflow = _validate_and_build_schedule(
         kind=kind,
         at=at,
@@ -696,7 +694,7 @@ def create_trigger(
         approval_mode=approval_mode,
         notes_enabled=notes_enabled,
         workflow=normalized_workflow,
-        workspace=_checked_workspace(workspace),
+        environment=_checked_environment(store, environment),
     )
     store.save(trigger)
     return trigger
@@ -717,7 +715,7 @@ def update_trigger(
     approval_mode: str = "manual",
     notes_enabled: bool = True,
     workflow: dict[str, Any] | None = None,
-    workspace: str | None = None,
+    environment: str | None = None,
 ) -> ScheduledTrigger:
     """Edit an existing trigger in place -- the Edit modal's Save action.
     Same validation as create_trigger (via _validate_and_build_schedule),
@@ -752,7 +750,7 @@ def update_trigger(
     trigger.approval_mode = approval_mode
     trigger.notes_enabled = notes_enabled
     trigger.workflow = normalized_workflow
-    trigger.workspace = _checked_workspace(workspace)
+    trigger.environment = _checked_environment(store, environment)
     store.save(trigger)
     return trigger
 
@@ -783,7 +781,7 @@ def patch_trigger(
         "approval_mode": trigger.approval_mode,
         "notes_enabled": trigger.notes_enabled,
         "workflow": trigger.workflow,
-        "workspace": trigger.workspace,
+        "environment": trigger.environment,
     }
     unknown = sorted(set(changes) - set(current))
     if unknown:
@@ -969,7 +967,7 @@ def build_scheduled_task_tools(
             approval_mode=draft["approval_mode"],
             notes_enabled=trigger.notes_enabled,
             workflow=trigger.workflow,
-            workspace=trigger.workspace,
+            environment=trigger.environment,
         )
         return updated.to_dict()
 
