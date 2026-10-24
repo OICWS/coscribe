@@ -23,6 +23,7 @@ _RECORD = "command-sandbox.json"
 # Codex reads permission profiles from config.toml only; each set of folders gets its own,
 # named after them, so commands running at once in different environments never share one.
 _PROFILES_KEPT = 64
+_DEFAULT = "coscribe-default"
 _lock = threading.Lock()
 
 
@@ -106,8 +107,13 @@ def _ensure_profile(home: Path, profile: dict[str, Any]) -> str:
         profiles = {**dict(list(profiles.items())[-(_PROFILES_KEPT - 1) :]), name: profile}
         home.mkdir(parents=True, exist_ok=True)
         (home / "profiles.json").write_text(json.dumps(profiles), encoding="utf-8")
-        config = '[windows]\nsandbox = "elevated"\n\n'
-        config += "\n".join(_section(key, value) for key, value in profiles.items())
+        # Codex refuses a config with profiles and no default (`codex sandbox uninstall` among
+        # others); the default may read and write nothing it isn't given.
+        none = {"readable": [], "writable": [], "network": False}
+        config = f'default_permissions = "{_DEFAULT}"\n\n[windows]\nsandbox = "elevated"\n\n'
+        config += "\n".join(
+            _section(key, value) for key, value in {_DEFAULT: none, **profiles}.items()
+        )
         tmp = home / "config.toml.tmp"
         tmp.write_text(config, encoding="utf-8")
         os.replace(tmp, home / "config.toml")

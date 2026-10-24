@@ -64,7 +64,9 @@ def test_a_command_runs_through_cmd_in_a_profile_for_exactly_its_folders(tmp_pat
         "cmd.exe", "/d", "/s", "/c", 'echo "hi"',
     ]  # fmt: skip
     config = (home / "config.toml").read_text(encoding="utf-8")
-    assert config.startswith('[windows]\nsandbox = "elevated"\n')
+    assert config.startswith(
+        'default_permissions = "coscribe-default"\n\n[windows]\nsandbox = "elevated"\n'
+    )
     assert (
         f"[permissions.{profile}.filesystem]\n"
         '":root" = "read"\n'
@@ -92,4 +94,4 @@ def test_the_same_folders_share_a_profile_and_old_profiles_are_dropped(tmp_path:
         profile(f"b{n}")
     config = (sandbox_home(tmp_path) / "config.toml").read_text(encoding="utf-8")
     assert f"[permissions.{first}.filesystem]" not in config
-    assert config.count(".filesystem]") == command_sandbox._PROFILES_KEPT
+    assert config.count(".filesystem]") == command_sandbox._PROFILES_KEPT + 1

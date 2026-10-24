@@ -189,10 +189,13 @@ async def test_stopping_a_background_command_ends_its_whole_process_tree(
     command = f'"{sys.executable}" -c "{parent}"'
 
     started = await tools["run_background_command"](command=command, description="tree")
-    for _ in range(200):
+    # A sandboxed command's first run in a folder waits for Codex to grant it to the sandbox user.
+    for _ in range(600):
         if pid_file.exists() and pid_file.read_text().strip():
             break
         await asyncio.sleep(0.1)
+    task = tools["check_background_task"](started["task_id"])
+    assert pid_file.exists(), task
     grandchild = int(pid_file.read_text())
     assert _alive(grandchild)
     assert tools["check_background_task"](started["task_id"])["status"] == "running"
