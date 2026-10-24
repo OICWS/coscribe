@@ -31,6 +31,7 @@ from ....tools import (
     sandbox_uninstall_argv,
     set_interpreter_override,
     uninstall_node_package,
+    warm_up_sandbox,
 )
 from ....tools import install_python_package as install_package
 from ....tools import list_python_packages as list_packages
@@ -137,6 +138,8 @@ def _sandbox_routes(router: APIRouter, state: AppState) -> None:
             return sandbox_status(state_dir)
         error = await asyncio.to_thread(_run_codex, sandbox_setup_argv(codex), state_dir)
         record_sandbox_setup(state_dir, None if error else codex, error)
+        if not error:
+            await asyncio.to_thread(warm_up_sandbox, state_dir)
         audit("setup", error)
         return sandbox_status(state_dir)
 

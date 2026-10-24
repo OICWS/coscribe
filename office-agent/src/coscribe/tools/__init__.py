@@ -115,6 +115,7 @@ from .exec import (
     uninstall_node_package,
     uninstall_python_package,
     venv_python,
+    warm_up_sandbox,
     working_interpreters,
 )
 from .files import build_file_tools
@@ -397,4 +398,5 @@ __all__ = [
     "sandbox_setup_argv",
     "sandbox_status",
     "sandbox_uninstall_argv",
+    "warm_up_sandbox",
 ]

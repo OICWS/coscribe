@@ -30,6 +30,7 @@ from coscribe.tools.exec import (
     sandbox_setup_argv,
     sandbox_uninstall_argv,
     script_env,
+    warm_up_sandbox,
 )
 
 real = pytest.mark.skipif(
@@ -153,6 +154,7 @@ def sandboxed_state(tmp_path_factory: pytest.TempPathFactory) -> Path:
     )
     assert done.returncode == 0, done.stdout + done.stderr
     record_sandbox_setup(state, codex)
+    warm_up_sandbox(state)
     return state
 
 

@@ -22,7 +22,7 @@ twins), the interpreter overrides (`get_interpreter_override`, `set_interpreter_
 `FolderGrants`, `sweep_folder_grants`, `self_test`, `SelfTest`, `isolation_available`, `isolation_for_scripts`,
 `script_scratch_root`, and for the command sandbox `start_command`, `sandboxed_command`, `sandbox_status`,
 `sandbox_codex`, `sandbox_home`, `record_sandbox_setup`, `sandbox_setup_argv`,
-`sandbox_uninstall_argv`. Import them from
+`sandbox_uninstall_argv`, `warm_up_sandbox`. Import them from
 `coscribe.tools.exec`.
 
 ## Depends on

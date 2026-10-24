@@ -8,7 +8,7 @@ function describe(sandbox: CommandSandbox | null, busy: boolean): string {
   if (sandbox === null) return "Checking…";
   switch (sandbox.state) {
     case "ready":
-      return "Set up. A command writes only its environment's folders, can't read your files elsewhere, and reaches the network only if its environment allows it.";
+      return "Set up. A command writes only its environment's folders and is offline unless the environment's network is Full; then you approve each one. It can still read most of your files.";
     case "unsupported":
       return "Only available on Windows. Here a command runs as you.";
     case "failed":

@@ -38,6 +38,7 @@ from coscribe.runtime import empty_hooks_config
 from coscribe.runtime_lg.audit import AuditLog
 from coscribe.runtime_lg.auto_review import REVIEWER_INSTRUCTIONS, Verdict
 from coscribe.tools.bookkeeping.subagent_tasks import SubAgentTask
+from tests.environment_helpers import in_environment
 
 from .wire_check import check_event
 
@@ -134,6 +135,7 @@ class Row:
     announced: bool = False  # a `tool_started` message goes to the client
     asked: bool = False  # an `approval_required` message goes to the client
     sandboxed: bool = False  # the command sandbox is set up
+    online: bool = False  # the conversation's environment has Full network
 
 
 ROWS: dict[str, Row] = {
@@ -230,6 +232,10 @@ ROWS: dict[str, Row] = {
     "a_sandboxed_command_follows_the_standing_approvals": Row(
         COMMAND, "approve", "preapproved", preapproved=True, sandboxed=True, announced=True
     ),
+    # -- the sandbox reads most files, so online it could send them out: the person approves
+    "an_online_sandboxed_command_asks_even_when_preapproved": Row(
+        COMMAND, "reject", "human", preapproved=True, sandboxed=True, online=True, asked=True
+    ),
 }
 
 
@@ -301,6 +307,8 @@ async def test_the_decision_for_one_situation(
     _veto(monkeypatch, session, row.veto)
     sandbox = Path("codex.exe") if row.sandboxed else None
     monkeypatch.setattr(approvals_module, "sandbox_codex", lambda state_dir: sandbox)
+    if row.online:
+        in_environment(session.settings.state_dir, "t1", network={"mode": "full", "domains": []})
     socket = _Socket(row.attended)
 
     result = await _decide(session, row.tool, socket, answer=row.human)

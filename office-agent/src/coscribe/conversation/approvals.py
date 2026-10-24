@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage
 
 from ..code_runtime import CodePermissions
 from ..config import Settings
+from ..runtime import NetworkGuard
 from ..runtime_lg import (
     CODE_APPROVAL_RISKS,
     EXEC_POLICY_TOOL_NAMES,
@@ -293,9 +294,7 @@ class ApprovalDecider:
             )
             self._audit(audit_log, name, args, "reject", "plan_mode", message)
             return {"type": "reject", "message": message}
-        if name == _COMMAND_TOOL and sandbox_codex(self._host.settings.state_dir) is None:
-            # Outside the sandbox a command runs as the person, with nothing to hold it: only
-            # they approve it, in every mode (decision 0022).
+        if name == _COMMAND_TOOL and self._command_needs_the_person():
             return await self._ask_person_only(audit_log, name, args, websocket)
         if exec_policy_decision == "allow":
             return await self._approved(
@@ -314,6 +313,15 @@ class ApprovalDecider:
             if decision is not None:
                 return decision
         return await self._ask_person_only(audit_log, name, args, websocket, reviewer_note)
+
+    def _command_needs_the_person(self) -> bool:
+        """Outside the sandbox a command runs as the person; inside it, it still reads most of
+        their files, which an online command could send out. Either way only the person approves
+        it, in every mode (decision 0022)."""
+        state_dir = self._host.settings.state_dir
+        if sandbox_codex(state_dir) is None:
+            return True
+        return NetworkGuard(state_dir, self._host.thread_id).scripts_online()
 
     async def _ask_person_only(
         self,

@@ -673,9 +673,9 @@ def build_background_task_tools(
         It runs through the machine's shell (sh, or cmd on Windows) in the
         workspace root, once the person turned commands on in Settings ›
         Capabilities. Where the command sandbox is set up (Windows) it can
-        write only this conversation's folders, can't read the person's
-        files elsewhere, and reaches the network only if the environment
-        allows it; otherwise it runs as the user, can change any file, and
+        write only this conversation's folders and is offline unless the
+        environment's network is Full (it can still read most files);
+        otherwise it runs as the user, can change any file, and
         the person approves each one. Prefer run_background_script when you
         can.
 

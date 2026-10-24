@@ -13,6 +13,7 @@ from .command_sandbox import (
     sandbox_status,
     sandbox_uninstall_argv,
     sandboxed_command,
+    warm_up_sandbox,
 )
 from .commands import start_command
 from .find_python import find_pythons
@@ -73,6 +74,7 @@ __all__ = [
     "sandbox_uninstall_argv",
     "sandboxed_command",
     "start_command",
+    "warm_up_sandbox",
     "Detachable",
     "FolderGrants",
     "sweep_folder_grants",

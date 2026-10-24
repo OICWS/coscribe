@@ -130,10 +130,11 @@ def test_setting_the_sandbox_up_records_which_codex_did_it_and_removing_it_forge
     entries = [(e.tool_name, e.decision) for e in AuditLog(tmp_path / "state").read_all()]
     if exit_code == 0:
         assert set_up["state"] == "ready"
-        assert calls == [
-            f"{home} sandbox setup --elevated --current-user",
-            f"{home} sandbox uninstall",
-        ]
+        # Setup, then one empty command so the person's first isn't the one Codex refuses.
+        assert calls[0] == f"{home} sandbox setup --elevated --current-user"
+        assert calls[1].startswith(f"{home} sandbox --permission-profile coscribe-")
+        assert calls[1].endswith(".cmd")
+        assert calls[2:] == [f"{home} sandbox uninstall"]
         assert entries == [
             ("command_sandbox_setup", "approve"),
             ("command_sandbox_uninstall", "approve"),

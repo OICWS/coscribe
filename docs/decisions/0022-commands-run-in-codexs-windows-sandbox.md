@@ -6,11 +6,13 @@ let them run as the user.
 
 ## Context
 `run_background_command` runs a cmd line. cmd can't list folders inside the AppContainer, so
-0021 left commands running as the user, able to change any file. A probe on a Windows runner
-(Codex 0.164.0) showed that `codex sandbox --permission-profile` in elevated mode holds a cmd or
-PowerShell line to the folders a profile names: it runs as a local sandbox user that writes only
-those folders, can't read the person's profile, reads the rest of the disk, and has no network
-unless the profile allows it. It needs `codex sandbox setup --elevated` once, which an
+0021 left commands running as the user, able to change any file. On a Windows runner,
+`codex sandbox --permission-profile` in elevated mode holds a cmd line to the folders a profile
+names for writing: it runs as a local sandbox user that writes only those folders and has no
+network unless the profile allows it. Reading is wider: elevated mode needs the whole disk
+readable (`":root" = "read"`), and setup gives the sandbox users read access to the person's
+Documents and Temp (checked with icacls on the runner); only the top of the profile stayed
+closed. It needs `codex sandbox setup --elevated` once, which an
 administrator approves.
 
 ## Decision
@@ -18,9 +20,13 @@ administrator approves.
   (`codex sandbox uninstall`); both are audited. The sandbox has its own `CODEX_HOME`, apart from
   the code module's and the person's.
 - Where it is set up, a command runs as `codex sandbox --permission-profile <p> -C <folder> --
-  cmd /d /s /c <line>`. Profile `<p>` writes the conversation's read-write folders, reads its
+  cmd /d /c <file>.cmd`, the line written to a UTF-8 batch file (Codex quotes arguments in a way
+  cmd can't read). Profile `<p>` writes the conversation's read-write folders, reads its
   read-only ones, and has network only when the environment's network is Full; one profile per
   set of folders, named after them.
+- Because the sandbox reads most of the person's files, a sandboxed command whose environment's
+  network is Full is approved by the person, as an unsandboxed one is: reading plus network
+  could send those files out. Offline, it follows the conversation's approval mode.
 - Where it isn't (not set up, or not Windows), turning commands on is not enough: the person
   also confirms "Run commands without the sandbox". Then a command runs as the user and every
   one is approved by the person in every mode (pre-approved, Accept Edits, Auto, a scheduled
@@ -28,9 +34,9 @@ administrator approves.
 - Scripts stay in the AppContainer (0021).
 
 ## Consequences
-- The sandbox user reads whatever the disk's ACLs let a local user read: other drives, the
-  Public folders, Program Files. Only the person's profile is closed to it (checked on the
-  runner's profile). The UI's "can't read your files elsewhere" means the profile.
+- What the sandbox holds is writes and network, not reads. The UI says so ("It can still read
+  most of your files"). Closing Documents would mean deny entries on the person's own folders,
+  which this decision does not do.
 - "Ready" means the setup's Codex is still where it was recorded. A Codex upgrade installs to a
   new folder, so the old record stops counting; a sandbox removed outside the app makes the
   command fail rather than run as the person (a real-Windows check).

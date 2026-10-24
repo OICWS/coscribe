@@ -1,12 +1,13 @@
-"""Commands (cmd and PowerShell) in Codex's Windows sandbox (decision 0022).
+"""Commands (cmd) in Codex's Windows sandbox (decision 0022).
 
 `codex sandbox` runs a command as a local sandbox user that Codex creates once
 (`codex sandbox setup --elevated`, which needs an administrator). That user may write only the
-conversation's folders and reads the rest of the disk but not the person's profile; network is
-off unless the environment allows it. Settings › Capabilities sets the sandbox up and records
-here which Codex did it; this module reads that record and builds the command line, so the tools
-need nothing from the code module. Elsewhere, or until it is set up, a command runs as the person.
-"""
+conversation's folders; network is off unless the environment's is Full. It reads what Codex
+grants its users, which is most of the disk and of the person's folders (Documents among them),
+so an online command still goes to the person (`conversation/approvals.py`). Settings ›
+Capabilities sets the sandbox up and records here which Codex did it; this module reads that
+record and builds the command line, so the tools need nothing from the code module. Elsewhere,
+or until it is set up, a command runs as the person."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import contextlib
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -84,8 +86,7 @@ def _toml_key(path: str) -> str:
 
 
 def _section(name: str, profile: dict[str, Any]) -> str:
-    # The elevated sandbox needs ":root" readable; the person's profile stays unreadable all the
-    # same, since the sandbox user is not the person.
+    # The elevated sandbox needs ":root" readable.
     lines = [f"[permissions.{name}.filesystem]", '":root" = "read"']
     lines += [f'{_toml_key(p)} = "read"' for p in profile["readable"]]
     lines += [f'{_toml_key(p)} = "write"' for p in profile["writable"]]
@@ -168,6 +169,21 @@ def _command_file(state_dir: Path, command: str) -> Path:
         f"@echo off\r\nchcp 65001 >nul\r\n{command}\r\n", encoding="utf-8", newline=""
     )
     return script
+
+
+def warm_up_sandbox(state_dir: Path) -> None:
+    """Runs one empty command: the first command after setup is refused ("Access is denied")
+    while Codex finishes granting its users (seen on the Windows runner), so it is not the
+    person's."""
+    commands = Path(state_dir) / "command-sandbox" / "commands"
+    sandboxed = sandboxed_command(state_dir, "rem", commands, [], [], False)
+    if sandboxed is None:
+        return
+    argv, env = sandboxed
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        subprocess.run(
+            argv, env={**os.environ, **env}, capture_output=True, timeout=120, check=False
+        )
 
 
 def sandbox_setup_argv(codex: Path) -> list[str]:
