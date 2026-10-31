@@ -145,6 +145,15 @@ class ApprovalHost(Protocol):
 class ApprovalDecider:
     def __init__(self, host: ApprovalHost) -> None:
         self._host = host
+        # What the turn is waiting on, by request id: a tab opened meanwhile
+        # is shown it again (see ConversationHistory.send_history).
+        self.open_prompts: dict[str, dict[str, Any]] = {}
+
+    async def _ask(self, websocket: Any, event: dict[str, Any]) -> None:
+        # A sub-agent's approval waits on its task, which the panel shows.
+        if not isinstance(websocket, SubAgentChannel):
+            self.open_prompts[str(event["id"])] = event
+        await websocket.send_json(event)
 
     async def _decide_action_request(
         self, request: dict[str, Any], websocket: Any, *, honor_stop: bool = True
@@ -416,7 +425,8 @@ class ApprovalDecider:
             if can_resolve_approvals(websocket)
             else (None, None)
         )
-        await websocket.send_json(
+        await self._ask(
+            websocket,
             {
                 "type": "approval_required",
                 "id": request_id,
@@ -425,12 +435,13 @@ class ApprovalDecider:
                 "before_preview": before_preview,
                 "after_preview": after_preview,
                 "reviewer_note": reviewer_note,
-            }
+            },
         )
         try:
             approved = await future
         finally:
             self._host._pending_approvals.pop(request_id, None)
+            self.open_prompts.pop(request_id, None)
             self._host._subagent_request_ids.discard(request_id)
             self._host._code_requests.pop(request_id, None)
         if approved and self._host._auto_paused:
@@ -456,13 +467,14 @@ class ApprovalDecider:
         future: Future[Any] = get_running_loop().create_future()
         self._host._pending_questions[request_id] = future
         questions = normalize_questions(args)
-        await websocket.send_json(
-            {"type": "question_required", "id": request_id, "questions": questions}
+        await self._ask(
+            websocket, {"type": "question_required", "id": request_id, "questions": questions}
         )
         try:
             reply = await future
         finally:
             self._host._pending_questions.pop(request_id, None)
+            self.open_prompts.pop(request_id, None)
         return {"type": "respond", "message": format_question_answers(questions, reply)}
 
     async def _decide_plan_request(
@@ -479,13 +491,14 @@ class ApprovalDecider:
         request_id = uuid.uuid4().hex
         future: Future[str] = get_running_loop().create_future()
         self._host._pending_questions[request_id] = future
-        await websocket.send_json(
-            {"type": "plan_ready", "id": request_id, "plan": str(args.get("plan", ""))}
+        await self._ask(
+            websocket, {"type": "plan_ready", "id": request_id, "plan": str(args.get("plan", ""))}
         )
         try:
             answer = await future
         finally:
             self._host._pending_questions.pop(request_id, None)
+            self.open_prompts.pop(request_id, None)
         if answer in (PLAN_CHOICE_AUTO, PLAN_CHOICE_MANUAL):
             self._host._toggle_mode("auto" if answer == PLAN_CHOICE_AUTO else "plan")
             await self._host.send_state(websocket)
@@ -534,11 +547,14 @@ class ApprovalDecider:
         request_id = uuid.uuid4().hex
         future: Future[str] = get_running_loop().create_future()
         self._host._pending_questions[request_id] = future
-        await websocket.send_json({"type": "task_draft_required", "id": request_id, "draft": draft})
+        await self._ask(
+            websocket, {"type": "task_draft_required", "id": request_id, "draft": draft}
+        )
         try:
             answer = await future
         finally:
             self._host._pending_questions.pop(request_id, None)
+            self.open_prompts.pop(request_id, None)
         return {"type": "respond", "message": answer}
 
     def _auto_approves(self, name: str) -> AutoApproveReason | None:

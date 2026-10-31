@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
 from langgraph.graph import END
@@ -21,6 +21,9 @@ from ..runtime_lg import render_transcript_lg as _render_transcript_lg
 from .events import EventSink
 from .export_text import conversation_markdown
 from .turn_lock import TurnLock
+
+if TYPE_CHECKING:
+    from .approvals import ApprovalDecider
 
 # Shared between _handle_compact (which writes it as the first message of
 # a fresh epoch) and send_history (which checks for it, below) -- lets
@@ -76,6 +79,9 @@ class HistoryHost(Protocol):
     _turn_lock: TurnLock
     _current_turn_task: asyncio.Task[None] | None
 
+    @property
+    def _approvals(self) -> ApprovalDecider: ...
+
     async def _run_observational_hooks(self, event: str, payload: dict[str, Any]) -> None: ...
 
     async def _handle_user_message_locked(
@@ -130,6 +136,10 @@ class ConversationHistory:
         ):
             entries.append({"kind": "user", "text": prompt})
         await websocket.send_json({"type": "history", "entries": entries, "has_older": has_older})
+        # The replay replaces what the tab shows; a turn still waiting on a
+        # question or approval (a run's, an investigation's) asks this tab too.
+        for event in list(self._host._approvals.open_prompts.values()):
+            await websocket.send_json(event)
 
     async def load_older_messages(self, websocket: EventSink) -> None:
         """Scroll-up pagination for a thread that's been /compact'd: send_

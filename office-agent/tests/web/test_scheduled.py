@@ -668,6 +668,54 @@ def test_a_failed_workflow_run_is_looked_into_in_a_new_conversation_lg(
     assert titles[thread_id] == "Look into: Word count"
 
 
+def test_a_question_the_investigation_asks_reaches_a_tab_opened_after_it_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The investigation runs on its own, not on a tab's socket: closing the
+    # tab that saw its question, or opening the thread only later, must not
+    # leave it waiting on an answer nobody can give.
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "workspace" / "notes.txt").write_text("one two", encoding="utf-8")
+    ask = _tool_call(
+        "q1",
+        "ask_user_question",
+        {"questions": [{"question": "Which file?", "options": [{"label": "a"}, {"label": "b"}]}]},
+    )
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            _structured({"words": 0}),
+            AIMessage(content="", tool_calls=[ask]),
+            AIMessage(content="Thanks, looking at a."),
+        ]
+    )
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        response = client.post(
+            "/api/scheduled-tasks",
+            json={"name": "Word count", "kind": "manual", "at": "", "workflow": _NOTES_WORKFLOW},
+        )
+        task = response.json()
+        run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
+        _wait_for_run_status(client, task["trigger_id"], run["run_id"])
+        base = f"/api/scheduled-tasks/{task['trigger_id']}/runs/{run['run_id']}"
+        thread_id = client.post(f"{base}/investigate", json={}).json()["thread_id"]
+        deadline = time.time() + 5
+        while len(fake_model.received) < 2 and time.time() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.2)
+        for _ in range(2):
+            with client.websocket_connect(f"/ws/{thread_id}") as ws:
+                question = _receive_until(ws, "question_required")[-1]
+        with client.websocket_connect(f"/ws/{thread_id}") as ws:
+            _receive_until(ws, "question_required")
+            ws.send_json({"type": "question_response", "id": question["id"], "answers": ["a"]})
+            deadline = time.time() + 5
+            while len(fake_model.received) < 3 and time.time() < deadline:
+                time.sleep(0.05)
+
+    assert question["questions"][0]["question"] == "Which file?"
+    assert "a" in str(fake_model.received[2][-1].content)
+
+
 def test_a_failed_run_of_a_task_set_to_is_looked_into_and_announced_lg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
