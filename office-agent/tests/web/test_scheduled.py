@@ -1080,6 +1080,54 @@ def test_revising_a_saved_workflow_proposes_changes_without_saving_them_lg(
     assert saved is not None and len(saved.workflow["steps"]) == 1
 
 
+def test_a_revised_draft_of_a_saved_workflow_stays_a_change_to_that_task_lg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import coscribe.conversation.session as session_module
+
+    ids = iter(["d1", "d2"])
+    monkeypatch.setattr(session_module, "_new_draft_id", lambda: next(ids))
+    task = _saved_workflow_task(tmp_path)
+
+    def proposal(*step_ids: str) -> AIMessage:
+        steps = [
+            {"id": i, "kind": "tool", "title": i, "tool": "read_file", "args": {"path": "in.txt"}}
+            for i in step_ids
+        ]
+        changes = [f"Reads it {len(steps)} times"]
+        return AIMessage(
+            content=json.dumps({"workflow": {"steps": steps}, "changes": changes, "notes": []})
+        )
+
+    fake_model = FakeToolCallingChatModel(
+        responses=[
+            AIMessage(content="", tool_calls=[_tool_call(
+                "c1", "revise_workflow", {"task_id": task.trigger_id, "request": "read it twice"}
+            )]),
+            proposal("read", "again"),
+            AIMessage(content="", tool_calls=[_tool_call(
+                "c2", "revise_workflow", {"draft_id": "d1", "request": "and a third time"}
+            )]),
+            proposal("read", "again", "third"),
+            AIMessage(content="Review the changes on the card."),
+        ]
+    )  # fmt: skip
+    with _client_lg(tmp_path, monkeypatch, fake_model) as client:
+        with client.websocket_connect("/ws/t_revise_twice") as ws:
+            ws.receive_json()  # state
+            ws.receive_json()  # history
+            ws.send_json({"type": "user_message", "text": "read the file twice, then three times"})
+            messages = _receive_until(ws, "tasks_changed")
+
+    results = [
+        m["result"] for m in messages if m.get("tool_name") == "revise_workflow" and "result" in m
+    ]
+    second = json.loads(results[-1]) if isinstance(results[-1], str) else results[-1]
+    assert second["draft_id"] == "d2", second
+    assert second["trigger_id"] == task.trigger_id
+    assert [s["id"] for s in second["workflow"]["steps"]] == ["read", "again", "third"]
+
+
 class _FakeCheckpointer:
     def __init__(self, thread_ids: list[str]) -> None:
         self.thread_ids = thread_ids

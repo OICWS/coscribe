@@ -304,14 +304,18 @@ class WorkflowDrafting:
     def _workflow_to_change(
         self, messages: list[Any], task_id: str, draft_id: str
     ) -> tuple[str, dict[str, Any], ScheduledTrigger | None]:
-        """(name, workflow, the saved task or None for a draft) for a draft
-        in this conversation or a saved task."""
+        """(name, workflow, the saved task or None for a new workflow) for a
+        draft in this conversation or a saved task."""
+        store = ScheduledTriggerStore(self._host.settings.state_dir)
         if draft_id:
             draft = _draft_from(messages, draft_id)
             if not draft:
                 raise DraftFailed(f"There's no draft {draft_id!r} in this conversation.")
-            return str(draft.get("name") or ""), draft["workflow"], None
-        trigger = ScheduledTriggerStore(self._host.settings.state_dir).load(task_id)
+            # A draft of changes to a saved task stays one when it is revised
+            # again, or the person is offered to save it as a second task.
+            linked = store.load(str(draft["trigger_id"])) if draft.get("trigger_id") else None
+            return str(draft.get("name") or ""), draft["workflow"], linked
+        trigger = store.load(task_id)
         if trigger is None:
             raise DraftFailed(f"There's no scheduled task with id {task_id!r}.")
         if not trigger.workflow:
