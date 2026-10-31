@@ -276,7 +276,8 @@ Last reviewed: 2026-10-15.
 8. **Workflows whose steps choose their autonomy** (#719, kurtosisOC; decision 0028). One PR
    per phase: P0 the record (done); P1 an agent step and an injected runner (P1a, the step in
    the spec and on the review card, and P1b, the engine running it through the conversation's
-   runner, a sub-agent: done; open there: a cost cap, an L3 step delegating); P2 the app (P2a,
+   runner, a sub-agent: done; an agent that ends silently no longer passes as done, in review;
+   open there: a cost cap, an L3 step delegating); P2 the app (P2a,
    showing, editing and answering agent steps, done; P2b a read-only canvas, in review;
    then the run's statuses on it); P3
    step-by-step drafting with test cases and dry runs; P4 the repair layers (a step's exception

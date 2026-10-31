@@ -157,6 +157,9 @@ class WorkflowAgentRunner:
                     )
                 state = await agent.aget_state(config)
                 if not state.next:
+                    if _ended_silently(state) and not _was_nudged(state):
+                        turn = {"messages": [HumanMessage(_SILENT_END_NUDGE)]}
+                        continue
                     break
                 resume, waiting = await self._decide(state, request, answers)
                 if waiting is not None:
@@ -171,6 +174,8 @@ class WorkflowAgentRunner:
             logger.warning("workflow agent %s failed", request.key, exc_info=True)
             return self._reply("failed", state, error=(str(exc) or type(exc).__name__)[:2000])
         answers.clear()
+        if _ended_silently(state):
+            return self._reply("failed", state, error=_SILENT_END_ERROR)
         messages = list((state.values or {}).get("messages", []))
         text = extract_text(getattr(messages[-1], "content", None)) if messages else ""
         if text.startswith(LIMIT_MESSAGE_PREFIX):
@@ -283,3 +288,26 @@ class WorkflowAgentRunner:
 
 async def _ignore(_update: Any) -> None:
     return None
+
+
+# A model can end a turn with no words and no call -- seen after a tool
+# error -- and an empty report would pass for a finished step though the
+# work may not be done. It is asked once to say where things stand.
+_SILENT_END_NUDGE = (
+    "Your last reply was empty. If a call failed, deal with it and finish the task. "
+    "Then say what you did, and plainly what is not done and why."
+)
+_SILENT_END_ERROR = "The agent stopped without saying whether the task was done."
+
+
+def _ended_silently(state: Any) -> bool:
+    messages = list((getattr(state, "values", None) or {}).get("messages", []))
+    if not messages or not isinstance(messages[-1], AIMessage):
+        return False
+    last = messages[-1]
+    return not last.tool_calls and not extract_text(last.content).strip()
+
+
+def _was_nudged(state: Any) -> bool:
+    messages = (getattr(state, "values", None) or {}).get("messages", [])
+    return any(isinstance(m, HumanMessage) and m.content == _SILENT_END_NUDGE for m in messages)
