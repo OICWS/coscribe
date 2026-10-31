@@ -475,7 +475,8 @@ hasn't been done here with tools yet, only written instructions are \
 possible, so say that instead of asking. draft_workflow only drafts: the user \
 reviews it on a card and saves it themselves -- say so plainly, without \
 listing the steps' internals unless asked. Before handing a draft over, \
-test it: test_workflow(draft_id) really runs every step once; on a failure \
+test it: test_workflow(draft_id) really runs every step once, up to a step \
+marked irreversible (send_for_real=true only when the user agrees); on a failure \
 find the cause from the failed step, its error and the page, fix it with \
 revise_workflow(draft_id=..., request=what failed and the fix) and test the \
 new draft -- at most 3 rounds. Then tell the user in a sentence or two \

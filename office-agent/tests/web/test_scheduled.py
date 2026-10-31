@@ -679,6 +679,12 @@ def test_a_failed_run_of_a_task_set_to_is_looked_into_and_announced_lg(
             AIMessage(
                 content="", tool_calls=[_tool_call("c1", "test_workflow", {"task_id": "gone"})]
             ),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call("c2", "test_workflow", {"task_id": "gone", "send_for_real": True})
+                ],
+            ),
             AIMessage(content="The file was empty."),
         ]
     )
@@ -692,10 +698,10 @@ def test_a_failed_run_of_a_task_set_to_is_looked_into_and_announced_lg(
         run = client.post(f"/api/scheduled-tasks/{task['trigger_id']}/run", json={}).json()["run"]
         event = client.portal.call(queue.get)
         deadline = time.time() + 30
-        while len(fake_model.received) < 3 and time.time() < deadline:
+        while len(fake_model.received) < 4 and time.time() < deadline:
             time.sleep(0.05)
         failed = _wait_for_run_status(client, task["trigger_id"], run["run_id"])
-        # The model's third call starting doesn't mean its reply is saved
+        # The model's last call starting doesn't mean its reply is saved
         # yet: read the history again until it is. The limit only stops a
         # hang; a slow runner gets its own full allowance.
         history: list[dict[str, Any]] = []
@@ -720,11 +726,13 @@ def test_a_failed_run_of_a_task_set_to_is_looked_into_and_announced_lg(
     assert failed["investigation"] == event["thread_id"]
     assert '[Look into a failed run of "Word count"' in str(fake_model.received[1][-1].content)
     # Nobody is there to approve the reproduction, and it didn't wait.
-    [tested] = [e for e in history if e.get("tool_name") == "test_workflow"]
+    tested, for_real = [e for e in history if e.get("tool_name") == "test_workflow"]
     assert tested["result"] == {
         "status": "failed",
         "error": "There's no scheduled task with id 'gone'.",
     }
+    # Nor is anyone there to agree that a test may submit or send for real.
+    assert for_real["result"]["status"] == "refused"
     assert any(e.get("text") == "The file was empty." for e in history)
 
 

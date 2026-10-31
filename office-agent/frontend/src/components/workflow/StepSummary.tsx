@@ -5,6 +5,10 @@ import { ConditionText, VarToken } from "./parts";
 
 const ARG_PREVIEW_CHARS = 32;
 
+function Irreversible({ on }: { on: boolean }) {
+  return on ? <span className="text-[var(--warning)]">· can’t be undone</span> : null;
+}
+
 function Arrow({ output, inputNames }: { output: string | null; inputNames: Set<string> }) {
   if (!output) return null;
   return (
@@ -50,6 +54,7 @@ function AgentSummary({
           <span className="font-mono text-[12px] text-[var(--fg)]">{step.fields.map((f) => f.name).join(", ")}</span>
         </>
       )}
+      <Irreversible on={step.irreversible} />
       <Arrow output={output} inputNames={inputNames} />
     </>
   );
@@ -70,6 +75,7 @@ export function StepSummary({ step, inputNames }: { step: WorkflowStep; inputNam
             <ArgPreview value={value} inputNames={inputNames} />
           </span>
         ))}
+        <Irreversible on={step.irreversible} />
         <Arrow output={output} inputNames={inputNames} />
       </>
     );

@@ -64,6 +64,34 @@ async def test_a_test_stops_before_an_approval(tmp_path: Path) -> None:
     assert [s["status"] for s in result["steps"]] == ["done", "waiting", "not reached"]
 
 
+def _send(step_id: str) -> dict[str, Any]:
+    return {"id": step_id, "kind": "tool", "title": "Submit the claim", "tool": "send",
+            "args": {"to": "{{row}}"}, "irreversible": True}  # fmt: skip
+
+
+async def test_a_test_stops_before_a_step_that_cant_be_taken_back(tmp_path: Path) -> None:
+    sent: list[str] = []
+    loop = {"id": "each", "kind": "loop", "title": "Each row", "over": "rows", "item": "row",
+            "steps": [_send("submit")]}  # fmt: skip
+    rows = {"id": "rows", "kind": "tool", "title": "Read the rows", "tool": "rows",
+            "save_as": "rows"}  # fmt: skip
+    workflow = parse_workflow({"steps": [rows, loop]})
+    tools = {"rows": lambda: ["a", "b"], "send": lambda to: sent.append(to)}
+
+    result = await run_test(workflow, _ctx(tmp_path, tools))
+
+    assert result["status"] == "stopped_before_irreversible"
+    assert result["stopped_before"] == {"id": "submit", "title": "Submit the claim"}
+    assert [s["id"] for s in result["steps"]] == ["rows", "each", "submit"]
+    assert result["steps"][2]["status"] == "not reached"
+    assert sent == []
+
+    for_real = await run_test(workflow, _ctx(tmp_path, tools), send_for_real=True)
+
+    assert for_real["status"] == "passed"
+    assert sent == ["a", "b"]
+
+
 async def test_a_workflow_that_cant_run_fails_the_test(tmp_path: Path) -> None:
     workflow = parse_workflow({"steps": [_read("a", "a.txt")]})
 

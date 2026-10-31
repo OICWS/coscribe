@@ -318,6 +318,9 @@ def build_investigation_prompt(trigger: ScheduledTrigger, run: ScheduledRun, req
         "revision with test_workflow(draft_id) -- at most 3 rounds.",
         "4. Tell the user in a few sentences what went wrong and what the revision changes, in "
         "the language of their request above.",
+        "A test stops before a step marked irreversible (a submit, a send, a payment): "
+        "don't test with send_for_real unless the user agrees to it here, and mark any "
+        "such step your revision adds.",
         "If the reproduction passes and the failure looks temporary (the site was down, a login "
         "had expired), say so instead of changing the workflow.",
     ]

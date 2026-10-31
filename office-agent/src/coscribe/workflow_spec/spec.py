@@ -119,6 +119,9 @@ class ToolStep(_Step):
     tool: str
     args: dict[str, Any] = {}
     save_as: str | None = None
+    # It sends, submits, pays or deletes something outside this machine that
+    # can't be taken back: a test run stops before it (decision 0029).
+    irreversible: bool = False
 
     _check_save_as = field_validator("save_as")(lambda v: v if v is None else _identifier(v))
 
@@ -220,6 +223,8 @@ class AgentStep(_Step):
     # The person's word, given when saving, that what this step reads from
     # outside may be acted on with its tools: it is then not read-only.
     trusted_input: bool = False
+    # As a tool step's: a test run stops before the whole step (decision 0029).
+    irreversible: bool = False
 
     _check_save_as = field_validator("save_as")(lambda v: v if v is None else _identifier(v))
 

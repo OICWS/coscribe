@@ -130,7 +130,9 @@ export interface WorkflowTestFile {
 
 /** What test_workflow reported. */
 export interface WorkflowTestResult {
-  status: "passed" | "failed" | "stopped_at_approval";
+  status: "passed" | "failed" | "stopped_at_approval" | "stopped_before_irreversible";
+  /** For "stopped_before_irreversible": the step a test doesn't run. */
+  stopped_before?: { id: string; title: string };
   seconds: number;
   steps: WorkflowTestStep[];
   files: WorkflowTestFile[];

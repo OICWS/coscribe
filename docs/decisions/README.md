@@ -39,3 +39,4 @@ documents may not say it again (`tests/test_doc_freshness.py`).
 | [0026](0026-libreoffice-is-an-optional-engine-found-or-installed-on-request.md) | LibreOffice is an optional engine, found or installed on request |
 | [0027](0027-an-artifact-is-what-coscribe-made-from-a-source-it-owns.md) | An artifact is what coscribe made from a source it owns |
 | [0028](0028-a-workflow-step-chooses-its-autonomy.md) | A workflow step chooses its autonomy; the graph stays fixed (proposed) |
+| [0029](0029-a-test-run-stops-before-a-step-that-cant-be-taken-back.md) | A test run stops before a step that can't be taken back (proposed) |

@@ -18,6 +18,7 @@ const agent = (changes: Partial<AgentStep> = {}): AgentStep => ({
   model: null,
   save_as: "found",
   trusted_input: false,
+  irreversible: false,
   ...changes,
 });
 

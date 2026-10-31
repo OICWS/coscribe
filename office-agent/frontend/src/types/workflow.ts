@@ -42,6 +42,8 @@ export interface ToolStep extends StepBase {
   tool: string;
   args: Record<string, unknown>;
   save_as: string | null;
+  /** Sends, submits, pays or deletes outside this machine: a test stops before it. */
+  irreversible: boolean;
 }
 
 export interface ScriptStep extends StepBase {
@@ -74,6 +76,8 @@ export interface AgentStep extends StepBase {
   save_as: string | null;
   /** The person said what this step reads from outside may be acted on. */
   trusted_input: boolean;
+  /** As a tool step's. */
+  irreversible: boolean;
 }
 
 export interface CheckStep extends StepBase {

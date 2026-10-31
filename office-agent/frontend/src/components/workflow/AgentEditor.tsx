@@ -4,7 +4,7 @@ import { UNAVAILABLE_TOOLS } from "../../lib/workflowEdit";
 import { AUTONOMY_DESCRIPTION, AUTONOMY_LABEL } from "../../lib/workflowLabels";
 import type { AgentStep, Autonomy } from "../../types/workflow";
 import { ToggleSwitch } from "../ToggleSwitch";
-import { type EditorProps, OutputFieldsTable, SaveAsField, ValuesHint } from "./editorParts";
+import { type EditorProps, IrreversibleToggle, OutputFieldsTable, SaveAsField, ValuesHint } from "./editorParts";
 import { AddRowButton, AutoTextarea, FieldLabel, RemoveButton } from "./fields";
 
 // Mirrors workflow_spec/spec.py's MAX_AGENT_STEPS.
@@ -189,6 +189,7 @@ export function AgentEditor({ step, onChange, context }: EditorProps<AgentStep>)
         </OutputFieldsTable>
       )}
       <TrustToggle step={step} onChange={onChange} />
+      <IrreversibleToggle step={step} onChange={onChange} />
       <div className="flex flex-wrap gap-4">
         <div className="w-32">
           <FieldLabel htmlFor={`${step.id}-max-steps`}>Most model calls</FieldLabel>

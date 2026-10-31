@@ -16,7 +16,14 @@ import type {
 import { ToggleSwitch } from "../ToggleSwitch";
 import { AgentEditor } from "./AgentEditor";
 import { ConditionRow } from "./ConditionRow";
-import { type EditorContext, type EditorProps, OutputFieldsTable, SaveAsField, ValuesHint } from "./editorParts";
+import {
+  type EditorContext,
+  type EditorProps,
+  IrreversibleToggle,
+  OutputFieldsTable,
+  SaveAsField,
+  ValuesHint,
+} from "./editorParts";
 import { AddRowButton, AutoTextarea, FieldLabel, RemoveButton } from "./fields";
 
 export type { EditorContext };
@@ -164,6 +171,7 @@ function ToolEditor({ step, onChange, context }: EditorProps<ToolStep>) {
         </div>
         <ValuesHint context={context} />
       </div>
+      <IrreversibleToggle step={step} onChange={onChange} />
       <SaveAsField step={step} onChange={onChange} />
     </>
   );

@@ -49,7 +49,11 @@ Steps -- every step has "id" (lowercase identifier, unique) and "title" \
 (short, plain language), plus one "kind":
 - "tool": {"tool": "<tool name>", "args": {...}, "save_as": "<name>"} -- \
 calls one tool. Copy the arguments of the call that worked exactly, \
-replacing only the values that became inputs or come from earlier steps.
+replacing only the values that became inputs or come from earlier steps. \
+Add "irreversible": true to a step that submits, sends, pays or deletes \
+something outside this machine -- a form's final submit, a sent message, \
+a payment -- never to one that only moves on, saves a draft or reads. A \
+test run stops before such a step, so checking the workflow sends nothing.
 - "script": {"code": "<python>", "inputs": {"pdf": "{{pdf_path}}"}, \
 "save_as": "<name>"} -- for a run_python_script call. The code reads \
 values from a ready-made `inputs` dict (never paste them into the code) \

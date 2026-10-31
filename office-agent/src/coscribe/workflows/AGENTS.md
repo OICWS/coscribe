@@ -30,7 +30,8 @@ history, so this package does not import `runtime_lg`).
 - An agent step that reads outside content may only make READ calls, unless `trusted_input`.
 - A bounded step's allowlist, declared folders and sites are its consent: a call beyond them
   waits for a person (`agent_step.decide`, `permissions.outside_declared`), never runs unasked.
-- A test run stops before an approval step and writes no run history.
+- A test run stops before an approval step and before a step marked `irreversible` (unless
+  `send_for_real`, refused when no one is watching; decision 0029), and writes no run history.
 - `UNAVAILABLE_TOOLS` in `engine.py` only lists tools a run may not call; the import contract,
   not that list, is what keeps the code module out.
 

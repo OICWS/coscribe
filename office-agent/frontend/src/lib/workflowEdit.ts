@@ -83,7 +83,9 @@ export function newStep(kind: StepKind, workflow: Workflow, available: string[],
       }
       // Only a read's result is usually worth keeping; a write's is a receipt.
       const keepsResult = tool?.risk_category === "READ";
-      return { kind, id, title, tool: tool?.name ?? "", args, save_as: keepsResult ? saveAs : null };
+      // A browser click may only open a menu; a send through a connector can't be recalled.
+      const irreversible = tool?.risk_category === "EXTERNAL" && !tool.name.startsWith("browser_");
+      return { kind, id, title, tool: tool?.name ?? "", args, save_as: keepsResult ? saveAs : null, irreversible };
     }
     case "script":
       return { kind, id, title, code: SCRIPT_TEMPLATE, inputs: {}, save_as: saveAs };
@@ -112,6 +114,7 @@ export function newStep(kind: StepKind, workflow: Workflow, available: string[],
         model: null,
         save_as: saveAs,
         trusted_input: false,
+        irreversible: false,
       };
     case "check":
       return {

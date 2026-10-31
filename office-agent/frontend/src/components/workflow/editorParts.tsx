@@ -11,6 +11,7 @@ import type {
   ToolStep,
   WorkflowStep,
 } from "../../types/workflow";
+import { ToggleSwitch } from "../ToggleSwitch";
 import { AddRowButton, FieldLabel, RemoveButton } from "./fields";
 import { VarToken } from "./parts";
 
@@ -168,5 +169,30 @@ export function OutputFieldsTable({
         </AddRowButton>
       </div>
     </div>
+  );
+}
+
+export function IrreversibleToggle<T extends ToolStep | AgentStep>({
+  step,
+  onChange,
+}: {
+  step: T;
+  onChange: (step: T) => void;
+}) {
+  return (
+    <label className="flex items-start gap-2.5 text-sm">
+      <ToggleSwitch
+        on={step.irreversible}
+        label="Can't be undone"
+        onClick={() => onChange({ ...step, irreversible: !step.irreversible })}
+      />
+      <span>
+        Can’t be undone
+        <span className="block text-[13px] text-[var(--muted)]">
+          It submits, sends, pays or deletes something. A test run stops before it, so checking the workflow doesn’t
+          send anything.
+        </span>
+      </span>
+    </label>
   );
 }

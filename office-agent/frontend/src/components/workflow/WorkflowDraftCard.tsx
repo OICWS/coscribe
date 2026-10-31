@@ -20,6 +20,7 @@ type Status =
   | { kind: "testing"; done: number; total: number }
   | { kind: "passed"; result: WorkflowTestResult }
   | { kind: "approval"; result: WorkflowTestResult }
+  | { kind: "irreversible"; result: WorkflowTestResult }
   | { kind: "failed"; result: WorkflowTestResult }
   | { kind: "untested" };
 
@@ -35,6 +36,7 @@ function draftStatus(entry: WorkflowDraftEntry, cards: DraftCards): Status {
   if (!result) return { kind: "untested" };
   if (result.status === "passed") return { kind: "passed", result };
   if (result.status === "stopped_at_approval") return { kind: "approval", result };
+  if (result.status === "stopped_before_irreversible") return { kind: "irreversible", result };
   return { kind: "failed", result };
 }
 
@@ -77,6 +79,16 @@ function StatusLine({ status }: { status: Status }) {
         <span className={`${base} text-[var(--warning)]`}>
           <AlertCircleIcon className="h-3.5 w-3.5 shrink-0" />
           Tested up to an approval step, where a test stops
+        </span>
+      );
+    case "irreversible":
+      return (
+        <span className={`${base} text-[var(--warning)]`}>
+          <AlertCircleIcon className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">
+            Tested up to “{status.result.stopped_before?.title ?? "a step that can't be undone"}”, which a test
+            doesn't send
+          </span>
         </span>
       );
     case "failed":

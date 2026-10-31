@@ -4,7 +4,9 @@ reviews it, and reproduces a saved one's failure.
 
 It runs on a throwaway checkpointer, so nothing lands in a task's run
 history, and stops before an approval step: a test has no one to ask, and
-what comes after an approval is exactly what the approval guards."""
+what comes after an approval is exactly what the approval guards. It also
+stops before a step marked irreversible unless told to send for real
+(decision 0029): checking a fix must not file a claim or pay an invoice."""
 
 from __future__ import annotations
 
@@ -21,7 +23,16 @@ from typing import Any
 from langgraph.checkpoint.memory import InMemorySaver
 
 from ..tools import browser_run
-from ..workflow_spec import ToolStep, Workflow, walk
+from ..workflow_spec import (
+    AgentStep,
+    ApprovalStep,
+    BranchStep,
+    LoopStep,
+    Step,
+    ToolStep,
+    Workflow,
+    walk,
+)
 from .engine import StepContext, StepRecord, WorkflowNotRunnable, WorkflowRun, preview
 
 _OUTPUT_CHARS = 400
@@ -112,18 +123,65 @@ def output_files(outputs: list[Any], root: Path, since: float) -> list[dict[str,
     return files
 
 
+_GUARD_PREFIX = "before_"
+
+
+def _guarded(workflow: Workflow) -> tuple[Workflow, dict[str, Step]]:
+    """The workflow with an approval step in front of every irreversible
+    one -- the engine already stops a test there -- and which guard stands
+    for which step."""
+    taken = {placed.step.id for placed in walk(workflow.steps)}
+    guards: dict[str, Step] = {}
+
+    def guard(step: Step) -> ApprovalStep:
+        gid = _GUARD_PREFIX + step.id
+        while gid in taken:
+            gid += "_"
+        taken.add(gid)
+        guards[gid] = step
+        return ApprovalStep(
+            id=gid,
+            title=f"Before {step.title}"[:120],
+            message=f"{step.title} can't be taken back.",
+        )
+
+    def rebuild(steps: list[Step]) -> list[Step]:
+        out: list[Step] = []
+        for step in steps:
+            if isinstance(step, LoopStep):
+                step = step.model_copy(update={"steps": rebuild(step.steps)})
+            elif isinstance(step, BranchStep):
+                step = step.model_copy(
+                    update={"then": rebuild(step.then), "otherwise": rebuild(step.otherwise)}
+                )
+            elif isinstance(step, (ToolStep, AgentStep)) and step.irreversible:
+                out.append(guard(step))
+            out.append(step)
+        return out
+
+    return workflow.model_copy(update={"steps": rebuild(workflow.steps)}), guards
+
+
 async def run_test(
     workflow: Workflow,
     ctx: StepContext,
     inputs: dict[str, Any] | None = None,
     on_step: Callable[[StepRecord], Awaitable[None]] | None = None,
     thread_id: str = "",
+    *,
+    send_for_real: bool = False,
 ) -> dict[str, Any]:
-    """{"status": "passed" | "failed" | "stopped_at_approval", "seconds",
-    "steps": [{"id", "title", "status", "seconds", "output", "error"}],
-    "failed_step", "error"} -- every step listed, "not reached" for those
-    the run never got to."""
+    """{"status": "passed" | "failed" | "stopped_at_approval" |
+    "stopped_before_irreversible", "seconds", "steps": [{"id", "title",
+    "status", "seconds", "output", "error"}], "failed_step", "error"} --
+    every step listed, "not reached" for those the run never got to; with
+    "stopped_before" ({"id", "title"}) when an irreversible step stopped it.
+    `send_for_real` runs irreversible steps too."""
     records: dict[str, StepRecord] = {}
+    shown = workflow
+    guards: dict[str, Step] = {}
+    if not send_for_real:
+        workflow, guards = _guarded(workflow)
 
     async def record_step(record: StepRecord) -> None:
         # Inside a loop the last pass stands for the step.
@@ -149,8 +207,11 @@ async def run_test(
                 "error": str(exc),
             }
     status = {"completed": "passed", "waiting": "stopped_at_approval"}.get(outcome.status, "failed")
+    stopped_before = guards.get(outcome.step_id or "") if status == "stopped_at_approval" else None
+    if stopped_before is not None:
+        status = "stopped_before_irreversible"
     steps = []
-    for placed in walk(workflow.steps):
+    for placed in walk(shown.steps):
         record = records.get(placed.step.id)
         step: dict[str, Any] = {
             "id": placed.step.id,
@@ -163,8 +224,14 @@ async def run_test(
         if record and record.status == "failed" and record.checks:
             step["checks"] = record.checks
         steps.append(step)
+    extra = (
+        {"stopped_before": {"id": stopped_before.id, "title": stopped_before.title}}
+        if stopped_before is not None
+        else {}
+    )
     return {
         "status": status,
+        **extra,
         "seconds": round(time.monotonic() - started, 1),
         "steps": steps,
         "files": output_files([r.output for r in records.values()], ctx.workspace_root, started_at),
