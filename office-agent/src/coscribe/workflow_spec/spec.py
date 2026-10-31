@@ -171,6 +171,9 @@ MAX_AGENT_STEPS = 60
 Autonomy = Literal["bounded", "high", "full"]
 # What an agent step's result holds when it names no fields.
 AGENT_REPORT_FIELD = "report"
+# Whether the agent finished, which every agent step's report gives
+# (`workflows.agent_step`); a field of the step can't take these names.
+AGENT_OUTCOME_FIELDS = frozenset({"outcome", "stopped_because", "assumed"})
 
 
 def _is_absolute_path(text: str) -> bool:
@@ -191,6 +194,9 @@ def _agent_is_consistent(step: AgentStep) -> AgentStep:
         raise ValueError("a full agent step reports in prose; give it no fields")
     if len({f.name for f in step.fields}) != len(step.fields):
         raise ValueError("field names must be unique")
+    reserved = {f.name for f in step.fields} & AGENT_OUTCOME_FIELDS
+    if reserved:
+        raise ValueError(f"{', '.join(sorted(reserved))} is the agent's own verdict; rename it")
     # A relative folder would resolve against wherever the server runs.
     relative = [f for f in step.folders if not _is_absolute_path(f)]
     if relative:

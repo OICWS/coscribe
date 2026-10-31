@@ -158,7 +158,7 @@ async def test_a_bounded_step_asks_before_a_call_beyond_its_allowlist(tmp_path: 
         [
             _calls(("read_file", {"path": "in.txt"})),
             _calls(("write_file", {"path": "out.txt", "content": "x"})),
-            _says('Done. {"urgent": 3}'),
+            _says('Done. {"outcome": "done", "urgent": 3}'),
         ],
     )
     step = _agent(tools=["read_file"], fields=[{"name": "urgent", "type": "number"}])

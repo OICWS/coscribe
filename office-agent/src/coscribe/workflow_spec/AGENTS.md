@@ -11,7 +11,7 @@ imports the other. Does not own running a workflow, what it may touch or draftin
 ## Public interface
 Definition: `Workflow`, `parse_workflow`, `workflow_error`, `walk`, `Placed`, `step_output`,
 `Step`, `ToolStep`, `ScriptStep`, `LLMStep`, `AgentStep`, `CheckStep`, `ApprovalStep`, `BranchStep`,
-`LoopStep`, `OutputField`, `AGENT_REPORT_FIELD`, `child_lists`, `step_references`. References: `resolve`, `evaluate`, `render_text`, `render_value`. Import these from
+`LoopStep`, `OutputField`, `AGENT_OUTCOME_FIELDS`, `AGENT_REPORT_FIELD`, `child_lists`, `step_references`. References: `resolve`, `evaluate`, `render_text`, `render_value`. Import these from
 `coscribe.workflow_spec`, not a submodule.
 
 ## Depends on

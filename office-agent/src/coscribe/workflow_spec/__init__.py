@@ -4,6 +4,7 @@ and `workflows` can run it without either importing the other."""
 
 from .refs import evaluate, render_text, render_value, resolve
 from .spec import (
+    AGENT_OUTCOME_FIELDS,
     AGENT_REPORT_FIELD,
     AgentStep,
     ApprovalStep,
@@ -26,6 +27,7 @@ from .spec import (
 )
 
 __all__ = [
+    "AGENT_OUTCOME_FIELDS",
     "AGENT_REPORT_FIELD",
     "AgentStep",
     "ApprovalStep",
