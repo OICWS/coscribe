@@ -38,7 +38,7 @@ env:
   EXCLUDED: approval chat
   SPECS: >-
     artifacts attachment chat-files code composer-drop-paste connector-setup connectors find labels navigation
-    panel-windows panels permissions workflow-agent workflow-canvas rail-dialog secrets settings sidebar skill-plugins slides slides-panels slides-stage slides-drafts slides-foreign titlebar tool-rows plan-panel plan-proposal plan-comments image-annotation prompt-suggestion run-in-background design-systems doc-editor dashboard design-canvas toolbar python-interpreter capabilities
+    panel-windows panels permissions workflow-agent workflow-canvas workflow-run-canvas rail-dialog secrets settings sidebar skill-plugins slides slides-panels slides-stage slides-drafts slides-foreign titlebar tool-rows plan-panel plan-proposal plan-comments image-annotation prompt-suggestion run-in-background design-systems doc-editor dashboard design-canvas toolbar python-interpreter capabilities
 
 jobs:
   playwright:

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Workflow } from "../../types/workflow";
 import { WorkflowCanvas } from "./WorkflowCanvas";
+import { ViewToggle } from "./ViewToggle";
 import { WorkflowEditor, type Persist } from "./WorkflowEditor";
 
 type View = "canvas" | "edit";
@@ -34,25 +35,7 @@ export function WorkflowSection({
   }
   return (
     <div className="flex flex-col gap-3">
-      <div
-        role="group"
-        aria-label="Workflow view"
-        className="flex gap-1 self-start rounded-lg bg-[var(--card-bg)] p-0.5"
-      >
-        {VIEWS.map((item) => (
-          <button
-            key={item.view}
-            type="button"
-            aria-pressed={view === item.view}
-            className={`h-7 rounded-md px-3 text-[13px] ${
-              view === item.view ? "bg-[var(--bg)] font-medium shadow-sm" : "text-[var(--muted)] hover:text-[var(--fg)]"
-            }`}
-            onClick={() => setView(item.view)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <ViewToggle label="Workflow view" views={VIEWS} value={view} onChange={setView} />
       {view === "canvas" ? (
         <WorkflowCanvas
           workflow={workflow}

@@ -1,6 +1,7 @@
 import { toolLabel } from "../../lib/toolLabels";
 import { formatValue } from "../../lib/workflowLabels";
 import type { WorkflowAgentActivity, WorkflowAgentCall } from "../../types/wire.gen";
+import type { WorkflowStep } from "../../types/workflow";
 
 /** The tools a finished agent step called, under its output -- declined
  * calls included. */
@@ -17,7 +18,14 @@ export function AgentToolsUsed({ activity }: { activity: WorkflowAgentActivity |
 
 /** The one call a waiting agent step asks about: answering applies to it
  * alone, and the agent goes on either way. */
-export function AgentCallRequest({ call }: { call: WorkflowAgentCall }) {
+export function AgentCallRequest({ call, step }: { call: WorkflowAgentCall; step: WorkflowStep }) {
+  // A bounded step asks only beyond what saving it allowed; say which limit.
+  const beyond =
+    step.kind !== "agent" || step.autonomy !== "bounded"
+      ? null
+      : step.tools.includes(call.tool)
+        ? "It’s on this step’s list of tools, but this call reaches outside the folders or sites the step names."
+        : "It isn’t on this step’s list of tools, so it needs your yes.";
   const args =
     call.args !== null && typeof call.args === "object" && !Array.isArray(call.args)
       ? Object.entries(call.args as Record<string, unknown>)
@@ -25,6 +33,7 @@ export function AgentCallRequest({ call }: { call: WorkflowAgentCall }) {
   return (
     <div className="flex flex-col gap-1.5" data-testid="agent-call-request">
       <p className="text-sm font-medium">The agent wants to use {toolLabel(call.tool)}</p>
+      {beyond && <p className="text-[13px] text-[var(--muted)]">{beyond}</p>}
       {args.length > 0 && (
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[13px]">
           {args.map(([key, value]) => (

@@ -20,9 +20,10 @@ import {
   stoppedInside,
   type LoopProgress,
 } from "../../lib/workflowProgress";
+import { passShowing } from "../../lib/workflowRunMap";
 import { placeSteps } from "../../lib/workflowTree";
 import type { BranchStep, CheckResult, LoopStep, StepRecord, Workflow, WorkflowStep } from "../../types/workflow";
-import { CheckIcon, ChevronDownIcon, ClockIcon, CloseIcon, SparkIcon, StopIcon } from "../icons";
+import { CheckIcon, ChevronDownIcon, ClockIcon, SparkIcon, StopIcon } from "../icons";
 import { ConditionText, VarToken } from "./parts";
 import { Screenshot } from "./Screenshot";
 import { InvestigationLink, WAITING_FOR_BROWSER } from "./InvestigationLink";
@@ -30,64 +31,16 @@ import { StepOutput } from "./StepOutput";
 import { AgentToolsUsed } from "./AgentActivity";
 import { primaryButton, secondaryButton } from "../../lib/formStyles";
 import { WaitingCard } from "./WaitingCard";
+import { StatusDot } from "./StatusDot";
+import { ViewToggle } from "./ViewToggle";
+import { WorkflowCanvas } from "./WorkflowCanvas";
 
 type RowStatus = StepRecord["status"] | "not_reached" | "stopped";
 
-const RUNNING_LABEL: Partial<Record<WorkflowStep["kind"], string>> = { llm: "Asking the model…", agent: "Working on it…" };
-
-function StatusDot({ status }: { status: RowStatus }) {
-  const base = "flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full";
-  const tint = (color: string) => ({ color, backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)` });
-  if (status === "done") {
-    return (
-      <span className={base} style={tint("var(--success)")} role="img" aria-label="Done">
-        <CheckIcon className="h-3 w-3" strokeWidth={3} />
-      </span>
-    );
-  }
-  if (status === "failed") {
-    return (
-      <span className={base} style={tint("var(--danger)")} role="img" aria-label="Failed">
-        <CloseIcon className="h-3 w-3" strokeWidth={3} />
-      </span>
-    );
-  }
-  if (status === "waiting") {
-    return (
-      <span className={base} style={tint("var(--warning)")} role="img" aria-label="Waiting for you">
-        <ClockIcon className="h-3 w-3" strokeWidth={2.5} />
-      </span>
-    );
-  }
-  if (status === "stopped") {
-    return (
-      <span className={`${base} bg-[var(--card-bg)] text-[var(--muted)]`} role="img" aria-label="Stopped">
-        <span className="h-2 w-2 rounded-[2px] bg-current" />
-      </span>
-    );
-  }
-  if (status === "running") {
-    return (
-      <span className={`${base} border border-[var(--border-hover)]`} role="img" aria-label="Running">
-        <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-[var(--border)] border-t-[var(--accent)] motion-reduce:animate-none" />
-      </span>
-    );
-  }
-  if (status === "skipped") {
-    return (
-      <span className={`${base} bg-[var(--card-bg)] text-[var(--muted)]`} role="img" aria-label="Skipped">
-        <span className="h-[1.5px] w-2 rounded bg-current" />
-      </span>
-    );
-  }
-  return (
-    <span
-      className={`${base} border-[1.5px] border-dashed border-[var(--border-hover)]`}
-      role="img"
-      aria-label={status === "pending" ? "Up next" : "Not reached"}
-    />
-  );
-}
+const RUNNING_LABEL: Partial<Record<WorkflowStep["kind"], string>> = {
+  llm: "Asking the model…",
+  agent: "Working on it…",
+};
 
 function CheckLines({
   step,
@@ -134,6 +87,8 @@ interface RunContext {
   onRetry: (stepId?: string) => Promise<string | null>;
   onAnswer: (approved: boolean, note: string) => Promise<string | null>;
   onEditStep: (stepId: string) => void;
+  /** The step picked on the run's canvas: loops open on a pass it ran in. */
+  focus: string | null;
 }
 
 interface RowProps {
@@ -383,7 +338,8 @@ function LoopPasses({
       </p>
     );
   }
-  const selected = Math.min(chosen ?? defaultPass(step, path, progress, ctx), progress.total - 1);
+  const focused = ctx.focus === null ? null : passShowing(ctx.run, ctx.focus, path);
+  const selected = Math.min(chosen ?? focused ?? defaultPass(step, path, progress, ctx), progress.total - 1);
   const label = progress.items[selected];
   return (
     <Nested
@@ -454,7 +410,7 @@ function StepRow({
   const showCard = !blockStopped && (status === "failed" || status === "waiting");
 
   return (
-    <li className="flex gap-3.5">
+    <li className="flex gap-3.5" data-run-step={step.id}>
       <div className="flex w-[22px] shrink-0 flex-col items-center">
         <StatusDot status={status} />
         {!last && <span className="min-h-3.5 w-px flex-1 bg-[var(--border)]" />}
@@ -501,7 +457,7 @@ function StepRow({
           </>
         )}
         {step.kind === "branch" && <BranchArms step={step} record={record} path={path} ctx={ctx} />}
-        {step.kind === "loop" && <LoopPasses step={step} record={record} path={path} ctx={ctx} />}
+        {step.kind === "loop" && <LoopPasses key={ctx.focus ?? ""} step={step} record={record} path={path} ctx={ctx} />}
       </div>
     </li>
   );
@@ -526,6 +482,13 @@ function RunList({ steps, path, ctx }: { steps: WorkflowStep[]; path: number[]; 
     </ol>
   );
 }
+
+type RunViewMode = "steps" | "canvas";
+
+const RUN_VIEWS: { view: RunViewMode; label: string }[] = [
+  { view: "steps", label: "Steps" },
+  { view: "canvas", label: "Overview" },
+];
 
 interface WorkflowRunViewProps {
   task: ScheduledTask;
@@ -613,8 +576,7 @@ function RunBanner({
           <ClockIcon className="h-4 w-4 shrink-0 text-[var(--warning)]" />
           <span>
             {waiting?.permission ? "Needs your OK" : "Waiting for you"} at{" "}
-            <span className="font-medium">{stepTitle(workflow, waiting?.step_id)}</span> -- answer it below to go
-            on.
+            <span className="font-medium">{stepTitle(workflow, waiting?.step_id)}</span> -- answer it below to go on.
           </span>
         </div>
       </div>
@@ -730,6 +692,8 @@ export function WorkflowRunView({
   const crashed = run.status === "failed" && !run.steps.some((record) => record.status === "failed");
   const [retrying, setRetrying] = useState(false);
   const [crashError, setCrashError] = useState<string | null>(null);
+  const [view, setView] = useState<RunViewMode>("steps");
+  const [focus, setFocus] = useState<string | null>(null);
   const ctx: RunContext = {
     workflow,
     run,
@@ -739,6 +703,7 @@ export function WorkflowRunView({
     onRetry,
     onAnswer,
     onEditStep,
+    focus,
   };
 
   return (
@@ -791,7 +756,23 @@ export function WorkflowRunView({
           </div>
         )}
 
-        <RunList steps={workflow.steps} path={[]} ctx={ctx} />
+        <ViewToggle label="Run view" views={RUN_VIEWS} value={view} onChange={setView} />
+        {view === "steps" ? (
+          <RunList steps={workflow.steps} path={[]} ctx={ctx} />
+        ) : (
+          <WorkflowCanvas
+            workflow={workflow}
+            run={run}
+            onOpenStep={(stepId) => {
+              setView("steps");
+              setFocus(stepId);
+              // The list is drawn by the time the next frame paints.
+              requestAnimationFrame(() =>
+                document.querySelector(`[data-run-step="${CSS.escape(stepId)}"]`)?.scrollIntoView({ block: "center" }),
+              );
+            }}
+          />
+        )}
       </div>
     </div>
   );

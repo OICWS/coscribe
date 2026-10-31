@@ -54,7 +54,7 @@ export function WaitingCard({
         </div>
       ) : (
         <>
-          {call && <AgentCallRequest call={call} />}
+          {call && <AgentCallRequest call={call} step={step} />}
           {!call && typeof record?.output === "string" && (
             <p className="whitespace-pre-wrap text-sm leading-relaxed">{record.output}</p>
           )}

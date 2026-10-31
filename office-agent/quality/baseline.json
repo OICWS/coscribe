@@ -289,7 +289,7 @@
   "office-agent/frontend/src/components/workflow/WorkflowDraftPage.tsx::WorkflowDraftPage": 189,
   "office-agent/frontend/src/components/workflow/WorkflowEditor.tsx::StepCard": 163,
   "office-agent/frontend/src/components/workflow/WorkflowEditor.tsx::WorkflowEditor": 143,
-  "office-agent/frontend/src/components/workflow/WorkflowRunView.tsx::RunBanner": 147,
+  "office-agent/frontend/src/components/workflow/WorkflowRunView.tsx::RunBanner": 146,
   "office-agent/frontend/src/state/reducer.ts::chatReducer": 469
  },
  "frontend_unused_exports": {
