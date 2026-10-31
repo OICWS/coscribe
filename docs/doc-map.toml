@@ -137,6 +137,8 @@ covers = [
   "office-agent/evals/tasks.py",
   "office-agent/evals/judge.py",
   "office-agent/evals/compare.py",
+  "office-agent/evals/workflow/run.py",
+  "office-agent/evals/workflow/site.py",
 ]
 
 # What the model reads to write slides: it must match what the engine compiles.

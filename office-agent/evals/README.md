@@ -166,3 +166,54 @@ missing) and reports whether the Docs skill was loaded:
 python -m evals.doc_route --out evals/runs/doc-route     # run it off-peak
 python -m evals.doc_route --check-only --out evals/runs/doc-route
 ```
+
+## Do saved workflows survive a site that changes? (`workflow/`, #754)
+
+Two form sites (an expense claim and a supplier registration) and the ways real sites change:
+- reworded labels;
+- a cookie dialog over the page;
+- a new required field, with or without data for it;
+- a review page;
+- a new reference format;
+- dates as DD/MM/YYYY;
+- a decoy button that only saves a draft;
+- a form that appears late;
+- reordered fields.
+
+`python -m evals.workflow.run --list` names them all.
+
+Each scenario builds the task in one of two ways:
+- the steps a person recording the original site would get (`fixed`);
+- one bounded agent step per row (`agent`).
+
+It drives a running desktop app, because the browser tools run in its built-in browser. The steps:
+1. Run the task.
+2. If the run fails, follow its investigation: approve what it asks, answer its questions, and save its last revision as "Save changes" would.
+3. Run the task again.
+
+The ground truth is what the site stored, not what the run says.
+
+```bash
+python -m evals.workflow.run --app http://127.0.0.1:PORT --workspace APP_WORKSPACE --out evals/runs/wf
+python -m evals.workflow.run ... --only expenses --builds agent --no-repair
+```
+
+The app's browser must be allowed 127.0.0.1 (Browser panel > Always allow), or every run waits on
+the prompt.
+
+`--mark-submit` marks the fixed workflows' final submit irreversible (decision 0029), so a
+repair's test runs stop before it; the side effects column then shows what still got through.
+
+Verdicts:
+- `PASS`: the first run filed every row correctly.
+- `REPAIRED`: the run after the investigation's revision filed every row correctly.
+- `SAFE_STOP`: a row lacked a required value and nothing was filed.
+- `ASKED`: the run paused to ask a person and filed nothing; the eval says no, and doesn't look into it.
+- `GUESSED`: a row lacked a required value and something was filed anyway.
+- `FALSE_SUCCESS`: the run said completed but the site holds something else, such as a draft, a wrong value or a missing row.
+- `FAILED`: neither run filed the rows correctly.
+
+`summary.md` also lists:
+- what the investigation asked;
+- the records the site got while it was being repaired (its test runs are real submissions);
+- whether its revision was still tied to the task.
